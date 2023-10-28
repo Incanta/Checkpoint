@@ -1,0 +1,68 @@
+#!/bin/bash
+
+LIB_SRC="${BASE_DIR}lib/filestorage/*.c"
+LIB_THIRDPARTY_SRC="${BASE_DIR}src/ext/*.c"
+
+ARCHIVEBLOCKSTORE_SRC="${BASE_DIR}lib/archiveblockstore/*.c"
+
+ATOMICCANCEL_SRC="${BASE_DIR}lib/atomiccancel/*.c"
+
+BLOCKSTORESTORAGE_SRC="${BASE_DIR}lib/blockstorestorage/*.c"
+
+COMPRESSBLOCKSTORE_SRC="${BASE_DIR}lib/compressblockstore/*.c"
+
+CACHEBLOCKSTORE_SRC="${BASE_DIR}lib/cacheblockstore/*.c"
+
+FILESTORAGE_SRC="${BASE_DIR}lib/*.c"
+
+FSBLOCKSTORAGE_SRC="${BASE_DIR}lib/fsblockstore/*.c"
+
+HPCDCCHUNKER_SRC="${BASE_DIR}lib/hpcdcchunker/*.c"
+
+LRUBLOCKSTORE_SRC="${BASE_DIR}lib/lrublockstore/*.c"
+
+MEMSTORAGE_SRC="${BASE_DIR}lib/memstorage/*.c"
+
+MEMTRACER_SRC="${BASE_DIR}lib/memtracer/*.c"
+
+MEOWHASH_SRC="${BASE_DIR}lib/meowhash/*.c"
+
+RATELIMITEDPROGRESS_SRC="${BASE_DIR}lib/ratelimitedprogress/*.c"
+
+COMPRESSION_REGISTRY_SRC="${BASE_DIR}lib/compressionregistry/*.c"
+
+HASH_REGISTRY_SRC="${BASE_DIR}lib/hashregistry/*.c"
+
+SHAREBLOCKSTORE_SRC="${BASE_DIR}lib/shareblockstore/*.c"
+
+BIKESHED_SRC="${BASE_DIR}lib/bikeshed/*.c"
+
+BLAKE2_SRC="${BASE_DIR}lib/blake2/*.c"
+BLAKE2_THIRDPARTY_SSE="${BASE_DIR}lib/blake2/ext/*.c"
+
+BLAKE3_SRC="${BASE_DIR}lib/blake3/*.c"
+BLAKE3_THIRDPARTY_SRC="${BASE_DIR}lib/blake3/ext/blake3.c ${BASE_DIR}lib/blake3/ext/blake3_dispatch.c ${BASE_DIR}lib/blake3/ext/blake3_portable.c"
+BLAKE3_THIRDPARTY_SSE="${BASE_DIR}lib/blake3/ext/blake3_sse2.c ${BASE_DIR}lib/blake3/ext/blake3_sse41.c"
+BLAKE3_THIRDPARTY_SSE42=
+BLAKE3_THIRDPARTY_AVX2="${BASE_DIR}lib/blake3/ext/blake3_avx2.c"
+BLAKE3_THIRDPARTY_AVX512="${BASE_DIR}lib/blake3/ext/blake3_avx512.c"
+BLAKE3_THIRDPARTY_NEON="${BASE_DIR}lib/blake3/ext/blake3_neon.c"
+
+LZ4_SRC="${BASE_DIR}lib/lz4/*.c"
+LZ4_THIRDPARTY_SRC="${BASE_DIR}lib/lz4/ext/*.c"
+
+BROTLI_SRC="${BASE_DIR}lib/brotli/*.c"
+BROTLI_THIRDPARTY_SRC="${BASE_DIR}lib/brotli/ext/common/*.c ${BASE_DIR}lib/brotli/ext/dec/*.c ${BASE_DIR}lib/brotli/ext/enc/*.c"
+
+ZSTD_SRC="${BASE_DIR}lib/zstd/*.c"
+ZSTD_THIRDPARTY_SRC="${BASE_DIR}lib/zstd/ext/common/*.c ${BASE_DIR}lib/zstd/ext/compress/*.c ${BASE_DIR}lib/zstd/ext/decompress/*.c"
+ZSTD_THIRDPARTY_GCC_SRC="${BASE_DIR}lib/zstd/ext/decompress/*.S"
+
+export SRC="${BASE_DIR}src/*.c $LIB_SRC $ARCHIVEBLOCKSTORE_SRC $ATOMICCANCEL_SRC $BLOCKSTORESTORAGE_SRC $COMPRESSBLOCKSTORE_SRC $CACHEBLOCKSTORE_SRC $SHAREBLOCKSTORE_SRC $FILESTORAGE_SRC $FSBLOCKSTORAGE_SRC $HPCDCCHUNKER_SRC $LRUBLOCKSTORE_SRC $MEMSTORAGE_SRC $MEMTRACER_SRC $RATELIMITEDPROGRESS_SRC $COMPRESSION_REGISTRY_SRC $HASH_REGISTRY_SRC $BIKESHED_SRC $BLAKE2_SRC $BLAKE3_SRC $MEOWHASH_SRC $LZ4_SRC $BROTLI_SRC $ZSTD_SRC"
+export THIRDPARTY_SRC="$LIB_THIRDPARTY_SRC $BLAKE3_THIRDPARTY_SRC $LZ4_THIRDPARTY_SRC $BROTLI_THIRDPARTY_SRC $ZSTD_THIRDPARTY_SRC"
+export THIRDPARTY_SSE="$BLAKE2_THIRDPARTY_SSE $BLAKE3_THIRDPARTY_SSE"
+export THIRDPARTY_SSE42="$BLAKE3_THIRDPARTY_SSE42"
+export THIRDPARTY_SRC_AVX2="$BLAKE3_THIRDPARTY_AVX2"
+export THIRDPARTY_SRC_AVX512="$BLAKE3_THIRDPARTY_AVX512"
+export THIRDPARTY_SRC_NEON="$BLAKE3_THIRDPARTY_NEON"
+export THIRDPARTY_GCC_SRC="$ZSTD_THIRDPARTY_GCC_SRC"

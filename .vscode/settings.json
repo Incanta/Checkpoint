@@ -1,0 +1,48 @@
+{
+  "typescript.tsdk": "./node_modules/typescript/lib",
+  "search.exclude": {
+    ".awcache": true,
+    "**/node_modules": true,
+    "**/out": true,
+    "app/test/fixtures": true,
+    "vendor": true,
+    "**/build": false,
+    "**/lib": false,
+    "**/dist": false
+  },
+  "files.exclude": {
+    "**/.git": true,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/.DS_Store": true,
+    "**/node_modules": true,
+    "**/out": true,
+    ".awcache": true,
+    ".eslintcache": true,
+    "**/build": false,
+    "**/lib": false,
+    "**/dist": false
+  },
+  "files.insertFinalNewline": true,
+  "editor.tabSize": 2,
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": true
+  },
+  "prettier.semi": false,
+  "prettier.singleQuote": true,
+  "prettier.trailingComma": "es5",
+  "prettier.ignorePath": ".prettierignore",
+  "eslint.options": {
+    "configFile": ".eslintrc.yml",
+    "rulePaths": ["eslint-rules"]
+  },
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact"
+  ],
+  "git.autoRepositoryDetection": "openEditors"
+}

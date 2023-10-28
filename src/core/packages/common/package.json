@@ -1,0 +1,11 @@
+{
+  "name": "@waypointscm/common",
+  "version": "1.0.0",
+  "description": "",
+  "main": "lib/index.js",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "node ./lib/index.js"
+  }
+}
