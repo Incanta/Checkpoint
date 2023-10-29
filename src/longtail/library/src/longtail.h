@@ -499,7 +499,7 @@ struct Longtail_JobAPI
 
 LONGTAIL_EXPORT uint64_t Longtail_GetJobAPISize();
 
-struct Longtail_JobAPI* Longtail_MakeJobAPI(
+LONGTAIL_EXPORT struct Longtail_JobAPI* Longtail_MakeJobAPI(
     void* mem,
     Longtail_DisposeFunc dispose_func,
     Longtail_Job_GetWorkerCountFunc get_worker_count_func,

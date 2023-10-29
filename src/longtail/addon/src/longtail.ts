@@ -45,9 +45,10 @@ export class Longtail {
 
   public CreateFullHashRegistry: koffi.KoffiFunction;
 
-  public CreateBikeshedJobAPI: koffi.KoffiFunction;
-
   public CreateFullCompressionRegistry: koffi.KoffiFunction;
+
+  public CreateBikeshedJobAPI: koffi.KoffiFunction;
+  public MakeJobAPI: koffi.KoffiFunction;
 
   public BlockStore_PutStoredBlock: koffi.KoffiFunction;
   public BlockStore_PreflightGet: koffi.KoffiFunction;
@@ -261,12 +262,6 @@ export class Longtail {
 
     koffi.alias("TLongtail_Hash", "uint64_t");
 
-    koffi.pointer("Longtail_JobAPI", koffi.opaque() as any);
-
-    this.CreateBikeshedJobAPI = this.lib.func(
-      "Longtail_JobAPI* Longtail_CreateBikeshedJobAPI(uint32_t worker_count, int worker_priority)",
-    );
-
     koffi.proto(
       "void Longtail_Progress_OnProgressFunc(void* progressApi, uint32_t total_count, uint32_t done_count)",
     );
@@ -278,6 +273,104 @@ export class Longtail {
 
     koffi.pointer("Longtail_CancelAPI", koffi.opaque() as any);
     koffi.pointer("Longtail_CancelAPI_HCancelToken", koffi.opaque() as any);
+
+    koffi.pointer("Longtail_JobAPI_Group", koffi.opaque() as any);
+    koffi.pointer("Longtail_JobAPI_Jobs", koffi.opaque() as any);
+
+    koffi.proto(
+      `int Longtail_JobAPI_JobFunc(void* context, uint32_t job_id, int is_cancelled)`,
+    );
+
+    koffi.proto("uint32_t Longtail_Job_GetWorkerCountFunc(void* job_api)");
+
+    koffi.proto(
+      `int Longtail_Job_ReserveJobsFunc(
+        void* job_api,
+        uint32_t job_count,
+        _Inout_ void* out_job_group)`,
+    );
+
+    koffi.proto(
+      `int Longtail_Job_CreateJobsFunc(
+        void* job_api,
+        Longtail_JobAPI_Group job_group,
+        Longtail_ProgressAPI* progressAPI,
+        Longtail_CancelAPI* optional_cancel_api,
+        Longtail_CancelAPI_HCancelToken optional_cancel_token,
+        uint32_t job_count,
+        Longtail_JobAPI_JobFunc* job_funcs,
+        void* job_contexts,
+        uint8_t job_channel,
+        _Out_ Longtail_JobAPI_Jobs* out_jobs)`,
+    );
+
+    koffi.proto(
+      `int Longtail_Job_AddDependeciesFunc(
+        void* job_api,
+        uint32_t job_count,
+        Longtail_JobAPI_Jobs jobs,
+        uint32_t dependency_job_count,
+        Longtail_JobAPI_Jobs dependency_jobs)`,
+    );
+
+    koffi.proto(
+      `int Longtail_Job_ReadyJobsFunc(
+        void* job_api,
+        uint32_t job_count,
+        Longtail_JobAPI_Jobs jobs)`,
+    );
+
+    koffi.proto(
+      `int Longtail_Job_WaitForAllJobsFunc(
+        void* job_api,
+        Longtail_JobAPI_Group job_group,
+        Longtail_ProgressAPI* progressAPI,
+        Longtail_CancelAPI* optional_cancel_api,
+        Longtail_CancelAPI_HCancelToken optional_cancel_token)`,
+    );
+
+    koffi.proto(
+      `int Longtail_Job_ResumeJobFunc(
+        void* job_api,
+        uint32_t job_id)`,
+    );
+
+    koffi.proto(
+      `int Longtail_Job_GetMaxBatchCountFunc(
+        void* job_api,
+        _Out_ uint32_t* out_max_job_batch_count,
+        _Out_ uint32_t* out_max_dependency_batch_count)`,
+    );
+
+    koffi.struct("Longtail_JobAPI", {
+      m_API: "Longtail_API",
+      GetWorkerCount: "Longtail_Job_GetWorkerCountFunc*",
+      ReserveJobs: "Longtail_Job_ReserveJobsFunc*",
+      CreateJobs: "Longtail_Job_CreateJobsFunc*",
+      AddDependecies: "Longtail_Job_AddDependeciesFunc*",
+      ReadyJobs: "Longtail_Job_ReadyJobsFunc*",
+      WaitForAllJobs: "Longtail_Job_WaitForAllJobsFunc*",
+      ResumeJob: "Longtail_Job_ResumeJobFunc*",
+      GetMaxBatchCountFunc: "Longtail_Job_GetMaxBatchCountFunc*",
+    });
+
+    this.MakeJobAPI = this.lib.func(
+      `Longtail_JobAPI* Longtail_MakeJobAPI(
+        void* mem,
+        Longtail_DisposeFunc* dispose_func,
+        Longtail_Job_GetWorkerCountFunc* get_worker_count_func,
+        Longtail_Job_ReserveJobsFunc* reserve_jobs_func,
+        Longtail_Job_CreateJobsFunc* create_jobs_func,
+        Longtail_Job_AddDependeciesFunc* add_dependecies_func,
+        Longtail_Job_ReadyJobsFunc* ready_jobs_func,
+        Longtail_Job_WaitForAllJobsFunc* wait_for_all_jobs_func,
+        Longtail_Job_ResumeJobFunc* resume_job_func,
+        Longtail_Job_GetMaxBatchCountFunc* get_max_batch_count_func)`,
+    );
+
+    this.CreateBikeshedJobAPI = this.lib.func(
+      "Longtail_JobAPI* Longtail_CreateBikeshedJobAPI(uint32_t worker_count, int worker_priority)",
+    );
 
     koffi.pointer("Longtail_CompressionRegistryAPI", koffi.opaque() as any);
 

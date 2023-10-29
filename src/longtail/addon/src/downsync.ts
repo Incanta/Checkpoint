@@ -8,6 +8,7 @@ import { LongtailApiBlockStore } from "./longtail-api-block-store";
 import { StoreIndexPointer } from "./store-index";
 import { LongtailApiProgress } from "./longtail-api-progress";
 import { stringify } from "./util";
+import { promisify } from "util";
 
 const baseDirectory = path.join(__dirname, "..", "download");
 const versionIndexPath = path.join(
@@ -47,7 +48,6 @@ function getCompleteStoreIndexBuffer() {
 
   const longtail = Longtail.get();
 
-  // TODO MIKE HERE make a new job api
   const jobs = longtail.CreateBikeshedJobAPI(1, 0);
 
   // pathFilter
@@ -170,9 +170,8 @@ function getCompleteStoreIndexBuffer() {
 
   const progressApi = new LongtailApiProgress();
 
-  console.log("calling change version");
-
-  longtail.ChangeVersion.async(
+  const ChangeVersion = promisify(longtail.ChangeVersion.async);
+  await ChangeVersion(
     indexStoreApi,
     fsApi,
     hashApiPointer.deref(),
@@ -186,10 +185,5 @@ function getCompleteStoreIndexBuffer() {
     versionDiffPointer.deref(),
     "path/to/download", // todo?
     1,
-    (err: any, result: any) => {
-      console.log("change version finished");
-      console.log(err);
-      console.log(result);
-    },
   );
 })();

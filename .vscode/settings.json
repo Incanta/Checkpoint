@@ -45,5 +45,6 @@
     "typescriptreact"
   ],
   "git.autoRepositoryDetection": "openEditors",
-  "C_Cpp.intelliSenseEngine": "default"
+  "C_Cpp.intelliSenseEngine": "default",
+  "cSpell.words": ["koffi", "longtail"]
 }

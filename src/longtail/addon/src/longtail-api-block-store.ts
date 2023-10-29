@@ -127,20 +127,22 @@ export class LongtailApiBlockStore extends LongtailApi {
     blockHash: bigint,
     inAsyncComplete: any,
   ): number {
-    console.log("GetStoredBlock func");
-
     const callbackApi = decode(
       inAsyncComplete,
       "Longtail_AsyncGetStoredBlockAPI",
     );
+    const OnComplete = decode(
+      callbackApi.OnComplete,
+      "Longtail_AsyncGetStoredBlock_OnCompleteFunc",
+    );
 
     this.getStoredBlockAsync(blockHash)
       .then((block) => {
-        callbackApi.OnComplete(inAsyncComplete, block, 0);
+        OnComplete(inAsyncComplete, block, 0);
       })
       .catch((err) => {
         console.error(`Error getting block ${blockHash.toString()}: ${err}`);
-        callbackApi.OnComplete(inAsyncComplete, null, 1);
+        OnComplete(inAsyncComplete, null, 1);
       });
 
     return 0;
