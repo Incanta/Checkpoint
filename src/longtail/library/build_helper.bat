@@ -89,6 +89,8 @@ if "!RELEASE_MODE!" == "release" (
     set CXXFLAGS=!BASE_CXXFLAGS! !CXXFLAGS_DEBUG!
 )
 
+@REM echo !CXXFLAGS!
+
 if NOT DEFINED VCINSTALLDIR (
     if exist "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" (
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x86_amd64
@@ -214,7 +216,7 @@ if "!TARGET_TYPE!" == "STATICLIB" (
     IF NOT EXIST static-lib (
         mkdir static-lib
     )
-    cd static-lib 
+    cd static-lib
     cl.exe /c %CXXFLAGS% %OPT% %SRC% %MAIN_SRC% /Fd:!TARGET!.pdb
     cd ..
     lib -nologo -out:!OUTPUT_TARGET! *.o !THIRD_PARTY_OUTPUT_FOLDER!\!THIRD_PARTY_LIB!

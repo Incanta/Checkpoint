@@ -1,5 +1,6 @@
 import { decode } from "koffi";
 import { ObjectPointer } from "./pointer";
+import { decodeHash } from "./util";
 
 export interface VersionIndex {
   version: number;
@@ -68,12 +69,8 @@ export class VersionIndexPointer extends ObjectPointer {
     );
 
     for (let i = 0; i < result.assetCount; i++) {
-      result.pathHashes.push(
-        decode(baseStruct.m_PathHashes, i * 8, "TLongtail_Hash"),
-      );
-      result.contentHashes.push(
-        decode(baseStruct.m_ContentHashes, i * 8, "TLongtail_Hash"),
-      );
+      result.pathHashes.push(decodeHash(baseStruct.m_PathHashes, i));
+      result.contentHashes.push(decodeHash(baseStruct.m_ContentHashes, i));
       result.assetSizes.push(
         decode(baseStruct.m_AssetSizes, i * 8, "uint64_t"),
       );
@@ -98,9 +95,7 @@ export class VersionIndexPointer extends ObjectPointer {
     }
 
     for (let i = 0; i < result.chunkCount; i++) {
-      result.chunkHashes.push(
-        decode(baseStruct.m_ChunkHashes, i * 8, "TLongtail_Hash"),
-      );
+      result.chunkHashes.push(decodeHash(baseStruct.m_ChunkHashes, i));
       result.chunkSizes.push(
         decode(baseStruct.m_ChunkSizes, i * 4, "uint32_t"),
       );

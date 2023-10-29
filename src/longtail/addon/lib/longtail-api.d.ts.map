@@ -1,0 +1,1 @@
+{"version":3,"file":"longtail-api.d.ts","sourceRoot":"","sources":["../src/longtail-api.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,wBAAwB,EAAwB,MAAM,OAAO,CAAC;AAEvE,qBAAa,WAAW;IACf,aAAa,EAAE,wBAAwB,CAAC;;IAMxC,OAAO,CAAC,GAAG,EAAE,GAAG,GAAG,IAAI;IAMvB,UAAU,IAAI,IAAI;IAIlB,GAAG,IAAI,GAAG;CAKlB"}

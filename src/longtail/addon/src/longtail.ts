@@ -57,6 +57,8 @@ export class Longtail {
   public BlockStore_Flush: koffi.KoffiFunction;
 
   public ReadVersionIndexFromBuffer: koffi.KoffiFunction;
+  public ReadStoreIndexFromBuffer: koffi.KoffiFunction;
+  public ReadStoredBlockFromBuffer: koffi.KoffiFunction;
 
   public MakeBlockStoreAPI: koffi.KoffiFunction;
 
@@ -73,9 +75,19 @@ export class Longtail {
 
   public CreateHPCDCChunkerAPI: koffi.KoffiFunction;
 
+  public ChangeVersion: koffi.KoffiFunction;
+
   private constructor() {
     this.lib = koffi.load(
-      path.join(__dirname, "longtail", "longtail_win32_x64"),
+      path.join(
+        __dirname,
+        "..",
+        "src",
+        "longtail",
+        "win32_x64",
+        "debug",
+        "longtail_dylib.dll",
+      ),
     );
 
     koffi.proto("void Longtail_DisposeFunc(void* obj)");
@@ -254,6 +266,18 @@ export class Longtail {
     this.CreateBikeshedJobAPI = this.lib.func(
       "Longtail_JobAPI* Longtail_CreateBikeshedJobAPI(uint32_t worker_count, int worker_priority)",
     );
+
+    koffi.proto(
+      "void Longtail_Progress_OnProgressFunc(void* progressApi, uint32_t total_count, uint32_t done_count)",
+    );
+
+    koffi.struct("Longtail_ProgressAPI", {
+      m_API: "Longtail_API",
+      OnProgress: "Longtail_Progress_OnProgressFunc*",
+    });
+
+    koffi.pointer("Longtail_CancelAPI", koffi.opaque() as any);
+    koffi.pointer("Longtail_CancelAPI_HCancelToken", koffi.opaque() as any);
 
     koffi.pointer("Longtail_CompressionRegistryAPI", koffi.opaque() as any);
 
@@ -443,6 +467,17 @@ export class Longtail {
       "int Longtail_ReadVersionIndexFromBuffer(const void* buffer, size_t size, _Out_ Longtail_VersionIndex** out_version_index)",
     );
 
+    this.ReadStoreIndexFromBuffer = this.lib.func(
+      "int Longtail_ReadStoreIndexFromBuffer(const void* buffer, size_t size, _Out_ Longtail_StoreIndex** out_store_index)",
+    );
+
+    this.ReadStoredBlockFromBuffer = this.lib.func(
+      `int Longtail_ReadStoredBlockFromBuffer(
+        const void* buffer,
+        size_t size,
+        _Out_ Longtail_StoredBlock** out_stored_block)`,
+    );
+
     koffi.proto(
       `int Longtail_BlockStore_PutStoredBlockFunc(
         Longtail_BlockStoreAPI* block_store_api,
@@ -586,6 +621,23 @@ export class Longtail {
 
     this.CreateHPCDCChunkerAPI = this.lib.func(
       `void* Longtail_CreateHPCDCChunkerAPI()`,
+    );
+
+    this.ChangeVersion = this.lib.func(
+      `int Longtail_ChangeVersion(
+        Longtail_BlockStoreAPI* block_store_api,
+        Longtail_StorageAPI* version_storage_api,
+        Longtail_HashAPI* hash_api,
+        Longtail_JobAPI* job_api,
+        Longtail_ProgressAPI* progress_api,
+        Longtail_CancelAPI* optional_cancel_api,
+        Longtail_CancelAPI_HCancelToken optional_cancel_token,
+        const Longtail_StoreIndex* store_index,
+        const Longtail_VersionIndex* source_version,
+        const Longtail_VersionIndex* target_version,
+        const Longtail_VersionDiff* version_diff,
+        const char* version_path,
+        int retain_permissions)`,
     );
   }
 

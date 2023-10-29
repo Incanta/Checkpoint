@@ -44,5 +44,6 @@
     "typescript",
     "typescriptreact"
   ],
-  "git.autoRepositoryDetection": "openEditors"
+  "git.autoRepositoryDetection": "openEditors",
+  "C_Cpp.intelliSenseEngine": "default"
 }

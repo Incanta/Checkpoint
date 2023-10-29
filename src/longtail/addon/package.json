@@ -5,19 +5,15 @@
   "repository": "git@github.com:IncantaGames/node-longtail.git",
   "author": "Incanta Games",
   "license": "UNLICENSED",
-  "gypfile": true,
   "packageManager": "yarn@1.22.19",
   "scripts": {
-    "build:old": "node-gyp rebuild",
-    "clean:old": "node-gyp clean",
     "build": "tsc -p .",
     "start": "ts-node src/test.ts",
     "down": "ts-node src/downsync.ts"
   },
   "dependencies": {
-    "bindings": "^1.5.0",
-    "koffi": "^2.6.4",
-    "node-addon-api": "^6.0.0"
+    "async-sema": "^3.1.1",
+    "koffi": "^2.6.4"
   },
   "devDependencies": {
     "@types/node": "^20.7.0",
@@ -28,7 +24,6 @@
     "eslint-plugin-import": "^2.28.1",
     "eslint-plugin-prefer-arrow": "^1.2.3",
     "eslint-plugin-prettier": "^5.0.0",
-    "node-gyp": "^9.3.1",
     "prettier": "^3.0.3",
     "ts-node": "^10.9.1",
     "typescript": "^5.2.2"

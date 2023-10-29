@@ -3,19 +3,24 @@ SetLocal EnableDelayedExpansion
 
 call arch_helper.bat
 
+rm -rf dist
+
 mkdir dist
+mkdir dist\!PLATFORM!
+mkdir dist\!PLATFORM!\debug
+mkdir dist\!PLATFORM!\release
 
 @REM copy build\artifacts\!PLATFORM!-cmd-debug\!PLATFORM!\longtail\debug\longtail.exe dist\longtail_debug.exe
 @REM copy build\artifacts\!PLATFORM!-cmd-release\!PLATFORM!\longtail\release\longtail.exe dist\longtail.exe
 
-copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.dll dist\longtail_!PLATFORM!_debug.dll
-copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.pdb dist\longtail_!PLATFORM!_debug.pdb
-copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.lib dist\longtail_!PLATFORM!_debug.lib
-copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.exp dist\longtail_!PLATFORM!_debug.exp
-copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.dll dist\longtail_!PLATFORM!.dll
-copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.pdb dist\longtail_!PLATFORM!.pdb
-copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.lib dist\longtail_!PLATFORM!.lib
-copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.exp dist\longtail_!PLATFORM!.exp
+copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.dll dist\!PLATFORM!\debug\longtail_dylib.dll
+copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.pdb dist\!PLATFORM!\debug\longtail_dylib.pdb
+copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.lib dist\!PLATFORM!\debug\longtail_dylib.lib
+copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.exp dist\!PLATFORM!\debug\longtail_dylib.exp
+copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.dll dist\!PLATFORM!\release\longtail_dylib.dll
+copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.pdb dist\!PLATFORM!\release\longtail_dylib.pdb
+copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.lib dist\!PLATFORM!\release\longtail_dylib.lib
+copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.exp dist\!PLATFORM!\release\longtail_dylib.exp
 
 @REM copy build\!PLATFORM!\longtail_static\debug\liblongtail_static.a dist\liblongtail_!PLATFORM!_debug.a
 @REM copy build\!PLATFORM!\longtail_static\release\liblongtail_static.a dist\liblongtail_!PLATFORM!.a

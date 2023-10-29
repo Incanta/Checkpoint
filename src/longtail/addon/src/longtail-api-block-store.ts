@@ -1,6 +1,17 @@
-import { IKoffiRegisteredCallback, register, sizeof, unregister } from "koffi";
+import {
+  IKoffiRegisteredCallback,
+  decode,
+  register,
+  sizeof,
+  unregister,
+} from "koffi";
 import { LongtailApi } from "./longtail-api";
 import { Longtail } from "./longtail";
+import { decodeHash, decodeHashes } from "./util";
+import { Sema } from "async-sema";
+import { StoredBlockPointer } from "./stored-block";
+import fs from "fs";
+import path from "path";
 
 export class LongtailApiBlockStore extends LongtailApi {
   public putStoredBlockHandle: IKoffiRegisteredCallback;
@@ -13,6 +24,11 @@ export class LongtailApiBlockStore extends LongtailApi {
 
   public storeApi: any;
   public nodeStoreApi: any;
+
+  private blockLocks: Map<bigint, Sema> = new Map<bigint, Sema>();
+  private blocks: Map<bigint, any> = new Map<bigint, any>();
+
+  private longtail: Longtail;
 
   public constructor() {
     super();
@@ -59,13 +75,13 @@ export class LongtailApiBlockStore extends LongtailApi {
       "Longtail_BlockStore_FlushFunc*",
     );
 
-    const longtail = Longtail.get();
-    this.storeApi = longtail.Alloc(
+    this.longtail = Longtail.get();
+    this.storeApi = this.longtail.Alloc(
       "NodeJSStoreAPI",
       sizeof("Longtail_BlockStoreAPI"),
     );
 
-    this.nodeStoreApi = longtail.MakeBlockStoreAPI(
+    this.nodeStoreApi = this.longtail.MakeBlockStoreAPI(
       this.storeApi,
       super.disposeHandle,
       this.putStoredBlockHandle,
@@ -88,22 +104,90 @@ export class LongtailApiBlockStore extends LongtailApi {
   }
 
   public preflightGet(
-    blockStoreApi: any,
+    inBlockStoreApi: any,
     blockCount: number,
-    blockHashes: bigint[],
-    asyncComplete: any,
+    inBlockHashes: any,
+    inAsyncComplete: any,
   ): number {
-    console.log("PreflightGet func");
+    const blockHashes = decodeHashes(inBlockHashes, blockCount);
+
+    const promises = blockHashes.map((blockHash) => {
+      return this.getStoredBlockAsync(blockHash);
+    });
+
+    Promise.all(promises).then((results) => {
+      // call inAsyncComplete i guess?
+    });
+
     return 0;
   }
 
   public getStoredBlock(
-    blockStoreApi: any,
+    inBlockStoreApi: any,
     blockHash: bigint,
-    asyncComplete: any,
+    inAsyncComplete: any,
   ): number {
     console.log("GetStoredBlock func");
+
+    const callbackApi = decode(
+      inAsyncComplete,
+      "Longtail_AsyncGetStoredBlockAPI",
+    );
+
+    this.getStoredBlockAsync(blockHash)
+      .then((block) => {
+        callbackApi.OnComplete(inAsyncComplete, block, 0);
+      })
+      .catch((err) => {
+        console.error(`Error getting block ${blockHash.toString()}: ${err}`);
+        callbackApi.OnComplete(inAsyncComplete, null, 1);
+      });
+
     return 0;
+  }
+
+  private async getStoredBlockAsync(blockHash: bigint): Promise<any> {
+    const lock = this.getOrCreateBlockLock(blockHash);
+    await lock.acquire();
+
+    let block = this.blocks.get(blockHash);
+
+    if (typeof block === "undefined") {
+      // TODO
+      const baseDirectory = path.join(__dirname, "..", "download");
+      const buffer = fs.readFileSync(
+        path.join(
+          baseDirectory,
+          "store",
+          "chunks",
+          "701a",
+          "0x701a4cbd8245bc55.lsb",
+        ),
+      );
+
+      const blockPtr = new StoredBlockPointer();
+      this.longtail.ReadStoredBlockFromBuffer(
+        buffer,
+        buffer.length,
+        blockPtr.ptr(),
+      );
+
+      block = blockPtr.deref();
+      this.blocks.set(blockHash, block);
+    }
+
+    lock.release();
+
+    return block;
+  }
+
+  private getOrCreateBlockLock(blockHash: bigint): Sema {
+    let lock = this.blockLocks.get(blockHash);
+    if (lock === undefined) {
+      lock = new Sema(2);
+      this.blockLocks.set(blockHash, lock);
+    }
+    return lock;
   }
 
   public getExistingContent(
@@ -114,7 +198,7 @@ export class LongtailApiBlockStore extends LongtailApi {
     asyncComplete: any,
   ): number {
     console.log(`GetExistingContent func`);
-    console.log(chunkHashes);
+    console.log(decode(chunkHashes, "uint64", 2));
     return 0;
   }
 
