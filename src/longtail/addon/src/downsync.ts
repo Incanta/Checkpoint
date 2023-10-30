@@ -12,11 +12,11 @@ export async function downsync(
   version: string,
   downloadDirectory: string,
 ) {
-  // const numWorkerCount = 1;
+  const numWorkerCount = 1; // TODO do we want to expose this or read the num processors?
 
   const longtail = Longtail.get();
 
-  const jobs = longtail.CreateBikeshedJobAPI(1, 0);
+  const jobs = longtail.CreateBikeshedJobAPI(numWorkerCount, 0);
 
   // pathFilter
 
@@ -112,16 +112,6 @@ export async function downsync(
     outChunkCount.ptr(),
     outChunkHashes,
   );
-
-  // const getExistingContentAsyncApi = new LongtailApiAsyncGetExistingContent();
-
-  // longtail.BlockStore_GetExistingContent(
-  //   indexStoreApi,
-  //   outChunkCount.deref(),
-  //   outChunkHashes,
-  //   0,
-  //   getExistingContentAsyncApi.get(),
-  // );
 
   const storeIndexBuffer = await client.getVersionStoreIndex(version);
   const remoteStoreIndexPtr = new StoreIndexPointer();
