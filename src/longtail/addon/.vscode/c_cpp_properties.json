@@ -3,15 +3,10 @@
     {
       "name": "Win32",
       "includePath": [
-        "${workspaceFolder}/src/longtail/addon/**",
-        "${workspaceFolder}/src/longtail/addon/node_modules/node-addon-api",
+        "${workspaceFolder}/**",
         "C:/Users/seese/AppData/Local/node-gyp/Cache/18.16.1/include/node"
       ],
-      "defines": [
-        "_DEBUG",
-        "UNICODE",
-        "_UNICODE"
-      ],
+      "defines": ["_DEBUG", "UNICODE", "_UNICODE"],
       "windowsSdkVersion": "10.0.22621.0",
       "compilerPath": "cl.exe",
       "cStandard": "c17",

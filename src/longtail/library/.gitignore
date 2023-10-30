@@ -33,5 +33,4 @@
 
 build/**
 dist/**
-.vscode/**
 .vs/**
