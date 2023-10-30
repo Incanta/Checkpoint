@@ -1,6 +1,6 @@
 import { decode } from "koffi";
 import { ObjectPointer } from "./pointer";
-import { decodeHash } from "./util";
+import { decodeHash } from "../util/decode";
 
 export interface Chunk {
   hash: bigint;

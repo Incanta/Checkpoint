@@ -1,6 +1,6 @@
 import { decode } from "koffi";
 import { ObjectPointer } from "./pointer";
-import { decodeHash, decodeHashes, stringify } from "./util";
+import { decodeHash, decodeHashes } from "../util/decode";
 
 export interface BlockIndex {
   blockHash: bigint;

@@ -1,13 +1,5 @@
 import { decode } from "koffi";
 
-export function stringify(obj: any): string {
-  return JSON.stringify(
-    obj,
-    (key, value) => (typeof value === "bigint" ? value.toString() : value),
-    2,
-  );
-}
-
 export function decodeHash(obj: any, offset: number = 0): bigint {
   return decode(obj, offset * 8, "TLongtail_Hash");
 }

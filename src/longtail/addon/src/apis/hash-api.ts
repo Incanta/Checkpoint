@@ -1,6 +1,6 @@
-import { IErrorResult } from "./error";
-import { Longtail } from "./longtail";
-import { StringPointer, VoidPointer } from "./pointer";
+import { IErrorResult } from "../util/error";
+import { Longtail } from "../longtail";
+import { StringPointer, VoidPointer } from "../types/pointer";
 
 export interface IHashApiContextResult extends IErrorResult {
   context: VoidPointer;

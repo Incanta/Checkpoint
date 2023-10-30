@@ -1,5 +1,5 @@
-import { IErrorResult } from "./error";
-import { Longtail } from "./longtail";
+import { IErrorResult } from "../util/error";
+import { Longtail } from "../longtail";
 import { NumberPointer, StringPointer, VoidPointer } from "./pointer";
 
 export interface IStorageApiReadResult extends IErrorResult {

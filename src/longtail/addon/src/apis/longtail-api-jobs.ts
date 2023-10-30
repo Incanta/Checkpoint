@@ -7,7 +7,7 @@ import {
   unregister,
 } from "koffi";
 import { LongtailApi } from "./longtail-api";
-import { Longtail } from "./longtail";
+import { Longtail } from "../longtail";
 
 export class JobGroup {
   public jobCount: number;

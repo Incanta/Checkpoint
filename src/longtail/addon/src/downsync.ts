@@ -1,49 +1,15 @@
-import { Longtail } from "./longtail";
 import fs from "fs";
 import path from "path";
-import { NumberPointer, ObjectPointer } from "./pointer";
-import { VersionIndexPointer } from "./version-index";
-import { LongtailApiAsyncGetExistingContent } from "./longtail-api-async-get-existing-content";
-import { LongtailApiBlockStore } from "./longtail-api-block-store";
-import { StoreIndexPointer } from "./store-index";
-import { LongtailApiProgress } from "./longtail-api-progress";
-import { stringify } from "./util";
 import { promisify } from "util";
+import { Longtail } from "./longtail";
+import { LongtailApiBlockStore } from "./apis/longtail-api-block-store";
+import { LongtailApiProgress } from "./apis/longtail-api-progress";
+import { StoreIndexPointer } from "./types/store-index";
+import { NumberPointer, ObjectPointer } from "./types/pointer";
+import { VersionIndexPointer } from "./types/version-index";
+import { ClientInterface } from "./client";
 
-const baseDirectory = path.join(__dirname, "..", "download");
-const versionIndexPath = path.join(
-  baseDirectory,
-  "version-data",
-  "version-index",
-  "1.0.0.lvi",
-);
-const versionStoreIndexPath = path.join(
-  baseDirectory,
-  "version-data",
-  "version-store-index",
-  "1.0.0.lsi",
-);
-const completeStoreIndexPath = path.join(
-  baseDirectory,
-  "store",
-  "store_fdd58e082b966e122278252aaf3c2d40c9165b8acbd8ddf2f23a39ee0a070863.lsi",
-);
-
-function getVersionIndexBuffer() {
-  return fs.readFileSync(versionIndexPath);
-}
-
-function getVersionStoreIndexBuffer() {
-  return fs.readFileSync(versionStoreIndexPath);
-}
-
-function getCompleteStoreIndexBuffer() {
-  return fs.readFileSync(completeStoreIndexPath);
-}
-
-// -------------------------------------
-
-(async () => {
+export async function downsync(client: ClientInterface, version: string) {
   // const numWorkerCount = 1;
 
   const longtail = Longtail.get();
@@ -54,15 +20,13 @@ function getCompleteStoreIndexBuffer() {
 
   // resolvedTargetFolderPath (local)
 
-  const fsApi = longtail.CreateFSStorageAPI();
-
   // cacheTargetIndexPath (local)
 
   // target scanning (local)
 
   const hashRegistry = longtail.CreateFullHashRegistry();
 
-  const remoteBuffer = getVersionIndexBuffer();
+  const remoteBuffer = await client.getVersionIndex(version);
   const remoteVersionIndexPtr = new VersionIndexPointer();
   longtail.ReadVersionIndexFromBuffer(
     remoteBuffer,
@@ -71,7 +35,6 @@ function getCompleteStoreIndexBuffer() {
   );
 
   const remoteVersionIndex = remoteVersionIndexPtr.get();
-  // console.log(remoteVersionIndex);
 
   const hashApiPointer = new ObjectPointer();
   const getHashApiError = longtail.HashRegistry_GetHashAPI(
@@ -81,9 +44,8 @@ function getCompleteStoreIndexBuffer() {
   );
 
   const localVersionIndexPointer = new VersionIndexPointer();
-  const localVersionIndexExists = false; // todo
-  if (localVersionIndexExists) {
-    const localBuffer = getVersionIndexBuffer();
+  const localBuffer = await client.getLocalVersionIndex();
+  if (localBuffer !== null) {
     longtail.ReadVersionIndexFromBuffer(
       localBuffer,
       localBuffer.length,
@@ -91,7 +53,7 @@ function getCompleteStoreIndexBuffer() {
     );
   } else {
     const err = longtail.CreateVersionIndex(
-      fsApi,
+      client.getStorageApi(),
       hashApiPointer.deref(),
       null,
       jobs,
@@ -112,10 +74,9 @@ function getCompleteStoreIndexBuffer() {
 
   const localFsApi = longtail.CreateFSStorageAPI(); // how is this different than fsApi?
 
-  const blockStoreApi = new LongtailApiBlockStore();
+  const blockStoreApi = new LongtailApiBlockStore(client);
   const nodeStoreApi = blockStoreApi.get();
 
-  // create remoteIndexStore remotestore.CreateBlockStoreForURI
   const compressionStoreApi = longtail.CreateCompressBlockStoreAPI(
     nodeStoreApi,
     compressionRegistry,
@@ -160,7 +121,7 @@ function getCompleteStoreIndexBuffer() {
   //   getExistingContentAsyncApi.get(),
   // );
 
-  const storeIndexBuffer = getVersionStoreIndexBuffer();
+  const storeIndexBuffer = await client.getVersionStoreIndex(version);
   const remoteStoreIndexPtr = new StoreIndexPointer();
   longtail.ReadStoreIndexFromBuffer(
     storeIndexBuffer,
@@ -173,7 +134,7 @@ function getCompleteStoreIndexBuffer() {
   const ChangeVersion = promisify(longtail.ChangeVersion.async);
   await ChangeVersion(
     indexStoreApi,
-    fsApi,
+    client.getStorageApi(),
     hashApiPointer.deref(),
     jobs,
     progressApi.get(),
@@ -186,4 +147,77 @@ function getCompleteStoreIndexBuffer() {
     "path/to/download", // todo?
     1,
   );
+}
+
+/**
+ * --------------------------------------
+ */
+
+class TestClient implements ClientInterface {
+  private storageApi: any;
+
+  constructor(private baseDirectory: string) {
+    const longtail = Longtail.get();
+    this.storageApi = longtail.CreateFSStorageAPI();
+  }
+
+  public getStorageApi(): any {
+    return this.storageApi;
+  }
+
+  public async getLocalVersionIndex(): Promise<Buffer | null> {
+    return null;
+  }
+
+  public async getVersionIndex(version: string): Promise<Buffer> {
+    return fs.readFileSync(
+      path.join(
+        this.baseDirectory,
+        "version-data",
+        "version-index",
+        `${version}.lvi`,
+      ),
+    );
+  }
+
+  public async getVersionStoreIndex(version: string): Promise<Buffer> {
+    return fs.readFileSync(
+      path.join(
+        this.baseDirectory,
+        "version-data",
+        "version-store-index",
+        `${version}.lsi`,
+      ),
+    );
+  }
+
+  public async getStoreIndex(): Promise<Buffer> {
+    const storeDirectory = path.join(this.baseDirectory, "store");
+
+    const storeIndexes = fs
+      .readdirSync(storeDirectory)
+      .filter((file) => file.endsWith(".lsi"));
+
+    return fs.readFileSync(path.join(storeDirectory, storeIndexes[0]));
+  }
+
+  public async getBlock(blockHash: bigint): Promise<Buffer> {
+    const hexString = blockHash.toString(16);
+
+    const buffer = fs.readFileSync(
+      path.join(
+        this.baseDirectory,
+        "store",
+        "chunks",
+        hexString.slice(0, 4),
+        `0x${hexString}.lsb`,
+      ),
+    );
+    return buffer;
+  }
+}
+
+(async () => {
+  const client = new TestClient(path.join(__dirname, "..", "download"));
+  await downsync(client, "1.0.0");
 })();

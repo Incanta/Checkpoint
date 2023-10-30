@@ -1,6 +1,6 @@
-import { IErrorResult } from "./error";
-import { Longtail } from "./longtail";
-import { VoidPointer } from "./pointer";
+import { IErrorResult } from "../util/error";
+import { Longtail } from "../longtail";
+import { VoidPointer } from "../types/pointer";
 
 export interface IHashRegistryApiHashApiResult extends IErrorResult {
   hashApi: VoidPointer;

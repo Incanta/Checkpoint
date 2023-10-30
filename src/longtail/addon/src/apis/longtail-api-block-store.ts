@@ -5,13 +5,12 @@ import {
   sizeof,
   unregister,
 } from "koffi";
-import { LongtailApi } from "./longtail-api";
-import { Longtail } from "./longtail";
-import { decodeHash, decodeHashes } from "./util";
 import { Sema } from "async-sema";
-import { StoredBlockPointer } from "./stored-block";
-import fs from "fs";
-import path from "path";
+import { LongtailApi } from "./longtail-api";
+import { Longtail } from "../longtail";
+import { decodeHashes } from "../util/decode";
+import { StoredBlockPointer } from "../types/stored-block";
+import { ClientInterface } from "../client";
 
 export class LongtailApiBlockStore extends LongtailApi {
   public putStoredBlockHandle: IKoffiRegisteredCallback;
@@ -29,9 +28,12 @@ export class LongtailApiBlockStore extends LongtailApi {
   private blocks: Map<bigint, any> = new Map<bigint, any>();
 
   private longtail: Longtail;
+  private client: ClientInterface;
 
-  public constructor() {
+  public constructor(client: ClientInterface) {
     super();
+
+    this.client = client;
 
     this.putStoredBlockHandle = register(
       this,
@@ -155,17 +157,7 @@ export class LongtailApiBlockStore extends LongtailApi {
     let block = this.blocks.get(blockHash);
 
     if (typeof block === "undefined") {
-      // TODO
-      const baseDirectory = path.join(__dirname, "..", "download");
-      const buffer = fs.readFileSync(
-        path.join(
-          baseDirectory,
-          "store",
-          "chunks",
-          "701a",
-          "0x701a4cbd8245bc55.lsb",
-        ),
-      );
+      const buffer = await this.client.getBlock(blockHash);
 
       const blockPtr = new StoredBlockPointer();
       this.longtail.ReadStoredBlockFromBuffer(
@@ -192,6 +184,7 @@ export class LongtailApiBlockStore extends LongtailApi {
     return lock;
   }
 
+  // we don't really use this function
   public getExistingContent(
     blockStoreApi: any,
     chunkCount: number,
@@ -199,8 +192,6 @@ export class LongtailApiBlockStore extends LongtailApi {
     minBlockUsagePercent: number,
     asyncComplete: any,
   ): number {
-    console.log(`GetExistingContent func`);
-    console.log(decode(chunkHashes, "uint64", 2));
     return 0;
   }
 
