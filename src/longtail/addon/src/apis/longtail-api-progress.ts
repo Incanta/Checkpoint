@@ -26,11 +26,6 @@ export class LongtailApiProgress extends LongtailApi {
     totalCount: number,
     doneCount: number,
   ): void {
-    console.log(
-      `Finished ${doneCount} of ${totalCount} - ${
-        (doneCount / totalCount) * 100
-      }%`,
-    );
     this.progress.emit("progress", totalCount, doneCount);
 
     if (doneCount >= totalCount) {

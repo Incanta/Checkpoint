@@ -1,5 +1,6 @@
 import koffi from "koffi";
 import path from "path";
+import os from "os";
 
 export class Longtail {
   private static instance: Longtail;
@@ -40,17 +41,34 @@ export class Longtail {
   public ChangeVersion: koffi.KoffiFunction;
 
   private constructor() {
-    this.lib = koffi.load(
-      path.join(
-        __dirname,
-        "..",
-        "src",
-        "longtail",
-        "win32_x64",
-        "debug",
-        "longtail_dylib.dll",
-      ),
+    let platform = "";
+    switch (os.platform()) {
+      case "win32": {
+        platform = "win32_x64";
+        break;
+      }
+      case "linux": {
+        platform = "linux_x64";
+        break;
+      }
+      case "darwin": {
+        platform = "macos_x64";
+        break;
+      }
+      default: {
+        throw new Error("Unsupported OS");
+      }
+    }
+    const libraryPath = path.join(
+      __dirname,
+      "..",
+      "src",
+      "longtail",
+      platform,
+      process.env.NODE_ENV === "DEBUG" ? "debug" : "release",
+      "longtail_dylib.dll",
     );
+    this.lib = koffi.load(libraryPath);
 
     koffi.proto("void Longtail_DisposeFunc(void* obj)");
 
