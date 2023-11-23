@@ -8,7 +8,7 @@
       "type": "shell",
       "command": "build-and-copy.bat",
       "options": {
-        "cwd": "${workspaceFolder}/src/longtail/library/shared_lib"
+        "cwd": "${workspaceFolder}/shared_lib"
       },
       "problemMatcher": [],
       "group": {
