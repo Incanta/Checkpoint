@@ -1,12 +1,12 @@
 import { describe, test, expect } from "@jest/globals";
 import path from "path";
-import { downsync } from "../downsync";
+import { pull } from "../pull";
 import { TestClient } from "./test-client";
 
-describe("downsync", () => {
+describe("pull", () => {
   test("it gets version 1.0.0", async () => {
     const client = new TestClient(path.join(__dirname, "download"));
-    await downsync(client, "1.0.0", "output");
+    await pull(client, "1.0.0", "output");
 
     const storage = client.getStorageApi();
     expect(storage.IsDir("output")).toBe(true);
@@ -18,6 +18,7 @@ describe("downsync", () => {
     expect(fileResult.error).toBe(0);
     const fileSizeResult = storage.GetSize(fileResult.file);
     expect(fileSizeResult.error).toBe(0);
+    console.log(fileResult.file);
     const fileReadResult = storage.Read(
       fileResult.file,
       0,

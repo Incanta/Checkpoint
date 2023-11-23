@@ -2,6 +2,10 @@ import fs from "fs";
 import path from "path";
 import { ClientInterface } from "../client";
 import { StorageApi } from "../types/storage-api";
+import { Modification } from "../types/modification";
+import { VersionIndexPointer } from "../types/version-index";
+import { StoreIndexPointer } from "../types/store-index";
+import { Longtail } from "../longtail";
 
 export class TestClient implements ClientInterface {
   private storageApi: StorageApi;
@@ -14,12 +18,20 @@ export class TestClient implements ClientInterface {
     return this.storageApi;
   }
 
-  public async getLocalVersionIndex(): Promise<Buffer | null> {
+  public async getLocalVersion(): Promise<string | null> {
     return null;
   }
 
-  public async getVersionIndex(version: string): Promise<Buffer> {
-    return fs.readFileSync(
+  public async getLocalVersionIndex(
+    directory: string,
+    modifications: Modification[],
+  ): Promise<VersionIndexPointer | null> {
+    return null;
+  }
+
+  public async getVersionIndex(version: string): Promise<VersionIndexPointer> {
+    const longtail = Longtail.get();
+    const buffer = fs.readFileSync(
       path.join(
         this.baseDirectory,
         "version-data",
@@ -27,10 +39,20 @@ export class TestClient implements ClientInterface {
         `${version}.lvi`,
       ),
     );
+    const versionIndexPtr = new VersionIndexPointer();
+    longtail.ReadVersionIndexFromBuffer(
+      buffer,
+      buffer.length,
+      versionIndexPtr.ptr(),
+    );
+    return versionIndexPtr;
   }
 
-  public async getVersionStoreIndex(version: string): Promise<Buffer> {
-    return fs.readFileSync(
+  public async getVersionStoreIndex(
+    version: string,
+  ): Promise<StoreIndexPointer> {
+    const longtail = Longtail.get();
+    const buffer = fs.readFileSync(
       path.join(
         this.baseDirectory,
         "version-data",
@@ -38,16 +60,31 @@ export class TestClient implements ClientInterface {
         `${version}.lsi`,
       ),
     );
+    const storeIndexPtr = new StoreIndexPointer();
+    longtail.ReadStoreIndexFromBuffer(
+      buffer,
+      buffer.length,
+      storeIndexPtr.ptr(),
+    );
+    return storeIndexPtr;
   }
 
-  public async getStoreIndex(): Promise<Buffer> {
+  public async getStoreIndex(): Promise<StoreIndexPointer> {
+    const longtail = Longtail.get();
     const storeDirectory = path.join(this.baseDirectory, "store");
 
     const storeIndexes = fs
       .readdirSync(storeDirectory)
       .filter((file) => file.endsWith(".lsi"));
 
-    return fs.readFileSync(path.join(storeDirectory, storeIndexes[0]));
+    const buffer = fs.readFileSync(path.join(storeDirectory, storeIndexes[0]));
+    const storeIndexPtr = new StoreIndexPointer();
+    longtail.ReadStoreIndexFromBuffer(
+      buffer,
+      buffer.length,
+      storeIndexPtr.ptr(),
+    );
+    return storeIndexPtr;
   }
 
   public async getBlock(blockHash: bigint): Promise<Buffer> {
@@ -63,5 +100,19 @@ export class TestClient implements ClientInterface {
       ),
     );
     return buffer;
+  }
+
+  public async writeVersionIndex(
+    versionIndex: VersionIndexPointer,
+    version: string,
+  ): Promise<void> {
+    //
+  }
+
+  public async writeStoreIndex(
+    storeIndex: StoreIndexPointer,
+    version: string,
+  ): Promise<void> {
+    //
   }
 }
