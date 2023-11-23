@@ -5,12 +5,12 @@
       "type": "node",
       "request": "launch",
       "name": "Jest All",
-      "runtimeExecutable": "${workspaceFolder}/src/desktop/node_modules/.bin/electron",
-      "program": "${workspaceFolder}/src/desktop/node_modules/jest/bin/jest",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron",
+      "program": "${workspaceFolder}/node_modules/jest/bin/jest",
       "args": [
         "--silent",
         "--config",
-        "${workspaceFolder}/src/desktop/app/jest.unit.config.js"
+        "${workspaceFolder}/app/jest.unit.config.js"
       ],
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen",
@@ -18,19 +18,19 @@
         "ELECTRON_RUN_AS_NODE": "1"
       },
       "windows": {
-        "runtimeExecutable": "${workspaceFolder}/src/desktop/node_modules/.bin/electron.cmd"
+        "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron.cmd"
       }
     },
     {
       "type": "node",
       "request": "launch",
       "name": "Jest Current",
-      "runtimeExecutable": "${workspaceFolder}/src/desktop/node_modules/.bin/electron",
-      "program": "${workspaceFolder}/src/desktop/node_modules/jest/bin/jest",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron",
+      "program": "${workspaceFolder}/node_modules/jest/bin/jest",
       "args": [
         "--silent",
         "--config",
-        "${workspaceFolder}/src/desktop/app/jest.unit.config.js",
+        "${workspaceFolder}/app/jest.unit.config.js",
         "${relativeFile}"
       ],
       "console": "integratedTerminal",
@@ -39,7 +39,7 @@
         "ELECTRON_RUN_AS_NODE": "1"
       },
       "windows": {
-        "runtimeExecutable": "${workspaceFolder}/src/desktop/node_modules/.bin/electron.cmd"
+        "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron.cmd"
       }
     }
   ]
