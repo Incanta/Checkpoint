@@ -30,6 +30,38 @@ export class NumberPointer {
   }
 }
 
+export class BigIntPointer {
+  private pointer: bigint[];
+
+  constructor() {
+    this.pointer = [BigInt(0)];
+  }
+
+  public ptr(): bigint[] {
+    return this.pointer;
+  }
+
+  public deref(): bigint {
+    return this.pointer[0];
+  }
+}
+
+export class BufferPointer {
+  private pointer: Uint8Array[];
+
+  constructor(length: number) {
+    this.pointer = [new Uint8Array(length)];
+  }
+
+  public ptr(): Uint8Array[] {
+    return this.pointer;
+  }
+
+  public deref(): Uint8Array {
+    return this.pointer[0];
+  }
+}
+
 export class StringPointer {
   private pointer: string[];
 

@@ -10,6 +10,9 @@ export class Longtail {
   public CreateFSStorageAPI: koffi.KoffiFunction;
   public CreateInMemStorageAPI: koffi.KoffiFunction;
 
+  public GetBlake3HashType: koffi.KoffiFunction;
+  public GetPathHash: koffi.KoffiFunction;
+
   public HashRegistry_GetHashAPI: koffi.KoffiFunction;
 
   public CreateFullHashRegistry: koffi.KoffiFunction;
@@ -20,8 +23,15 @@ export class Longtail {
   public MakeJobAPI: koffi.KoffiFunction;
 
   public ReadVersionIndexFromBuffer: koffi.KoffiFunction;
+  public WriteVersionIndexToBuffer: koffi.KoffiFunction;
+  public ReadVersionIndex: koffi.KoffiFunction;
+  public WriteVersionIndex: koffi.KoffiFunction;
+  public CreateStoreIndex: koffi.KoffiFunction;
+  public WriteStoreIndexToBuffer: koffi.KoffiFunction;
   public ReadStoreIndexFromBuffer: koffi.KoffiFunction;
   public ReadStoredBlockFromBuffer: koffi.KoffiFunction;
+  public WriteStoreIndex: koffi.KoffiFunction;
+  public ReadStoreIndex: koffi.KoffiFunction;
 
   public MakeBlockStoreAPI: koffi.KoffiFunction;
 
@@ -39,6 +49,7 @@ export class Longtail {
   public CreateHPCDCChunkerAPI: koffi.KoffiFunction;
 
   public ChangeVersion: koffi.KoffiFunction;
+  public MergeVersionIndex: koffi.KoffiFunction;
 
   private constructor() {
     let platform = "";
@@ -75,6 +86,8 @@ export class Longtail {
     koffi.struct("Longtail_API", {
       Dispose: "Longtail_DisposeFunc*",
     });
+
+    koffi.alias("TLongtail_Hash", "uint64_t");
 
     koffi.pointer("Longtail_StorageAPI_HOpenFile", koffi.opaque() as any);
     koffi.pointer("Longtail_StorageAPI_HIterator", koffi.opaque() as any);
@@ -287,6 +300,10 @@ export class Longtail {
       "int Longtail_Hash_HashBufferFunc(void* hash_api, uint32_t length, const void* data, _Out_ uint64_t* out_hash)",
     );
 
+    this.GetBlake3HashType = this.lib.func(
+      `uint32_t Longtail_GetBlake3HashType()`,
+    );
+
     koffi.struct("Longtail_HashAPI", {
       m_API: "Longtail_API",
       GetIdentifier: "Longtail_Hash_GetIdentifierFunc*",
@@ -295,6 +312,13 @@ export class Longtail {
       EndContext: "Longtail_Hash_EndContextFunc*",
       HashBuffer: "Longtail_Hash_HashBufferFunc*",
     });
+
+    this.GetPathHash = this.lib.func(
+      `int Longtail_GetPathHash(
+        Longtail_HashAPI* hash_api,
+        const char* path,
+        _Out_ TLongtail_Hash* out_hash)`,
+    );
 
     this.HashRegistry_GetHashAPI = this.lib.func(
       "int Longtail_GetHashRegistry_GetHashAPI(void* hash_registry, uint32_t hash_type, _Out_ Longtail_HashAPI** out_hash_api)",
@@ -308,8 +332,6 @@ export class Longtail {
     this.CreateFullHashRegistry = this.lib.func(
       "Longtail_HashRegistryAPI* Longtail_CreateFullHashRegistry()",
     );
-
-    koffi.alias("TLongtail_Hash", "uint64_t");
 
     koffi.proto(
       "void Longtail_Progress_OnProgressFunc(void* progressApi, uint32_t total_count, uint32_t done_count)",
@@ -564,8 +586,62 @@ export class Longtail {
       "int Longtail_ReadVersionIndexFromBuffer(const void* buffer, size_t size, _Out_ Longtail_VersionIndex** out_version_index)",
     );
 
+    this.WriteVersionIndexToBuffer = this.lib.func(
+      `int Longtail_WriteVersionIndexToBuffer(
+        const Longtail_VersionIndex* version_index,
+        _Out_ uint8_t** out_buffer,
+        _Out_ size_t* out_size)`,
+    );
+
+    this.ReadVersionIndex = this.lib.func(
+      `int Longtail_ReadVersionIndex(
+        Longtail_StorageAPI* storage_api,
+        const char* path,
+        _Out_ Longtail_VersionIndex** out_version_index)`,
+    );
+
+    this.WriteVersionIndex = this.lib.func(
+      `int Longtail_WriteVersionIndex(
+        Longtail_StorageAPI* storage_api,
+        Longtail_VersionIndex* version_index,
+        const char* path)`,
+    );
+
+    this.CreateStoreIndex = this.lib.func(
+      `int Longtail_CreateStoreIndex(
+        Longtail_HashAPI* hash_api,
+        uint32_t chunk_count,
+        const TLongtail_Hash* chunk_hashes,
+        const uint32_t* chunk_sizes,
+        const uint32_t* optional_chunk_tags,
+        uint32_t max_block_size,
+        uint32_t max_chunks_per_block,
+        _Out_ Longtail_StoreIndex** out_store_index)`,
+    );
+
+    this.WriteStoreIndexToBuffer = this.lib.func(
+      `int Longtail_WriteStoreIndexToBuffer(
+        const Longtail_StoreIndex* store_index,
+        _Out_ uint8_t** out_buffer,
+        _Out_ size_t* out_size)`,
+    );
+
     this.ReadStoreIndexFromBuffer = this.lib.func(
       "int Longtail_ReadStoreIndexFromBuffer(const void* buffer, size_t size, _Out_ Longtail_StoreIndex** out_store_index)",
+    );
+
+    this.WriteStoreIndex = this.lib.func(
+      `int Longtail_WriteStoreIndex(
+        Longtail_StorageAPI* storage_api,
+        Longtail_StoreIndex* store_index,
+        const char* path)`,
+    );
+
+    this.ReadStoreIndex = this.lib.func(
+      `int Longtail_ReadStoreIndex(
+        Longtail_StorageAPI* storage_api,
+        const char* path,
+        _Out_ Longtail_StoreIndex** out_store_index)`,
     );
 
     this.ReadStoredBlockFromBuffer = this.lib.func(
@@ -735,6 +811,15 @@ export class Longtail {
         const Longtail_VersionDiff* version_diff,
         const char* version_path,
         int retain_permissions)`,
+    );
+
+    this.MergeVersionIndex = this.lib.func(
+      `int Longtail_MergeVersionIndex(
+        Longtail_VersionIndex* base_version_index,
+        Longtail_VersionIndex* overlay_version_index,
+        const TLongtail_Hash* removed_files,
+        const size_t num_removed_files,
+        _Out_ Longtail_VersionIndex** out_version_index);`,
     );
   }
 

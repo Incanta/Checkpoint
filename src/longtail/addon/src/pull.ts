@@ -7,10 +7,10 @@ import { NumberPointer, ObjectPointer } from "./types/pointer";
 import { VersionIndexPointer } from "./types/version-index";
 import { ClientInterface } from "./client";
 
-export async function downsync(
+export async function pull(
   client: ClientInterface,
   version: string,
-  downloadDirectory: string,
+  directory: string,
 ) {
   const numWorkerCount = 1; // TODO do we want to expose this or read the num processors?
 
@@ -28,13 +28,7 @@ export async function downsync(
 
   const hashRegistry = longtail.CreateFullHashRegistry();
 
-  const remoteBuffer = await client.getVersionIndex(version);
-  const remoteVersionIndexPtr = new VersionIndexPointer();
-  longtail.ReadVersionIndexFromBuffer(
-    remoteBuffer,
-    remoteBuffer.length,
-    remoteVersionIndexPtr.ptr(),
-  );
+  const remoteVersionIndexPtr = await client.getVersionIndex(version);
 
   const remoteVersionIndex = remoteVersionIndexPtr.get();
 
@@ -45,15 +39,13 @@ export async function downsync(
     hashApiPointer.ptr(),
   );
 
-  const localVersionIndexPointer = new VersionIndexPointer();
-  const localBuffer = await client.getLocalVersionIndex();
-  if (localBuffer !== null) {
-    longtail.ReadVersionIndexFromBuffer(
-      localBuffer,
-      localBuffer.length,
-      localVersionIndexPointer.ptr(),
-    );
-  } else {
+  let localVersionIndexPointer = await client.getLocalVersionIndex(
+    directory,
+    [],
+  );
+
+  if (localVersionIndexPointer === null) {
+    localVersionIndexPointer = new VersionIndexPointer();
     const err = longtail.CreateVersionIndex(
       client.getStorageApi().get(),
       hashApiPointer.deref(),
@@ -70,11 +62,10 @@ export async function downsync(
       localVersionIndexPointer.ptr(),
     );
   }
+
   const localVersionIndex = localVersionIndexPointer.get();
 
   const compressionRegistry = longtail.CreateFullCompressionRegistry();
-
-  const localFsApi = longtail.CreateFSStorageAPI(); // how is this different than fsApi?
 
   const blockStoreApi = new LongtailApiBlockStore(client);
   const nodeStoreApi = blockStoreApi.get();
@@ -113,13 +104,7 @@ export async function downsync(
     outChunkHashes,
   );
 
-  const storeIndexBuffer = await client.getVersionStoreIndex(version);
-  const remoteStoreIndexPtr = new StoreIndexPointer();
-  longtail.ReadStoreIndexFromBuffer(
-    storeIndexBuffer,
-    storeIndexBuffer.length,
-    remoteStoreIndexPtr.ptr(),
-  );
+  const remoteStoreIndexPtr = await client.getVersionStoreIndex(version);
 
   const progressApi = new LongtailApiProgress();
 
@@ -136,7 +121,7 @@ export async function downsync(
     localVersionIndexPointer.deref(),
     remoteVersionIndexPtr.deref(),
     versionDiffPointer.deref(),
-    downloadDirectory,
+    directory,
     1,
   );
 }

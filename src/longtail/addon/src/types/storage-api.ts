@@ -1,10 +1,10 @@
 import { IErrorResult } from "../util/error";
 import { Longtail } from "../longtail";
-import { NumberPointer, StringPointer, VoidPointer } from "./pointer";
+import { BufferPointer, NumberPointer, VoidPointer } from "./pointer";
 import { decode } from "koffi";
 
 export interface IStorageApiReadResult extends IErrorResult {
-  contents: string;
+  contents: Uint8Array;
 }
 
 export interface IStorageApiSizeResult extends IErrorResult {
@@ -159,7 +159,7 @@ export class StorageApi {
     offset: number,
     length: number,
   ): IStorageApiReadResult {
-    const output = new StringPointer(length);
+    const output = new BufferPointer(length);
     const error = this.decodedApi.Read(
       this.api,
       file.deref(),
