@@ -1030,14 +1030,16 @@ LONGTAIL_EXPORT int Longtail_CreateVersionIndex(
  *
  * @param[in] base_version_index    Pointer to an initialized struct Longtail_VersionIndex
  * @param[in] overlay_version_index Pointer to an initialized struct Longtail_VersionIndex
+ * @param[in] removed_files         Files to remove from base_version_index (since overlay won't include them)
+ * @param[in] num_removed_files     The length of removed files
  * @param[out] out_version_index    Pointer to an struct Longtail_VersionIndex pointer
  * @return                          Return code (errno style), zero on success
  */
 LONGTAIL_EXPORT int Longtail_MergeVersionIndex(
     const struct Longtail_VersionIndex* base_version_index,
     const struct Longtail_VersionIndex* overlay_version_index,
-    const size_t num_removed_files,
     const TLongtail_Hash* removed_files,
+    const size_t num_removed_files,
     struct Longtail_VersionIndex** out_version_index);
 
 /*! @brief Writes a struct Longtail_VersionIndex to a byte buffer.
@@ -1229,6 +1231,12 @@ LONGTAIL_EXPORT int Longtail_CreateVersionDiff(
     const struct Longtail_VersionIndex* source_version,
     const struct Longtail_VersionIndex* target_version,
     struct Longtail_VersionDiff** out_version_diff);
+
+LONGTAIL_EXPORT int Longtail_CreateVersionIndexFromDiff(
+    struct Longtail_HashAPI* hash_api,
+    const struct Longtail_VersionIndex* source_version,
+    const struct Longtail_VersionDiff* version_diff,
+    struct Longtail_VersionIndex** out_target_version);
 
 /*! @brief Unpack and modify a version.
  *
@@ -1769,12 +1777,12 @@ struct Longtail_VersionDiff
     uint32_t* m_TargetAddedCount;
     uint32_t* m_ModifiedContentCount;
     uint32_t* m_ModifiedPermissionsCount;
-    uint32_t* m_SourceRemovedAssetIndexes;
-    uint32_t* m_TargetAddedAssetIndexes;
-    uint32_t* m_SourceContentModifiedAssetIndexes;
-    uint32_t* m_TargetContentModifiedAssetIndexes;
-    uint32_t* m_SourcePermissionsModifiedAssetIndexes;
-    uint32_t* m_TargetPermissionsModifiedAssetIndexes;
+    uint32_t* m_SourceRemovedAssetIndexes; // []
+    uint32_t* m_TargetAddedAssetIndexes; // []
+    uint32_t* m_SourceContentModifiedAssetIndexes; // []
+    uint32_t* m_TargetContentModifiedAssetIndexes; // []
+    uint32_t* m_SourcePermissionsModifiedAssetIndexes; // []
+    uint32_t* m_TargetPermissionsModifiedAssetIndexes; // []
 };
 
 ///////////// Longtail private functions

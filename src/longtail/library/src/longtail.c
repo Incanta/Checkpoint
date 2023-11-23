@@ -2769,8 +2769,8 @@ static SORTFUNC(SortPathShortToLongVersionMerge)
 int Longtail_MergeVersionIndex(
     const struct Longtail_VersionIndex* base_version_index,
     const struct Longtail_VersionIndex* overlay_version_index,
-    const size_t num_removed_files,
     const TLongtail_Hash* removed_files,
+    const size_t num_removed_files,
     struct Longtail_VersionIndex** out_version_index)
 {
     MAKE_LOG_CONTEXT_FIELDS(ctx)
@@ -2865,7 +2865,6 @@ int Longtail_MergeVersionIndex(
     for (uint32_t i = 0; i < base_asset_count; ++i)
     {
         TLongtail_Hash path_hash = base_version_index->m_PathHashes[i];
-
 
         if (num_removed_files > 0 && removed_files != 0)
         {
@@ -7535,6 +7534,67 @@ int Longtail_CreateVersionDiff(
     Longtail_Free(work_mem);
     *out_version_diff = version_diff;
     return 0;
+}
+
+// struct Longtail_VersionDiff
+// {
+//     uint32_t* m_SourceRemovedCount;
+//     uint32_t* m_TargetAddedCount;
+//     uint32_t* m_ModifiedContentCount;
+//     uint32_t* m_ModifiedPermissionsCount;
+//     uint32_t* m_SourceRemovedAssetIndexes; // []
+//     uint32_t* m_TargetAddedAssetIndexes; // []
+//     uint32_t* m_SourceContentModifiedAssetIndexes; // []
+//     uint32_t* m_TargetContentModifiedAssetIndexes; // []
+//     uint32_t* m_SourcePermissionsModifiedAssetIndexes; // []
+//     uint32_t* m_TargetPermissionsModifiedAssetIndexes; // []
+// };
+
+// struct Longtail_VersionIndex
+// {
+//     uint32_t* m_Version;
+//     uint32_t* m_HashIdentifier;
+//     uint32_t* m_TargetChunkSize;
+//     uint32_t* m_AssetCount;
+//     uint32_t* m_ChunkCount;
+//     uint32_t* m_AssetChunkIndexCount;
+//     TLongtail_Hash* m_PathHashes;       // []
+//     TLongtail_Hash* m_ContentHashes;    // []
+//     uint64_t* m_AssetSizes;             // []
+//     uint32_t* m_AssetChunkCounts;       // []
+//     // uint64_t* m_CreationDates;       // []
+//     // uint64_t* m_ModificationDates;   // []
+//     uint32_t* m_AssetChunkIndexStarts;  // []
+//     uint32_t* m_AssetChunkIndexes;      // []
+//     TLongtail_Hash* m_ChunkHashes;      // []
+
+//     uint32_t* m_ChunkSizes;             // []
+//     uint32_t* m_ChunkTags;              // []
+
+//     uint32_t* m_NameOffsets;            // []
+//     uint32_t m_NameDataSize;
+//     uint16_t* m_Permissions;            // []
+//     char* m_NameData;
+// };
+
+int Longtail_CreateVersionIndexFromDiff(
+    struct Longtail_HashAPI* hash_api,
+    const struct Longtail_VersionIndex* source_version,
+    const struct Longtail_VersionDiff* version_diff,
+    struct Longtail_VersionIndex** out_target_version)
+{
+    MAKE_LOG_CONTEXT_FIELDS(ctx)
+        LONGTAIL_LOGFIELD(hash_api, "%p"),
+        LONGTAIL_LOGFIELD(source_version, "%p"),
+        LONGTAIL_LOGFIELD(version_diff, "%p"),
+        LONGTAIL_LOGFIELD(out_target_version, "%p")
+    MAKE_LOG_CONTEXT_WITH_FIELDS(ctx, 0, LONGTAIL_LOG_LEVEL_DEBUG)
+
+    LONGTAIL_VALIDATE_INPUT(ctx, source_version != 0, return EINVAL)
+    LONGTAIL_VALIDATE_INPUT(ctx, version_diff != 0, return EINVAL)
+    LONGTAIL_VALIDATE_INPUT(ctx, out_target_version != 0, return EINVAL)
+    LONGTAIL_VALIDATE_INPUT(ctx, hash_api != 0, return EINVAL)
+    LONGTAIL_VALIDATE_INPUT(ctx, hash_api->GetIdentifier(hash_api) == *source_version->m_HashIdentifier, return EINVAL)
 }
 
 int Longtail_ChangeVersion(
