@@ -31,20 +31,18 @@ export async function commit(
     compressionRegistry,
   );
 
+  // this is the string version that the client's "HEAD" points to.
+  // changes to their repo are based off this version
   const baseVersion = await client.getLocalVersion();
 
   if (baseVersion === null) {
     throw new Error("No base version found; was the workspace initialized?");
   }
 
-  const baseVersionIndexBuffer = await client.getVersionIndex(baseVersion);
-  const baseVersionIndexPtr = new VersionIndexPointer();
-  longtail.ReadVersionIndexFromBuffer(
-    baseVersionIndexBuffer,
-    baseVersionIndexBuffer.length,
-    baseVersionIndexPtr.ptr(),
-  );
+  // this is the version index of the client's "HEAD" without any changes
+  const baseVersionIndexPtr = await client.getVersionIndex(baseVersion);
 
+  // this is the version index of the proposed commit changes
   const localModifiedVersionIndex = await client.getLocalVersionIndex(
     directory,
     modifications,
@@ -72,6 +70,10 @@ export async function commit(
     }
   }
 
+  // I believe this may just be necessary in the server code,
+  // but this is the client code (no function for the server code yet).
+  // I don't think that the client needs to get the merged version index
+  // to create the missing content
   const nextVersionIndexPtr = new VersionIndexPointer();
   longtail.MergeVersionIndex(
     baseVersionIndexPtr.deref(),
@@ -81,13 +83,8 @@ export async function commit(
     nextVersionIndexPtr.ptr(),
   );
 
-  const storeIndexBuffer = await client.getStoreIndex();
-  const remoteStoreIndexPtr = new StoreIndexPointer();
-  longtail.ReadStoreIndexFromBuffer(
-    storeIndexBuffer,
-    storeIndexBuffer.length,
-    remoteStoreIndexPtr.ptr(),
-  );
+  // this _should_ be the store index for the remote repo
+  const storeIndexBufferPtr = await client.getStoreIndex();
 
   // CreateMissingContent
 

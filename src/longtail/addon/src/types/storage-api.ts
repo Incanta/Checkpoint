@@ -170,9 +170,17 @@ export class StorageApi {
     return { contents: output.deref(), error };
   }
 
-  public OpenWriteFile(path: string): IStorageApiFileResult {
+  public OpenWriteFile(
+    path: string,
+    initialSize: number = 0,
+  ): IStorageApiFileResult {
     const output = new VoidPointer();
-    const error = this.decodedApi.OpenWriteFile(this.api, path, output.ptr());
+    const error = this.decodedApi.OpenWriteFile(
+      this.api,
+      path,
+      Math.floor(initialSize),
+      output.ptr(),
+    );
     return { file: output, error };
   }
 
