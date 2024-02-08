@@ -50,6 +50,8 @@ export class Longtail {
 
   public ChangeVersion: koffi.KoffiFunction;
   public MergeVersionIndex: koffi.KoffiFunction;
+  public CreateMissingContent: koffi.KoffiFunction;
+  public WriteContent: koffi.KoffiFunction;
 
   private constructor() {
     let platform = "";
@@ -820,6 +822,29 @@ export class Longtail {
         const TLongtail_Hash* removed_files,
         const size_t num_removed_files,
         _Out_ Longtail_VersionIndex** out_version_index);`,
+    );
+
+    this.CreateMissingContent = this.lib.func(
+      `int Longtail_CreateMissingContent(
+        Longtail_HashAPI* hash_api,
+        const Longtail_StoreIndex* store_index,
+        const Longtail_VersionIndex* version_index,
+        uint32_t max_block_size,
+        uint32_t max_chunks_per_block,
+        _Out_ Longtail_StoreIndex** out_store_index);`,
+    );
+
+    this.WriteContent = this.lib.func(
+      `int Longtail_WriteContent(
+        Longtail_StorageAPI* source_storage_api,
+        Longtail_BlockStoreAPI* block_store_api,
+        Longtail_JobAPI* job_api,
+        Longtail_ProgressAPI* progress_api,
+        Longtail_CancelAPI* optional_cancel_api,
+        Longtail_CancelAPI_HCancelToken optional_cancel_token,
+        Longtail_StoreIndex* store_index,
+        Longtail_VersionIndex* version_index,
+        const char* assets_folder);`,
     );
   }
 

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { ClientInterface } from "../client";
+import { ClientInterface } from "../client/client-interface";
 import { StorageApi } from "../types/storage-api";
 import { Modification } from "../types/modification";
 import { VersionIndexPointer } from "../types/version-index";
@@ -29,7 +29,9 @@ export class TestClient implements ClientInterface {
     return null;
   }
 
-  public async getVersionIndex(version: string): Promise<VersionIndexPointer> {
+  public async getVersionIndexFromServer(
+    version: string,
+  ): Promise<VersionIndexPointer> {
     const longtail = Longtail.get();
     const buffer = fs.readFileSync(
       path.join(
@@ -48,7 +50,7 @@ export class TestClient implements ClientInterface {
     return versionIndexPtr;
   }
 
-  public async getVersionStoreIndex(
+  public async getVersionStoreIndexFromServer(
     version: string,
   ): Promise<StoreIndexPointer> {
     const longtail = Longtail.get();
@@ -69,7 +71,7 @@ export class TestClient implements ClientInterface {
     return storeIndexPtr;
   }
 
-  public async getStoreIndex(): Promise<StoreIndexPointer> {
+  public async getLatestStoreIndexFromServer(): Promise<StoreIndexPointer> {
     const longtail = Longtail.get();
     const storeDirectory = path.join(this.baseDirectory, "store");
 
@@ -87,7 +89,7 @@ export class TestClient implements ClientInterface {
     return storeIndexPtr;
   }
 
-  public async getBlock(blockHash: bigint): Promise<Buffer> {
+  public async getBlockFromServer(blockHash: bigint): Promise<Buffer> {
     const hexString = blockHash.toString(16);
 
     const buffer = fs.readFileSync(

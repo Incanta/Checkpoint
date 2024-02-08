@@ -1,14 +1,29 @@
 import { describe, test, expect } from "@jest/globals";
 import path from "path";
-import { pull } from "../pull";
+import { pull } from "../client/pull";
 import { TestClientFull } from "./test-client-full";
-import { createRepo } from "../create-repo";
-import { commit } from "../commit";
+import { createRepo } from "../server/create-repo";
+import { commit } from "../client/commit";
 import { Operation } from "../types/modification";
 import { nanoid } from "nanoid";
+import { TestServerFull } from "./test-server-full";
+
+/**
+ * server needs to be able to:
+ * - create a repo
+ * - receive a commit
+ * - server a pull request
+ */
+
+/**
+ * client needs to be able to:
+ * - pull from a server
+ * - commit to a server
+ */
 
 describe("full workflow", () => {
-  const client = new TestClientFull(path.join(__dirname, "download"));
+  const server = new TestServerFull(path.join(__dirname, "repos"));
+  const client = new TestClientFull(path.join(__dirname, "repos"), server);
 
   const sourceDirectory = "source";
   const pullDirectory = "pull";
@@ -17,7 +32,9 @@ describe("full workflow", () => {
   const file2Contents = nanoid(10);
 
   test("it runs a simple workflow", async () => {
-    await createRepo(client);
+    await createRepo(server);
+
+    await pull(client, "0", sourceDirectory);
 
     const storage = client.getStorageApi();
 

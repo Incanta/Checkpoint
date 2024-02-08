@@ -10,7 +10,7 @@ import { LongtailApi } from "./longtail-api";
 import { Longtail } from "../longtail";
 import { decodeHashes } from "../util/decode";
 import { StoredBlockPointer } from "../types/stored-block";
-import { ClientInterface } from "../client";
+import { ClientInterface } from "../client/client-interface";
 
 export class LongtailApiBlockStore extends LongtailApi {
   public putStoredBlockHandle: IKoffiRegisteredCallback;
@@ -157,7 +157,7 @@ export class LongtailApiBlockStore extends LongtailApi {
     let block = this.blocks.get(blockHash);
 
     if (typeof block === "undefined") {
-      const buffer = await this.client.getBlock(blockHash);
+      const buffer = await this.client.getBlockFromServer(blockHash);
 
       const blockPtr = new StoredBlockPointer();
       this.longtail.ReadStoredBlockFromBuffer(

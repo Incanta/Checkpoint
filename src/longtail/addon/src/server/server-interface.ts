@@ -1,9 +1,9 @@
-import { Modification } from "./types/modification";
-import { StorageApi } from "./types/storage-api";
-import { StoreIndexPointer } from "./types/store-index";
-import { VersionIndexPointer } from "./types/version-index";
+import { Modification } from "../types/modification";
+import { StorageApi } from "../types/storage-api";
+import { StoreIndexPointer } from "../types/store-index";
+import { VersionIndexPointer } from "../types/version-index";
 
-export interface ClientInterface {
+export interface ServerInterface {
   getStorageApi(): StorageApi;
   getLocalVersion(): Promise<string | null>;
   getLocalVersionIndex(

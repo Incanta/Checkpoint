@@ -1,11 +1,11 @@
 import { promisify } from "util";
-import { Longtail } from "./longtail";
-import { LongtailApiBlockStore } from "./apis/longtail-api-block-store";
-import { StoreIndexPointer } from "./types/store-index";
-import { BigIntPointer, ObjectPointer } from "./types/pointer";
-import { VersionIndexPointer } from "./types/version-index";
-import { ClientInterface } from "./client";
-import { Modification, Operation } from "./types/modification";
+import { Longtail } from "../longtail";
+import { LongtailApiBlockStore } from "../apis/longtail-api-block-store";
+import { StoreIndexPointer } from "../types/store-index";
+import { BigIntPointer, ObjectPointer } from "../types/pointer";
+import { VersionIndexPointer } from "../types/version-index";
+import { ClientInterface } from "./client-interface";
+import { Modification, Operation } from "../types/modification";
 
 export async function commit(
   client: ClientInterface,
@@ -14,6 +14,8 @@ export async function commit(
   modifications: Modification[],
 ) {
   const numWorkerCount = 1; // TODO do we want to expose this or read the num processors?
+  const targetBlockSize = 8388608; // 8MB, default from golongtail
+  const maxChunksPerBlock = 1024; // default from golongtail
 
   const longtail = Longtail.get();
 
@@ -40,7 +42,8 @@ export async function commit(
   }
 
   // this is the version index of the client's "HEAD" without any changes
-  const baseVersionIndexPtr = await client.getVersionIndex(baseVersion);
+  const baseVersionIndexPtr =
+    await client.getVersionIndexFromServer(baseVersion);
 
   // this is the version index of the proposed commit changes
   const localModifiedVersionIndex = await client.getLocalVersionIndex(
@@ -74,21 +77,41 @@ export async function commit(
   // but this is the client code (no function for the server code yet).
   // I don't think that the client needs to get the merged version index
   // to create the missing content
-  const nextVersionIndexPtr = new VersionIndexPointer();
-  longtail.MergeVersionIndex(
-    baseVersionIndexPtr.deref(),
+  // Later Mike: This totally isn't necessary; we'll use localModifiedVersionIndex
+  // const nextVersionIndexPtr = new VersionIndexPointer();
+  // longtail.MergeVersionIndex(
+  //   baseVersionIndexPtr.deref(),
+  //   localModifiedVersionIndex.deref(),
+  //   removedFileHashes,
+  //   removedFileHashes.length,
+  //   nextVersionIndexPtr.ptr(),
+  // );
+
+  const storeIndexBufferPtr = await client.getLatestStoreIndexFromServer();
+
+  const missingContentVersionStoreIndex = new StoreIndexPointer();
+  longtail.CreateMissingContent(
+    hashApi.deref(),
+    storeIndexBufferPtr.deref(),
     localModifiedVersionIndex.deref(),
-    removedFileHashes,
-    removedFileHashes.length,
-    nextVersionIndexPtr.ptr(),
+    targetBlockSize,
+    maxChunksPerBlock,
+    missingContentVersionStoreIndex.ptr(),
   );
 
-  // this _should_ be the store index for the remote repo
-  const storeIndexBufferPtr = await client.getStoreIndex();
-
-  // CreateMissingContent
-
-  // WriteContent
+  // WriteContent - need to write the content to our own in-memory store
+  // where we can push it to the server
+  longtail.WriteContent(
+    client.getStorageApi().get(),
+    null, // TODO
+    jobs,
+    null,
+    null,
+    null,
+    missingContentVersionStoreIndex.deref(),
+    localModifiedVersionIndex.deref(),
+    directory,
+  );
 
   // FlushStoresSync
 

@@ -1,20 +1,18 @@
 import fs from "fs";
 import path from "path";
-import { ClientInterface } from "../client/client-interface";
+import { ServerInterface } from "../server/server-interface";
 import { StorageApi } from "../types/storage-api";
 import { Modification } from "../types/modification";
 import { VersionIndexPointer } from "../types/version-index";
 import { StoreIndexPointer } from "../types/store-index";
 import { Longtail } from "../longtail";
-import { ServerInterface } from "../server/server-interface";
 
-export class TestClientFull implements ClientInterface {
+export class TestServerFull implements ServerInterface {
+  private baseDirectory: string;
   private storageApi: StorageApi;
 
-  constructor(
-    private baseDirectory: string,
-    private server: ServerInterface,
-  ) {
+  constructor(baseDirectory: string) {
+    this.baseDirectory = baseDirectory;
     this.storageApi = StorageApi.CreateInMemStorageAPI();
   }
 
@@ -33,9 +31,7 @@ export class TestClientFull implements ClientInterface {
     return null;
   }
 
-  public async getVersionIndexFromServer(
-    version: string,
-  ): Promise<VersionIndexPointer> {
+  public async getVersionIndex(version: string): Promise<VersionIndexPointer> {
     const longtail = Longtail.get();
     const versionIndex = new VersionIndexPointer();
 
@@ -53,7 +49,7 @@ export class TestClientFull implements ClientInterface {
     return versionIndex;
   }
 
-  public async getVersionStoreIndexFromServer(
+  public async getVersionStoreIndex(
     version: string,
   ): Promise<StoreIndexPointer> {
     const longtail = Longtail.get();
@@ -73,7 +69,7 @@ export class TestClientFull implements ClientInterface {
     return storeIndex;
   }
 
-  public async getLatestStoreIndexFromServer(): Promise<StoreIndexPointer> {
+  public async getStoreIndex(): Promise<StoreIndexPointer> {
     const longtail = Longtail.get();
     const storeIndex = new StoreIndexPointer();
 
@@ -86,7 +82,7 @@ export class TestClientFull implements ClientInterface {
     return storeIndex;
   }
 
-  public async getBlockFromServer(blockHash: bigint): Promise<Buffer> {
+  public async getBlock(blockHash: bigint): Promise<Buffer> {
     const hexString = blockHash.toString(16);
     const blockPath = path.join(
       this.baseDirectory,
