@@ -84,5 +84,5 @@ export function getSHA() {
     return circleSHA
   }
 
-  return revParse(Path.resolve(__dirname, '../.git'), 'HEAD')
+  return revParse(Path.resolve(__dirname, '../../../.git'), 'HEAD')
 }
