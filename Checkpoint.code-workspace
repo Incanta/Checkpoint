@@ -60,20 +60,6 @@
     "editor.codeActionsOnSave": {
       "source.fixAll.eslint": "explicit"
     },
-    "prettier.semi": false,
-    "prettier.singleQuote": true,
-    "prettier.trailingComma": "es5",
-    "prettier.ignorePath": ".prettierignore",
-    "eslint.options": {
-      "configFile": ".eslintrc.yml",
-      "rulePaths": ["eslint-rules"]
-    },
-    "eslint.validate": [
-      "javascript",
-      "javascriptreact",
-      "typescript",
-      "typescriptreact"
-    ],
     "git.autoRepositoryDetection": "openEditors",
     "C_Cpp.intelliSenseEngine": "default",
     "cSpell.words": ["koffi", "longtail"]
