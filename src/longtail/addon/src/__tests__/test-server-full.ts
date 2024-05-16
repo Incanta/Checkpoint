@@ -2,7 +2,6 @@ import fs from "fs";
 import path from "path";
 import { ServerInterface } from "../server/server-interface";
 import { StorageApi } from "../types/storage-api";
-import { Modification } from "../types/modification";
 import { VersionIndexPointer } from "../types/version-index";
 import { StoreIndexPointer } from "../types/store-index";
 import { Longtail } from "../longtail";
@@ -16,19 +15,12 @@ export class TestServerFull implements ServerInterface {
     this.storageApi = StorageApi.CreateInMemStorageAPI();
   }
 
+  public async init(): Promise<void> {
+    //
+  }
+
   public getStorageApi(): StorageApi {
     return this.storageApi;
-  }
-
-  public async getLocalVersion(): Promise<string | null> {
-    return null;
-  }
-
-  public async getLocalVersionIndex(
-    directory: string,
-    modifications: Modification[],
-  ): Promise<VersionIndexPointer | null> {
-    return null;
   }
 
   public async getVersionIndex(version: string): Promise<VersionIndexPointer> {

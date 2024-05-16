@@ -28,10 +28,14 @@ describe("full workflow", () => {
   const sourceDirectory = "source";
   const pullDirectory = "pull";
 
+  const file1Name = "file1";
   const file1Contents = nanoid(10);
+  const file2Name = "file2";
   const file2Contents = nanoid(10);
 
   test("it runs a simple workflow", async () => {
+    // todo: add an api for the client to trigger repo creation
+    // rather than the server just doing it here
     await createRepo(server);
 
     await pull(client, "0", sourceDirectory);
@@ -41,19 +45,19 @@ describe("full workflow", () => {
     const dirResult = storage.CreateDir(sourceDirectory);
     expect(dirResult.error).toBe(0);
 
-    const file1 = storage.OpenWriteFile(`${sourceDirectory}/file1`);
+    const file1 = storage.OpenWriteFile(`${sourceDirectory}/${file1Name}`);
     expect(file1.error).toBe(0);
     storage.Write(file1.file, 0, file1Contents);
     storage.CloseFile(file1.file);
 
-    const file2 = storage.OpenWriteFile(`${sourceDirectory}/file2`);
+    const file2 = storage.OpenWriteFile(`${sourceDirectory}/${file2Name}`);
     expect(file2.error).toBe(0);
     storage.Write(file2.file, 0, file2Contents);
     storage.CloseFile(file2.file);
 
     await commit(client, "1", sourceDirectory, [
       {
-        path: "file1",
+        path: file1Name,
         operation: Operation.Add,
         permissions: 0o644,
         isDirectory: false,
