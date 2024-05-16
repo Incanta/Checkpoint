@@ -1,6 +1,10 @@
 {
   "folders": [
     {
+      "name": "Core",
+      "path": "src/core"
+    },
+    {
       "name": "Addon",
       "path": "src/longtail/addon"
     },
