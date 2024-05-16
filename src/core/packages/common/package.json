@@ -1,5 +1,5 @@
 {
-  "name": "@waypointscm/common",
+  "name": "@checkpointvcs/common",
   "version": "1.0.0",
   "description": "",
   "main": "lib/index.js",
