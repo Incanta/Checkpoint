@@ -15,7 +15,8 @@
     "clean": "node scripts/clean.js",
     "clean:all": "node scripts/clean.js all",
     "lint": "eslint packages/**/*.{js,ts,tsx}",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "cli": "ts-node packages/client/src/bin.ts"
   },
   "dependencies": {
     "@incanta/config": "^0.3.1"
