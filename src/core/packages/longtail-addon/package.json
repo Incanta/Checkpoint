@@ -1,5 +1,5 @@
 {
-  "name": "@checkpointvcs/client",
+  "name": "@checkpointvcs/longtail-addon",
   "version": "1.0.0",
   "description": "",
   "main": "lib/index.js",
@@ -7,8 +7,5 @@
   "private": true,
   "type": "module",
   "scripts": {
-  },
-  "dependencies": {
-    "commander": "^12.0.0"
   }
 }

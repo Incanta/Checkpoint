@@ -5,10 +5,6 @@
       "path": "src/core"
     },
     {
-      "name": "Addon",
-      "path": "src/longtail/addon"
-    },
-    {
       "name": "Library",
       "path": "src/longtail/library"
     },
