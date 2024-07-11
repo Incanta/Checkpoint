@@ -5,6 +5,7 @@
   "main": "lib/index.js",
   "license": "UNLICENSED",
   "private": true,
+  "type": "module",
   "scripts": {
     "start": "node ./lib/index.js"
   },

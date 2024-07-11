@@ -4,6 +4,7 @@ import path from "path";
 export interface CheckpointConfig {
   configVersion: number;
   gitRoot: string;
+  centralizedWorkflow: boolean;
   logging: {
     level: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
     prettify: {
@@ -42,6 +43,7 @@ export const DefaultLoggingConfig: CheckpointConfig["logging"] = {
 export const DefaultConfig: CheckpointConfig = {
   configVersion: 1,
   gitRoot: "",
+  centralizedWorkflow: true,
   logging: DefaultLoggingConfig,
 };
 
@@ -49,7 +51,10 @@ export async function getConfig(gitRoot: string): Promise<CheckpointConfig> {
   const configPath = path.join(gitRoot, ".checkpoint", "config.json");
 
   if (!existsSync(configPath)) {
-    return DefaultConfig;
+    return {
+      ...DefaultConfig,
+      gitRoot,
+    };
   }
 
   const config = await fs.readFile(configPath, "utf-8");

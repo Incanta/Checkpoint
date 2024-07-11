@@ -19,12 +19,13 @@ export async function getGitRoot(directory: string): Promise<string> {
     throw new Error("Could not find Git repository");
   }
 
-  const gitDir = path.join(...dirParts, ".git");
+  const gitDir = path.join(...dirParts);
   return gitDir;
 }
 
 export async function exec(
-  command: string
+  command: string,
+  cwd: string | null = null
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   const exec = promisify(nativeExec);
   let result: { stdout: string; stderr: string; code: number } = {
@@ -34,7 +35,9 @@ export async function exec(
   };
 
   try {
-    const r = await exec(command);
+    const r = await exec(command, {
+      cwd: cwd || process.cwd(),
+    });
     result = { stdout: r.stdout, stderr: r.stderr, code: 0 };
   } catch (e: any) {
     result.code = e.code;

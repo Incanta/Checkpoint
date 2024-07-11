@@ -1,17 +1,31 @@
 import path from "path";
 import { existsSync, promises as fs } from "fs";
-import { CheckpointConfig } from "../config";
+import type { CheckpointConfig } from "../config";
 import { exec } from "../util";
 import { GetLogger } from "../logging";
 
-export async function InstallFilter(): Promise<void> {
+export const lfsError =
+  "Found Git LFS filters in this Git repository's .gitattributes file. Checkpoint cannot be used alongside Git LFS. Remove the LFS filters and try again.";
+
+export async function InstallFilter(
+  directory: string | null = null
+): Promise<void> {
+  const globalString = directory == null ? "--global" : "";
+  // await exec(
+  //   `git config ${globalString} filter.checkpoint.process "git-chk filter-process"`,
+  //   directory
+  // );
   await exec(
-    `git config --global filter.checkpoint.process "git-chk filter-process"`
+    `git config ${globalString} filter.checkpoint.required true`,
+    directory
   );
-  await exec(`git config --global filter.checkpoint.required true`);
-  await exec(`git config --global filter.checkpoint.clean "git-chk clean %f"`);
   await exec(
-    `git config --global filter.checkpoint.smudge "git-chk smudge %f"`
+    `git config ${globalString} filter.checkpoint.clean "git-chk clean %f"`,
+    directory
+  );
+  await exec(
+    `git config ${globalString} filter.checkpoint.smudge "git-chk smudge %f"`,
+    directory
   );
 }
 
@@ -54,10 +68,8 @@ export async function UpdateGitHooks(
     );
 
     if (attributes.includes("filter=lfs")) {
-      GetLogger(config).error(
-        "Found Git LFS filters in this Git repository's .gitattributes file. Checkpoint cannot be used alongside Git LFS. Remove the LFS filters and try again."
-      );
-      process.exit(1);
+      GetLogger(config).error(lfsError);
+      throw lfsError;
     }
   }
 
@@ -70,16 +82,16 @@ export async function UpdateGitHooks(
   GetLogger(config).info("Updated Git hooks.");
 }
 
+export const AttributeFilterSuffix =
+  "filter=checkpoint diff=checkpoint merge=checkpoint -text";
+
 export async function SetUpGitAttributes(
   config: CheckpointConfig
 ): Promise<void> {
   const attributesFile = path.join(config.gitRoot, ".gitattributes");
 
-  if (existsSync(attributesFile)) {
-    GetLogger(config).info(
-      "Found existing .gitattributes file, skipping set up."
-    );
-    return;
+  if (!existsSync(attributesFile)) {
+    await fs.writeFile(attributesFile, "");
   }
 
   const commonFilters = [
@@ -161,11 +173,22 @@ export async function SetUpGitAttributes(
 
   const content = commonFilters
     .map((s) =>
-      s.startsWith("#")
-        ? `\n${s}`
-        : `${s} filter=checkpoint diff=checkpoint merge=checkpoint -text`
+      s.startsWith("#") ? `\n${s}` : `${s} ${AttributeFilterSuffix}`
     )
     .join("\n");
 
-  await fs.writeFile(attributesFile, content);
+  await fs.appendFile(attributesFile, `\n\n${content}`);
+}
+
+export async function Track(
+  config: CheckpointConfig,
+  pattern: string
+): Promise<void> {
+  const attributesFile = path.join(config.gitRoot, ".gitattributes");
+
+  if (!existsSync(attributesFile)) {
+    await fs.writeFile(attributesFile, "");
+  }
+
+  await fs.appendFile(attributesFile, `\n${pattern} ${AttributeFilterSuffix}`);
 }

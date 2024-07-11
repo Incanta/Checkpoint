@@ -1,4 +1,4 @@
-import { CheckpointConfig } from "../config";
+import type { CheckpointConfig } from "../config";
 import { GetLogger } from "../logging";
 import { exec } from "../util";
 

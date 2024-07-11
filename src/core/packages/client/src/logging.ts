@@ -1,10 +1,11 @@
-import pino, { Logger as PinoLogger } from "pino";
+import pino from "pino";
+import type { Logger as PinoLogger } from "pino";
 import "pino-pretty"; // this ensures pkg will bundle it
-import { CheckpointConfig } from "./config";
+import type { CheckpointConfig } from "./config";
 
 export function GetLogger(config: CheckpointConfig): PinoLogger {
   return pino({
-    level: config.logging.level,
+    level: process.env["CI"] !== "" ? "warn" : config.logging.level,
     transport: config.logging.prettify.enabled
       ? {
           target: "pino-pretty",
