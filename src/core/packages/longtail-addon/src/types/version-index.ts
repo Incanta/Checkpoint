@@ -25,7 +25,7 @@ export interface VersionIndex {
 }
 
 export class VersionIndexPointer extends ObjectPointer {
-  constructor() {
+  public constructor() {
     super();
   }
 
@@ -56,7 +56,7 @@ export class VersionIndexPointer extends ObjectPointer {
       return result;
     }
 
-    const baseStruct = decode(this.deref(), "Longtail_VersionIndex");
+    const baseStruct = decode(this.asInput(), "Longtail_VersionIndex");
 
     result.version = decode(baseStruct.m_Version, "uint32_t");
     result.hashIdentifier = decode(baseStruct.m_HashIdentifier, "uint32_t");

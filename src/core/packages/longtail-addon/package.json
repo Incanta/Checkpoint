@@ -2,10 +2,10 @@
   "name": "@checkpointvcs/longtail-addon",
   "version": "1.0.0",
   "description": "",
-  "main": "lib/index.js",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
+  "module": "src/index.ts",
   "scripts": {
   }
 }

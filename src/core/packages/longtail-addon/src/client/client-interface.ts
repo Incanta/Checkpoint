@@ -1,29 +1,19 @@
-import { type Modification } from "../types/modification";
-import { StorageApi } from "../types/storage-api";
 import { StoreIndexPointer } from "../types/store-index";
 import { VersionIndexPointer } from "../types/version-index";
 
 export interface ClientInterface {
-  getStorageApi(): StorageApi;
-
-  getLocalVersion(): Promise<string | null>;
-  getLocalVersionIndex(
-    directory: string,
-    modifications: Modification[]
-  ): Promise<VersionIndexPointer | null>;
+  getStorageApi(): any;
 
   getVersionIndexFromServer(version: string): Promise<VersionIndexPointer>;
-  getVersionStoreIndexFromServer(version: string): Promise<StoreIndexPointer>;
   getLatestStoreIndexFromServer(): Promise<StoreIndexPointer>;
   getBlockFromServer(blockHash: bigint): Promise<Buffer>;
 
-  writeVersionIndex(
-    versionIndex: VersionIndexPointer,
+  writeVersionIndexToServer(
+    versionIndexPtr: VersionIndexPointer,
     version: string
   ): Promise<void>;
-
-  writeStoreIndex(
-    storeIndex: StoreIndexPointer,
-    version: string
+  writePartialStoreIndexToServer(
+    storeIndexPtr: StoreIndexPointer
   ): Promise<void>;
+  writeBlockToServer(blockHash: bigint, blockData: Buffer): Promise<void>;
 }

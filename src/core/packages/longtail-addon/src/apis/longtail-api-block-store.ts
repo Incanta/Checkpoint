@@ -7,7 +7,7 @@ import {
 } from "koffi";
 import { Sema } from "async-sema";
 import { LongtailApi } from "./longtail-api";
-import { Longtail } from "../longtail";
+import { LongtailKoffi } from "../longtail-koffi";
 import { decodeHashes } from "../util/decode";
 import { StoredBlockPointer } from "../types/stored-block";
 import { type ClientInterface } from "../client/client-interface";
@@ -27,7 +27,7 @@ export class LongtailApiBlockStore extends LongtailApi {
   private blockLocks: Map<bigint, Sema> = new Map<bigint, Sema>();
   private blocks: Map<bigint, any> = new Map<bigint, any>();
 
-  private longtail: Longtail;
+  private longtail: LongtailKoffi;
   private client: ClientInterface;
 
   public constructor(client: ClientInterface) {
@@ -77,7 +77,7 @@ export class LongtailApiBlockStore extends LongtailApi {
       "Longtail_BlockStore_FlushFunc*"
     );
 
-    this.longtail = Longtail.get();
+    this.longtail = LongtailKoffi.get();
     this.storeApi = this.longtail.Alloc(
       "NodeJSStoreAPI",
       sizeof("Longtail_BlockStoreAPI")
@@ -97,7 +97,7 @@ export class LongtailApiBlockStore extends LongtailApi {
   }
 
   public putStoredBlock(
-    blockStoreApi: any,
+    inBlockStoreApi: any,
     storedBlock: any,
     asyncComplete: any
   ): number {

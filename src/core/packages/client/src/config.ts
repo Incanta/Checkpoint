@@ -3,8 +3,13 @@ import path from "path";
 
 export interface CheckpointConfig {
   configVersion: number;
-  gitRoot: string;
+  repoRoot: string;
   centralizedWorkflow: boolean;
+  remote: {
+    server: string;
+    organization: string;
+    repository: string;
+  };
   logging: {
     level: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
     prettify: {
@@ -42,8 +47,13 @@ export const DefaultLoggingConfig: CheckpointConfig["logging"] = {
 
 export const DefaultConfig: CheckpointConfig = {
   configVersion: 1,
-  gitRoot: "",
+  repoRoot: "",
   centralizedWorkflow: true,
+  remote: {
+    server: "",
+    organization: "",
+    repository: "",
+  },
   logging: DefaultLoggingConfig,
 };
 
@@ -53,7 +63,7 @@ export async function getConfig(gitRoot: string): Promise<CheckpointConfig> {
   if (!existsSync(configPath)) {
     return {
       ...DefaultConfig,
-      gitRoot,
+      repoRoot: gitRoot,
     };
   }
 
@@ -74,6 +84,6 @@ export async function getConfig(gitRoot: string): Promise<CheckpointConfig> {
     ...DefaultConfig,
     ...JSON.parse(config),
     ...JSON.parse(overrideConfig),
-    gitRoot,
+    repoRoot: gitRoot,
   };
 }

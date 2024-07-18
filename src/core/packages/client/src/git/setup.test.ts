@@ -40,7 +40,7 @@ describe("Git Setup", () => {
 
   it("installs .gitattributes", async () => {
     const checkpointConfig = await getConfig(gitDir.path);
-    expect(checkpointConfig.gitRoot).toBe(gitDir.path);
+    expect(checkpointConfig.repoRoot).toBe(gitDir.path);
 
     await SetUpGitAttributes(checkpointConfig);
 
@@ -58,7 +58,7 @@ describe("Git Setup", () => {
 
   it("installs the hook files", async () => {
     const checkpointConfig = await getConfig(gitDir.path);
-    expect(checkpointConfig.gitRoot).toBe(gitDir.path);
+    expect(checkpointConfig.repoRoot).toBe(gitDir.path);
 
     await UpdateGitHooks(checkpointConfig, false);
 
@@ -69,7 +69,7 @@ describe("Git Setup", () => {
 
   it("tracks an individual pattern", async () => {
     const checkpointConfig = await getConfig(gitDir.path);
-    expect(checkpointConfig.gitRoot).toBe(gitDir.path);
+    expect(checkpointConfig.repoRoot).toBe(gitDir.path);
 
     await Track(checkpointConfig, "*.xyz");
 
@@ -85,7 +85,7 @@ describe("Git Setup", () => {
 
   it("fails to install hook files if LFS is enabled on the current repo", async () => {
     const checkpointConfig = await getConfig(gitDir.path);
-    expect(checkpointConfig.gitRoot).toBe(gitDir.path);
+    expect(checkpointConfig.repoRoot).toBe(gitDir.path);
 
     await exec(`git lfs track "*.abc"`, gitDir.path);
 

@@ -9,6 +9,7 @@
   "scripts": {
   },
   "dependencies": {
-    "commander": "^12.0.0"
+    "commander": "^12.0.0",
+    "@checkpointvcs/longtail-addon": "workspace:*"
   }
 }

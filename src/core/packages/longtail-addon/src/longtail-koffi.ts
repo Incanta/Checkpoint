@@ -2,10 +2,12 @@ import koffi from "koffi";
 import path from "path";
 import os from "os";
 
-export class Longtail {
-  private static instance: Longtail;
+export class LongtailKoffi {
+  private static instance: LongtailKoffi;
 
   public lib: koffi.IKoffiLib;
+
+  public FileInfos: koffi.IKoffiCType;
 
   public CreateFSStorageAPI: koffi.KoffiFunction;
   public CreateInMemStorageAPI: koffi.KoffiFunction;
@@ -15,11 +17,11 @@ export class Longtail {
 
   public HashRegistry_GetHashAPI: koffi.KoffiFunction;
 
-  public CreateFullHashRegistry: koffi.KoffiFunction;
+  public Longtail_CreateFullHashRegistry: koffi.KoffiFunction;
 
   public CreateFullCompressionRegistry: koffi.KoffiFunction;
 
-  public CreateBikeshedJobAPI: koffi.KoffiFunction;
+  public Longtail_CreateBikeshedJobAPI: koffi.KoffiFunction;
   public MakeJobAPI: koffi.KoffiFunction;
 
   public ReadVersionIndexFromBuffer: koffi.KoffiFunction;
@@ -32,6 +34,7 @@ export class Longtail {
   public ReadStoredBlockFromBuffer: koffi.KoffiFunction;
   public WriteStoreIndex: koffi.KoffiFunction;
   public ReadStoreIndex: koffi.KoffiFunction;
+  public MergeStoreIndex: koffi.KoffiFunction;
 
   public MakeBlockStoreAPI: koffi.KoffiFunction;
 
@@ -52,6 +55,8 @@ export class Longtail {
   public MergeVersionIndex: koffi.KoffiFunction;
   public CreateMissingContent: koffi.KoffiFunction;
   public WriteContent: koffi.KoffiFunction;
+
+  public GetZStdDefaultCompressionType: koffi.KoffiFunction;
 
   private constructor() {
     let platform = "";
@@ -91,196 +96,18 @@ export class Longtail {
 
     koffi.alias("TLongtail_Hash", "uint64_t");
 
-    koffi.pointer("Longtail_StorageAPI_HOpenFile", koffi.opaque() as any);
-    koffi.pointer("Longtail_StorageAPI_HIterator", koffi.opaque() as any);
-    koffi.pointer("Longtail_StorageAPI_HLockFile", koffi.opaque() as any);
-    koffi.pointer("Longtail_StorageAPI_HFileMap", koffi.opaque() as any);
     koffi.pointer("Longtail_HashAPI_HContext", koffi.opaque() as any);
 
-    koffi.struct("Longtail_StorageAPI_EntryProperties", {
-      m_Name: "const char*",
-      m_Size: "uint64_t",
-      m_Permissions: "uint16_t",
-      m_IsDir: "int",
+    this.FileInfos = koffi.struct("Longtail_FileInfos", {
+      m_Count: "uint32_t",
+      m_PathDataSize: "uint32_t",
+      m_Sizes: "uint64_t*", // []
+      m_PathStartOffsets: "uint32_t*", // []
+      m_Permissions: "uint16_t*", // []
+      m_PathData: "char*",
     });
 
-    koffi.proto(
-      `int Longtail_Storage_OpenReadFile(
-        void* storage_api,
-        const char* path,
-        _Out_ Longtail_StorageAPI_HOpenFile* out_open_file)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_GetSize(
-        void* storage_api,
-        Longtail_StorageAPI_HOpenFile f,
-        _Out_ uint64_t* out_size)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_Read(
-        void* storage_api,
-        Longtail_StorageAPI_HOpenFile f,
-        uint64_t offset,
-        uint64_t length,
-        _Out_ void* output)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_OpenWriteFile(
-        void* storage_api,
-        const char* path,
-        uint64_t initial_size,
-        _Out_ Longtail_StorageAPI_HOpenFile* out_open_file)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_Write(
-        void* storage_api,
-        Longtail_StorageAPI_HOpenFile f,
-        uint64_t offset,
-        uint64_t length,
-        const void* input)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_SetSize(
-        void* storage_api,
-        Longtail_StorageAPI_HOpenFile f,
-        uint64_t length)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_SetPermissions(
-        void* storage_api,
-        const char* path,
-        uint16_t permissions)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_GetPermissions(
-        void* storage_api,
-        const char* path,
-        _Out_ uint16_t* out_permissions)`
-    );
-    koffi.proto(
-      `void Longtail_Storage_CloseFile(
-        void* storage_api,
-        Longtail_StorageAPI_HOpenFile f)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_CreateDir(
-        void* storage_api,
-        const char* path)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_RenameFile(
-        void* storage_api,
-        const char* source_path,
-        const char* target_path)`
-    );
-    koffi.proto(
-      `char* Longtail_Storage_ConcatPath(
-        void* storage_api,
-        const char* root_path,
-        const char* sub_path)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_IsDir(
-        void* storage_api,
-        const char* path)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_IsFile(
-        void* storage_api,
-        const char* path)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_RemoveDir(
-        void* storage_api,
-        const char* path)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_RemoveFile(
-        void* storage_api,
-        const char* path)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_StartFind(
-        void* storage_api,
-        const char* path,
-        _Out_ Longtail_StorageAPI_HIterator* out_iterator)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_FindNext(
-        void* storage_api,
-        Longtail_StorageAPI_HIterator iterator)`
-    );
-    koffi.proto(
-      `void Longtail_Storage_CloseFind(
-        void* storage_api,
-        Longtail_StorageAPI_HIterator iterator)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_GetEntryProperties(
-        void* storage_api,
-        Longtail_StorageAPI_HIterator iterator,
-        _Out_ Longtail_StorageAPI_EntryProperties* out_properties)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_LockFile(
-        void* storage_api,
-        const char* path,
-        _Out_ Longtail_StorageAPI_HLockFile* out_lock_file)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_UnlockFile(
-        void* storage_api,
-        Longtail_StorageAPI_HLockFile lock_file)`
-    );
-    koffi.proto(
-      `char* Longtail_Storage_GetParentPath(
-        void* storage_api,
-        const char* path)`
-    );
-    koffi.proto(
-      `int Longtail_Storage_MapFile(
-        void* storage_api,
-        Longtail_StorageAPI_HOpenFile f,
-        uint64_t offset,
-        uint64_t length,
-        _Out_ Longtail_StorageAPI_HFileMap* out_file_map,
-        _Out_ const void** out_data_ptr)`
-    );
-    koffi.proto(
-      `void Longtail_Storage_UnmapFile(
-        void* storage_api,
-        Longtail_StorageAPI_HFileMap m)`
-    );
-
-    koffi.struct("Longtail_StorageAPI", {
-      m_API: "Longtail_API",
-      OpenReadFile: "Longtail_Storage_OpenReadFile*",
-      GetSize: "Longtail_Storage_GetSize*",
-      Read: "Longtail_Storage_Read*",
-      OpenWriteFile: "Longtail_Storage_OpenWriteFile*",
-      Write: "Longtail_Storage_Write*",
-      SetSize: "Longtail_Storage_SetSize*",
-      SetPermissions: "Longtail_Storage_SetPermissions*",
-      GetPermissions: "Longtail_Storage_GetPermissions*",
-      CloseFile: "Longtail_Storage_CloseFile*",
-      CreateDir: "Longtail_Storage_CreateDir*",
-      RenameFile: "Longtail_Storage_RenameFile*",
-      ConcatPath: "Longtail_Storage_ConcatPath*",
-      IsDir: "Longtail_Storage_IsDir*",
-      IsFile: "Longtail_Storage_IsFile*",
-      RemoveDir: "Longtail_Storage_RemoveDir*",
-      RemoveFile: "Longtail_Storage_RemoveFile*",
-      StartFind: "Longtail_Storage_StartFind*",
-      FindNext: "Longtail_Storage_FindNext*",
-      CloseFind: "Longtail_Storage_CloseFind*",
-      GetEntryProperties: "Longtail_Storage_GetEntryProperties*",
-      LockFile: "Longtail_Storage_LockFile*",
-      UnlockFile: "Longtail_Storage_UnlockFile*",
-      GetParentPath: "Longtail_Storage_GetParentPath*",
-      MapFile: "Longtail_Storage_MapFile*",
-      UnMapFile: "Longtail_Storage_UnmapFile*",
-    });
-
+    koffi.pointer("Longtail_StorageAPI", koffi.opaque() as any);
     this.CreateFSStorageAPI = this.lib.func(
       "Longtail_StorageAPI* Longtail_CreateFSStorageAPI()"
     );
@@ -331,7 +158,7 @@ export class Longtail {
       GetHashAPI: "void*",
     });
 
-    this.CreateFullHashRegistry = this.lib.func(
+    this.Longtail_CreateFullHashRegistry = this.lib.func(
       "Longtail_HashRegistryAPI* Longtail_CreateFullHashRegistry()"
     );
 
@@ -441,7 +268,7 @@ export class Longtail {
         Longtail_Job_GetMaxBatchCountFunc* get_max_batch_count_func)`
     );
 
-    this.CreateBikeshedJobAPI = this.lib.func(
+    this.Longtail_CreateBikeshedJobAPI = this.lib.func(
       "Longtail_JobAPI* Longtail_CreateBikeshedJobAPI(uint32_t worker_count, int worker_priority)"
     );
 
@@ -653,6 +480,13 @@ export class Longtail {
         _Out_ Longtail_StoredBlock** out_stored_block)`
     );
 
+    this.MergeStoreIndex = this.lib.func(
+      `int Longtail_MergeStoreIndex(
+        Longtail_StoreIndex* local_store_index,
+        Longtail_StoreIndex* remote_store_index,
+        _Out_ Longtail_StoreIndex** out_store_index)`
+    );
+
     koffi.proto(
       `int Longtail_BlockStore_PutStoredBlockFunc(
         Longtail_BlockStoreAPI* block_store_api,
@@ -846,13 +680,17 @@ export class Longtail {
         Longtail_VersionIndex* version_index,
         const char* assets_folder);`
     );
+
+    this.GetZStdDefaultCompressionType = this.lib.func(
+      `uint32_t Longtail_GetZStdDefaultQuality()`
+    );
   }
 
-  public static get(): Longtail {
-    if (!Longtail.instance) {
-      Longtail.instance = new Longtail();
+  public static get(): LongtailKoffi {
+    if (!LongtailKoffi.instance) {
+      LongtailKoffi.instance = new LongtailKoffi();
     }
 
-    return Longtail.instance;
+    return LongtailKoffi.instance;
   }
 }

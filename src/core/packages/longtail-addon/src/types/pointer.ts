@@ -79,21 +79,22 @@ export class StringPointer {
 }
 
 export class ObjectPointer {
-  private pointer: any[];
+  private pointer: BigUint64Array;
 
   public constructor() {
-    this.pointer = [{ dummy: 0 }];
+    this.pointer = new BigUint64Array(1);
+    this.pointer[0] = 0n;
   }
 
   public valid(): boolean {
-    return typeof this.pointer[0]["dummy"] === "undefined";
+    return this.pointer[0] !== 0n;
   }
 
-  public ptr(): any[] {
+  public asOutput(): any {
     return this.pointer;
   }
 
-  public deref(): any {
+  public asInput(): any {
     return this.pointer[0];
   }
 }

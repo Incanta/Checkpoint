@@ -68,7 +68,7 @@ export class StoreIndexPointer extends ObjectPointer {
       return result;
     }
 
-    const baseStruct = decode(this.deref(), "Longtail_StoreIndex");
+    const baseStruct = decode(this.asInput(), "Longtail_StoreIndex");
 
     result.version = decode(baseStruct.m_Version, "uint32_t");
     result.hashIdentifier = decode(baseStruct.m_HashIdentifier, "uint32_t");

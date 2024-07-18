@@ -18,7 +18,7 @@ export interface StoredBlock {
 }
 
 export class StoredBlockPointer extends ObjectPointer {
-  constructor() {
+  public constructor() {
     super();
   }
 
@@ -40,7 +40,7 @@ export class StoredBlockPointer extends ObjectPointer {
       return result;
     }
 
-    const baseStruct = decode(this.deref(), "Longtail_StoredBlock");
+    const baseStruct = decode(this.asInput(), "Longtail_StoredBlock");
     const blockIndexStruct = decode(
       baseStruct.m_BlockIndex,
       "Longtail_BlockIndex"

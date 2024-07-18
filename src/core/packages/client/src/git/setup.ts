@@ -36,7 +36,7 @@ export async function MakeHookFile(
 ): Promise<void> {
   const content = `#!/bin/sh\ncommand -v git-chk >/dev/null 2>&1 || { echo >&2 "\\nThis repository is configured for Checkpoint but 'git-chk' was not found on your path. If you no longer wish to use Checkpoint, remove this hook by deleting '.git/hooks/${command}'.\\n"; exit 2; }\ngit chk ${command} "$@"`;
 
-  const hookPath = path.join(config.gitRoot, ".git", "hooks", command);
+  const hookPath = path.join(config.repoRoot, ".git", "hooks", command);
   if (!force && existsSync(hookPath)) {
     const hookFileContents = await fs.readFile(hookPath, "utf-8");
 
@@ -60,10 +60,10 @@ export async function UpdateGitHooks(
   force: boolean
 ): Promise<void> {
   // check if LFS is enabled
-  if (existsSync(path.join(config.gitRoot, ".gitattributes"))) {
+  if (existsSync(path.join(config.repoRoot, ".gitattributes"))) {
     // check if any filters use LFS
     const attributes = await fs.readFile(
-      path.join(config.gitRoot, ".gitattributes"),
+      path.join(config.repoRoot, ".gitattributes"),
       "utf-8"
     );
 
@@ -73,7 +73,7 @@ export async function UpdateGitHooks(
     }
   }
 
-  await fs.mkdir(path.join(config.gitRoot, ".git", "hooks"), {
+  await fs.mkdir(path.join(config.repoRoot, ".git", "hooks"), {
     recursive: true,
   });
 
@@ -88,7 +88,7 @@ export const AttributeFilterSuffix =
 export async function SetUpGitAttributes(
   config: CheckpointConfig
 ): Promise<void> {
-  const attributesFile = path.join(config.gitRoot, ".gitattributes");
+  const attributesFile = path.join(config.repoRoot, ".gitattributes");
 
   if (!existsSync(attributesFile)) {
     await fs.writeFile(attributesFile, "");
@@ -184,7 +184,7 @@ export async function Track(
   config: CheckpointConfig,
   pattern: string
 ): Promise<void> {
-  const attributesFile = path.join(config.gitRoot, ".gitattributes");
+  const attributesFile = path.join(config.repoRoot, ".gitattributes");
 
   if (!existsSync(attributesFile)) {
     await fs.writeFile(attributesFile, "");

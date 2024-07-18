@@ -1,4 +1,3 @@
-import { StorageApi } from "../types/storage-api";
 import { StoreIndexPointer } from "../types/store-index";
 import { VersionIndexPointer } from "../types/version-index";
 
@@ -10,7 +9,7 @@ export interface ServerInterface {
   commitUpload(repoId: string, uploadId: string): Promise<void>;
 
   // Internal
-  getStorageApi(): StorageApi;
+  getStorageApi(): any;
   getVersionIndex(version: string): Promise<VersionIndexPointer>;
   getVersionStoreIndex(version: string): Promise<StoreIndexPointer>;
   getStoreIndex(): Promise<StoreIndexPointer>;

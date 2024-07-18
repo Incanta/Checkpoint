@@ -13,8 +13,7 @@
       "path": "src/desktop"
     },
     {
-      "name": "Root",
-      "path": "."
+      "path": "../golongtail"
     }
   ],
   "extensions": {
