@@ -7,3 +7,6 @@
 [submodule "src/desktop/app/static/common/gitignore"]
 	path = src/desktop/app/static/common/gitignore
 	url = https://github.com/github/gitignore
+[submodule "src/golongtail"]
+	path = src/golongtail
+	url = git@github.com:Incanta/golongtail.git
