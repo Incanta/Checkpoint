@@ -3,8 +3,6 @@ import path from "path";
 
 export interface CheckpointConfig {
   configVersion: number;
-  repoRoot: string;
-  centralizedWorkflow: boolean;
   remote: {
     server: string;
     organization: string;
@@ -47,8 +45,6 @@ export const DefaultLoggingConfig: CheckpointConfig["logging"] = {
 
 export const DefaultConfig: CheckpointConfig = {
   configVersion: 1,
-  repoRoot: "",
-  centralizedWorkflow: true,
   remote: {
     server: "",
     organization: "",
@@ -57,20 +53,21 @@ export const DefaultConfig: CheckpointConfig = {
   logging: DefaultLoggingConfig,
 };
 
-export async function getConfig(gitRoot: string): Promise<CheckpointConfig> {
-  const configPath = path.join(gitRoot, ".checkpoint", "config.json");
+export async function getConfig(
+  workspaceRoot: string
+): Promise<CheckpointConfig> {
+  const configPath = path.join(workspaceRoot, ".checkpoint", "config.json");
 
   if (!existsSync(configPath)) {
     return {
       ...DefaultConfig,
-      repoRoot: gitRoot,
     };
   }
 
   const config = await fs.readFile(configPath, "utf-8");
 
   const overrideConfigPath = path.join(
-    gitRoot,
+    workspaceRoot,
     ".checkpoint",
     "config-override.json"
   );
@@ -84,6 +81,6 @@ export async function getConfig(gitRoot: string): Promise<CheckpointConfig> {
     ...DefaultConfig,
     ...JSON.parse(config),
     ...JSON.parse(overrideConfig),
-    repoRoot: gitRoot,
+    repoRoot: workspaceRoot,
   };
 }

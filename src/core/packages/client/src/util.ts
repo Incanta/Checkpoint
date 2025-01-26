@@ -3,12 +3,12 @@ import { promisify } from "util";
 import path from "path";
 import { promises as fs } from "fs";
 
-export async function getGitRoot(directory: string): Promise<string> {
-  // find the .git directory in any parent directory
+export async function getWorkspaceRoot(directory: string): Promise<string> {
+  // find the .checkpoint directory in any parent directory
   const dirParts = directory.split(path.sep);
   while (dirParts.length > 0) {
     try {
-      await fs.stat(path.join(...dirParts, ".git"));
+      await fs.stat(path.join(...dirParts, ".checkpoint"));
       break;
     } catch (e) {
       dirParts.pop();
@@ -16,11 +16,11 @@ export async function getGitRoot(directory: string): Promise<string> {
   }
 
   if (dirParts.length === 0) {
-    throw new Error("Could not find Git repository");
+    throw new Error("Could not find Checkpoint workspace");
   }
 
-  const gitDir = path.join(...dirParts);
-  return gitDir;
+  const checkpointDir = path.join(...dirParts);
+  return checkpointDir;
 }
 
 export async function exec(
