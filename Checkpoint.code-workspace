@@ -1,19 +1,20 @@
 {
   "folders": [
     {
-      "name": "Core",
-      "path": "src/core"
+      "name": "App",
+      "path": "src/app"
     },
     {
-      "name": "Library",
-      "path": "src/longtail/library"
+      "name": "Core",
+      "path": "src/core"
     },
     {
       "name": "Desktop",
       "path": "src/desktop"
     },
     {
-      "path": "../golongtail"
+      "name": "Root",
+      "path": "."
     }
   ],
   "extensions": {
@@ -49,6 +50,7 @@
       "**/dist": false
     },
     "files.insertFinalNewline": true,
+    "files.trimTrailingWhitespace": true,
     "editor.tabSize": 2,
     "editor.formatOnSave": true,
     "editor.defaultFormatter": "esbenp.prettier-vscode",
@@ -57,6 +59,12 @@
     },
     "git.autoRepositoryDetection": "openEditors",
     "C_Cpp.intelliSenseEngine": "default",
-    "cSpell.words": ["koffi", "longtail"]
+    "cSpell.words": ["koffi", "longtail"],
+    "yaml.schemas": {
+      "https://www.artillery.io/schema.json": []
+    },
+    "[prisma]": {
+      "editor.defaultFormatter": "Prisma.prisma"
+    }
   }
 }
