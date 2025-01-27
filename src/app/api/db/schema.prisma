@@ -14,11 +14,72 @@ generator client {
   binaryTargets = "native"
 }
 
-// Define your own datamodels here and run `yarn redwood prisma migrate dev`
-// to create migrations for them and apply to your dev DB.
-// TODO: Please remove the following example:
-model UserExample {
-  id    Int     @id @default(autoincrement())
-  email String  @unique
-  name  String?
+model User {
+  id      String @id @default(cuid())
+  name    String
+  email   String
+  auth0Id String @unique
+
+  checkpointAdmin Boolean @default(false)
+
+  orgs              OrgUser[]
+  specificRepoRoles RepoRole[]
+}
+
+enum RepoAccess {
+  NONE
+  READ
+  WRITE
+  ADMIN
+}
+
+enum OrgRole {
+  MEMBER
+  BILLING
+  ADMIN
+}
+
+model Org {
+  id   String @id @default(cuid())
+  name String
+
+  defaultRepoAccess     RepoAccess @default(WRITE)
+  defaultCanCreateRepos Boolean    @default(true)
+
+  users OrgUser[]
+  repos Repo[]
+}
+
+model OrgUser {
+  id             String  @id @default(cuid())
+  role           OrgRole @default(MEMBER)
+  canCreateRepos Boolean @default(true)
+
+  org   Org    @relation(fields: [orgId], references: [id])
+  orgId String
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+}
+
+model Repo {
+  id   String @id @default(cuid())
+  name String
+
+  org   Org    @relation(fields: [orgId], references: [id])
+  orgId String
+
+  additionalRoles RepoRole[]
+}
+
+model RepoRole {
+  id String @id @default(cuid())
+
+  access RepoAccess
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
 }
