@@ -1,7 +1,7 @@
-import { hydrateRoot, createRoot } from 'react-dom/client'
+import { hydrateRoot, createRoot } from "react-dom/client";
 
-import App from './App'
-import Routes from './Routes'
+import App from "./App";
+import Routes from "./Routes";
 
 /**
  * When `#redwood-app` isn't empty then it's very likely that you're using
@@ -9,13 +9,13 @@ import Routes from './Routes'
  * rather than replacing it.
  * https://react.dev/reference/react-dom/client/hydrateRoot
  */
-const redwoodAppElement = document.getElementById('redwood-app')
+const redwoodAppElement = document.getElementById("redwood-app");
 
 if (!redwoodAppElement) {
   throw new Error(
     "Could not find an element with ID 'redwood-app'. Please ensure it " +
-      "exists in your 'web/src/index.html' file."
-  )
+      "exists in your 'web/src/index.html' file.",
+  );
 }
 
 if (redwoodAppElement.children?.length > 0) {
@@ -23,13 +23,13 @@ if (redwoodAppElement.children?.length > 0) {
     redwoodAppElement,
     <App>
       <Routes />
-    </App>
-  )
+    </App>,
+  );
 } else {
-  const root = createRoot(redwoodAppElement)
+  const root = createRoot(redwoodAppElement);
   root.render(
     <App>
       <Routes />
-    </App>
-  )
+    </App>,
+  );
 }

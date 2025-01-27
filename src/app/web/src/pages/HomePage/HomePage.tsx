@@ -1,7 +1,7 @@
-import { useAuth } from 'src/auth'
+import { useAuth } from "src/auth";
 
 const HomePage = () => {
-  const { isAuthenticated, signUp, logIn } = useAuth()
+  const { isAuthenticated, signUp, logIn } = useAuth();
 
   return (
     <>
@@ -11,7 +11,7 @@ const HomePage = () => {
       <button onClick={logIn}>log in</button>
       <button onClick={signUp}>sign up</button>
     </>
-  )
-}
+  );
+};
 
-export default HomePage
+export default HomePage;

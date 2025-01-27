@@ -9,7 +9,8 @@
   "devDependencies": {
     "@redwoodjs/auth-auth0-setup": "8.5.0",
     "@redwoodjs/core": "8.5.0",
-    "@redwoodjs/project-config": "8.5.0"
+    "@redwoodjs/project-config": "8.5.0",
+    "eslint-plugin-prefer-arrow": "^1.2.3"
   },
   "eslintConfig": {
     "extends": "@redwoodjs/eslint-config",

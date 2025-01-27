@@ -8,7 +8,7 @@
 // thoughtful :)
 
 // This import will be automatically removed when building for production
-import { DevFatalErrorPage } from '@redwoodjs/web/dist/components/DevFatalErrorPage'
+import { DevFatalErrorPage } from "@redwoodjs/web/dist/components/DevFatalErrorPage";
 
 export default DevFatalErrorPage ||
   (() => (
@@ -54,4 +54,4 @@ export default DevFatalErrorPage ||
         </h1>
       </section>
     </main>
-  ))
+  ));
