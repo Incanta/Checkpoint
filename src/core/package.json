@@ -3,11 +3,7 @@
   "version": "1.0.0",
   "license": "UNLICENSED",
   "private": true,
-  "workspaces": {
-    "packages": [
-      "packages/*"
-    ]
-  },
+  "workspaces": ["client", "server"],
   "scripts": {
     "compile": "tsc -p .",
     "lint": "eslint packages/**/*.{js,ts,tsx}",
@@ -16,25 +12,21 @@
   },
   "dependencies": {
     "async-sema": "^3.1.1",
-    "koffi": "^2.8.11",
-    "pino": "^9.1.0",
-    "pino-pretty": "^11.0.0"
+    "pino": "^9.6.0",
+    "pino-pretty": "^11.3.0"
   },
   "devDependencies": {
-    "@types/bun": "^1.1.6",
-    "@typescript-eslint/eslint-plugin": "^7.9.0",
-    "@typescript-eslint/parser": "^7.9.0",
+    "@types/bun": "^1.2.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "cross-env": "^7.0.3",
-    "eslint": "^8.56.0",
-    "eslint-config-prettier": "^8.3.0",
-    "eslint-plugin-import": "^2.25.4",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^8.10.0",
+    "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-prefer-arrow": "^1.2.3",
-    "eslint-plugin-prettier": "^4.0.0",
-    "prettier": "^2.5.1",
+    "eslint-plugin-prettier": "^4.2.1",
+    "prettier": "^2.8.8",
     "tmp-promise": "^3.0.3",
-    "typescript": "^5.4.5"
-  },
-  "trustedDependencies": [
-    "koffi"
-  ]
+    "typescript": "^5.7.3"
+  }
 }
