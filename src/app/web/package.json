@@ -1,0 +1,27 @@
+{
+  "name": "web",
+  "version": "0.0.0",
+  "private": true,
+  "browserslist": {
+    "development": [
+      "last 1 version"
+    ],
+    "production": [
+      "defaults"
+    ]
+  },
+  "dependencies": {
+    "@auth0/auth0-spa-js": "^2",
+    "@redwoodjs/auth-auth0-web": "8.5.0",
+    "@redwoodjs/forms": "8.5.0",
+    "@redwoodjs/router": "8.5.0",
+    "@redwoodjs/web": "8.5.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@redwoodjs/vite": "8.5.0",
+    "@types/react": "^18.2.55",
+    "@types/react-dom": "^18.2.19"
+  }
+}

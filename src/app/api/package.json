@@ -1,0 +1,10 @@
+{
+  "name": "api",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@redwoodjs/api": "8.5.0",
+    "@redwoodjs/auth-auth0-api": "8.5.0",
+    "@redwoodjs/graphql-server": "8.5.0"
+  }
+}

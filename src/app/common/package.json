@@ -1,0 +1,12 @@
+{
+  "name": "@checkpointvcs/common",
+  "version": "1.0.0",
+  "description": "",
+  "main": "lib/index.js",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node ./lib/index.js"
+  }
+}
