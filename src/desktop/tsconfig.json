@@ -1,29 +1,18 @@
 {
   "compilerOptions": {
-    "module": "esnext",
-    "moduleResolution": "node",
-    "target": "ES2022",
-    "esModuleInterop": true,
-    "resolveJsonModule": true,
-    "importHelpers": true,
-    "allowUnreachableCode": false,
-    "allowUnusedLabels": false,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUnusedLocals": true,
-    "sourceMap": true,
-    "jsx": "react",
+    "incremental": true,
+    "target": "es2022",
+    "module": "commonjs",
+    "lib": ["dom", "es2022"],
+    "jsx": "react-jsx",
     "strict": true,
-    "outDir": "./out",
-    "useUnknownInCatchVariables": false
+    "sourceMap": true,
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "outDir": ".erb/dll"
   },
-  "include": ["app/**/*.ts", "app/**/*.tsx", "app/**/*.d.tsx"],
-  "exclude": [
-    "node_modules",
-    "app/node_modules",
-    "dist",
-    "out",
-    "app/src/highlighter"
-  ],
-  "compileOnSave": false
+  "exclude": ["test", "release/build", "release/app/dist", ".erb/dll"]
 }
