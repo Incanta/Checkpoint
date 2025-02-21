@@ -1,12 +1,3 @@
-[submodule "src/desktop/gemoji"]
-	path = src/desktop/gemoji
-	url = https://github.com/github/gemoji.git
-[submodule "src/desktop/app/static/common/choosealicense.com"]
-	path = src/desktop/app/static/common/choosealicense.com
-	url = https://github.com/github/choosealicense.com.git
-[submodule "src/desktop/app/static/common/gitignore"]
-	path = src/desktop/app/static/common/gitignore
-	url = https://github.com/github/gitignore
 [submodule "src/golongtail"]
 	path = src/golongtail
 	url = git@github.com:Incanta/golongtail.git
