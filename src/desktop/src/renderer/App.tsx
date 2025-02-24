@@ -1,8 +1,9 @@
-import { MemoryRouter as Router, Routes, Route } from 'react-router-dom';
-import icon from '../../assets/icon.svg';
-import './App.css';
+import { MemoryRouter as Router, Routes, Route } from "react-router-dom";
+import icon from "../../assets/icon.svg";
+import "./App.css";
+import React from "react";
 
-function Hello() {
+function Hello(): React.ReactElement {
   return (
     <div>
       <div className="Hello">
@@ -39,7 +40,7 @@ function Hello() {
   );
 }
 
-export default function App() {
+export default function App(): React.ReactElement {
   return (
     <Router>
       <Routes>
