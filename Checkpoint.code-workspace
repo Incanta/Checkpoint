@@ -65,6 +65,14 @@
     },
     "[prisma]": {
       "editor.defaultFormatter": "Prisma.prisma"
-    }
+    },
+    "files.associations": {
+      ".eslintrc": "jsonc",
+      ".prettierrc": "jsonc",
+      ".eslintignore": "ignore"
+    },
+    "javascript.validate.enable": false,
+    "javascript.format.enable": false,
+    "typescript.format.enable": false
   }
 }
