@@ -4,7 +4,7 @@
     "paths": {
       "@checkpointvcs/*": ["./packages/*/src/index.ts"]
     },
-    "typeRoots": ["./types", "node_modules/@types"],
+    "typeRoots": ["./types", "node_modules/@types", "node_modules/bun-types"],
 
     // Enable latest features
     "lib": ["ESNext"],

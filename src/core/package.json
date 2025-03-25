@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "license": "UNLICENSED",
   "private": true,
-  "workspaces": ["client", "server"],
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "scripts": {
     "compile": "tsc -p .",
     "lint": "eslint packages/**/*.{js,ts,tsx}",
@@ -11,12 +14,17 @@
     "package": "bun package.ts"
   },
   "dependencies": {
+    "@incanta/config": "^0.6.5",
     "async-sema": "^3.1.1",
+    "lodash.merge": "^4.6.2",
+    "njwt": "^2.0.1",
     "pino": "^9.6.0",
-    "pino-pretty": "^11.3.0"
+    "pino-pretty": "^11.3.0",
+    "yup": "^1.6.1"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.0",
+    "@types/bun": "^1.2.5",
+    "@types/lodash.merge": "^4.6.9",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "cross-env": "^7.0.3",

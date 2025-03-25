@@ -1,9 +1,0 @@
-cache:
-  enabled: true
-  path: "cache"
-
-local:
-  path: "todo"
-
-remote:
-  path: "todo"

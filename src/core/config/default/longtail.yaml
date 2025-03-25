@@ -1,7 +1,0 @@
-executable:
-  path: ""
-  name: "longtail.exe"
-min-block-usage-percent: 80
-exclude-filter-regex:
-  - "^.*\\.(pdb|PDB|obj|OBJ|precompiled)$"
-  - "^Intermediate$"

@@ -1,0 +1,15 @@
+{
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Launch CodeLLDB",
+      "program": "bun",
+      "args": ["client/src/index.ts"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PATH": "${env:PATH};${workspaceFolder}/libraries"
+      }
+    }
+  ]
+}
