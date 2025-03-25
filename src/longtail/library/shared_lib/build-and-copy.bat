@@ -9,5 +9,5 @@ cd ..
 
 call dist.bat
 
-rm -rf ../addon/src/longtail
-cp -r dist ../addon/src/longtail
+rm -rf ../wrapper/longtail
+cp -r dist ../wrapper/longtail

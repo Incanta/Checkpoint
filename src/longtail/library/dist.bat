@@ -13,17 +13,17 @@ mkdir dist\!PLATFORM!\release
 @REM copy build\artifacts\!PLATFORM!-cmd-debug\!PLATFORM!\longtail\debug\longtail.exe dist\longtail_debug.exe
 @REM copy build\artifacts\!PLATFORM!-cmd-release\!PLATFORM!\longtail\release\longtail.exe dist\longtail.exe
 
-copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.dll dist\!PLATFORM!\debug\longtail_dylib.dll
-copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.pdb dist\!PLATFORM!\debug\longtail_dylib.pdb
-copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.lib dist\!PLATFORM!\debug\longtail_dylib.lib
-copy build\!PLATFORM!\longtail_dylib\debug\longtail_dylib.exp dist\!PLATFORM!\debug\longtail_dylib.exp
-copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.dll dist\!PLATFORM!\release\longtail_dylib.dll
-copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.pdb dist\!PLATFORM!\release\longtail_dylib.pdb
-copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.lib dist\!PLATFORM!\release\longtail_dylib.lib
-copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.exp dist\!PLATFORM!\release\longtail_dylib.exp
+copy build\!PLATFORM!\longtail\debug\longtail.dll dist\!PLATFORM!\debug\longtail.dll
+copy build\!PLATFORM!\longtail\debug\longtail.pdb dist\!PLATFORM!\debug\longtail.pdb
+copy build\!PLATFORM!\longtail\debug\longtail.lib dist\!PLATFORM!\debug\longtail.lib
+copy build\!PLATFORM!\longtail\debug\longtail.exp dist\!PLATFORM!\debug\longtail.exp
+copy build\!PLATFORM!\longtail\release\longtail.dll dist\!PLATFORM!\release\longtail.dll
+copy build\!PLATFORM!\longtail\release\longtail.pdb dist\!PLATFORM!\release\longtail.pdb
+copy build\!PLATFORM!\longtail\release\longtail.lib dist\!PLATFORM!\release\longtail.lib
+copy build\!PLATFORM!\longtail\release\longtail.exp dist\!PLATFORM!\release\longtail.exp
 
-@REM copy build\!PLATFORM!\longtail_static\debug\liblongtail_static.a dist\liblongtail_!PLATFORM!_debug.a
-@REM copy build\!PLATFORM!\longtail_static\release\liblongtail_static.a dist\liblongtail_!PLATFORM!.a
+@REM copy build\!PLATFORM!\longtail_static\debug\liblongtail_static.a dist\!PLATFORM!\debug\liblongtail.a
+@REM copy build\!PLATFORM!\longtail_static\release\liblongtail_static.a dist\!PLATFORM!\release\liblongtail.a
 
 mkdir dist\include
 mkdir dist\include\src
@@ -51,6 +51,7 @@ mkdir dist\include\lib\ratelimitedprogress
 mkdir dist\include\lib\shareblockstore
 mkdir dist\include\lib\zstd
 copy src\*.h dist\include\src
+copy lib\longtail_platform.h dist\include\lib
 copy lib\archiveblockstore\*.h dist\include\lib\archiveblockstore
 copy lib\atomiccancel\*.h dist\include\lib\atomiccancel
 copy lib\bikeshed\*.h dist\include\lib\bikeshed

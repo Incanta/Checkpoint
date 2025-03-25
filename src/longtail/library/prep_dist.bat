@@ -11,10 +11,10 @@ mkdir build\artifacts\artifacts-cmd-release\!PLATFORM!\longtail\release
 copy build\!PLATFORM!\longtail\release\*.exe build\artifacts\artifacts-cmd-release\!PLATFORM!\longtail\release
 copy build\!PLATFORM!\longtail\release\*.pdb build\artifacts\artifacts-cmd-release\!PLATFORM!\longtail\release
 
-mkdir build\artifacts\artifacts-shared_lib-debug\!PLATFORM!\longtail_dylib\debug
-copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.* build\artifacts\artifacts-shared_lib-debug\!PLATFORM!\longtail_dylib\debug
-mkdir build\artifacts\artifacts-shared_lib-release\!PLATFORM!\longtail_dylib\release
-copy build\!PLATFORM!\longtail_dylib\release\longtail_dylib.* build\artifacts\artifacts-shared_lib-release\!PLATFORM!\longtail_dylib\release
+mkdir build\artifacts\artifacts-shared_lib-debug\!PLATFORM!\longtail\debug
+copy build\!PLATFORM!\longtail\release\longtail.* build\artifacts\artifacts-shared_lib-debug\!PLATFORM!\longtail\debug
+mkdir build\artifacts\artifacts-shared_lib-release\!PLATFORM!\longtail\release
+copy build\!PLATFORM!\longtail\release\longtail.* build\artifacts\artifacts-shared_lib-release\!PLATFORM!\longtail\release
 
 mkdir build\artifacts\artifacts-static_lib-debug\!PLATFORM!\longtail_static\debug
 copy build\!PLATFORM!\longtail_static\debug\liblongtail_static.* build\artifacts\artifacts-static_lib-debug\!PLATFORM!\longtail_static\debug

@@ -18,8 +18,8 @@ mkdir -p dist
 cp build/artifacts/${PLATFORM}-cmd-debug/${PLATFORM}/longtail/debug/longtail dist/longtail_debug
 cp build/artifacts/${PLATFORM}-cmd-release/${PLATFORM}/longtail/release/longtail dist/longtail
 
-cp build/artifacts/${PLATFORM}-shared_lib-debug/${PLATFORM}/longtail_dylib/debug/longtail_dylib.so dist/longtail_${PLATFORM}_debug.so
-cp build/artifacts/${PLATFORM}-shared_lib-release/${PLATFORM}/longtail_dylib/release/longtail_dylib.so dist/longtail_${PLATFORM}.so
+cp build/artifacts/${PLATFORM}-shared_lib-debug/${PLATFORM}/longtail/debug/longtail.so dist/longtail_${PLATFORM}_debug.so
+cp build/artifacts/${PLATFORM}-shared_lib-release/${PLATFORM}/longtail/release/longtail.so dist/longtail_${PLATFORM}.so
 
 cp build/artifacts/${PLATFORM}-static_lib-debug/${PLATFORM}/longtail_static/debug/liblongtail_static.a dist/liblongtail_${PLATFORM}_debug.a
 cp build/artifacts/${PLATFORM}-static_lib-release/${PLATFORM}/longtail_static/release/liblongtail_static.a dist/liblongtail_${PLATFORM}.a

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export TARGET=longtail_dylib
+export TARGET=longtail
 export TARGET_TYPE=SHAREDLIB
 
 . ${BASE_DIR}all_sources.sh

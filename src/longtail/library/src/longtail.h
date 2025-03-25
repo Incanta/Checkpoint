@@ -844,7 +844,7 @@ LONGTAIL_EXPORT int Longtail_GetLogLevel();
 #define LONGTAIL_LOG_LEVEL_OFF      4
 
 #ifndef LONGTAIL_LOG
-    void Longtail_CallLogger(const char* file, const char* function, int line, struct Longtail_LogContextFmt_Private* log_context, int level, const char* fmt, ...);
+    LONGTAIL_EXPORT void Longtail_CallLogger(const char* file, const char* function, int line, struct Longtail_LogContextFmt_Private* log_context, int level, const char* fmt, ...);
     #define LONGTAIL_LOG(log_context, level, fmt, ...) \
         Longtail_CallLogger(__FILE__, __func__, __LINE__, log_context, level, fmt, __VA_ARGS__);
 #endif

@@ -9,5 +9,5 @@ cd ..
 
 call dist.bat
 
-rm -rf ../node-longtail/src/longtail
-cp -r dist ../node-longtail/src/longtail
+rm -rf ../wrapper/longtail
+cp -r dist ../wrapper/longtail

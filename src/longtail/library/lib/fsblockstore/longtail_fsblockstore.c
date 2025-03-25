@@ -612,18 +612,8 @@ int FSBlockStore_GetStoreIndexFromStorage(
 
     struct Longtail_StoreIndex* store_index = 0;
 
-    int err = EnsureParentPathExists(storage_api, fsblockstore_api->m_StoreIndexLockPath);
-    if (err)
-    {
-        LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "EnsureParentPathExists() failed with %d", err)
-        return err;
-    }
-    Longtail_StorageAPI_HLockFile store_index_lock_file;
-    err = storage_api->LockFile(storage_api, fsblockstore_api->m_StoreIndexLockPath, &store_index_lock_file);
-    if (err)
-    {
-        LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "storage_api->LockFile() failed with %d", err)
-        return err;
+    while (storage_api->IsFile(storage_api, fsblockstore_api->m_StoreIndexLockPath)) {
+      Longtail_Sleep(100000); // sleep for 100ms
     }
 
     const char* store_index_path = storage_api->ConcatPath(storage_api, store_path, "store.lsi");
@@ -635,11 +625,9 @@ int FSBlockStore_GetStoreIndexFromStorage(
         {
             LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "Longtail_ReadStoreIndex() failed with %d", err)
             Longtail_Free((void*)store_index_path);
-            storage_api->UnlockFile(storage_api, store_index_lock_file);
             return err;
         }
     }
-    storage_api->UnlockFile(storage_api, store_index_lock_file);
 
     Longtail_Free((void*)store_index_path);
     if (store_index)
@@ -647,19 +635,17 @@ int FSBlockStore_GetStoreIndexFromStorage(
         *out_store_index = store_index;
         return 0;
     }
-    err = ReadContent(
-        storage_api,
-        job_api,
-        store_path,
-        block_extension,
-        &store_index);
+
+    int err = Longtail_CreateStoreIndexFromBlocks(
+        0,
+        0,
+        out_store_index);
+
     if (err)
     {
-        LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "ReadContent() failed with %d", err)
+        LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "Longtail_CreateStoreIndexFromBlocks() failed with %d", err)
         return err;
     }
-    *out_store_index = store_index;
-    fsblockstore_api->m_StoreIndexIsDirty = 1;
     return 0;
 }
 
@@ -1301,59 +1287,59 @@ static int FSBlockStore_Flush(struct Longtail_BlockStoreAPI* block_store_api, st
     Longtail_AtomicAdd64(&api->m_StatU64[Longtail_BlockStoreAPI_StatU64_Flush_Count], 1);
 
     Longtail_LockSpinLock(api->m_Lock);
-    intptr_t new_block_count = arrlen(api->m_AddedBlockIndexes);
-    int err = 0;
-    if (new_block_count > 0)
-    {
-        err = FSBlockStore_UpdateStoreIndex(api);
-        if (err)
-        {
-            LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "FSBlockStore_UpdateStoreIndex() failed with %d", err)
-        }
-    }
+    // intptr_t new_block_count = arrlen(api->m_AddedBlockIndexes);
+    // int err = 0;
+    // if (new_block_count > 0)
+    // {
+    //     err = FSBlockStore_UpdateStoreIndex(api);
+    //     if (err)
+    //     {
+    //         LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "FSBlockStore_UpdateStoreIndex() failed with %d", err)
+    //     }
+    // }
 
-    if ((err == 0) && api->m_StoreIndex && api->m_StoreIndexIsDirty)
-    {
-        int err = EnsureParentPathExists(api->m_StorageAPI, api->m_StoreIndexLockPath);
-        if (err)
-        {
-            LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "EnsureParentPathExists() failed with %d", err)
-        }
-        else
-        {
-            const char* store_index_path = api->m_StorageAPI->ConcatPath(api->m_StorageAPI, api->m_StorePath, "store.lsi");
-            Longtail_StorageAPI_HLockFile store_index_lock_file;
-            int err = api->m_StorageAPI->LockFile(api->m_StorageAPI, api->m_StoreIndexLockPath, &store_index_lock_file);
-            if (!err)
-            {
-                if (new_block_count > 0 || (!api->m_StorageAPI->IsFile(api->m_StorageAPI, store_index_path)))
-                {
-                    err = SafeWriteStoreIndex(api, 1);
-                    if (err)
-                    {
-                        LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_WARNING, "SafeWriteStoreIndex() failed with %d", err);
-                    }
-                }
-                api->m_StorageAPI->UnlockFile(api->m_StorageAPI, store_index_lock_file);
-            }
-            Longtail_Free((void*)store_index_path);
-        }
-    }
+    // if ((err == 0) && api->m_StoreIndex && api->m_StoreIndexIsDirty)
+    // {
+    //     int err = EnsureParentPathExists(api->m_StorageAPI, api->m_StoreIndexLockPath);
+    //     if (err)
+    //     {
+    //         LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "EnsureParentPathExists() failed with %d", err)
+    //     }
+    //     else
+    //     {
+    //         const char* store_index_path = api->m_StorageAPI->ConcatPath(api->m_StorageAPI, api->m_StorePath, "store.lsi");
+    //         Longtail_StorageAPI_HLockFile store_index_lock_file;
+    //         int err = api->m_StorageAPI->LockFile(api->m_StorageAPI, api->m_StoreIndexLockPath, &store_index_lock_file);
+    //         if (!err)
+    //         {
+    //             if (new_block_count > 0 || (!api->m_StorageAPI->IsFile(api->m_StorageAPI, store_index_path)))
+    //             {
+    //                 err = SafeWriteStoreIndex(api, 1);
+    //                 if (err)
+    //                 {
+    //                     LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_WARNING, "SafeWriteStoreIndex() failed with %d", err);
+    //                 }
+    //             }
+    //             api->m_StorageAPI->UnlockFile(api->m_StorageAPI, store_index_lock_file);
+    //         }
+    //         Longtail_Free((void*)store_index_path);
+    //     }
+    // }
 
     Longtail_UnlockSpinLock(api->m_Lock);
 
-    if (err)
-    {
-        LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "Failed with %d", err)
-        Longtail_AtomicAdd64(&api->m_StatU64[Longtail_BlockStoreAPI_StatU64_Flush_FailCount], 1);
-    }
+    // if (err)
+    // {
+    //     LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "Failed with %d", err)
+    //     Longtail_AtomicAdd64(&api->m_StatU64[Longtail_BlockStoreAPI_StatU64_Flush_FailCount], 1);
+    // }
 
     if (async_complete_api)
     {
-        async_complete_api->OnComplete(async_complete_api, err);
+        async_complete_api->OnComplete(async_complete_api, 0);
         return 0;
     }
-    return err;
+    return 0;
 }
 
 static void FSBlockStore_Dispose(struct Longtail_API* api)
