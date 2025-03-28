@@ -1,11 +1,18 @@
 import type { Decoded } from "@redwoodjs/api";
 import { AuthenticationError, ForbiddenError } from "@redwoodjs/graphql-server";
+import { db } from "./db";
 
 /**
  * Represents the user attributes returned by the decoding the
  * Authentication provider's JWT together with an optional list of roles.
  */
-type RedwoodUser = Record<string, unknown> & { roles?: string[] };
+export type RedwoodUser = {
+  id: string;
+  username: string;
+  name: string;
+  email: string;
+  checkpointAdmin?: boolean;
+};
 
 /**
  * getCurrentUser returns the user information together with
@@ -31,18 +38,49 @@ type RedwoodUser = Record<string, unknown> & { roles?: string[] };
  */
 export const getCurrentUser = async (
   decoded: Decoded,
+  jwt: { schema: string; token: string; type: string },
 ): Promise<RedwoodUser | null> => {
   if (!decoded) {
     return null;
   }
 
-  const roles = decoded[process.env.AUTH0_AUDIENCE + "/roles"];
+  const base = (process.env as Record<string, string>)["AUTH0_NAMESPACE"];
+  const email = decoded[`${base}/email`] as string;
+  const username = decoded[`${base}/username`] as string;
 
-  if (roles) {
-    return { ...decoded, roles };
+  if (!email || !username) {
+    return null;
   }
 
-  return { ...decoded };
+  let user = await db.user.findUnique({
+    where: {
+      username,
+    },
+  });
+
+  if (!user) {
+    user = await db.user.create({
+      data: {
+        name: username,
+        username,
+        email,
+      },
+    });
+  }
+
+  const result: RedwoodUser = {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    email: user.email,
+    checkpointAdmin: user.checkpointAdmin,
+  };
+
+  if (!result.checkpointAdmin) {
+    delete result.checkpointAdmin;
+  }
+
+  return result;
 };
 
 /**

@@ -6,7 +6,7 @@ module.exports = {
     sourceType: "module", // Allows for the use of imports
   },
   plugins: [
-    "@typescript-eslint",
+    "typescript-eslint",
     "eslint-plugin-prefer-arrow",
     "eslint-plugin-import",
   ],

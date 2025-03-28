@@ -15,15 +15,17 @@ generator client {
 }
 
 model User {
-  id      String @id @default(cuid())
-  name    String
-  email   String
-  auth0Id String @unique
+  id       String @id @default(cuid())
+  name     String
+  username String @unique
+  email    String
 
   checkpointAdmin Boolean @default(false)
 
   orgs              OrgUser[]
   specificRepoRoles RepoRole[]
+  fileLocks         FileLock[]
+  changeLists       ChangeList[]
 }
 
 enum RepoAccess {
@@ -40,8 +42,11 @@ enum OrgRole {
 }
 
 model Org {
-  id   String @id @default(cuid())
-  name String
+  id        String    @id @default(cuid())
+  deletedAt DateTime?
+  deletedBy String?
+
+  name String @unique
 
   defaultRepoAccess     RepoAccess @default(WRITE)
   defaultCanCreateRepos Boolean    @default(true)
@@ -60,16 +65,29 @@ model OrgUser {
 
   user   User   @relation(fields: [userId], references: [id])
   userId String
+
+  @@unique([orgId, userId])
 }
 
 model Repo {
-  id   String @id @default(cuid())
+  id        String    @id @default(cuid())
+  deletedAt DateTime?
+  deletedBy String?
+
   name String
+
+  public Boolean @default(false)
 
   org   Org    @relation(fields: [orgId], references: [id])
   orgId String
 
   additionalRoles RepoRole[]
+
+  files       File[]
+  changelists ChangeList[]
+  branches    Branch[]     @relation("RepoBranch")
+
+  @@unique([orgId, name])
 }
 
 model RepoRole {
@@ -79,6 +97,89 @@ model RepoRole {
 
   repo   Repo   @relation(fields: [repoId], references: [id])
   repoId String
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@unique([repoId, userId])
+}
+
+model Branch {
+  id String @id @default(cuid())
+
+  repo   Repo   @relation("RepoBranch", fields: [repoId], references: [id])
+  repoId String
+
+  name       String
+  headNumber Int
+
+  isDefault Boolean @default(false)
+
+  @@unique([repoId, name])
+}
+
+model ChangeList {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  number  Int
+  message String
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  user   User?   @relation(fields: [userId], references: [id])
+  userId String?
+
+  parent       ChangeList?  @relation("ChangeListToParent", fields: [repoId, parentNumber], references: [repoId, number])
+  children     ChangeList[] @relation("ChangeListToParent")
+  parentNumber Int?
+
+  fileChanges FileChange[]
+
+  @@unique([repoId, number])
+}
+
+enum FileChangeType {
+  ADD
+  DELETE
+  MODIFY
+}
+
+model FileChange {
+  id String @id @default(cuid())
+
+  file   File   @relation(fields: [fileId], references: [id])
+  fileId String
+
+  changeList       ChangeList @relation(fields: [repoId, changeListNumber], references: [repoId, number])
+  repoId           String
+  changeListNumber Int
+
+  type    FileChangeType
+  oldPath String?
+}
+
+model File {
+  id String @id @default(cuid())
+
+  path String
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  changes FileChange[]
+  locks   FileLock[]
+}
+
+model FileLock {
+  id         String    @id @default(cuid())
+  createdAt  DateTime  @default(now())
+  unlockedAt DateTime?
+
+  file   File   @relation(fields: [fileId], references: [id])
+  fileId String
 
   user   User   @relation(fields: [userId], references: [id])
   userId String

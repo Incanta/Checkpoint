@@ -3,10 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
+    "@incanta/config": "^0.6.5",
     "@prisma/client": "6.2.1",
     "@redwoodjs/api": "8.5.0",
     "@redwoodjs/auth-auth0-api": "8.5.0",
     "@redwoodjs/graphql-server": "8.5.0",
-    "prisma": "^6.2.1"
+    "njwt": "^2.0.1",
+    "prisma": "6.2.1"
   }
 }
