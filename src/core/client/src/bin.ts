@@ -21,4 +21,25 @@ rmCommand(program);
 statusCommand(program);
 submitCommand(program);
 
-program.parse();
+const args = process.argv;
+const adjustedArgs: string[] = [];
+for (let i = 0; i < args.length; i++) {
+  if (
+    args[i] === "submit" ||
+    args[i] === "commit" ||
+    args[i] === "c" ||
+    args[i] === "s"
+  ) {
+    adjustedArgs.push("submit");
+    i++;
+    if (args[i] === "-m" || args[i] === "--message") {
+      adjustedArgs.push(args[i]);
+      i++;
+      adjustedArgs.push(args.slice(i).join(" "));
+      i = args.length;
+    }
+  } else {
+    adjustedArgs.push(args[i]);
+  }
+}
+program.parse(adjustedArgs);

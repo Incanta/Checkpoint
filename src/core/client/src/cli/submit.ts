@@ -12,7 +12,10 @@ export async function submitCommand(program: Command): Promise<void> {
     .command("submit")
     .aliases(["commit", "c", "s"])
     .description("Submit staged files")
-    .requiredOption("-m, --message <message>", "Changelist message")
+    .requiredOption(
+      "-m, --message <message>",
+      "Changelist message; this must be the last option in the command line"
+    )
     .action(async (options: { message: string }) => {
       const workspace = await getWorkspaceRoot(process.cwd());
       const workspaceConfigDir = path.join(workspace, ".checkpoint");
