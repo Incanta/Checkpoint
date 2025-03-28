@@ -7,11 +7,12 @@ import { commit } from "../commit";
 import type { Modification } from "common/src";
 import { gql, GraphQLClient } from "graphql-request";
 
-export async function commitCommand(program: Command): Promise<void> {
+export async function submitCommand(program: Command): Promise<void> {
   program
-    .command("commit")
-    .description("Commit staged files")
-    .requiredOption("-m, --message <message>", "Commit message")
+    .command("submit")
+    .aliases(["commit", "c", "s"])
+    .description("Submit staged files")
+    .requiredOption("-m, --message <message>", "Changelist message")
     .action(async (options: { message: string }) => {
       const workspace = await getWorkspaceRoot(process.cwd());
       const workspaceConfigDir = path.join(workspace, ".checkpoint");

@@ -4,7 +4,7 @@ import { logoutCommand } from "./cli/logout";
 import { addCommand } from "./cli/add";
 import { rmCommand } from "./cli/rm";
 import { statusCommand } from "./cli/status";
-import { commitCommand } from "./cli/commit";
+import { submitCommand } from "./cli/submit";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const packageJson = require("../package.json");
@@ -19,6 +19,6 @@ logoutCommand(program);
 addCommand(program);
 rmCommand(program);
 statusCommand(program);
-commitCommand(program);
+submitCommand(program);
 
 program.parse();
