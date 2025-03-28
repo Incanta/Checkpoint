@@ -16,6 +16,7 @@ export async function submitCommand(program: Command): Promise<void> {
     .action(async (options: { message: string }) => {
       const workspace = await getWorkspaceRoot(process.cwd());
       const workspaceConfigDir = path.join(workspace, ".checkpoint");
+      const stagedFile = path.join(workspaceConfigDir, "staged.json");
 
       const lockFile = path.join(workspaceConfigDir, "workspace.lock");
       if (await fs.exists(lockFile)) {
@@ -29,7 +30,6 @@ export async function submitCommand(program: Command): Promise<void> {
       try {
         await fs.writeFile(lockFile, "");
 
-        const stagedFile = path.join(workspaceConfigDir, "staged.json");
         const stagedFiles: Modification[] = (await fs.exists(stagedFile))
           ? JSON.parse(await fs.readFile(stagedFile, "utf-8"))
           : [];
@@ -101,6 +101,11 @@ export async function submitCommand(program: Command): Promise<void> {
         exitCode = 1;
       } finally {
         await fs.rm(lockFile);
+      }
+
+      if (exitCode === 0) {
+        console.log("Successfully submitted changes.");
+        await fs.rm(stagedFile);
       }
 
       process.exit(exitCode);
