@@ -5,19 +5,23 @@
   "private": true,
   "workspaces": [
     "client",
-    "server"
+    "server",
+    "common"
   ],
   "scripts": {
     "compile": "tsc -p .",
-    "lint": "eslint packages/**/*.{js,ts,tsx}",
-    "cli": "bun run packages/client/src/bin.ts",
-    "package": "bun package.ts"
+    "lint": "eslint **/*.{js,ts,tsx}",
+    "cli": "NODE_CONFIG_DIR=client/config bun run client/src/bin.ts",
+    "package": "bun package.ts",
+    "server": "NODE_CONFIG_DIR=server/config bun run server/src/index.ts"
   },
   "dependencies": {
     "@incanta/config": "^0.6.5",
     "async-sema": "^3.1.1",
+    "graphql-request": "^7.1.2",
     "lodash.merge": "^4.6.2",
     "njwt": "^2.0.1",
+    "open": "^10.1.0",
     "pino": "^9.6.0",
     "pino-pretty": "^11.3.0",
     "yup": "^1.6.1"

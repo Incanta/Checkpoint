@@ -1,0 +1,13 @@
+connection:
+  master:
+    host: "localhost"
+    port: 9333
+    tls: false
+  filer:
+    host: "localhost"
+    port: 8888
+    tls: false
+
+jwt:
+  signing-key: "secret"
+  expiration-ms: 3000

@@ -1,4 +1,5 @@
 services:
+
   master:
     image: checkpointvcs/seaweedfs:local
     pull_policy: never
@@ -9,6 +10,7 @@ services:
     command: "master -ip=master -ip.bind=0.0.0.0"
     volumes:
       - ./.data/seaweed-config/security.toml:/etc/seaweedfs/security.toml
+
   volume:
     image: checkpointvcs/seaweedfs:local
     pull_policy: never
@@ -21,6 +23,7 @@ services:
     volumes:
       - ./.data/volume:/data
       - ./.data/seaweed-config/security.toml:/etc/seaweedfs/security.toml
+
   filer:
     image: checkpointvcs/seaweedfs:local
     pull_policy: never
@@ -37,3 +40,10 @@ services:
     volumes:
       - ./.data/seaweed-config/filer.toml:/etc/seaweedfs/filer.toml
       - ./.data/seaweed-config/security.toml:/etc/seaweedfs/security.toml
+
+  redis:
+    image: redis
+    ports:
+      - 6379:6379
+    volumes:
+      - ./.data/redis:/data

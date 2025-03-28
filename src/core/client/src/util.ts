@@ -2,6 +2,11 @@ import { exec as nativeExec } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import { promises as fs } from "fs";
+import os from "os";
+
+export function relativePath(from: string, to: string): string {
+  return path.relative(from, to).replace(/\\/g, "/");
+}
 
 export async function getWorkspaceRoot(directory: string): Promise<string> {
   // find the .checkpoint directory in any parent directory
@@ -16,7 +21,10 @@ export async function getWorkspaceRoot(directory: string): Promise<string> {
   }
 
   if (dirParts.length === 0) {
-    throw new Error("Could not find Checkpoint workspace");
+    console.error(
+      "Could not find a Checkpoint workspace; run this from a child directory of an initialized workspace."
+    );
+    process.exit(1);
   }
 
   const checkpointDir = path.join(...dirParts);
@@ -44,4 +52,39 @@ export async function exec(
   }
 
   return result;
+}
+
+export async function getAuthToken(): Promise<string> {
+  try {
+    const auth = await fs.readFile(
+      path.join(os.homedir(), ".config", "checkpoint", "auth.json"),
+      "utf-8"
+    );
+    return JSON.parse(auth).access_token;
+  } catch (e) {
+    console.error("Could not read authentication token; please login");
+    process.exit(1);
+  }
+}
+
+export interface Workspace {
+  orgId: string;
+  repoId: string;
+  workspaceId: string;
+  workspaceName: string;
+}
+
+export async function getWorkspaceDetails(): Promise<Workspace> {
+  const workspace = await getWorkspaceRoot(process.cwd());
+  const workspaceConfigDir = path.join(workspace, ".checkpoint");
+
+  const configPath = path.join(workspaceConfigDir, "config.json");
+  try {
+    const config = await fs.readFile(configPath, "utf-8");
+    return JSON.parse(config);
+  } catch (e) {
+    throw new Error(
+      "Could not read workspace configuration, did you initialize this workspace properly?"
+    );
+  }
 }

@@ -6,6 +6,7 @@
 #include <brotli/longtail_brotli.h>
 #include <compressblockstore/longtail_compressblockstore.h>
 #include <compressionregistry/longtail_full_compression_registry.h>
+#include <cpr/cpr.h>
 #include <filestorage/longtail_filestorage.h>
 #include <fsblockstore/longtail_fsblockstore.h>
 #include <hashregistry/longtail_full_hash_registry.h>
@@ -23,11 +24,15 @@
 #include <sstream>
 #include <thread>
 
+#include "json.hpp"
 #include "seaweedfs.h"
+
+using json = nlohmann::json;
 
 struct Modification {
   bool IsDelete;
   const char* Path;
+  const char* OldPath;
 };
 
 uint32_t ParseCompressionType(const char* compression_algorithm) {
@@ -287,6 +292,7 @@ DLL_EXPORT void FreeHandle(WrapperAsyncHandle* handle) {
 }
 
 int32_t Commit(
+    const char* Message,
     uint32_t TargetChunkSize,
     uint32_t TargetBlockSize,
     uint32_t MaxChunksPerBlock,
@@ -298,10 +304,12 @@ int32_t Commit(
     const char* LocalRootPath,
     const char* RemoteBasePath,
     const char* FilerUrl,
+    const char* BackendUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
     uint32_t NumModifications,
-    const Modification* Modifications, WrapperAsyncHandle* handle) {
+    const Modification* Modifications,
+    WrapperAsyncHandle* handle) {
   struct Longtail_HashRegistryAPI* hash_registry = Longtail_CreateFullHashRegistry();
   struct Longtail_JobAPI* job_api = Longtail_CreateBikeshedJobAPI(1, 0);
   struct Longtail_CompressionRegistryAPI* compression_registry = Longtail_CreateFullCompressionRegistry();
@@ -746,6 +754,68 @@ int32_t Commit(
     return err;
   }
 
+  void* missing_store_index_buffer;
+  size_t missing_store_index_size;
+  err = Longtail_WriteStoreIndexToBuffer(remote_missing_store_index, &missing_store_index_buffer, &missing_store_index_size);
+
+  if (err) {
+    SetHandleStep(handle, "Failed to write missing store index to buffer");
+    handle->error = err;
+    handle->completed = 1;
+    Longtail_Free(remote_missing_store_index);
+    Longtail_Free(existing_remote_store_index);
+    Longtail_Free(source_version_index);
+    SAFE_DISPOSE_API(chunker_api);
+    SAFE_DISPOSE_API(store_block_store_api);
+    SAFE_DISPOSE_API(store_block_fsstore_api);
+    SAFE_DISPOSE_API(file_storage_api);
+    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(compression_registry);
+    SAFE_DISPOSE_API(hash_registry);
+    SAFE_DISPOSE_API(job_api);
+    return err;
+  }
+
+  json payload = {
+      {"message", std::string(Message)},
+      {"modifications", json::array()},
+      {"versionIndex", version_file_stream.str()}};
+
+  for (uint32_t i = 0; i < NumModifications; ++i) {
+    payload["modifications"].push_back(json::object());
+    payload["modifications"][i]["delete"] = Modifications[i].IsDelete;
+    payload["modifications"][i]["path"] = std::string(Modifications[i].Path);
+
+    if (Modifications[i].OldPath != nullptr) {
+      payload["modifications"][i]["oldPath"] = std::string(Modifications[i].OldPath);
+    }
+  }
+
+  cpr::Response r = cpr::Post(
+      cpr::Url{std::string(BackendUrl) + "/commit"},
+      cpr::Bearer{std::string(JWT)},
+      cpr::Multipart{
+          {"payload", payload.dump()},
+          {"storeIndex", cpr::Buffer{(char*)missing_store_index_buffer, (char*)missing_store_index_buffer + missing_store_index_size, "chunk.bin"}}});
+
+  if (r.status_code != 200) {
+    SetHandleStep(handle, "Failed to write commit to backend");
+    handle->error = r.status_code;
+    handle->completed = 1;
+    Longtail_Free(remote_missing_store_index);
+    Longtail_Free(existing_remote_store_index);
+    Longtail_Free(source_version_index);
+    SAFE_DISPOSE_API(chunker_api);
+    SAFE_DISPOSE_API(store_block_store_api);
+    SAFE_DISPOSE_API(store_block_fsstore_api);
+    SAFE_DISPOSE_API(file_storage_api);
+    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(compression_registry);
+    SAFE_DISPOSE_API(hash_registry);
+    SAFE_DISPOSE_API(job_api);
+    return r.status_code;
+  }
+
   SetHandleStep(handle, "Completed");
   handle->error = 0;
   handle->completed = 1;
@@ -767,6 +837,7 @@ int32_t Commit(
 
 DLL_EXPORT WrapperAsyncHandle*
 CommitAsync(
+    const char* Message,
     uint32_t TargetChunkSize,
     uint32_t TargetBlockSize,
     uint32_t MaxChunksPerBlock,
@@ -778,6 +849,7 @@ CommitAsync(
     const char* LocalRootPath,
     const char* RemoteBasePath,
     const char* FilerUrl,
+    const char* BackendUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
     uint32_t NumModifications,
@@ -793,6 +865,7 @@ CommitAsync(
 
   std::thread diff_thread([=]() {
     int32_t err = Commit(
+        Message,
         TargetChunkSize,
         TargetBlockSize,
         MaxChunksPerBlock,
@@ -804,6 +877,7 @@ CommitAsync(
         LocalRootPath,
         RemoteBasePath,
         FilerUrl,
+        BackendUrl,
         JWT,
         JWTExpirationMs,
         NumModifications,

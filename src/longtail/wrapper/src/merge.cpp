@@ -65,22 +65,44 @@ int Merge(
   Longtail_Storage_CloseFile(storage_api, out_open_file);
 
   struct Longtail_StoreIndex* existing_remote_store_index;
-  err = Longtail_ReadStoreIndex(
-      storage_api,
-      StoreFilePath.c_str(),
-      &existing_remote_store_index);
 
-  if (err) {
-    SetHandleStep(handle, "Failed to read the existing store index");
-    handle->error = err;
-    handle->completed = 1;
-    int removeError = Longtail_Storage_RemoveFile(storage_api, LockFilePath.c_str());
-    if (removeError) {
-      SetHandleStep(handle, "Failed to read the existing store index AND failed to remove lock file");
+  if (!storage_api->IsFile(storage_api, StoreFilePath.c_str())) {
+    // create new store index
+    int err = Longtail_CreateStoreIndexFromBlocks(
+        0,
+        0,
+        &existing_remote_store_index);
+
+    if (err) {
+      SetHandleStep(handle, "Failed to create new store index");
+      handle->error = err;
+      handle->completed = 1;
+      int removeError = Longtail_Storage_RemoveFile(storage_api, LockFilePath.c_str());
+      if (removeError) {
+        SetHandleStep(handle, "Failed to create new store index AND failed to remove lock file");
+      }
+      Longtail_Free(additional_store_index);
+      SAFE_DISPOSE_API(storage_api);
+      return err;
     }
-    Longtail_Free(additional_store_index);
-    SAFE_DISPOSE_API(storage_api);
-    return err;
+  } else {
+    err = Longtail_ReadStoreIndex(
+        storage_api,
+        StoreFilePath.c_str(),
+        &existing_remote_store_index);
+
+    if (err) {
+      SetHandleStep(handle, "Failed to read the existing store index");
+      handle->error = err;
+      handle->completed = 1;
+      int removeError = Longtail_Storage_RemoveFile(storage_api, LockFilePath.c_str());
+      if (removeError) {
+        SetHandleStep(handle, "Failed to read the existing store index AND failed to remove lock file");
+      }
+      Longtail_Free(additional_store_index);
+      SAFE_DISPOSE_API(storage_api);
+      return err;
+    }
   }
 
   struct Longtail_StoreIndex* merged_store_index;
@@ -133,6 +155,10 @@ int Merge(
     SAFE_DISPOSE_API(storage_api);
     return err;
   }
+
+  SetHandleStep(handle, "Completed");
+  handle->error = 0;
+  handle->completed = 1;
 
   return 0;
 }

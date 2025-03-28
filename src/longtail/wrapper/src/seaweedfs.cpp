@@ -82,11 +82,20 @@ static int SeaweedFSStorageAPI_GetSize(
   LONGTAIL_VALIDATE_INPUT(ctx, f != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, out_size != 0, return EINVAL);
 
+  struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
+
   SeaweedFSStorageAPI_OpenFile* open_file = (struct SeaweedFSStorageAPI_OpenFile*)f;
 
-  std::cerr << "SeaweedFSStorageAPI_GetSize called (not expected): " << open_file->m_Path << std::endl;
+  cpr::Response r = cpr::Head(cpr::Url{std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path)},
+                              cpr::Bearer{std::string(seaweed_storage_api->m_JWT)});
 
-  return 0;
+  if (r.status_code >= 200 && r.status_code < 300) {
+    std::string length = r.header["Content-Length"];
+    *out_size = std::stoull(length);
+    return 0;
+  }
+
+  return r.status_code;
 }
 
 static int SeaweedFSStorageAPI_Read(
@@ -439,9 +448,16 @@ static int SeaweedFSStorageAPI_RemoveFile(struct Longtail_StorageAPI* storage_ap
   LONGTAIL_VALIDATE_INPUT(ctx, storage_api != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, path != 0, return EINVAL);
 
-  std::cerr << "SeaweedFSStorageAPI_RemoveFile called (not expected)" << std::endl;
+  struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
 
-  return 0;
+  cpr::Response r = cpr::Delete(cpr::Url{std::string(seaweed_storage_api->m_URL) + std::string(path)},
+                                cpr::Bearer{std::string(seaweed_storage_api->m_JWT)});
+
+  if (r.status_code >= 200 && r.status_code < 300) {
+    return 0;
+  }
+
+  return r.status_code;
 }
 
 static int SeaweedFSStorageAPI_StartFind(struct Longtail_StorageAPI* storage_api, const char* path, Longtail_StorageAPI_HIterator* out_iterator) {

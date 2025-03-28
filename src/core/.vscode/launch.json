@@ -5,10 +5,10 @@
       "request": "launch",
       "name": "Launch CodeLLDB",
       "program": "bun",
-      "args": ["client/src/index.ts"],
-      "cwd": "${workspaceFolder}",
+      "args": ["../src/bin.ts", "commit", "-m", "Initial commit"],
+      "cwd": "${workspaceFolder}/client/workspace",
       "env": {
-        "PATH": "${env:PATH};${workspaceFolder}/libraries"
+        "NODE_CONFIG_DIR": "${workspaceFolder}/client/config"
       }
     }
   ]
