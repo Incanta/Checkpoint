@@ -5,6 +5,7 @@ import { addCommand } from "./cli/add";
 import { rmCommand } from "./cli/rm";
 import { statusCommand } from "./cli/status";
 import { submitCommand } from "./cli/submit";
+import { initCommand } from "./cli/init";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const packageJson = require("../package.json");
@@ -20,6 +21,7 @@ addCommand(program);
 rmCommand(program);
 statusCommand(program);
 submitCommand(program);
+initCommand(program);
 
 const args = process.argv;
 const adjustedArgs: string[] = [];
