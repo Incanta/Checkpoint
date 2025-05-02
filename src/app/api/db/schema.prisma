@@ -123,8 +123,10 @@ model ChangeList {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  number  Int
-  message String
+  number       Int
+  message      String
+  versionIndex String
+  stateTree    Json
 
   repo   Repo   @relation(fields: [repoId], references: [id])
   repoId String
@@ -162,7 +164,8 @@ model FileChange {
 }
 
 model File {
-  id String @id @default(cuid())
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
 
   path String
 

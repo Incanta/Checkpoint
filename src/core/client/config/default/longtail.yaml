@@ -6,3 +6,4 @@ hashing-algo: "blake3"
 compression-algo: "zstd"
 enable-mmap-indexing: false
 enable-mmap-block-store: false
+log-level: "off"

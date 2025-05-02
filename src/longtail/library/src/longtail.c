@@ -778,7 +778,7 @@ void Longtail_Free(void* p)
 }
 
 #if !defined(LONGTAIL_LOG_LEVEL)
-    #define LONGTAIL_LOG_LEVEL   LONGTAIL_LOG_LEVEL_WARNING
+    #define LONGTAIL_LOG_LEVEL   LONGTAIL_LOG_LEVEL_OFF
 #endif
 
 static Longtail_Log Longtail_Log_private = 0;
@@ -1605,6 +1605,106 @@ int Longtail_GetFilesRecursively(
     *out_file_infos = context.m_FileInfos;
     context.m_FileInfos = 0;
     return 0;
+}
+
+int Longtail_GetFilesFilteredByVersionIndex(
+    struct Longtail_StorageAPI* storage_api,
+    struct Longtail_VersionIndex* version_index,
+    struct Longtail_CancelAPI* optional_cancel_api,
+    Longtail_CancelAPI_HCancelToken optional_cancel_token,
+    const char* root_path,
+    struct Longtail_FileInfos** out_file_infos)
+{
+  MAKE_LOG_CONTEXT_FIELDS(ctx)
+      LONGTAIL_LOGFIELD(storage_api, "%p"),
+      LONGTAIL_LOGFIELD(version_index, "%p"),
+      LONGTAIL_LOGFIELD(optional_cancel_api, "%p"),
+      LONGTAIL_LOGFIELD(optional_cancel_token, "%p"),
+      LONGTAIL_LOGFIELD(root_path, "%s"),
+      LONGTAIL_LOGFIELD(out_file_infos, "%p")
+  MAKE_LOG_CONTEXT_WITH_FIELDS(ctx, 0, LONGTAIL_LOG_LEVEL_DEBUG)
+
+  LONGTAIL_VALIDATE_INPUT(ctx, storage_api != 0, return EINVAL)
+  LONGTAIL_VALIDATE_INPUT(ctx, version_index != 0, return EINVAL)
+  LONGTAIL_VALIDATE_INPUT(ctx, root_path != 0, return EINVAL)
+  LONGTAIL_VALIDATE_INPUT(ctx, out_file_infos != 0, return EINVAL)
+
+  const uint32_t default_path_count = *version_index->m_AssetCount;
+  const uint32_t default_path_data_size = default_path_count * 128;
+
+  struct Longtail_FileInfos* file_infos = CreateFileInfos(default_path_count, default_path_data_size);
+  if (!file_infos)
+  {
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "CreateFileInfos() failed with %d", ENOMEM)
+      return ENOMEM;
+  }
+  struct AddFile_Context context = {storage_api, default_path_count, default_path_data_size, (uint32_t)(strlen(root_path)), file_infos};
+  file_infos = 0;
+
+  int err = 0;
+  for (int i = 0; i < *version_index->m_AssetCount; ++i)
+  {
+      uint32_t name_offset = version_index->m_NameOffsets[i];
+      const char* asset_path = version_index->m_NameData + name_offset;
+      const char* full_path = storage_api->ConcatPath(storage_api, root_path, asset_path);
+      if (IsDirPath(full_path))
+      {
+          continue;
+      }
+
+      Longtail_StorageAPI_HOpenFile file = 0;
+      err = storage_api->OpenReadFile(storage_api, full_path, &file);
+      if (err)
+      {
+          // file not found (new in this version index), continue
+          continue;
+      }
+
+      uint64_t file_size = 0;
+      err = storage_api->GetSize(storage_api, file, &file_size);
+      if (err)
+      {
+          LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_WARNING, "storage_api->GetSize() failed with %d", err)
+          storage_api->CloseFile(storage_api, file);
+          Longtail_Free(context.m_FileInfos);
+          return err;
+      }
+
+      uint16_t file_permissions = 0;
+      err = storage_api->GetPermissions(storage_api, full_path, &file_permissions);
+      if (err)
+      {
+          LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_WARNING, "storage_api->GetPermissions() failed with %d", err)
+          storage_api->CloseFile(storage_api, file);
+          Longtail_Free(context.m_FileInfos);
+          return err;
+      }
+
+      struct Longtail_StorageAPI_EntryProperties properties;
+      properties.m_Name = asset_path;
+      properties.m_IsDir = 0;
+      properties.m_Size = file_size;
+      properties.m_Permissions = file_permissions;
+
+      err = AddFile(
+        &context,
+        root_path,
+        asset_path,
+        &properties
+      );
+      if (err)
+      {
+          LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "AppendPath() failed with %d", err)
+          storage_api->CloseFile(storage_api, file);
+          Longtail_Free(context.m_FileInfos);
+          return err;
+      }
+      storage_api->CloseFile(storage_api, file);
+  }
+
+  *out_file_infos = context.m_FileInfos;
+  context.m_FileInfos = 0;
+  return 0;
 }
 
 struct StorageChunkFeederContext

@@ -929,6 +929,14 @@ LONGTAIL_EXPORT int Longtail_GetFilesRecursively(
     const char* root_path,
     struct Longtail_FileInfos** out_file_infos);
 
+LONGTAIL_EXPORT int Longtail_GetFilesFilteredByVersionIndex(
+    struct Longtail_StorageAPI* storage_api,
+    struct Longtail_VersionIndex* version_index,
+    struct Longtail_CancelAPI* optional_cancel_api,
+    Longtail_CancelAPI_HCancelToken optional_cancel_token,
+    const char* root_path,
+    struct Longtail_FileInfos** out_file_infos);
+
 /*! @brief Get the size of a constructedV VersionIndex.
  *
  * @param[in] asset_count             The number of assets (files and directories) in the index

@@ -1,7 +1,7 @@
 import merge from "lodash.merge";
 import { routeRoot } from "./root";
 import type { BunRequest, RouterTypes, Server } from "bun";
-import { routeCommit } from "./commit";
+import { routeSubmit } from "./submit";
 import { routeFiler } from "./filer";
 
 // Bun's types are incomplete
@@ -14,5 +14,5 @@ export type Endpoint = {
 };
 
 export function routes(): Record<string, Endpoint> {
-  return merge({}, routeRoot(), routeCommit(), routeFiler());
+  return merge({}, routeRoot(), routeSubmit(), routeFiler());
 }

@@ -5,6 +5,8 @@ export const schema = gql`
     updatedAt: DateTime!
     number: Int!
     message: String!
+    versionIndex: String!
+    stateTree: JSON!
     repo: Repo!
     repoId: String!
     user: User
@@ -17,14 +19,22 @@ export const schema = gql`
   }
 
   type Query {
-    changeList(id: String!): ChangeList @requireAuth
+    changeList(id: String!): ChangeList! @requireAuth
+    changeLists(repoId: String!, numbers: [Int!]!): [ChangeList!]! @requireAuth
+  }
+
+  input ModificationInput {
+    delete: Boolean!
+    path: String!
+    oldPath: String
   }
 
   input CreateChangeListInput {
     message: String!
     repoId: String!
-    userId: String!
-    parentNumber: Int
+    branchName: String!
+    versionIndex: String!
+    modifications: [ModificationInput!]!
   }
 
   input UpdateChangeListInput {

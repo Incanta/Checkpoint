@@ -215,7 +215,11 @@ static int SeaweedFSStorageAPI_Write(
 
   std::string url = std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path);
 
-  std::cout << "SeaweedFSStorageAPI_Write: " << url << std::endl;
+  if (offset > 0) {
+    url += std::string("?op=append");
+  }
+
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "SeaweedFSStorageAPI_Write: %s", url.c_str());
 
   cpr::Response r = cpr::Post(cpr::Url{url},
                               cpr::Bearer{std::string(seaweed_storage_api->m_JWT)},
@@ -345,7 +349,7 @@ static int SeaweedFSStorageAPI_RenameFile(struct Longtail_StorageAPI* storage_ap
 
   std::string url = std::string(seaweed_storage_api->m_URL) + std::string(target_path) + "?mv.from=" + std::string(source_path);
 
-  std::cout << "SeaweedFSStorageAPI_RenameFile: " << url << std::endl;
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "SeaweedFSStorageAPI_RenameFile: %s", url.c_str());
 
   cpr::Response r = cpr::Post(cpr::Url{url},
                               cpr::Bearer{std::string(seaweed_storage_api->m_JWT)});
@@ -557,7 +561,7 @@ static int SeaweedFSStorageAPI_LockFile(struct Longtail_StorageAPI* storage_api,
   strcat(lock_path, ".lock");
   memset(lock_path + strlen(path) + 5, 0, 1);
 
-  std::cout << "SeaweedFSStorageAPI_LockFile: " << lock_path << std::endl;
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "SeaweedFSStorageAPI_LockFile: %s", lock_path);
 
   while (SeaweedFSStorageAPI_IsFile(storage_api, lock_path)) {
     std::cerr << "SeaweedFSStorageAPI_LockFile: waiting for file not to exist: " << lock_path << std::endl;
@@ -608,7 +612,7 @@ static int SeaweedFSStorageAPI_UnlockFile(struct Longtail_StorageAPI* storage_ap
 
   std::string url = std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path);
 
-  std::cout << "SeaweedFSStorageAPI_UnlockFile: " << url << std::endl;
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "SeaweedFSStorageAPI_UnlockFile: %s", url.c_str());
 
   cpr::Response r = cpr::Delete(cpr::Url{url},
                                 cpr::Bearer{std::string(seaweed_storage_api->m_JWT)});

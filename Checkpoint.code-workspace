@@ -71,7 +71,10 @@
     },
     "git.autoRepositoryDetection": "openEditors",
     "C_Cpp.intelliSenseEngine": "default",
-    "cSpell.words": ["koffi", "longtail"],
+    "cSpell.words": [
+      "koffi",
+      "longtail"
+    ],
     "yaml.schemas": {
       "https://www.artillery.io/schema.json": []
     },
@@ -168,7 +171,8 @@
       "xutility": "cpp",
       "longtail_blake2.h": "c",
       "longtail_fsblockstore.h": "c",
-      "stb_ds.h": "c"
+      "stb_ds.h": "c",
+      "errno.h": "c"
     },
     "javascript.validate.enable": false,
     "javascript.format.enable": false,

@@ -1,13 +1,4 @@
-#include <longtail.h>
-#include <longtail_platform.h>
-
-#include <chrono>
-#include <iostream>
-#include <string>
-#include <thread>
-
 #include "main.h"
-#include "seaweedfs.h"
 
 int Merge(
     const char* RemoteBasePath,
@@ -169,7 +160,10 @@ MergeAsync(
     const char* FilerUrl,
     const char* JWT,
     void* additional_store_index_buffer,
-    size_t additional_store_index_size) {
+    size_t additional_store_index_size,
+    int LogLevel = 4) {
+  SetLogging(LogLevel);
+
   WrapperAsyncHandle* handle = (WrapperAsyncHandle*)Longtail_Alloc(0, sizeof(WrapperAsyncHandle));
   if (!handle) {
     return 0;

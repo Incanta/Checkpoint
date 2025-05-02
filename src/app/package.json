@@ -15,7 +15,7 @@
     "migrate": "run-s -c migrate:clean migrate:dev gen:types",
     "migrate:clean": "rm -rf api/db/migrations api/db/dev.db*",
     "migrate:dev": "yarn rw prisma migrate dev",
-    "gen:types": "yarn rw g types",
+    "gen:types": "yarn rw prisma generate && yarn rw g types",
     "test": "yarn rw test --no-watch api"
   },
   "devDependencies": {

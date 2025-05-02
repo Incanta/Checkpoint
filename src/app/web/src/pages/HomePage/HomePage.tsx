@@ -5,7 +5,7 @@ import { gql, useMutation, useQuery } from "@apollo/client";
 import { Form, Submit, TextField } from "@redwoodjs/forms";
 
 const ME_QUERY = gql`
-  query {
+  query me {
     me {
       id
       email
@@ -14,7 +14,7 @@ const ME_QUERY = gql`
 `;
 
 const ORGS_QUERY = gql`
-  query {
+  query orgs {
     myOrgs {
       id
       name

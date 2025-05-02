@@ -5,8 +5,15 @@
       "request": "launch",
       "name": "Launch CodeLLDB",
       "program": "bun",
-      "args": ["../src/bin.ts", "commit", "-m", "Initial commit"],
-      "cwd": "${workspaceFolder}/client/workspace",
+      "args": [
+        "../client/src/bin.ts",
+        "commit",
+        "-m",
+        "remove hello",
+        "--longtail-log-level",
+        "debug",
+      ],
+      "cwd": "${workspaceFolder}/wk",
       "env": {
         "NODE_CONFIG_DIR": "${workspaceFolder}/client/config"
       }

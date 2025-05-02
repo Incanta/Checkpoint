@@ -4,19 +4,69 @@ import {
   CreateLongtailLibrary,
   createStringBuffer,
   decodeHandle,
+  GetLogLevel,
+  type LongtailLogLevel,
   type Modification,
 } from "@checkpointvcs/common";
+import {
+  getAuthToken,
+  getWorkspaceState,
+  saveWorkspaceState,
+  type Workspace,
+} from "./util";
+import { gql, GraphQLClient } from "graphql-request";
 
-export async function commit(
-  localRoot: string,
-  orgId: string,
-  repoId: string,
+export async function submit(
+  workspace: Workspace,
   message: string,
   modifications: Modification[],
-  token: string,
-  tokenExpirationMs: number,
-  backendUrl: string
+  logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
+    "longtail.log-level"
+  )
 ): Promise<void> {
+  const apiToken = await getAuthToken();
+
+  const client = new GraphQLClient(config.get<string>("checkpoint.api.url"), {
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      "auth-provider": "auth0",
+    },
+  });
+
+  const storageTokenResponse: any = await client.request(
+    gql`
+      query getStorageToken(
+        $orgId: String!
+        $repoId: String!
+        $write: Boolean!
+      ) {
+        storageToken(orgId: $orgId, repoId: $repoId, write: $write) {
+          token
+          expiration
+          backendUrl
+        }
+      }
+    `,
+    {
+      orgId: workspace.orgId,
+      repoId: workspace.repoId,
+      write: true,
+    }
+  );
+
+  if (
+    !storageTokenResponse.storageToken ||
+    !storageTokenResponse.storageToken.token ||
+    !storageTokenResponse.storageToken.expiration ||
+    !storageTokenResponse.storageToken.backendUrl
+  ) {
+    throw new Error("Could not get storage token");
+  }
+
+  const token = storageTokenResponse.storageToken.token;
+  const tokenExpirationMs = storageTokenResponse.storageToken.expiration * 1000;
+  const backendUrl = storageTokenResponse.storageToken.backendUrl;
+
   // on windows, requires PATH to include libraries folder
   const lib = CreateLongtailLibrary();
 
@@ -59,6 +109,7 @@ export async function commit(
     res.text()
   );
 
+  const branchNameBuffer = createStringBuffer(workspace.branchName);
   const messageBuffer = createStringBuffer(message);
   const hashingAlgoBuffer = createStringBuffer(
     config.get<string>("longtail.hashing-algo")
@@ -66,13 +117,17 @@ export async function commit(
   const compressionAlgoBuffer = createStringBuffer(
     config.get<string>("longtail.compression-algo")
   );
-  const localRootBuffer = createStringBuffer(localRoot);
-  const remoteRootBuffer = createStringBuffer(`/${orgId}/${repoId}`);
+  const localRootBuffer = createStringBuffer(workspace.localRoot);
+  const remoteRootBuffer = createStringBuffer(
+    `/${workspace.orgId}/${workspace.repoId}`
+  );
   const filerUrlBuffer = createStringBuffer(filerUrl);
   const backendUrlBuffer = createStringBuffer(backendUrl);
   const tokenBuffer = createStringBuffer(token);
+  const apiJwtBuffer = createStringBuffer(apiToken);
 
-  const asyncHandle = lib.CommitAsync(
+  const asyncHandle = lib.SubmitAsync(
+    ptr(branchNameBuffer.buffer),
     ptr(messageBuffer.buffer),
     config.get<number>("longtail.target-chunk-size"),
     config.get<number>("longtail.target-block-size"),
@@ -88,8 +143,10 @@ export async function commit(
     ptr(backendUrlBuffer.buffer),
     ptr(tokenBuffer.buffer),
     tokenExpirationMs,
+    ptr(apiJwtBuffer.buffer),
     modifications.length,
-    ptr(buffer)
+    ptr(buffer),
+    GetLogLevel(logLevel)
   );
 
   if (asyncHandle === 0 || asyncHandle === null) {
@@ -106,14 +163,15 @@ export async function commit(
     );
 
     if (decoded.currentStep !== lastStep) {
-      console.log(`Current step: ${decoded.currentStep}`);
       lastStep = decoded.currentStep;
     }
 
     if (decoded.completed) {
-      console.log(
-        `Completed with exit code: ${decoded.error} and last step ${decoded.currentStep}`
-      );
+      if (decoded.error !== 0) {
+        console.log(
+          `Completed with exit code: ${decoded.error} and last step ${decoded.currentStep}`
+        );
+      }
       flagForGC = false;
       break;
     }
@@ -121,7 +179,32 @@ export async function commit(
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
 
+  const decoded = decodeHandle(
+    new Uint8Array(toArrayBuffer(asyncHandle, 0, 2320)),
+    true
+  );
+
+  if (decoded.error === 0) {
+    const workspaceState = await getWorkspaceState();
+
+    for (const modification of modifications) {
+      if (modification.delete) {
+        delete workspaceState.files[modification.path];
+      } else {
+        workspaceState.files[modification.path] =
+          decoded.result.changeListNumber;
+      }
+    }
+
+    // we do not update the workspace state changelist number here
+    // because they may need to sync other changes. we don't
+    // auto pull during a push.
+
+    await saveWorkspaceState(workspaceState);
+  }
+
   if (flagForGC) {
+    console.log(branchNameBuffer);
     console.log(messageBuffer);
     console.log(hashingAlgoBuffer);
     console.log(compressionAlgoBuffer);
@@ -136,4 +219,10 @@ export async function commit(
   }
 
   lib.FreeHandle(asyncHandle);
+
+  if (decoded.error !== 0) {
+    throw new Error(
+      `Error submitting changes: ${decoded.error} ${decoded.currentStep}`
+    );
+  }
 }

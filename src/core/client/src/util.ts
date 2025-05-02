@@ -1,8 +1,10 @@
+import config from "@incanta/config";
 import { exec as nativeExec } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import { promises as fs } from "fs";
 import os from "os";
+import { gql, GraphQLClient } from "graphql-request";
 
 export function relativePath(from: string, to: string): string {
   return path.relative(from, to).replace(/\\/g, "/");
@@ -67,11 +69,20 @@ export async function getAuthToken(): Promise<string> {
   }
 }
 
-export interface Workspace {
+export interface WorkspaceState {
+  changeListNumber: number;
+  files: Record<string, number>;
+}
+
+export interface WorkspaceConfig {
   orgId: string;
   repoId: string;
-  workspaceId: string;
+  branchName: string;
   workspaceName: string;
+}
+
+export interface Workspace extends WorkspaceConfig {
+  localRoot: string;
 }
 
 export async function getWorkspaceDetails(): Promise<Workspace> {
@@ -81,10 +92,136 @@ export async function getWorkspaceDetails(): Promise<Workspace> {
   const configPath = path.join(workspaceConfigDir, "config.json");
   try {
     const config = await fs.readFile(configPath, "utf-8");
-    return JSON.parse(config);
+    const details: Workspace = JSON.parse(config);
+    details.localRoot = workspace;
+    return details;
   } catch (e) {
     throw new Error(
       "Could not read workspace configuration, did you initialize this workspace properly?"
     );
   }
+}
+
+export async function saveWorkspaceDetails(
+  workspace: WorkspaceConfig
+): Promise<void> {
+  const workspaceRoot = await getWorkspaceRoot(process.cwd());
+  const workspaceConfigDir = path.join(workspaceRoot, ".checkpoint");
+
+  try {
+    await fs.mkdir(workspaceConfigDir, { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceConfigDir, "config.json"),
+      JSON.stringify(workspace, null, 2)
+    );
+  } catch (e) {
+    throw new Error(
+      "Could not write workspace configuration, did you initialize this workspace properly?"
+    );
+  }
+}
+
+export async function getWorkspaceState(): Promise<WorkspaceState> {
+  const workspace = await getWorkspaceRoot(process.cwd());
+  const workspaceConfigDir = path.join(workspace, ".checkpoint");
+
+  const statePath = path.join(workspaceConfigDir, "state.json");
+  try {
+    const state = await fs.readFile(statePath, "utf-8");
+    return JSON.parse(state);
+  } catch (e) {
+    return {
+      changeListNumber: 0,
+      files: {},
+    };
+  }
+}
+
+export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
+  const workspace = await getWorkspaceRoot(process.cwd());
+  const workspaceConfigDir = path.join(workspace, ".checkpoint");
+
+  try {
+    await fs.mkdir(workspaceConfigDir, { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceConfigDir, "state.json"),
+      JSON.stringify(state, null, 2)
+    );
+  } catch (e) {
+    throw new Error(
+      "Could not write workspace state, did you initialize this workspace properly?"
+    );
+  }
+}
+
+export async function getLatestChangeListId(
+  workspace: Workspace
+): Promise<string> {
+  const apiToken = await getAuthToken();
+
+  const client = new GraphQLClient(config.get<string>("checkpoint.api.url"), {
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      "auth-provider": "auth0",
+    },
+  });
+
+  const branchResponse: any = await client.request(
+    gql`
+      query getBranch($repoId: String!, $branchName: String!) {
+        branch(repoId: $repoId, name: $branchName) {
+          headNumber
+        }
+      }
+    `,
+    {
+      repoId: workspace.repoId,
+      branchName: workspace.branchName,
+    }
+  );
+
+  if (!branchResponse.branch) {
+    throw new Error("Could not get latest changelist number");
+  }
+
+  const changeListNumber = branchResponse.branch.headNumber;
+
+  return getChangeListId(workspace, changeListNumber);
+}
+
+export async function getChangeListId(
+  workspace: Workspace,
+  changeListNumber: number
+): Promise<string> {
+  const apiToken = await getAuthToken();
+
+  const client = new GraphQLClient(config.get<string>("checkpoint.api.url"), {
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      "auth-provider": "auth0",
+    },
+  });
+
+  const changeListResponse: any = await client.request(
+    gql`
+      query getChangeList($repoId: String!, $changeListNumber: Int!) {
+        changeLists(repoId: $repoId, numbers: [$changeListNumber]) {
+          id
+        }
+      }
+    `,
+    {
+      repoId: workspace.repoId,
+      changeListNumber: changeListNumber,
+    }
+  );
+
+  if (
+    !changeListResponse.changeLists ||
+    changeListResponse.changeLists.length === 0
+  ) {
+    throw new Error("Could not get changelist ID");
+  }
+
+  return changeListResponse.changeLists[0].id;
 }

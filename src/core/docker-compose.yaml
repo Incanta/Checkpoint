@@ -1,7 +1,9 @@
 services:
-
   master:
     image: checkpointvcs/seaweedfs:local
+    build:
+      context: ../seaweedfs/docker
+      dockerfile: Dockerfile.local
     pull_policy: never
     ports:
       - 9333:9333
@@ -13,6 +15,9 @@ services:
 
   volume:
     image: checkpointvcs/seaweedfs:local
+    build:
+      context: ../seaweedfs/docker
+      dockerfile: Dockerfile.local
     pull_policy: never
     ports:
       - 8080:8080
@@ -26,6 +31,9 @@ services:
 
   filer:
     image: checkpointvcs/seaweedfs:local
+    build:
+      context: ../seaweedfs/docker
+      dockerfile: Dockerfile.local
     pull_policy: never
     ports:
       - 8888:8888
@@ -47,3 +55,11 @@ services:
       - 6379:6379
     volumes:
       - ./.data/redis:/data
+
+  # app:
+  #   build:
+  #     context: ../app
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - 8910:8910
+  #     - 8911:8911

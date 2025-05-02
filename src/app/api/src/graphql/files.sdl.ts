@@ -7,4 +7,8 @@ export const schema = gql`
     changes: [FileChange]!
     locks: [FileLock]!
   }
+
+  type Query {
+    files(ids: [String!]!): [File!]! @requireAuth
+  }
 `;

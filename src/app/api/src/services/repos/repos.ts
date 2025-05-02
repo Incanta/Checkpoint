@@ -89,6 +89,8 @@ export const createRepo: MutationResolvers["createRepo"] = async ({ input }, { c
       data: {
         number: 0,
         message: "Repo Creation",
+        versionIndex: "",
+        stateTree: {},
         repoId: repo.id,
         userId: currentUser.id,
       }

@@ -2,7 +2,7 @@ import config from "@incanta/config";
 import type { Command } from "commander";
 import { promises as fs } from "fs";
 import path from "path";
-import { getAuthToken, type Workspace } from "../util";
+import { getAuthToken, type WorkspaceConfig } from "../util";
 import { gql, GraphQLClient } from "graphql-request";
 import inquirer from "inquirer";
 
@@ -10,7 +10,8 @@ export async function initCommand(program: Command): Promise<void> {
   program
     .command("init")
     .description("Initialize a Checkpoint workspace in the current directory")
-    .action(async () => {
+    .argument("<name>", "Workspace name")
+    .action(async (name) => {
       const workspace = process.cwd();
       const workspaceConfigDir = path.join(workspace, ".checkpoint");
 
@@ -76,11 +77,11 @@ export async function initCommand(program: Command): Promise<void> {
         },
       ]);
 
-      const workspaceDetails: Workspace = {
+      const workspaceDetails: WorkspaceConfig = {
         orgId: selectedOrg,
         repoId: selectedRepo,
-        workspaceId: "",
-        workspaceName: "",
+        branchName: "main",
+        workspaceName: name,
       };
 
       await fs.writeFile(

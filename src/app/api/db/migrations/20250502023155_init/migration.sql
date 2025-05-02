@@ -66,6 +66,8 @@ CREATE TABLE "ChangeList" (
     "updatedAt" DATETIME NOT NULL,
     "number" INTEGER NOT NULL,
     "message" TEXT NOT NULL,
+    "versionIndex" TEXT NOT NULL,
+    "stateTree" JSONB NOT NULL,
     "repoId" TEXT NOT NULL,
     "userId" TEXT,
     "parentNumber" INTEGER,
@@ -89,6 +91,7 @@ CREATE TABLE "FileChange" (
 -- CreateTable
 CREATE TABLE "File" (
     "id" TEXT NOT NULL PRIMARY KEY,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "path" TEXT NOT NULL,
     "repoId" TEXT NOT NULL,
     CONSTRAINT "File_repoId_fkey" FOREIGN KEY ("repoId") REFERENCES "Repo" ("id") ON DELETE RESTRICT ON UPDATE CASCADE

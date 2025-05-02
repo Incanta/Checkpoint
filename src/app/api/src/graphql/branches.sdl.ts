@@ -8,6 +8,11 @@ export const schema = gql`
     isDefault: Boolean!
   }
 
+  type Query {
+    branches(repoId: String!): [Branch!]! @requireAuth
+    branch(repoId: String!, name: String!): Branch @requireAuth
+  }
+
   # input CreateBranchInput {
   #   repoId: String!
   #   name: String!
