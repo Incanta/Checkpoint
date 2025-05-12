@@ -1,6 +1,3 @@
-[submodule "src/golongtail"]
-	path = src/golongtail
-	url = git@github.com:Incanta/golongtail.git
 [submodule "src/seaweedfs"]
 	path = src/seaweedfs
 	url = git@github.com:Incanta/seaweedfs.git
