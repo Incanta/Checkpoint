@@ -25,16 +25,9 @@
 #include <sstream>
 #include <thread>
 
-#include "../util/json.hpp"
+#include "../util/json.h"
 #include "../util/seaweedfs.h"
-
-#ifdef _WIN32
-#define DLL_EXPORT extern "C" __declspec(dllexport)
-#else
-#define DLL_EXPORT extern "C"
-#endif
-
-#define NO_BLOCKS_ERROR 10100
+#include "exposed.h"
 
 struct WrapperAsyncHandle {
   char currentStep[256];
@@ -45,14 +38,6 @@ struct WrapperAsyncHandle {
   char result[2048];
 };
 
-using json = nlohmann::json;
-
-struct Modification {
-  bool IsDelete;
-  const char* Path;
-  const char* OldPath;
-};
-
 void SetHandleStep(WrapperAsyncHandle* handle, const char* step);
 bool IsHandleCanceled(WrapperAsyncHandle* handle);
 
@@ -60,3 +45,38 @@ uint32_t ParseCompressionType(const char* compression_algorithm);
 uint32_t ParseHashingType(const char* hashing_type);
 
 void SetLogging(int level);
+
+int32_t SubmitSync(
+    const char* BranchName,
+    const char* Message,
+    uint32_t TargetChunkSize,
+    uint32_t TargetBlockSize,
+    uint32_t MaxChunksPerBlock,
+    uint32_t MinBlockUsagePercent,
+    const char* HashingAlgo,
+    const char* CompressionAlgo,
+    bool EnableMmapIndexing,
+    bool EnableMmapBlockStore,
+    const char* LocalRootPath,
+    const char* RemoteBasePath,
+    const char* FilerUrl,
+    const char* BackendUrl,
+    const char* JWT,
+    uint64_t JWTExpirationMs,
+    const char* API_JWT,
+    bool KeepCheckedOut,
+    const char* WorkspaceId,
+    uint32_t NumModifications,
+    const Checkpoint::Modification* Modifications,
+    WrapperAsyncHandle* handle);
+
+int32_t PullSync(
+    const char* VersionIndex,
+    bool EnableMmapIndexing,
+    bool EnableMmapBlockStore,
+    const char* LocalRootPath,
+    const char* RemoteBasePath,
+    const char* FilerUrl,
+    const char* JWT,
+    uint64_t JWTExpirationMs,
+    WrapperAsyncHandle* handle);

@@ -21,6 +21,10 @@
       "path": "src/seaweedfs"
     },
     {
+      "name": "Unreal",
+      "path": "src/unreal"
+    },
+    {
       "name": "Desktop",
       "path": "src/desktop"
     },

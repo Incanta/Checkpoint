@@ -50,6 +50,8 @@ export function CreateLongtailLibrary() {
         FFIType.cstring,
         FFIType.u64,
         FFIType.cstring,
+        FFIType.u8,
+        FFIType.cstring,
         FFIType.u32,
         FFIType.pointer,
         FFIType.int,

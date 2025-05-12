@@ -1,7 +1,7 @@
 import type {
   QueryResolvers,
   MutationResolvers,
-  ChangeListRelationResolvers,
+  ChangelistRelationResolvers,
   ModificationInput,
 } from "types/graphql";
 
@@ -11,16 +11,17 @@ import { FileChangeType } from "@prisma/client";
 
 interface DbModification extends ModificationInput {
   id: string;
+  isNew: boolean;
 }
 
-export const changeList: QueryResolvers["changeList"] = ({ id }) => {
-  return db.changeList.findUnique({
+export const changelist: QueryResolvers["changelist"] = ({ id }) => {
+  return db.changelist.findUnique({
     where: { id },
   });
 };
 
-export const changeLists: QueryResolvers["changeLists"] = ({ repoId, numbers }) => {
-  return db.changeList.findMany({
+export const changelists: QueryResolvers["changelists"] = ({ repoId, numbers }) => {
+  return db.changelist.findMany({
     where: {
       repoId,
       number: {
@@ -30,7 +31,7 @@ export const changeLists: QueryResolvers["changeLists"] = ({ repoId, numbers }) 
   });
 };
 
-export const createChangeList: MutationResolvers["createChangeList"] = async ({
+export const createChangelist: MutationResolvers["createChangelist"] = async ({
   input,
 }) => {
   const repo = await db.repo.findUnique({
@@ -82,6 +83,7 @@ export const createChangeList: MutationResolvers["createChangeList"] = async ({
         },
       });
 
+      let isNew = false;
       if (!dbFile) {
         dbFile = await db.file.create({
           data: {
@@ -89,10 +91,12 @@ export const createChangeList: MutationResolvers["createChangeList"] = async ({
             path: modification.path,
           }
         });
+        isNew = true;
       }
 
       return {
         id: dbFile.id,
+        isNew,
         ...modification,
       };
     })
@@ -117,14 +121,14 @@ export const createChangeList: MutationResolvers["createChangeList"] = async ({
         throw new Error(`Branch ${input.branchName} not found`);
       }
 
-      const headChangeList = await db.changeList.findFirst({
+      const headChangelist = await db.changelist.findFirst({
         where: {
           repoId: input.repoId,
           number: branch.headNumber,
         },
       });
 
-      const latestChangeList = await db.changeList.findFirst({
+      const latestChangelist = await db.changelist.findFirst({
         where: {
           repoId: input.repoId,
         },
@@ -133,26 +137,26 @@ export const createChangeList: MutationResolvers["createChangeList"] = async ({
         },
       });
 
-      const nextChangeListNumber = latestChangeList.number + 1;
+      const nextChangelistNumber = latestChangelist.number + 1;
 
-      const stateTree: Record<string, number> = Object.assign({}, latestChangeList.stateTree as any);
+      const stateTree: Record<string, number> = Object.assign({}, latestChangelist.stateTree as any);
       for (const modification of dbModifications) {
         if (modification.id && modification.delete) {
           delete stateTree[modification.id];
         } else {
-          stateTree[modification.id] = nextChangeListNumber;
+          stateTree[modification.id] = nextChangelistNumber;
         }
       }
 
-      const changelist = await db.changeList.create({
+      const changelist = await db.changelist.create({
         data: {
-          number: nextChangeListNumber,
+          number: nextChangelistNumber,
           message: input.message,
           versionIndex: input.versionIndex,
           stateTree: stateTree as any,
           repoId: input.repoId,
           userId: currentUser.id,
-          parentNumber: headChangeList.number,
+          parentNumber: headChangelist.number,
         },
       });
 
@@ -195,13 +199,51 @@ export const createChangeList: MutationResolvers["createChangeList"] = async ({
           data: {
             fileId: dbFile.id,
             repoId: input.repoId,
-            changeListNumber: changelist.number,
+            changelistNumber: changelist.number,
             type:
               modification.delete ?
                 FileChangeType.DELETE :
                 isCreate ?
                   FileChangeType.ADD :
                   FileChangeType.MODIFY,
+          },
+        });
+      }
+
+      if (!input.keepCheckedOut) {
+        await db.fileCheckout.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            fileId: {
+              in: dbModifications.map((modification) => modification.id),
+            }
+          },
+          data: {
+            removedAt: new Date(),
+          },
+        });
+      } else {
+        // checkout the new files
+        await db.fileCheckout.createMany({
+          data: dbModifications.filter(modification => modification.isNew).map((modification) => ({
+            fileId: modification.id,
+            workspaceId: input.workspaceId,
+            userId: currentUser.id,
+            locked: false, // TODO: need to consider auto-locking rules
+          })),
+        });
+
+        // remove checkout for deleted files
+        await db.fileCheckout.updateMany({
+          data: {
+            locked: false,
+            removedAt: new Date(),
+          },
+          where: {
+            workspaceId: input.workspaceId,
+            fileId: {
+              in: dbModifications.filter(modification => modification.delete).map((modification) => modification.id),
+            },
           },
         });
       }
@@ -215,30 +257,30 @@ export const createChangeList: MutationResolvers["createChangeList"] = async ({
   throw new Error("Failed to create changelist after 3 attempts, try again");
 };
 
-export const updateChangeList: MutationResolvers["updateChangeList"] = ({
+export const updateChangelist: MutationResolvers["updateChangelist"] = ({
   id,
   input,
 }) => {
-  return db.changeList.update({
+  return db.changelist.update({
     data: input,
     where: { id },
   });
 };
 
-export const ChangeList: ChangeListRelationResolvers = {
+export const Changelist: ChangelistRelationResolvers = {
   repo: (_obj, { root }) => {
-    return db.changeList.findUnique({ where: { id: root?.id } }).repo();
+    return db.changelist.findUnique({ where: { id: root?.id } }).repo();
   },
   user: (_obj, { root }) => {
-    return db.changeList.findUnique({ where: { id: root?.id } }).user();
+    return db.changelist.findUnique({ where: { id: root?.id } }).user();
   },
   parent: (_obj, { root }) => {
-    return db.changeList.findUnique({ where: { id: root?.id } }).parent();
+    return db.changelist.findUnique({ where: { id: root?.id } }).parent();
   },
   children: (_obj, { root }) => {
-    return db.changeList.findUnique({ where: { id: root?.id } }).children();
+    return db.changelist.findUnique({ where: { id: root?.id } }).children();
   },
   fileChanges: (_obj, { root }) => {
-    return db.changeList.findUnique({ where: { id: root?.id } }).fileChanges();
+    return db.changelist.findUnique({ where: { id: root?.id } }).fileChanges();
   },
 };

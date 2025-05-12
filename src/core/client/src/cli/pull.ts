@@ -2,8 +2,8 @@ import type { Command } from "commander";
 import { promises as fs } from "fs";
 import path from "path";
 import {
-  getChangeListId,
-  getLatestChangeListId,
+  getChangelistId,
+  getLatestChangelistId,
   getWorkspaceDetails,
   getWorkspaceRoot,
 } from "../util";
@@ -58,14 +58,14 @@ export async function pullCommand(program: Command): Promise<void> {
 
           const getLatest = options.changelist === "latest";
 
-          const changeListId = getLatest
-            ? await getLatestChangeListId(workspaceDetails)
-            : await getChangeListId(
+          const changelistId = getLatest
+            ? await getLatestChangelistId(workspaceDetails)
+            : await getChangelistId(
                 workspaceDetails,
                 Math.floor(Number(options.changelist))
               );
 
-          await pull(workspaceDetails, changeListId, options.longtailLogLevel);
+          await pull(workspaceDetails, changelistId, options.longtailLogLevel);
         } catch (e: any) {
           if (e.message) {
             console.error(e.message);

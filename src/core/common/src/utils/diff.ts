@@ -1,7 +1,7 @@
 export interface StateDiff {
   timestamp: Date;
   deletions: string[];
-  changeListsToPull: number[];
+  changelistsToPull: number[];
 }
 
 export function DiffState(
@@ -9,25 +9,25 @@ export function DiffState(
   newState: Record<string, number>
 ): StateDiff {
   const deletions: string[] = [];
-  const changeListsToPull: number[] = [];
+  const changelistsToPull: number[] = [];
 
   for (const stateFileId in state) {
     if (newState[stateFileId] === undefined) {
       deletions.push(stateFileId);
     } else if (state[stateFileId] !== newState[stateFileId]) {
-      if (!changeListsToPull.includes(newState[stateFileId])) {
-        changeListsToPull.push(newState[stateFileId]);
+      if (!changelistsToPull.includes(newState[stateFileId])) {
+        changelistsToPull.push(newState[stateFileId]);
       }
     }
   }
 
   for (const newStateFileId in newState) {
     if (state[newStateFileId] === undefined) {
-      if (!changeListsToPull.includes(newState[newStateFileId])) {
-        changeListsToPull.push(newState[newStateFileId]);
+      if (!changelistsToPull.includes(newState[newStateFileId])) {
+        changelistsToPull.push(newState[newStateFileId]);
       }
     }
   }
 
-  return { timestamp: new Date(), deletions, changeListsToPull };
+  return { timestamp: new Date(), deletions, changelistsToPull };
 }

@@ -4,7 +4,7 @@
 #include "../util/progress.h"
 #include "main.h"
 
-int32_t Submit(
+int32_t SubmitSync(
     const char* BranchName,
     const char* Message,
     uint32_t TargetChunkSize,
@@ -22,8 +22,10 @@ int32_t Submit(
     const char* JWT,
     uint64_t JWTExpirationMs,
     const char* API_JWT,
+    bool KeepCheckedOut,
+    const char* WorkspaceId,
     uint32_t NumModifications,
-    const Modification* Modifications,
+    const Checkpoint::Modification* Modifications,
     WrapperAsyncHandle* handle) {
   struct Longtail_HashRegistryAPI* hash_registry = Longtail_CreateFullHashRegistry();
   struct Longtail_JobAPI* job_api = Longtail_CreateBikeshedJobAPI(1, 0);
@@ -485,7 +487,9 @@ int32_t Submit(
       {"branchName", std::string(BranchName)},
       {"message", std::string(Message)},
       {"modifications", json::array()},
-      {"versionIndex", version_file_stream.str()}};
+      {"versionIndex", version_file_stream.str()},
+      {"keepCheckedOut", KeepCheckedOut},
+      {"workspaceId", std::string(WorkspaceId)}};
 
   for (uint32_t i = 0; i < NumModifications; ++i) {
     payload["modifications"].push_back(json::object());
@@ -528,7 +532,7 @@ int32_t Submit(
   }
 
   json result = {
-      {"changeListNumber", std::string(BranchName)}};
+      {"changelistNumber", std::string(BranchName)}};
 
   strcpy(handle->result, result.dump().c_str());
 
@@ -570,8 +574,10 @@ SubmitAsync(
     const char* JWT,
     uint64_t JWTExpirationMs,
     const char* API_JWT,
+    bool KeepCheckedOut,
+    const char* WorkspaceId,
     uint32_t NumModifications,
-    const Modification* Modifications,
+    const Checkpoint::Modification* Modifications,
     int LogLevel = 4) {
   SetLogging(LogLevel);
 
@@ -585,7 +591,7 @@ SubmitAsync(
   SetHandleStep(handle, "Initializing");
 
   std::thread diff_thread([=]() {
-    int32_t err = Submit(
+    int32_t err = SubmitSync(
         BranchName,
         Message,
         TargetChunkSize,
@@ -603,6 +609,8 @@ SubmitAsync(
         JWT,
         JWTExpirationMs,
         API_JWT,
+        KeepCheckedOut,
+        WorkspaceId,
         NumModifications,
         Modifications,
         handle);

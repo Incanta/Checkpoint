@@ -192,7 +192,7 @@ export async function submit(
         delete workspaceState.files[modification.path];
       } else {
         workspaceState.files[modification.path] =
-          decoded.result.changeListNumber;
+          decoded.result.changelistNumber;
       }
     }
 

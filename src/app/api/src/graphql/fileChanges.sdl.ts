@@ -3,9 +3,9 @@ export const schema = gql`
     id: String!
     file: File!
     fileId: String!
-    changeList: ChangeList!
+    changelist: Changelist!
     repoId: String!
-    changeListNumber: Int!
+    changelistNumber: Int!
     type: FileChangeType!
     oldPath: String
   }

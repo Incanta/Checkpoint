@@ -20,7 +20,7 @@ import path from "path";
 
 export async function pull(
   workspace: Workspace,
-  changeListId: string, // implies branch name
+  changelistId: string, // implies branch name
   logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
     "longtail.log-level"
   )
@@ -72,10 +72,10 @@ export async function pull(
     res.text()
   );
 
-  const changeListResponse: any = await client.request(
+  const changelistResponse: any = await client.request(
     gql`
-      query getChangeList($id: String!) {
-        changeList(id: $id) {
+      query getChangelist($id: String!) {
+        changelist(id: $id) {
           number
           versionIndex
           stateTree
@@ -83,7 +83,7 @@ export async function pull(
       }
     `,
     {
-      id: changeListId,
+      id: changelistId,
     }
   );
 
@@ -91,13 +91,13 @@ export async function pull(
 
   const diff = DiffState(
     workspaceState.files,
-    changeListResponse.changeList.stateTree
+    changelistResponse.changelist.stateTree
   );
 
-  const changeListsResponse: any = await client.request(
+  const changelistsResponse: any = await client.request(
     gql`
-      query getChangeLists($repoId: String!, $numbers: [Int!]!) {
-        changeLists(repoId: $repoId, numbers: $numbers) {
+      query getChangelists($repoId: String!, $numbers: [Int!]!) {
+        changelists(repoId: $repoId, numbers: $numbers) {
           id
           number
           versionIndex
@@ -106,16 +106,16 @@ export async function pull(
     `,
     {
       repoId: workspace.repoId,
-      numbers: diff.changeListsToPull,
+      numbers: diff.changelistsToPull,
     }
   );
 
-  const sortedChangeLists = changeListsResponse.changeLists.sort(
+  const sortedChangelists = changelistsResponse.changelists.sort(
     (a: any, b: any) => a.number - b.number
   );
 
-  const versionsToPull: string[] = sortedChangeLists.map(
-    (changeList: any) => changeList.versionIndex
+  const versionsToPull: string[] = sortedChangelists.map(
+    (changelist: any) => changelist.versionIndex
   );
 
   // on windows, requires PATH to include libraries folder
@@ -226,8 +226,8 @@ export async function pull(
     }
 
     await saveWorkspaceState({
-      changeListNumber: changeListResponse.changeList.number,
-      files: changeListResponse.changeList.stateTree,
+      changelistNumber: changelistResponse.changelist.number,
+      files: changelistResponse.changelist.stateTree,
     });
   }
 

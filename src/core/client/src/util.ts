@@ -70,7 +70,7 @@ export async function getAuthToken(): Promise<string> {
 }
 
 export interface WorkspaceState {
-  changeListNumber: number;
+  changelistNumber: number;
   files: Record<string, number>;
 }
 
@@ -131,7 +131,7 @@ export async function getWorkspaceState(): Promise<WorkspaceState> {
     return JSON.parse(state);
   } catch (e) {
     return {
-      changeListNumber: 0,
+      changelistNumber: 0,
       files: {},
     };
   }
@@ -154,7 +154,7 @@ export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
   }
 }
 
-export async function getLatestChangeListId(
+export async function getLatestChangelistId(
   workspace: Workspace
 ): Promise<string> {
   const apiToken = await getAuthToken();
@@ -184,14 +184,14 @@ export async function getLatestChangeListId(
     throw new Error("Could not get latest changelist number");
   }
 
-  const changeListNumber = branchResponse.branch.headNumber;
+  const changelistNumber = branchResponse.branch.headNumber;
 
-  return getChangeListId(workspace, changeListNumber);
+  return getChangelistId(workspace, changelistNumber);
 }
 
-export async function getChangeListId(
+export async function getChangelistId(
   workspace: Workspace,
-  changeListNumber: number
+  changelistNumber: number
 ): Promise<string> {
   const apiToken = await getAuthToken();
 
@@ -202,26 +202,26 @@ export async function getChangeListId(
     },
   });
 
-  const changeListResponse: any = await client.request(
+  const changelistResponse: any = await client.request(
     gql`
-      query getChangeList($repoId: String!, $changeListNumber: Int!) {
-        changeLists(repoId: $repoId, numbers: [$changeListNumber]) {
+      query getChangelist($repoId: String!, $changelistNumber: Int!) {
+        changelists(repoId: $repoId, numbers: [$changelistNumber]) {
           id
         }
       }
     `,
     {
       repoId: workspace.repoId,
-      changeListNumber: changeListNumber,
+      changelistNumber: changelistNumber,
     }
   );
 
   if (
-    !changeListResponse.changeLists ||
-    changeListResponse.changeLists.length === 0
+    !changelistResponse.changelists ||
+    changelistResponse.changelists.length === 0
   ) {
     throw new Error("Could not get changelist ID");
   }
 
-  return changeListResponse.changeLists[0].id;
+  return changelistResponse.changelists[0].id;
 }

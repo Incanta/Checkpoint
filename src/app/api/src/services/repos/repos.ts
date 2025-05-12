@@ -85,7 +85,7 @@ export const createRepo: MutationResolvers["createRepo"] = async ({ input }, { c
       }
     });
 
-    await db.changeList.create({
+    await db.changelist.create({
       data: {
         number: 0,
         message: "Repo Creation",

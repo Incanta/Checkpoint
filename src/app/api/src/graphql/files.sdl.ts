@@ -5,7 +5,7 @@ export const schema = gql`
     repo: Repo!
     repoId: String!
     changes: [FileChange]!
-    locks: [FileLock]!
+    checkouts: [FileCheckout]!
   }
 
   type Query {

@@ -5,7 +5,7 @@
 #include "../util/progress.h"
 #include "main.h"
 
-int Pull(
+int PullSync(
     const char* VersionIndex,
     bool EnableMmapIndexing,
     bool EnableMmapBlockStore,
@@ -392,7 +392,7 @@ PullAsync(
   SetHandleStep(handle, "Initializing");
 
   std::thread merge_thread([=]() {
-    int32_t err = Pull(
+    int32_t err = PullSync(
         VersionIndex,
         EnableMmapIndexing,
         EnableMmapBlockStore,

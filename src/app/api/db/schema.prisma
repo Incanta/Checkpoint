@@ -24,8 +24,8 @@ model User {
 
   orgs              OrgUser[]
   specificRepoRoles RepoRole[]
-  fileLocks         FileLock[]
-  changeLists       ChangeList[]
+  changelists       Changelist[]
+  workspaces        Workspace[]
 }
 
 enum RepoAccess {
@@ -84,8 +84,10 @@ model Repo {
   additionalRoles RepoRole[]
 
   files       File[]
-  changelists ChangeList[]
-  branches    Branch[]     @relation("RepoBranch")
+  changelists Changelist[]
+  branches    Branch[]        @relation("RepoBranch")
+  tags        ChangelistTag[]
+  workspaces  Workspace[]
 
   @@unique([orgId, name])
 }
@@ -118,7 +120,7 @@ model Branch {
   @@unique([repoId, name])
 }
 
-model ChangeList {
+model Changelist {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -134,13 +136,28 @@ model ChangeList {
   user   User?   @relation(fields: [userId], references: [id])
   userId String?
 
-  parent       ChangeList?  @relation("ChangeListToParent", fields: [repoId, parentNumber], references: [repoId, number])
-  children     ChangeList[] @relation("ChangeListToParent")
+  parent       Changelist?  @relation("ChangelistToParent", fields: [repoId, parentNumber], references: [repoId, number])
+  children     Changelist[] @relation("ChangelistToParent")
   parentNumber Int?
 
   fileChanges FileChange[]
+  tags        ChangelistTag[]
 
   @@unique([repoId, number])
+}
+
+model ChangelistTag {
+  id String @id @default(cuid())
+
+  name String
+
+  changelist Changelist @relation(fields: [repoId, number], references: [repoId, number])
+  repoId     String
+  number     Int
+
+  repo Repo @relation(fields: [repoId], references: [id])
+
+  @@unique([repoId, name])
 }
 
 enum FileChangeType {
@@ -155,9 +172,9 @@ model FileChange {
   file   File   @relation(fields: [fileId], references: [id])
   fileId String
 
-  changeList       ChangeList @relation(fields: [repoId, changeListNumber], references: [repoId, number])
+  changelist       Changelist @relation(fields: [repoId, changelistNumber], references: [repoId, number])
   repoId           String
-  changeListNumber Int
+  changelistNumber Int
 
   type    FileChangeType
   oldPath String?
@@ -172,18 +189,36 @@ model File {
   repo   Repo   @relation(fields: [repoId], references: [id])
   repoId String
 
-  changes FileChange[]
-  locks   FileLock[]
+  changes   FileChange[]
+  checkouts FileCheckout[]
 }
 
-model FileLock {
-  id         String    @id @default(cuid())
-  createdAt  DateTime  @default(now())
-  unlockedAt DateTime?
+model FileCheckout {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  removedAt DateTime?
 
-  file   File   @relation(fields: [fileId], references: [id])
+  locked Boolean @default(false)
+
   fileId String
+  file   File   @relation(fields: [fileId], references: [id])
 
-  user   User   @relation(fields: [userId], references: [id])
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+}
+
+model Workspace {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  name String
+
   userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  repoId String
+  repo   Repo   @relation(fields: [repoId], references: [id])
+
+  fileCheckouts FileCheckout[]
 }

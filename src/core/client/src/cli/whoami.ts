@@ -10,12 +10,15 @@ export async function whoamiCommand(program: Command): Promise<void> {
     .action(async () => {
       const apiToken = await getAuthToken();
 
-      const client = new GraphQLClient(config.get<string>("checkpoint.api.url"), {
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          "auth-provider": "auth0",
-        },
-      });
+      const client = new GraphQLClient(
+        config.get<string>("checkpoint.api.url"),
+        {
+          headers: {
+            Authorization: `Bearer ${apiToken}`,
+            "auth-provider": "auth0",
+          },
+        }
+      );
 
       let meResponse: any;
       try {
@@ -41,5 +44,5 @@ export async function whoamiCommand(program: Command): Promise<void> {
       console.log(
         `You are logged in as ${meResponse.me.email} (${meResponse.me.id})`
       );
-    })
+    });
 }

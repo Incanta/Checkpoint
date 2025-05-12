@@ -7,8 +7,8 @@ export const schema = gql`
     checkpointAdmin: Boolean!
     orgs: [OrgUser]!
     specificRepoRoles: [RepoRole]!
-    fileLocks: [FileLock]!
-    changeLists: [ChangeList]!
+    fileCheckouts: [FileCheckout]!
+    changelists: [Changelist]!
   }
 
   type Query {

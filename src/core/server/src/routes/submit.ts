@@ -41,6 +41,8 @@ const RequestSchema = object({
       oldPath: string().optional(),
     }).required()
   ).required(),
+  keepCheckedOut: boolean().required(),
+  workspaceId: string().required(),
 });
 interface RequestSchema extends InferType<typeof RequestSchema> {}
 
@@ -189,10 +191,10 @@ export function routeSubmit(): Record<string, Endpoint> {
         );
 
         try {
-          const createChangeListResponse: any = await client.request(
+          const createChangelistResponse: any = await client.request(
             gql`
-              mutation CreateChangeList($input: CreateChangeListInput!) {
-                createChangeList(input: $input) {
+              mutation CreateChangelist($input: CreateChangelistInput!) {
+                createChangelist(input: $input) {
                   id
                   number
                 }
@@ -205,13 +207,15 @@ export function routeSubmit(): Record<string, Endpoint> {
                 versionIndex: payload.versionIndex,
                 branchName: payload.branchName,
                 modifications: payload.modifications,
+                keepCheckedOut: payload.keepCheckedOut,
+                workspaceId: payload.workspaceId,
               },
             }
           );
 
           const responseMessage: RequestResponse = {
-            id: createChangeListResponse.createChangeList.id,
-            number: createChangeListResponse.createChangeList.number,
+            id: createChangelistResponse.createChangelist.id,
+            number: createChangelistResponse.createChangelist.number,
           };
 
           return new Response(JSON.stringify(responseMessage), { status: 200 });

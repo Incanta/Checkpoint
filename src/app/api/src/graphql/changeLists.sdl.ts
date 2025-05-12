@@ -1,5 +1,5 @@
 export const schema = gql`
-  type ChangeList {
+  type Changelist {
     id: String!
     createdAt: DateTime!
     updatedAt: DateTime!
@@ -12,15 +12,15 @@ export const schema = gql`
     user: User
     userId: String
     heads: [Branch]!
-    parent: ChangeList
-    children: [ChangeList]!
+    parent: Changelist
+    children: [Changelist]!
     parentNumber: Int
     fileChanges: [FileChange]!
   }
 
   type Query {
-    changeList(id: String!): ChangeList! @requireAuth
-    changeLists(repoId: String!, numbers: [Int!]!): [ChangeList!]! @requireAuth
+    changelist(id: String!): Changelist! @requireAuth
+    changelists(repoId: String!, numbers: [Int!]!): [Changelist!]! @requireAuth
   }
 
   input ModificationInput {
@@ -29,20 +29,22 @@ export const schema = gql`
     oldPath: String
   }
 
-  input CreateChangeListInput {
+  input CreateChangelistInput {
     message: String!
     repoId: String!
     branchName: String!
     versionIndex: String!
     modifications: [ModificationInput!]!
+    keepCheckedOut: Boolean!
+    workspaceId: String!
   }
 
-  input UpdateChangeListInput {
+  input UpdateChangelistInput {
     message: String
   }
 
   type Mutation {
-    createChangeList(input: CreateChangeListInput!): ChangeList! @requireAuth
-    updateChangeList(id: String!, input: UpdateChangeListInput!): ChangeList! @requireAuth
+    createChangelist(input: CreateChangelistInput!): Changelist! @requireAuth
+    updateChangelist(id: String!, input: UpdateChangelistInput!): Changelist! @requireAuth
   }
 `;

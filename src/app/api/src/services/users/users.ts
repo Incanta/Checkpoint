@@ -48,10 +48,10 @@ export const User: UserRelationResolvers = {
   specificRepoRoles: (_obj, { root }) => {
     return db.user.findUnique({ where: { id: root?.id } }).specificRepoRoles();
   },
-  fileLocks: (_obj, { root }) => {
-    return db.user.findUnique({ where: { id: root?.id } }).fileLocks();
+  fileCheckouts: (_obj, { root }) => {
+    return db.user.findUnique({ where: { id: root?.id } }).fileCheckouts();
   },
-  changeLists: (_obj, { root }) => {
-    return db.user.findUnique({ where: { id: root?.id } }).changeLists();
+  changelists: (_obj, { root }) => {
+    return db.user.findUnique({ where: { id: root?.id } }).changelists();
   },
 };

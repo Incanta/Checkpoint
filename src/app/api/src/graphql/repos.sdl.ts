@@ -9,7 +9,7 @@ export const schema = gql`
     orgId: String!
     additionalRoles: [RepoRole]!
     files: [File]!
-    changelists: [ChangeList]!
+    changelists: [Changelist]!
     branches: [Branch]!
   }
 
