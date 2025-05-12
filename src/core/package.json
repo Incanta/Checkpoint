@@ -1,7 +1,7 @@
 {
   "name": "@checkpointvcs/core",
   "version": "1.0.0",
-  "license": "UNLICENSED",
+  "license": "(Elastic-2.0 OR AGPL-3.0)",
   "private": true,
   "workspaces": [
     "client",

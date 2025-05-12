@@ -2,10 +2,9 @@
   "name": "@checkpointvcs/longtail-addon",
   "version": "1.0.0",
   "description": "",
-  "license": "UNLICENSED",
+  "license": "(Elastic-2.0 OR AGPL-3.0)",
   "private": true,
   "type": "module",
   "module": "src/index.ts",
-  "scripts": {
-  }
+  "scripts": {}
 }
