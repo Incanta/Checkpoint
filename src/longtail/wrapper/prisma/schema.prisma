@@ -1,0 +1,56 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = "native"
+}
+
+model Migration {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  name      String   @unique
+  logs      String?
+}
+
+model Server {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name String @unique
+
+  graphqlUrl       String
+  auth0Url         String
+  auth0ClientId    String
+  auth0AudienceApi String
+
+  accessToken String?
+  expiresIn   Int?
+  idToken     String?
+  scope       String?
+  tokenType   String?
+}
+
+model Config {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  name      String   @unique
+  value     String?
+}
+
+model File {
+  path    String  @id
+  oldPath String?
+
+  deleted Boolean @default(false)
+  staged  Boolean @default(false)
+
+  changelist Int?
+  backendId  String? @unique
+
+  // TODO: should we cache state here?
+}

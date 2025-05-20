@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "migrate": "cross-env DATABASE_URL=file:shadow.db prisma migrate dev",
+    "migrate:reset": "rm -rf prisma/migrations/ prisma/shadow.db* && npm run migrate -- --name init && node copy-seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.8.1",
+    "cross-env": "^7.0.3",
+    "prisma": "^6.8.1"
+  }
+}

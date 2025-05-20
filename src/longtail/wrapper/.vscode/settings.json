@@ -1,0 +1,7 @@
+{
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/build/_deps/**",
+    "${workspaceFolder}/build/include",
+    "${workspaceFolder}/longtail/include/**",
+  ]
+}

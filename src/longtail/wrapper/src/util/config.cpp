@@ -1,5 +1,8 @@
 #include "config.h"
 
+#include <migrations.h>
+#include <sqlite3.h>
+
 #include <ctime>
 #include <fstream>
 #include <iostream>
@@ -15,6 +18,10 @@ struct CacheEntry {
 };
 
 std::map<std::string, CacheEntry> ConfigCache;
+
+sqlite3 *GlobalDb = nullptr;
+std::string WorkspaceDbPath;
+sqlite3 *WorkspaceDb = nullptr;
 
 std::string CheckpointConfig::GetConfigDir() {
 #if defined(_WIN32) || defined(_WIN64)
@@ -63,109 +70,40 @@ std::string CheckpointConfig::GetAuthToken() {
 std::string CheckpointConfig::GetGraphQLUrl() {
   // Check if already cached (1 minute expiration)
   std::time_t currentTime = std::time(nullptr);
-  auto it = ConfigCache.find("config");
+  auto it = ConfigCache.find("graphql_url");
   if (it != ConfigCache.end() && std::difftime(currentTime, it->second.timestamp) < 60) {
-    json configData = json::parse(it->second.value);
-
-    if (configData.contains("graphql_url")) {
-      return configData["graphql_url"];
-    }
+    return it->second.value;
   }
 
-  std::string configDir = CheckpointConfig::GetConfigDir();
-  std::string configFilePath = configDir + CheckpointConfig::sep + "config.json";
-
-  std::ifstream configFile(configFilePath);
-  if (!configFile.is_open()) {
-    std::cerr << "Error: Unable to open config file at " << configFilePath << std::endl;
-    return "";
-  }
-
-  std::string contents((std::istreambuf_iterator<char>(configFile)), std::istreambuf_iterator<char>());
-  configFile.close();
-
-  ConfigCache["config"] = CacheEntry{contents, currentTime};
-
-  json configData = json::parse(contents);
-
-  if (configData.contains("graphql_url")) {
-    return configData["graphql_url"];
-  } else {
-    std::cerr << "Error: graphql_url not found in config file." << std::endl;
-    return "";
-  }
+  std::string value = CheckpointConfig::GetGlobalConfigVar("graphql_url");
+  ConfigCache["graphql_url"] = CacheEntry{value, currentTime};
+  return value;
 }
 
 std::string CheckpointConfig::GetAuth0Url() {
   // Check if already cached (1 minute expiration)
   std::time_t currentTime = std::time(nullptr);
-  auto it = ConfigCache.find("config");
+  auto it = ConfigCache.find("auth0_url");
   if (it != ConfigCache.end() && std::difftime(currentTime, it->second.timestamp) < 60) {
-    json configData = json::parse(it->second.value);
-
-    if (configData.contains("auth0") && configData["auth0"].contains("url")) {
-      return configData["auth0"]["url"];
-    }
+    return it->second.value;
   }
 
-  std::string configDir = CheckpointConfig::GetConfigDir();
-  std::string configFilePath = configDir + CheckpointConfig::sep + "config.json";
-
-  std::ifstream configFile(configFilePath);
-  if (!configFile.is_open()) {
-    std::cerr << "Error: Unable to open config file at " << configFilePath << std::endl;
-    return "";
-  }
-
-  std::string contents((std::istreambuf_iterator<char>(configFile)), std::istreambuf_iterator<char>());
-  configFile.close();
-
-  ConfigCache["config"] = CacheEntry{contents, currentTime};
-
-  json configData = json::parse(contents);
-
-  if (configData.contains("auth0") && configData["auth0"].contains("url")) {
-    return configData["auth0"]["url"];
-  } else {
-    std::cerr << "Error: Auth0 URL not found in config file." << std::endl;
-    return "";
-  }
+  std::string value = CheckpointConfig::GetGlobalConfigVar("auth0_url");
+  ConfigCache["auth0_url"] = CacheEntry{value, currentTime};
+  return value;
 }
 
 std::string CheckpointConfig::GetAuth0ClientId() {
   // Check if already cached (1 minute expiration)
   std::time_t currentTime = std::time(nullptr);
-  auto it = ConfigCache.find("config");
+  auto it = ConfigCache.find("auth0_client_id");
   if (it != ConfigCache.end() && std::difftime(currentTime, it->second.timestamp) < 60) {
-    json configData = json::parse(it->second.value);
-
-    if (configData.contains("auth0") && configData["auth0"].contains("clientId")) {
-      return configData["auth0"]["clientId"];
-    }
+    return it->second.value;
   }
 
-  std::string configDir = CheckpointConfig::GetConfigDir();
-  std::string configFilePath = configDir + CheckpointConfig::sep + "config.json";
-
-  std::ifstream configFile(configFilePath);
-  if (!configFile.is_open()) {
-    std::cerr << "Error: Unable to open config file at " << configFilePath << std::endl;
-    return "";
-  }
-
-  std::string contents((std::istreambuf_iterator<char>(configFile)), std::istreambuf_iterator<char>());
-  configFile.close();
-
-  ConfigCache["config"] = CacheEntry{contents, currentTime};
-
-  json configData = json::parse(contents);
-
-  if (configData.contains("auth0") && configData["auth0"].contains("clientId")) {
-    return configData["auth0"]["clientId"];
-  } else {
-    std::cerr << "Error: Auth0 Client ID not found in config file." << std::endl;
-    return "";
-  }
+  std::string value = CheckpointConfig::GetGlobalConfigVar("auth0_client_id");
+  ConfigCache["auth0_client_id"] = CacheEntry{value, currentTime};
+  return value;
 }
 
 std::string CheckpointConfig::GetAuth0Audience() {
@@ -173,33 +111,178 @@ std::string CheckpointConfig::GetAuth0Audience() {
   std::time_t currentTime = std::time(nullptr);
   auto it = ConfigCache.find("config");
   if (it != ConfigCache.end() && std::difftime(currentTime, it->second.timestamp) < 60) {
-    json configData = json::parse(it->second.value);
+    return it->second.value;
+  }
 
-    if (configData.contains("auth0") && configData["auth0"].contains("audienceApi")) {
-      return configData["auth0"]["audienceApi"];
+  std::string value = CheckpointConfig::GetGlobalConfigVar("auth0_audience");
+  ConfigCache["auth0_audience"] = CacheEntry{value, currentTime};
+  return value;
+}
+
+int OpenDatabase(const std::string &dbPath, sqlite3 **db) {
+  int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+  int err = sqlite3_open_v2(dbPath.c_str(), db, flags, nullptr);
+
+  if (*db == nullptr) {
+    std::cerr << "Error allocating ram for SQLite db" << std::endl;
+    return err;
+  }
+
+  if (err != SQLITE_OK) {
+    std::cerr << "Error opening database: " << sqlite3_errmsg(*db) << std::endl;
+    sqlite3_close(*db);
+    return err;
+  }
+
+  return SQLITE_OK;
+}
+
+void MigrateDatabase(sqlite3 *db) {
+  int err = SQLITE_OK;
+
+  for (const auto &migration : Migrations::migrations) {
+    std::string migrationName = migration.first;
+    std::string sql = migration.second;
+
+    // check if the migration has already been applied in the Migration table
+    std::string checkSql = "SELECT COUNT(*) FROM Migration WHERE name='" + migrationName + "'";
+    int count = -1;
+    err = sqlite3_exec(
+        db,
+        checkSql.c_str(),
+        [](void *data, int argc, char **argv, char **azColName) {
+          if (argc > 0 && argv[0] != nullptr) {
+            int *count = static_cast<int *>(data);
+            *count = std::stoi(argv[0]);
+          }
+          return 0;
+        },
+        &count,
+        nullptr);
+    if (err != SQLITE_OK) {
+      std::cerr << "Error executing query: " << sqlite3_errmsg(db) << std::endl;
+    }
+
+    if (count == 0) {
+      // Migration has not been applied, so apply it
+      err = sqlite3_exec(db, sql.c_str(), nullptr, nullptr, nullptr);
+      if (err != SQLITE_OK) {
+        std::cerr << "Error applying migration: " << sqlite3_errmsg(db) << std::endl;
+      } else {
+        // Insert the migration name into the Migration table
+        std::string insertSql = "INSERT INTO Migration (name) VALUES ('" + migrationName + "')";
+        err = sqlite3_exec(db, insertSql.c_str(), nullptr, nullptr, nullptr);
+        if (err != SQLITE_OK) {
+          std::cerr << "Error inserting migration name: " << sqlite3_errmsg(db) << std::endl;
+        }
+      }
+    }
+  }
+}
+
+bool EnsureGlobalDb() {
+  if (GlobalDb == nullptr) {
+    std::string configDir = CheckpointConfig::GetConfigDir();
+    std::string configFilePath = configDir + CheckpointConfig::sep + "global.db";
+
+    int err = OpenDatabase(configFilePath, &GlobalDb);
+    if (err != SQLITE_OK) {
+      return false;
     }
   }
 
-  std::string configDir = CheckpointConfig::GetConfigDir();
-  std::string configFilePath = configDir + CheckpointConfig::sep + "config.json";
+  return true;
+}
 
-  std::ifstream configFile(configFilePath);
-  if (!configFile.is_open()) {
-    std::cerr << "Error: Unable to open config file at " << configFilePath << std::endl;
-    return "";
+bool EnsureWorkspaceDb(Checkpoint::Workspace *workspace) {
+  if (WorkspaceDb == nullptr || WorkspaceDbPath != std::string(workspace->localRoot)) {
+    if (WorkspaceDb != nullptr) {
+      sqlite3_close(WorkspaceDb);
+    }
+    WorkspaceDbPath = std::string(workspace->localRoot);
+
+    std::string configDir = CheckpointConfig::GetConfigDir();
+    std::string workspaceDir = std::string(workspace->localRoot);
+    std::string workspaceFilePath = workspaceDir + CheckpointConfig::sep + "workspace.db";
+
+    int err = OpenDatabase(workspaceFilePath, &WorkspaceDb);
+    if (err != SQLITE_OK) {
+      return false;
+    }
   }
 
-  std::string contents((std::istreambuf_iterator<char>(configFile)), std::istreambuf_iterator<char>());
-  configFile.close();
+  return true;
+}
 
-  ConfigCache["config"] = CacheEntry{contents, currentTime};
+void CheckpointConfig::MigrateGlobalDatabase() {
+  if (EnsureGlobalDb()) {
+    MigrateDatabase(GlobalDb);
+  }
+}
 
-  json configData = json::parse(contents);
+void CheckpointConfig::MigrateWorkspaceDatabase(Checkpoint::Workspace *workspace) {
+  if (EnsureWorkspaceDb(workspace)) {
+    MigrateDatabase(WorkspaceDb);
+  }
+}
 
-  if (configData.contains("auth0") && configData["auth0"].contains("audienceApi")) {
-    return configData["auth0"]["audienceApi"];
-  } else {
-    std::cerr << "Error: Auth0 Audience not found in config file." << std::endl;
-    return "";
+std::string GetConfigVar(sqlite3 *db, std::string varName) {
+  std::string result = "";  // Variable to store the result
+  std::string query = "SELECT value FROM Config WHERE name='" + varName + "'";
+
+  int err = sqlite3_exec(
+      db,
+      query.c_str(),
+      [](void *data, int argc, char **argv, char **azColName) {
+        if (argc > 0 && argv[0] != nullptr) {
+          std::string *result = static_cast<std::string *>(data);
+          *result = argv[0];
+        }
+        return 0;
+      },
+      &result,  // Pass the address of result as user data
+      nullptr);
+
+  if (err != SQLITE_OK) {
+    std::cerr << "Error executing query: " << sqlite3_errmsg(db) << std::endl;
+  }
+
+  return result;  // Return the actual result instead of empty string
+}
+
+std::string CheckpointConfig::GetGlobalConfigVar(const std::string &varName) {
+  if (EnsureGlobalDb()) {
+    return GetConfigVar(GlobalDb, varName);
+  }
+
+  return "";
+}
+
+std::string CheckpointConfig::GetWorkspaceConfigVar(Checkpoint::Workspace *workspace, const std::string &varName) {
+  if (EnsureWorkspaceDb(workspace)) {
+    return GetConfigVar(WorkspaceDb, varName);
+  }
+
+  return "";
+}
+
+void SetConfigVar(sqlite3 *db, const std::string &varName, const std::string &value) {
+  std::string query = "INSERT OR REPLACE INTO Config (name, value) VALUES ('" + varName + "', '" + value + "')";
+
+  int err = sqlite3_exec(db, query.c_str(), nullptr, nullptr, nullptr);
+  if (err != SQLITE_OK) {
+    std::cerr << "Error executing query: " << sqlite3_errmsg(db) << std::endl;
+  }
+}
+
+void CheckpointConfig::SetGlobalConfigVar(const std::string &varName, const std::string &value) {
+  if (EnsureGlobalDb()) {
+    SetConfigVar(GlobalDb, varName, value);
+  }
+}
+
+void CheckpointConfig::SetWorkspaceConfigVar(Checkpoint::Workspace *workspace, const std::string &varName, const std::string &value) {
+  if (EnsureWorkspaceDb(workspace)) {
+    SetConfigVar(WorkspaceDb, varName, value);
   }
 }
