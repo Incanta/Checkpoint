@@ -7677,26 +7677,6 @@ int Longtail_CreateVersionDiff(
 //     char* m_NameData;
 // };
 
-int Longtail_CreateVersionIndexFromDiff(
-    struct Longtail_HashAPI* hash_api,
-    const struct Longtail_VersionIndex* source_version,
-    const struct Longtail_VersionDiff* version_diff,
-    struct Longtail_VersionIndex** out_target_version)
-{
-    MAKE_LOG_CONTEXT_FIELDS(ctx)
-        LONGTAIL_LOGFIELD(hash_api, "%p"),
-        LONGTAIL_LOGFIELD(source_version, "%p"),
-        LONGTAIL_LOGFIELD(version_diff, "%p"),
-        LONGTAIL_LOGFIELD(out_target_version, "%p")
-    MAKE_LOG_CONTEXT_WITH_FIELDS(ctx, 0, LONGTAIL_LOG_LEVEL_DEBUG)
-
-    LONGTAIL_VALIDATE_INPUT(ctx, source_version != 0, return EINVAL)
-    LONGTAIL_VALIDATE_INPUT(ctx, version_diff != 0, return EINVAL)
-    LONGTAIL_VALIDATE_INPUT(ctx, out_target_version != 0, return EINVAL)
-    LONGTAIL_VALIDATE_INPUT(ctx, hash_api != 0, return EINVAL)
-    LONGTAIL_VALIDATE_INPUT(ctx, hash_api->GetIdentifier(hash_api) == *source_version->m_HashIdentifier, return EINVAL)
-}
-
 int Longtail_ChangeVersion(
     struct Longtail_BlockStoreAPI* block_store_api,
     struct Longtail_StorageAPI* version_storage_api,
