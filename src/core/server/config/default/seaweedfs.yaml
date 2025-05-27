@@ -1,10 +1,10 @@
 connection:
   master:
-    host: "localhost"
+    host: "master"
     port: 9333
     tls: false
   filer:
-    host: "localhost"
+    host: "filer"
     port: 8888
     tls: false
 
