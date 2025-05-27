@@ -6,24 +6,17 @@ call arch_helper.bat
 rm -rf dist
 
 mkdir dist
-mkdir dist\!PLATFORM!
-mkdir dist\!PLATFORM!\debug
-mkdir dist\!PLATFORM!\release
+mkdir dist\debug
+mkdir dist\release
 
-@REM copy build\artifacts\!PLATFORM!-cmd-debug\!PLATFORM!\longtail\debug\longtail.exe dist\longtail_debug.exe
-@REM copy build\artifacts\!PLATFORM!-cmd-release\!PLATFORM!\longtail\release\longtail.exe dist\longtail.exe
-
-copy build\!PLATFORM!\longtail\debug\longtail.dll dist\!PLATFORM!\debug\longtail.dll
-copy build\!PLATFORM!\longtail\debug\longtail.pdb dist\!PLATFORM!\debug\longtail.pdb
-copy build\!PLATFORM!\longtail\debug\longtail.lib dist\!PLATFORM!\debug\longtail.lib
-copy build\!PLATFORM!\longtail\debug\longtail.exp dist\!PLATFORM!\debug\longtail.exp
-copy build\!PLATFORM!\longtail\release\longtail.dll dist\!PLATFORM!\release\longtail.dll
-copy build\!PLATFORM!\longtail\release\longtail.pdb dist\!PLATFORM!\release\longtail.pdb
-copy build\!PLATFORM!\longtail\release\longtail.lib dist\!PLATFORM!\release\longtail.lib
-copy build\!PLATFORM!\longtail\release\longtail.exp dist\!PLATFORM!\release\longtail.exp
-
-@REM copy build\!PLATFORM!\longtail_static\debug\liblongtail_static.a dist\!PLATFORM!\debug\liblongtail.a
-@REM copy build\!PLATFORM!\longtail_static\release\liblongtail_static.a dist\!PLATFORM!\release\liblongtail.a
+copy build\!PLATFORM!\longtail\debug\longtail.dll dist\debug\longtail.dll
+copy build\!PLATFORM!\longtail\debug\longtail.pdb dist\debug\longtail.pdb
+copy build\!PLATFORM!\longtail\debug\longtail.lib dist\debug\longtail.lib
+copy build\!PLATFORM!\longtail\debug\longtail.exp dist\debug\longtail.exp
+copy build\!PLATFORM!\longtail\release\longtail.dll dist\release\longtail.dll
+copy build\!PLATFORM!\longtail\release\longtail.pdb dist\release\longtail.pdb
+copy build\!PLATFORM!\longtail\release\longtail.lib dist\release\longtail.lib
+copy build\!PLATFORM!\longtail\release\longtail.exp dist\release\longtail.exp
 
 mkdir dist\include
 mkdir dist\include\src

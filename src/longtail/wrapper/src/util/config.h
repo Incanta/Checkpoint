@@ -26,6 +26,6 @@ std::string GetGlobalConfigVar(const std::string &varName);
 std::string GetWorkspaceConfigVar(Checkpoint::Workspace *workspace, const std::string &varName);
 
 void SetGlobalConfigVar(const std::string &varName, const std::string &value);
-void SetWorkspaceConfigVar(Checkpoint::Workspace *workspace, const std::string &varName, const std::string &value););
+void SetWorkspaceConfigVar(Checkpoint::Workspace *workspace, const std::string &varName, const std::string &value);
 
 }  // namespace CheckpointConfig

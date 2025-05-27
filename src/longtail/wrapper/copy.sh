@@ -1,18 +1,49 @@
 #!/bin/bash
 
+USE_DEBUG_LIBS=false
+if [[ "$1" == "debug" ]]; then
+  USE_DEBUG_LIBS=true
+fi
+
+LIB_FOLDER_LOWERCASE=release
+if [[ "$USE_DEBUG_LIBS" == "true" ]]; then
+  LIB_FOLDER_LOWERCASE=debug
+fi
+
+LIB_FOLDER_PASCALCASE=Release
+if [[ "$USE_DEBUG_LIBS" == "true" ]]; then
+  LIB_FOLDER_PASCALCASE=Debug
+fi
+
+UNAME_RESPONSE=$(uname -s)
+if [[ "$UNAME_RESPONSE" == "Linux" ]]; then
+  OS_NAME="linux"
+elif [[ "$UNAME_RESPONSE" == "Darwin" ]]; then
+  OS_NAME="macos"
+else
+  OS_NAME="windows"
+fi
+
 output_dirs=(
   "../../../core/libraries"
   "../../../unreal/Source/ThirdParty/CheckpointLibrary"
 )
 
-for dir in "${output_dirs[@]}"; do
-  rm -rf $dir
-  mkdir -p $dir/win64
-  cp -f ../longtail/win32_x64/debug/longtail.* $dir/win64
-  cp -f ./Debug/* $dir/win64
+if [[ "$OS_NAME" == "windows" ]]; then
+  EXT_NAME=".dll"
+else
+  EXT_NAME=".so"
+fi
 
-  cp -f ./_deps/cpr-build/cpr/Debug/cpr.dll $dir/win64
-  cp -f ./_deps/curl-build/lib/Debug/libcurl-d.dll $dir/win64
-  cp -f ./_deps/zlib-build/Debug/zlib.dll $dir/win64
+for dir in "${output_dirs[@]}"; do
+  OUTPUT_DIR="$dir/$OS_NAME"
+  rm -rf $OUTPUT_DIR
+  mkdir -p $OUTPUT_DIR
+  cp -f ../longtail/${LIB_FOLDER_LOWERCASE}/longtail.* $OUTPUT_DIR
+  cp -f ./${LIB_FOLDER_PASCALCASE}/* $OUTPUT_DIR
+
+  cp -f ./_deps/cpr-build/cpr/${LIB_FOLDER_PASCALCASE}/cpr${EXT_NAME} $OUTPUT_DIR
+  cp -f ./_deps/curl-build/lib/${LIB_FOLDER_PASCALCASE}/libcurl-d${EXT_NAME} $OUTPUT_DIR
+  cp -f ./_deps/zlib-build/${LIB_FOLDER_PASCALCASE}/zlibd1${EXT_NAME} $OUTPUT_DIR
   cp -f ../src/exposed/exposed.h $dir/checkpoint.h
 done

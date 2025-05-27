@@ -37,7 +37,7 @@ target_include_directories(LongtailWrapper PRIVATE
   ${SQLite3_INCLUDE_DIRS}
 )
 
-find_library(LongtailLibrary longtail PATHS longtail/win32_x64/debug/)
+find_library(LongtailLibrary longtail PATHS longtail/debug/)
 
 target_link_libraries(
   LongtailWrapper
@@ -46,55 +46,8 @@ target_link_libraries(
   ${SQLite3_LIBRARIES}
 )
 
-# Generate migrations.h header file from SQL migration files
-set(MIGRATIONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/prisma/migrations")
-set(MIGRATIONS_HEADER "${CMAKE_CURRENT_BINARY_DIR}/include/migrations.h")
-
 # Create include directory in build dir
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include")
-
-# Debug output to confirm paths
-message(STATUS "Migrations source dir: ${MIGRATIONS_DIR}")
-message(STATUS "Migrations header output: ${MIGRATIONS_HEADER}")
-
-# Custom command to generate the migrations.h file
-add_custom_command(
-  OUTPUT ${MIGRATIONS_HEADER}
-  COMMAND ${CMAKE_COMMAND} -E echo "Running migration generation script..."
-  COMMAND ${CMAKE_COMMAND}
-    -DMIGRATIONS_DIR=${MIGRATIONS_DIR}
-    -DMIGRATIONS_HEADER=${MIGRATIONS_HEADER}
-    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateMigrations.cmake"
-  COMMENT "Generating migrations.h from SQL files"
-  # Make it depend on all SQL files in the migrations directory
-  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateMigrations.cmake"
-          "$<TARGET_PROPERTY:scan_migrations,MIGRATION_DEPENDENCIES>"
-  VERBATIM
-)
-
-# Create a "dummy" custom target to scan for migration files
-add_custom_target(scan_migrations
-  COMMAND ${CMAKE_COMMAND} -E echo "Scanning for migration files..."
-  COMMAND ${CMAKE_COMMAND}
-    -DMIGRATIONS_DIR=${MIGRATIONS_DIR}
-    -DTARGET=scan_migrations
-    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ScanMigrations.cmake"
-  COMMENT "Scanning for migration file changes"
-)
-
-# Make sure migrations are generated before building
-add_custom_target(generate_migrations ALL DEPENDS ${MIGRATIONS_HEADER})
-add_dependencies(generate_migrations scan_migrations)
-add_dependencies(LongtailWrapper generate_migrations)
-
-# Force migrations.h to be created during configure time for better IDE integration
-execute_process(
-  COMMAND ${CMAKE_COMMAND} -E echo "Initial generation of migrations.h"
-  COMMAND ${CMAKE_COMMAND}
-    -DMIGRATIONS_DIR=${MIGRATIONS_DIR}
-    -DMIGRATIONS_HEADER=${MIGRATIONS_HEADER}
-    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateMigrations.cmake"
-)
 
 # Add the generated header directory to include paths
 target_include_directories(LongtailWrapper PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/include")
@@ -112,7 +65,7 @@ endif()
 # )
 
 # Install the longtail library files to core/libraries/
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/longtail/win32_x64/debug/
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/longtail/debug/
         DESTINATION ${CMAKE_INSTALL_PREFIX}
         FILES_MATCHING PATTERN "longtail.*")
 

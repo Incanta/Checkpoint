@@ -13,16 +13,13 @@ fi
 
 . arch_helper.sh $ARCH
 
-mkdir -p dist
+rm -rf dist
 
-cp build/artifacts/${PLATFORM}-cmd-debug/${PLATFORM}/longtail/debug/longtail dist/longtail_debug
-cp build/artifacts/${PLATFORM}-cmd-release/${PLATFORM}/longtail/release/longtail dist/longtail
+mkdir -p dist/debug
+mkdir -p dist/release
 
-cp build/artifacts/${PLATFORM}-shared_lib-debug/${PLATFORM}/longtail/debug/longtail.so dist/longtail_${PLATFORM}_debug.so
-cp build/artifacts/${PLATFORM}-shared_lib-release/${PLATFORM}/longtail/release/longtail.so dist/longtail_${PLATFORM}.so
-
-cp build/artifacts/${PLATFORM}-static_lib-debug/${PLATFORM}/longtail_static/debug/liblongtail_static.a dist/liblongtail_${PLATFORM}_debug.a
-cp build/artifacts/${PLATFORM}-static_lib-release/${PLATFORM}/longtail_static/release/liblongtail_static.a dist/liblongtail_${PLATFORM}.a
+cp build/${PLATFORM}/longtail/debug/longtail.so dist/debug/longtail.so
+cp build/${PLATFORM}/longtail/release/longtail.so dist/release/longtail.so
 
 mkdir dist/include
 mkdir dist/include/src
@@ -50,6 +47,7 @@ mkdir dist/include/lib/ratelimitedprogress
 mkdir dist/include/lib/shareblockstore
 mkdir dist/include/lib/zstd
 cp src/*.h dist/include/src
+cp lib/longtail_platform.h dist/include/lib
 cp lib/archiveblockstore/*.h dist/include/lib/archiveblockstore
 cp lib/atomiccancel/*.h dist/include/lib/atomiccancel
 cp lib/bikeshed/*.h dist/include/lib/bikeshed
