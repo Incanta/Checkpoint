@@ -39,7 +39,7 @@ target_include_directories(LongtailWrapper PRIVATE
 )
 
 find_library(LongtailLibrary
-  NAMES longtail longtail.dll longtail.so longtail.dylib
+  longtail
   PATHS ${CMAKE_CURRENT_SOURCE_DIR}/longtail/debug/)
 
 target_link_libraries(

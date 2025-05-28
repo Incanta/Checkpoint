@@ -18,10 +18,8 @@ rm -rf dist
 mkdir -p dist/debug
 mkdir -p dist/release
 
-cp build/${PLATFORM}/longtail/debug/longtail.so dist/debug/longtail.so
-ln -s dist/debug/longtail.so dist/debug/liblongtail.so
-cp build/${PLATFORM}/longtail/release/longtail.so dist/release/longtail.so
-ln -s dist/release/longtail.so dist/release/liblongtail.so
+cp build/${PLATFORM}/longtail/debug/longtail.so dist/debug/liblongtail.so
+cp build/${PLATFORM}/longtail/release/longtail.so dist/release/liblongtail.so
 
 mkdir dist/include
 mkdir dist/include/src
