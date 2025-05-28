@@ -11,7 +11,10 @@
 #include <inttypes.h>
 #include <stdarg.h>
 #include <errno.h>
+
+#if defined(_WIN32)
 #include <Windows.h>
+#endif
 
 #if !defined(alloca)
     #if defined(__GLIBC__) || defined(__sun) || defined(__CYGWIN__)

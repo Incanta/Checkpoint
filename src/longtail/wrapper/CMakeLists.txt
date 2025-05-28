@@ -21,6 +21,7 @@ FetchContent_MakeAvailable(sqlite3)
 add_library(sqlite3 STATIC
   ${sqlite3_SOURCE_DIR}/sqlite3.c
 )
+set_target_properties(sqlite3 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(sqlite3 PUBLIC ${sqlite3_SOURCE_DIR})
 set(SQLite3_INCLUDE_DIRS ${sqlite3_SOURCE_DIR})
 set(SQLite3_LIBRARIES sqlite3)
@@ -37,7 +38,9 @@ target_include_directories(LongtailWrapper PRIVATE
   ${SQLite3_INCLUDE_DIRS}
 )
 
-find_library(LongtailLibrary longtail PATHS longtail/debug/)
+find_library(LongtailLibrary
+  NAMES longtail.dll longtail.so longtail.dylib
+  PATHS ${CMAKE_CURRENT_SOURCE_DIR}/longtail/debug/)
 
 target_link_libraries(
   LongtailWrapper

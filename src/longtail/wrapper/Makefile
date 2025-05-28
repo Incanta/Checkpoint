@@ -2,5 +2,5 @@ build:
 	cd .. && ./scripts/generate_migrations.sh && cd -
 	cmake --build .
 
-install:
+copy:
 	../copy.sh debug

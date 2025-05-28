@@ -35,15 +35,30 @@ else
   EXT_NAME=".so"
 fi
 
-for dir in "${output_dirs[@]}"; do
-  OUTPUT_DIR="$dir/$OS_NAME"
-  rm -rf $OUTPUT_DIR
-  mkdir -p $OUTPUT_DIR
-  cp -f ../longtail/${LIB_FOLDER_LOWERCASE}/longtail.* $OUTPUT_DIR
-  cp -f ./${LIB_FOLDER_PASCALCASE}/* $OUTPUT_DIR
+if [[ "$OS_NAME" == "windows" ]]; then
+  for dir in "${output_dirs[@]}"; do
+    OUTPUT_DIR="$dir/$OS_NAME"
+    rm -rf $OUTPUT_DIR
+    mkdir -p $OUTPUT_DIR
+    cp -f ../longtail/${LIB_FOLDER_LOWERCASE}/longtail.* $OUTPUT_DIR
+    cp -f ./${LIB_FOLDER_PASCALCASE}/* $OUTPUT_DIR
 
-  cp -f ./_deps/cpr-build/cpr/${LIB_FOLDER_PASCALCASE}/cpr${EXT_NAME} $OUTPUT_DIR
-  cp -f ./_deps/curl-build/lib/${LIB_FOLDER_PASCALCASE}/libcurl-d${EXT_NAME} $OUTPUT_DIR
-  cp -f ./_deps/zlib-build/${LIB_FOLDER_PASCALCASE}/zlibd1${EXT_NAME} $OUTPUT_DIR
-  cp -f ../src/exposed/exposed.h $dir/checkpoint.h
-done
+    cp -f ./_deps/cpr-build/cpr/${LIB_FOLDER_PASCALCASE}/cpr${EXT_NAME} $OUTPUT_DIR
+    cp -f ./_deps/curl-build/lib/${LIB_FOLDER_PASCALCASE}/libcurl-d${EXT_NAME} $OUTPUT_DIR
+    cp -f ./_deps/zlib-build/${LIB_FOLDER_PASCALCASE}/zlibd1${EXT_NAME} $OUTPUT_DIR
+    cp -f ../src/exposed/exposed.h $dir/checkpoint.h
+  done
+else
+  for dir in "${output_dirs[@]}"; do
+    OUTPUT_DIR="$dir/$OS_NAME"
+    rm -rf $OUTPUT_DIR
+    mkdir -p $OUTPUT_DIR
+    cp -f ../longtail/${LIB_FOLDER_LOWERCASE}/*longtail.* $OUTPUT_DIR
+    cp -f ./libLongtailWrapper* $OUTPUT_DIR
+
+    cp -f ./_deps/cpr-build/cpr/libcpr${EXT_NAME}* $OUTPUT_DIR
+    cp -f ./_deps/curl-build/lib//libcurl-d${EXT_NAME}* $OUTPUT_DIR
+    cp -f ./_deps/zlib-build/libz${EXT_NAME}* $OUTPUT_DIR
+    cp -f ../src/exposed/exposed.h $dir/checkpoint.h
+  done
+fi
