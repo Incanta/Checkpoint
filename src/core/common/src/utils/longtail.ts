@@ -1,5 +1,6 @@
 import { dlopen, FFIType } from "bun:ffi";
 import path from "path";
+import os from "os";
 
 export type LongtailLogLevel = "debug" | "info" | "warn" | "error" | "off";
 
@@ -22,15 +23,38 @@ export function GetLogLevel(value: LongtailLogLevel): number {
 
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export function CreateLongtailLibrary() {
+  let folder: string;
+  let library: string;
+  switch (os.platform()) {
+    case "darwin": {
+      folder = "macos";
+      library = "libLongtailWrapper.dylib";
+      break;
+    }
+    case "linux": {
+      folder = "linux";
+      library = "libLongtailWrapper.so";
+      break;
+    }
+    case "win32": {
+      folder = "windows";
+      library = "LongtailWrapper.dll";
+      break;
+    }
+    default:
+      throw new Error(`Unsupported platform: ${os.platform()}`);
+  }
+
   process.env["PATH"] = `${process.env["PATH"]};${path.join(
     __dirname,
     "..",
     "..",
     "..",
-    "libraries"
+    "libraries",
+    folder
   )}`;
 
-  const { symbols: lib } = dlopen("LongtailWrapper.dll", {
+  const { symbols: lib } = dlopen(library, {
     SubmitAsync: {
       args: [
         FFIType.cstring,
