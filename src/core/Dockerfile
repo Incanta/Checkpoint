@@ -1,5 +1,11 @@
 FROM oven/bun:slim AS base
 
+RUN apt-get update
+RUN apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    libssl-dev \
+    libpsl-dev
 COPY package.json ./
 RUN mkdir client
 RUN mkdir server

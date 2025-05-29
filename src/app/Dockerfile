@@ -1,6 +1,6 @@
 # base
 # ----
-FROM node:20-bookworm-slim as base
+FROM node:20-bookworm-slim AS base
 
 RUN corepack enable
 
@@ -33,7 +33,7 @@ COPY --chown=node:node .env.defaults .env.defaults
 
 # api build
 # ---------
-FROM base as api_build
+FROM base AS api_build
 
 # If your api side build relies on build-time environment variables,
 # specify them here as ARGs. (But don't put secrets in your Dockerfile!)
@@ -45,7 +45,7 @@ RUN yarn rw build api
 
 # web prerender build
 # -------------------
-FROM api_build as web_build_with_prerender
+FROM api_build AS web_build_with_prerender
 
 ARG AUTH0_DOMAIN
 ARG AUTH0_CLIENT_ID
@@ -57,7 +57,7 @@ RUN yarn rw build web
 
 # web build
 # ---------
-FROM base as web_build
+FROM base AS web_build
 
 ARG AUTH0_DOMAIN
 ARG AUTH0_CLIENT_ID
@@ -69,7 +69,7 @@ RUN yarn rw build web --no-prerender
 
 # api serve
 # ---------
-FROM node:20-bookworm-slim as api_serve
+FROM node:20-bookworm-slim AS api_serve
 
 RUN corepack enable
 
@@ -114,7 +114,7 @@ CMD [ "node_modules/.bin/rw-server", "api" ]
 
 # web serve
 # ---------
-FROM node:20-bookworm-slim as web_serve
+FROM node:20-bookworm-slim AS web_serve
 
 RUN corepack enable
 
@@ -143,11 +143,11 @@ ENV NODE_ENV=production \
   API_PROXY_TARGET=http://api:8911
 
 # We use the shell form here for variable expansion.
-CMD "node_modules/.bin/rw-web-server" "--api-proxy-target" "$API_PROXY_TARGET"
+CMD [ "node_modules/.bin/rw-web-server", "--api-proxy-target", "$API_PROXY_TARGET" ]
 
 # console
 # -------
-FROM base as console
+FROM base AS console
 
 # To add more packages:
 #

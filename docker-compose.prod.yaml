@@ -157,6 +157,8 @@ services:
       - node_modules_backend:/home/bun/app/node_modules
     networks:
       - checkpoint
+    environment:
+      LD_LIBRARY_PATH: "/home/bun/app/libraries/linux"
 
 volumes:
   node_modules_redwood:

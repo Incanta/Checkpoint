@@ -1,6 +1,7 @@
 import { dlopen, FFIType } from "bun:ffi";
 import path from "path";
 import os from "os";
+import fs from "fs";
 
 export type LongtailLogLevel = "debug" | "info" | "warn" | "error" | "off";
 
@@ -45,14 +46,11 @@ export function CreateLongtailLibrary() {
       throw new Error(`Unsupported platform: ${os.platform()}`);
   }
 
-  process.env["PATH"] = `${process.env["PATH"]};${path.join(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "libraries",
-    folder
-  )}`;
+  const libPath = path.join(__dirname, "..", "..", "..", "libraries", folder);
+  process.env["PATH"] = `${process.env["PATH"]};${libPath}`;
+  process.env[
+    "LD_LIBRARY_PATH"
+  ] = `${process.env["LD_LIBRARY_PATH"]};${libPath}`;
 
   const { symbols: lib } = dlopen(library, {
     SubmitAsync: {
