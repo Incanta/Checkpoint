@@ -1,6 +1,8 @@
 import type { Decoded } from "@redwoodjs/api";
 import { AuthenticationError, ForbiddenError } from "@redwoodjs/graphql-server";
 import { db } from "./db";
+import Session from "supertokens-node/recipe/session";
+import supertokens from "supertokens-node";
 
 /**
  * Represents the user attributes returned by the decoding the
@@ -41,28 +43,41 @@ export const getCurrentUser = async (
   jwt: { schema: string; token: string; type: string },
 ): Promise<RedwoodUser | null> => {
   if (!decoded) {
+    console.warn("No decoded token found, user is not authenticated.");
     return null;
   }
 
-  const base = (process.env as Record<string, string>)["AUTH0_NAMESPACE"];
-  const email = decoded[`${base}/email`] as string;
-  const username = decoded[`${base}/username`] as string;
+  const sessionInfo = await Session.getSessionInformation(decoded.sessionHandle as string);
+  const userResult = await supertokens.getUsersNewestFirst({
+    tenantId: sessionInfo.tenantId,
+    query: {
+      userId: sessionInfo.userId,
+    }
+  });
 
-  if (!email || !username) {
+  if (userResult.users.length === 0) {
+    console.warn("No user found for session:", sessionInfo);
+    return null;
+  }
+
+  const email = userResult.users[0].user?.email as string;
+
+  if (!email) {
+    console.warn("No email found for user:", userResult.users[0]);
     return null;
   }
 
   let user = await db.user.findUnique({
     where: {
-      username,
+      email,
     },
   });
 
   if (!user) {
     user = await db.user.create({
       data: {
-        name: username,
-        username,
+        name: email,
+        username: email,
         email,
       },
     });
@@ -88,8 +103,8 @@ export const getCurrentUser = async (
  *
  * @returns {boolean} - If the currentUser is authenticated
  */
-export const isAuthenticated = (): boolean => {
-  return !!context.currentUser;
+export const isAuthenticated = (context?: Record<string, unknown>): boolean => {
+  return !!context?.currentUser;
 };
 
 /**
@@ -106,34 +121,36 @@ type AllowedRoles = string | string[] | undefined;
  * @returns {boolean} - Returns true if the currentUser is logged in and assigned one of the given roles,
  * or when no roles are provided to check against. Otherwise returns false.
  */
-export const hasRole = (roles: AllowedRoles): boolean => {
-  if (!isAuthenticated()) {
+export const hasRole = (roles: AllowedRoles, context?: Record<string, unknown>): boolean => {
+  if (!isAuthenticated(context)) {
     return false;
   }
 
-  const currentUserRoles = context.currentUser?.roles;
+  // we don't use this function
 
-  if (typeof roles === "string") {
-    if (typeof currentUserRoles === "string") {
-      // roles to check is a string, currentUser.roles is a string
-      return currentUserRoles === roles;
-    } else if (Array.isArray(currentUserRoles)) {
-      // roles to check is a string, currentUser.roles is an array
-      return currentUserRoles?.some((allowedRole) => roles === allowedRole);
-    }
-  }
+  // const currentUserRoles = (context.currentUser as RedwoodUser)?.roles;
 
-  if (Array.isArray(roles)) {
-    if (Array.isArray(currentUserRoles)) {
-      // roles to check is an array, currentUser.roles is an array
-      return currentUserRoles?.some((allowedRole) =>
-        roles.includes(allowedRole),
-      );
-    } else if (typeof currentUserRoles === "string") {
-      // roles to check is an array, currentUser.roles is a string
-      return roles.some((allowedRole) => currentUserRoles === allowedRole);
-    }
-  }
+  // if (typeof roles === "string") {
+  //   if (typeof currentUserRoles === "string") {
+  //     // roles to check is a string, currentUser.roles is a string
+  //     return currentUserRoles === roles;
+  //   } else if (Array.isArray(currentUserRoles)) {
+  //     // roles to check is a string, currentUser.roles is an array
+  //     return currentUserRoles?.some((allowedRole) => roles === allowedRole);
+  //   }
+  // }
+
+  // if (Array.isArray(roles)) {
+  //   if (Array.isArray(currentUserRoles)) {
+  //     // roles to check is an array, currentUser.roles is an array
+  //     return currentUserRoles?.some((allowedRole) =>
+  //       roles.includes(allowedRole),
+  //     );
+  //   } else if (typeof currentUserRoles === "string") {
+  //     // roles to check is an array, currentUser.roles is a string
+  //     return roles.some((allowedRole) => currentUserRoles === allowedRole);
+  //   }
+  // }
 
   // roles not found
   return false;
@@ -153,12 +170,12 @@ export const hasRole = (roles: AllowedRoles): boolean => {
  *
  * @see https://github.com/redwoodjs/redwood/tree/main/packages/auth for examples
  */
-export const requireAuth = ({ roles }: { roles?: AllowedRoles } = {}) => {
-  if (!isAuthenticated()) {
+export const requireAuth = ({ roles, context }: { roles?: AllowedRoles, context?: Record<string, unknown> } = {}) => {
+  if (!isAuthenticated(context)) {
     throw new AuthenticationError("You don't have permission to do that.");
   }
 
-  if (roles && !hasRole(roles)) {
+  if (roles && !hasRole(roles, context)) {
     throw new ForbiddenError("You don't have access to do that.");
   }
 };

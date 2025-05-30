@@ -1,4 +1,4 @@
-import { authDecoder } from "@redwoodjs/auth-auth0-api";
+import { authDecoder } from "@redwoodjs/auth-supertokens-api";
 import { createGraphQLHandler } from "@redwoodjs/graphql-server";
 
 import directives from "src/directives/**/*.{js,ts}";

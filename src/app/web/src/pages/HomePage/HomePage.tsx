@@ -1,4 +1,4 @@
-import { useAuth } from "src/auth";
+import { useAuth } from "src/authentication";
 
 import { gql, useMutation, useQuery } from "@apollo/client";
 

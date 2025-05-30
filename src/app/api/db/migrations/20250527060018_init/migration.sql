@@ -148,6 +148,7 @@ CREATE TABLE "Workspace" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "User_username_key" ON "User"("username");
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Org_name_key" ON "Org"("name");

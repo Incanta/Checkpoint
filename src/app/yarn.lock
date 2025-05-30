@@ -121,13 +121,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@auth0/auth0-spa-js@npm:^2":
-  version: 2.1.3
-  resolution: "@auth0/auth0-spa-js@npm:2.1.3"
-  checksum: 10c0/781d474564731f96182ff78d85e1d13841e924eba5d2e9a42593db28c66e2a6c59db1755c8c906698f0cd6d33d6e61501f0e0ab57ec981700966246944cccf74
-  languageName: node
-  linkType: hard
-
 "@babel/cli@npm:7.26.4":
   version: 7.26.4
   resolution: "@babel/cli@npm:7.26.4"
@@ -4485,33 +4478,35 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@redwoodjs/auth-auth0-api@npm:8.6.1":
+"@redwoodjs/auth-supertokens-api@npm:8.6.1":
   version: 8.6.1
-  resolution: "@redwoodjs/auth-auth0-api@npm:8.6.1"
+  resolution: "@redwoodjs/auth-supertokens-api@npm:8.6.1"
   dependencies:
     jsonwebtoken: "npm:9.0.2"
     jwks-rsa: "npm:3.1.0"
-  checksum: 10c0/06c6a90a37fac3e37751a688ca2f079dc920603fc7154e19854139c77084339714e71c4f1d7ac994d2ff2720b6e85ada4a4b1aff26b7d86f3118b936f47853a2
+  peerDependencies:
+    supertokens-node: 15.2.3
+  checksum: 10c0/bd6008213f63b190e9764959f95c702a0d37b64a2d62156f314f1d0d504d4d12ef39881936afffee4d577a2c8190630e0d9eedf9a9a1eb17ffe149fdb9b504b2
   languageName: node
   linkType: hard
 
-"@redwoodjs/auth-auth0-setup@npm:8.6.1":
+"@redwoodjs/auth-supertokens-setup@npm:8.6.1":
   version: 8.6.1
-  resolution: "@redwoodjs/auth-auth0-setup@npm:8.6.1"
+  resolution: "@redwoodjs/auth-supertokens-setup@npm:8.6.1"
   dependencies:
     "@redwoodjs/cli-helpers": "npm:8.6.1"
-  checksum: 10c0/f66186c15e2b733bfd2f524d1664311787c2c7c32b841359ffd96e1e805910363e8ac2c79925086db29ff4539cfd771cdff69edcecec49fed130356a364b4b26
+  checksum: 10c0/367ae7f3c3ffd9d1bd62fa3584d83bf43776343d318a9424e7af87e32f5689d924d62808f6bc6655ab57e47f435efb1b1718d595ac48814dea4e9604600fd0ab
   languageName: node
   linkType: hard
 
-"@redwoodjs/auth-auth0-web@npm:8.6.1":
+"@redwoodjs/auth-supertokens-web@npm:8.6.1":
   version: 8.6.1
-  resolution: "@redwoodjs/auth-auth0-web@npm:8.6.1"
+  resolution: "@redwoodjs/auth-supertokens-web@npm:8.6.1"
   dependencies:
     "@redwoodjs/auth": "npm:8.6.1"
   peerDependencies:
-    "@auth0/auth0-spa-js": 2.1.3
-  checksum: 10c0/409b4fd84b591005d04826e460b1494dc8ec71fab40fd841968e59a20110eb912042b52589d953b23366ccde9a30d689ae3f282b5c24185e9f8e876aedd1a186
+    supertokens-auth-react: 0.39.1
+  checksum: 10c0/485106e1f7c0dc766975a6f667db440be9d5998ad388bbfa3b5b95196935bf7d26e0a6378601f14444be06d6574edb581cf4e0f72b4924055e53a33f1dfcdd15
   languageName: node
   linkType: hard
 
@@ -6761,10 +6756,12 @@ __metadata:
     "@prisma/client": "npm:6.2.1"
     "@redwoodjs/api": "npm:8.6.1"
     "@redwoodjs/api-server": "npm:8.6.1"
-    "@redwoodjs/auth-auth0-api": "npm:8.6.1"
+    "@redwoodjs/auth-supertokens-api": "npm:8.6.1"
     "@redwoodjs/graphql-server": "npm:8.6.1"
+    inflation: "npm:^2.1.0"
     njwt: "npm:^2.0.1"
     prisma: "npm:6.2.1"
+    supertokens-node: "npm:^15"
   languageName: unknown
   linkType: soft
 
@@ -7122,6 +7119,17 @@ __metadata:
   version: 4.10.2
   resolution: "axe-core@npm:4.10.2"
   checksum: 10c0/0e20169077de96946a547fce0df39d9aeebe0077f9d3eeff4896518b96fde857f80b98f0d4279274a7178791744dd5a54bb4f322de45b4f561ffa2586ff9a09d
+  languageName: node
+  linkType: hard
+
+"axios@npm:^1.6.0":
+  version: 1.9.0
+  resolution: "axios@npm:1.9.0"
+  dependencies:
+    follow-redirects: "npm:^1.15.6"
+    form-data: "npm:^4.0.0"
+    proxy-from-env: "npm:^1.1.0"
+  checksum: 10c0/9371a56886c2e43e4ff5647b5c2c3c046ed0a3d13482ef1d0135b994a628c41fbad459796f101c655e62f0c161d03883454474d2e435b2e021b1924d9f24994c
   languageName: node
   linkType: hard
 
@@ -7504,6 +7512,15 @@ __metadata:
   dependencies:
     resolve: "npm:^1.17.0"
   checksum: 10c0/06c43adf3cb1939825ab9a4ac355b23272820ee421a20d04f62e0dabd9ea305e497b97f3ac027f87d53c366483aafe8673bbe1aaa5e41cd69eeafa65ac5fda6e
+  languageName: node
+  linkType: hard
+
+"browser-tabs-lock@npm:^1.3.0":
+  version: 1.3.0
+  resolution: "browser-tabs-lock@npm:1.3.0"
+  dependencies:
+    lodash: "npm:>=4.17.21"
+  checksum: 10c0/b1f9cbd221725cf3228daf42360ea6a97f69b29e0475ef734bc5a6bd5c27b61f99db716c49808988a1c735d828207dcaa3a8802e605d0195538fbf9e25d1753b
   languageName: node
   linkType: hard
 
@@ -8311,7 +8328,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"content-type@npm:~1.0.4, content-type@npm:~1.0.5":
+"content-type@npm:^1.0.5, content-type@npm:~1.0.4, content-type@npm:~1.0.5":
   version: 1.0.5
   resolution: "content-type@npm:1.0.5"
   checksum: 10c0/b76ebed15c000aee4678c3707e0860cb6abd4e680a598c0a26e17f0bfae723ec9cc2802f0ff1bc6e4d80603719010431d2231018373d4dde10f9ccff9dadf5af
@@ -8329,6 +8346,13 @@ __metadata:
   version: 1.0.6
   resolution: "cookie-signature@npm:1.0.6"
   checksum: 10c0/b36fd0d4e3fef8456915fcf7742e58fbfcc12a17a018e0eb9501c9d5ef6893b596466f03b0564b81af29ff2538fd0aa4b9d54fe5ccbfb4c90ea50ad29fe2d221
+  languageName: node
+  linkType: hard
+
+"cookie@npm:0.4.0":
+  version: 0.4.0
+  resolution: "cookie@npm:0.4.0"
+  checksum: 10c0/71508a1c8a4e97bb88f42635542ef24ebe7e713f82573ac61e9b289616334d14bfb28210d7979d9ada24b0254f5fb563af938cac13bc8c0c3f60f47a2257f791
   languageName: node
   linkType: hard
 
@@ -8500,7 +8524,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"cross-fetch@npm:^3.1.5":
+"cross-fetch@npm:^3.1.5, cross-fetch@npm:^3.1.6":
   version: 3.2.0
   resolution: "cross-fetch@npm:3.2.0"
   dependencies:
@@ -8559,6 +8583,13 @@ __metadata:
     randombytes: "npm:^2.1.0"
     randomfill: "npm:^1.0.4"
   checksum: 10c0/184a2def7b16628e79841243232ab5497f18d8e158ac21b7ce90ab172427d0a892a561280adc08f9d4d517bce8db2a5b335dc21abb970f787f8e874bd7b9db7d
+  languageName: node
+  linkType: hard
+
+"crypto-js@npm:^4.1.1":
+  version: 4.2.0
+  resolution: "crypto-js@npm:4.2.0"
+  checksum: 10c0/8fbdf9d56f47aea0794ab87b0eb9833baf80b01a7c5c1b0edc7faf25f662fb69ab18dc2199e2afcac54670ff0cd9607a9045a3f7a80336cccd18d77a55b9fdf0
   languageName: node
   linkType: hard
 
@@ -8697,6 +8728,13 @@ __metadata:
   dependencies:
     "@babel/runtime": "npm:^7.21.0"
   checksum: 10c0/e4b521fbf22bc8c3db332bbfb7b094fd3e7627de0259a9d17c7551e2d2702608a7307a449206065916538e384f37b181565447ce2637ae09828427aed9cb5581
+  languageName: node
+  linkType: hard
+
+"dayjs@npm:^1.11.9":
+  version: 1.11.13
+  resolution: "dayjs@npm:1.11.13"
+  checksum: 10c0/a3caf6ac8363c7dade9d1ee797848ddcf25c1ace68d9fe8678ecf8ba0675825430de5d793672ec87b24a69bf04a1544b176547b2539982275d5542a7955f35b7
   languageName: node
   linkType: hard
 
@@ -11360,7 +11398,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"https-proxy-agent@npm:^5.0.1":
+"https-proxy-agent@npm:^5.0.0, https-proxy-agent@npm:^5.0.1":
   version: 5.0.1
   resolution: "https-proxy-agent@npm:5.0.1"
   dependencies:
@@ -11495,6 +11533,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"inflation@npm:^2.0.0, inflation@npm:^2.1.0":
+  version: 2.1.0
+  resolution: "inflation@npm:2.1.0"
+  checksum: 10c0/aadfcb8047a7e00d644e2e195f901dd9d7266c2be2326b7f8f6a99298f14916f1e322d00108a7e2778d6e76a8dc2174ddb9ac14bcdfe4f4866dfd612b695ab5d
+  languageName: node
+  linkType: hard
+
 "inflight@npm:^1.0.4":
   version: 1.0.6
   resolution: "inflight@npm:1.0.6"
@@ -11550,6 +11595,13 @@ __metadata:
     hasown: "npm:^2.0.2"
     side-channel: "npm:^1.1.0"
   checksum: 10c0/03966f5e259b009a9bf1a78d60da920df198af4318ec004f57b8aef1dd3fe377fbc8cce63a96e8c810010302654de89f9e19de1cd8ad0061d15be28a695465c7
+  languageName: node
+  linkType: hard
+
+"intl-tel-input@npm:^17.0.19":
+  version: 17.0.21
+  resolution: "intl-tel-input@npm:17.0.21"
+  checksum: 10c0/2c6c0331046f69fcf880812ab766266e568c3e8b44d50eb628e5bb305e73c2cf4b39965a3422efc54557f46cf983b5b91e9d6c9965ec9513c6eb8c47a790b8c3
   languageName: node
   linkType: hard
 
@@ -12656,7 +12708,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"jose@npm:^4.11.4, jose@npm:^4.14.6":
+"jose@npm:^4.11.4, jose@npm:^4.13.1, jose@npm:^4.14.6":
   version: 4.15.9
   resolution: "jose@npm:4.15.9"
   checksum: 10c0/4ed4ddf4a029db04bd167f2215f65d7245e4dc5f36d7ac3c0126aab38d66309a9e692f52df88975d99429e357e5fd8bab340ff20baab544d17684dd1d940a0f4
@@ -12925,7 +12977,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"jsonwebtoken@npm:9.0.2":
+"jsonwebtoken@npm:9.0.2, jsonwebtoken@npm:^9.0.0":
   version: 9.0.2
   resolution: "jsonwebtoken@npm:9.0.2"
   dependencies:
@@ -13089,6 +13141,13 @@ __metadata:
     prelude-ls: "npm:^1.2.1"
     type-check: "npm:~0.4.0"
   checksum: 10c0/effb03cad7c89dfa5bd4f6989364bfc79994c2042ec5966cb9b95990e2edee5cd8969ddf42616a0373ac49fac1403437deaf6e9050fbbaa3546093a59b9ac94e
+  languageName: node
+  linkType: hard
+
+"libphonenumber-js@npm:^1.9.44":
+  version: 1.12.8
+  resolution: "libphonenumber-js@npm:1.12.8"
+  checksum: 10c0/9c60d0f7b7b1c5bd85973fb80b8f7d7bbaf57fab2ca89b4f3712ad2e65ac7df8a3f52746a94104fffb618da4109f26fee07fc3225ac65dd17058b0d5d178cb47
   languageName: node
   linkType: hard
 
@@ -13304,7 +13363,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lodash@npm:4.17.21, lodash@npm:^4.17.14, lodash@npm:^4.17.15, lodash@npm:^4.17.20, lodash@npm:^4.17.21, lodash@npm:~4.17.0":
+"lodash@npm:4.17.21, lodash@npm:>=4.17.21, lodash@npm:^4.17.14, lodash@npm:^4.17.15, lodash@npm:^4.17.20, lodash@npm:^4.17.21, lodash@npm:~4.17.0":
   version: 4.17.21
   resolution: "lodash@npm:4.17.21"
   checksum: 10c0/d8cbea072bb08655bb4c989da418994b073a608dffa608b09ac04b43a791b12aeae7cd7ad919aa4c925f33b48490b5cfe6c1f71d827956071dae2e7bb3a6b74c
@@ -14077,6 +14136,13 @@ __metadata:
     util: "npm:^0.12.4"
     vm-browserify: "npm:^1.0.1"
   checksum: 10c0/e617f92f6af5a031fb9e670a04e1cf5d74e09ac46e182c784c5d5fff44c36d47f208ac01f267ec75d83c125a30e2c006090f676cd71d35e99a4c8a196a90cfff
+  languageName: node
+  linkType: hard
+
+"nodemailer@npm:^6.7.2":
+  version: 6.10.1
+  resolution: "nodemailer@npm:6.10.1"
+  checksum: 10c0/e81fde258ea4f4e5646e9e3eebe89294d007939999d2d1a8c96c5488fa00bf659e46cf76fccb2697e9aa6ef9807a1ed47ff2aef6ad30b795e3849b6997066d16
   languageName: node
   linkType: hard
 
@@ -14882,6 +14948,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"pkce-challenge@npm:^3.0.0":
+  version: 3.1.0
+  resolution: "pkce-challenge@npm:3.1.0"
+  dependencies:
+    crypto-js: "npm:^4.1.1"
+  checksum: 10c0/5ff04324159946d1712557103f9cc6484ab0b86078c55049f5da1d709ffd9e1093868b44fb3fa98b162b14a6410f894d19eb09b79a6de0317be0ac9c86408b74
+  languageName: node
+  linkType: hard
+
 "pkg-dir@npm:^3.0.0":
   version: 3.0.0
   resolution: "pkg-dir@npm:3.0.0"
@@ -15110,7 +15185,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"prop-types@npm:^15.7.2, prop-types@npm:^15.8.1":
+"prop-types@npm:*, prop-types@npm:^15.7.2, prop-types@npm:^15.8.1":
   version: 15.8.1
   resolution: "prop-types@npm:15.8.1"
   dependencies:
@@ -15146,6 +15221,13 @@ __metadata:
     module-not-found-error: "npm:^1.0.1"
     resolve: "npm:^1.11.1"
   checksum: 10c0/f2e57670ed57ef047720516f0ad2f88bfdba4aaa54139bf5d7fe6ec84bf91ec932f402c56439b44d3596743fd9405be4aac99a924eb897e3396c5be1a81672b0
+  languageName: node
+  linkType: hard
+
+"psl@npm:1.8.0":
+  version: 1.8.0
+  resolution: "psl@npm:1.8.0"
+  checksum: 10c0/b5f1956f7530860e1918e7238291689fdc3cab9c2c0cdbc47cde21addcc7f62495d794692cc1e43e54728d273f78037e8e73ac43009509a1a7f823341f4039c8
   languageName: node
   linkType: hard
 
@@ -15226,6 +15308,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"qr.js@npm:0.0.0":
+  version: 0.0.0
+  resolution: "qr.js@npm:0.0.0"
+  checksum: 10c0/1c6a4c7a58d04e52ec2fee99e39b680fdc5b2a510a981df42c36b716a8eac6634d130fc4d65af8f030f2a07dbf5fa046b97cdfa7456c250ebb50a73916efdcb5
+  languageName: node
+  linkType: hard
+
 "qs@npm:6.13.0":
   version: 6.13.0
   resolution: "qs@npm:6.13.0"
@@ -15235,7 +15324,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"qs@npm:^6.12.3":
+"qs@npm:^6.12.3, qs@npm:^6.9.4":
   version: 6.14.0
   resolution: "qs@npm:6.14.0"
   dependencies:
@@ -15402,6 +15491,18 @@ __metadata:
   version: 18.3.1
   resolution: "react-is@npm:18.3.1"
   checksum: 10c0/f2f1e60010c683479e74c63f96b09fb41603527cd131a9959e2aee1e5a8b0caf270b365e5ca77d4a6b18aae659b60a86150bb3979073528877029b35aecd2072
+  languageName: node
+  linkType: hard
+
+"react-qr-code@npm:^2.0.12":
+  version: 2.0.15
+  resolution: "react-qr-code@npm:2.0.15"
+  dependencies:
+    prop-types: "npm:^15.8.1"
+    qr.js: "npm:0.0.0"
+  peerDependencies:
+    react: "*"
+  checksum: 10c0/6a9d73918623eecbf6204da02bae1851b584f22f0724b2e5cf529a7eee991a757a211822146f670db63c21860ccb2d245b9288f48cd58ca2bff16de0dcdbdb25
   languageName: node
   linkType: hard
 
@@ -16027,7 +16128,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "root-workspace-0b6124@workspace:."
   dependencies:
-    "@redwoodjs/auth-auth0-setup": "npm:8.6.1"
+    "@redwoodjs/auth-supertokens-setup": "npm:8.6.1"
     "@redwoodjs/core": "npm:8.6.1"
     "@redwoodjs/project-config": "npm:8.6.1"
     "@typescript-eslint/parser": "npm:^8.22.0"
@@ -16150,6 +16251,13 @@ __metadata:
   dependencies:
     loose-envify: "npm:^1.1.0"
   checksum: 10c0/26383305e249651d4c58e6705d5f8425f153211aef95f15161c151f7b8de885f24751b377e4a0b3dd42cce09aad3f87a61dab7636859c0d89b7daf1a1e2a5c78
+  languageName: node
+  linkType: hard
+
+"scmp@npm:^2.1.0":
+  version: 2.1.0
+  resolution: "scmp@npm:2.1.0"
+  checksum: 10c0/2128efa993cd2e3e10e3ab6d574cc9993ac7aa30430527e5da830ab509ba15eae49d8ca918d6aa934915bbd5b863778b04178227be005b49d801c0ca6063d2e4
   languageName: node
   linkType: hard
 
@@ -17014,6 +17122,69 @@ __metadata:
   languageName: node
   linkType: hard
 
+"supertokens-auth-react@npm:~0.39.1":
+  version: 0.39.1
+  resolution: "supertokens-auth-react@npm:0.39.1"
+  dependencies:
+    intl-tel-input: "npm:^17.0.19"
+    prop-types: "npm:*"
+    react-qr-code: "npm:^2.0.12"
+    supertokens-js-override: "npm:^0.0.4"
+  peerDependencies:
+    react: ">=16.8.0"
+    react-dom: ">=16.8.0"
+    supertokens-web-js: ^0.10.0
+  checksum: 10c0/d3f08000a0fd76a63baa1bfa32edd9e38355d11f1a21e5d8b4e8f9e77320027596bb94d2046d43ac7dd2842626174b82f0f463b16e61031fbf2f8b4a66eb1856
+  languageName: node
+  linkType: hard
+
+"supertokens-js-override@npm:0.0.4, supertokens-js-override@npm:^0.0.4":
+  version: 0.0.4
+  resolution: "supertokens-js-override@npm:0.0.4"
+  checksum: 10c0/75468560e2f9fa0386e38d22f80aea705342f728db877b069623d3cfe070d85977b257508a2c8d3c6439280bfd6f1c7448ba8ac312b9abba6c8927428330028e
+  languageName: node
+  linkType: hard
+
+"supertokens-node@npm:^15":
+  version: 15.2.3
+  resolution: "supertokens-node@npm:15.2.3"
+  dependencies:
+    content-type: "npm:^1.0.5"
+    cookie: "npm:0.4.0"
+    cross-fetch: "npm:^3.1.6"
+    debug: "npm:^4.3.3"
+    inflation: "npm:^2.0.0"
+    jose: "npm:^4.13.1"
+    libphonenumber-js: "npm:^1.9.44"
+    nodemailer: "npm:^6.7.2"
+    pkce-challenge: "npm:^3.0.0"
+    psl: "npm:1.8.0"
+    supertokens-js-override: "npm:^0.0.4"
+    twilio: "npm:^4.7.2"
+  checksum: 10c0/bf34aa3dc60bcec8ca4bac620c4a76cbbff267bbf78c02379ec61df86bc5369e649ecbb693d4d06a5d7686cf4c3b950fb355b143ea492ae9ca3140a523a39ae6
+  languageName: node
+  linkType: hard
+
+"supertokens-web-js@npm:~0.10.0":
+  version: 0.10.1
+  resolution: "supertokens-web-js@npm:0.10.1"
+  dependencies:
+    supertokens-js-override: "npm:0.0.4"
+    supertokens-website: "npm:^19.0.0"
+  checksum: 10c0/12e65146124defe00f926f1c8fabf10afd628765c5ee48a9cbaeea75eee9409d56f7005d933bec19d661689282abe26f1249613ff16136277a2dcef782c4f0f4
+  languageName: node
+  linkType: hard
+
+"supertokens-website@npm:^19.0.0":
+  version: 19.0.1
+  resolution: "supertokens-website@npm:19.0.1"
+  dependencies:
+    browser-tabs-lock: "npm:^1.3.0"
+    supertokens-js-override: "npm:^0.0.4"
+  checksum: 10c0/855fd07590d295566265d26a2effe74cd7d8e3fbaef2c0b2c21961d7a1cb5d1462816d63433aa85dabbf32de755d7df99b46a318da16f73d2daea02699211ea5
+  languageName: node
+  linkType: hard
+
 "supports-color@npm:^5.3.0, supports-color@npm:^5.5.0":
   version: 5.5.0
   resolution: "supports-color@npm:5.5.0"
@@ -17450,6 +17621,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"twilio@npm:^4.7.2":
+  version: 4.23.0
+  resolution: "twilio@npm:4.23.0"
+  dependencies:
+    axios: "npm:^1.6.0"
+    dayjs: "npm:^1.11.9"
+    https-proxy-agent: "npm:^5.0.0"
+    jsonwebtoken: "npm:^9.0.0"
+    qs: "npm:^6.9.4"
+    scmp: "npm:^2.1.0"
+    url-parse: "npm:^1.5.9"
+    xmlbuilder: "npm:^13.0.2"
+  checksum: 10c0/a82e9d79ee2989ffa40c725f7e78857b442a163e3a1f395d4f0086e21e78243d26d1bf60adb1d18823b6cb372debbdfd0346980eb6e3a137d0605ea258768b19
+  languageName: node
+  linkType: hard
+
 "type-check@npm:^0.4.0, type-check@npm:~0.4.0":
   version: 0.4.0
   resolution: "type-check@npm:0.4.0"
@@ -17803,7 +17990,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"url-parse@npm:^1.5.3":
+"url-parse@npm:^1.5.3, url-parse@npm:^1.5.9":
   version: 1.5.10
   resolution: "url-parse@npm:1.5.10"
   dependencies:
@@ -18092,8 +18279,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "web@workspace:web"
   dependencies:
-    "@auth0/auth0-spa-js": "npm:^2"
-    "@redwoodjs/auth-auth0-web": "npm:8.6.1"
+    "@redwoodjs/auth-supertokens-web": "npm:8.6.1"
     "@redwoodjs/forms": "npm:8.6.1"
     "@redwoodjs/router": "npm:8.6.1"
     "@redwoodjs/vite": "npm:8.6.1"
@@ -18103,6 +18289,8 @@ __metadata:
     "@types/react-dom": "npm:^18.2.19"
     react: "npm:18.3.1"
     react-dom: "npm:18.3.1"
+    supertokens-auth-react: "npm:~0.39.1"
+    supertokens-web-js: "npm:~0.10.0"
   languageName: unknown
   linkType: soft
 
@@ -18420,6 +18608,13 @@ __metadata:
   version: 4.0.0
   resolution: "xml-name-validator@npm:4.0.0"
   checksum: 10c0/c1bfa219d64e56fee265b2bd31b2fcecefc063ee802da1e73bad1f21d7afd89b943c9e2c97af2942f60b1ad46f915a4c81e00039c7d398b53cf410e29d3c30bd
+  languageName: node
+  linkType: hard
+
+"xmlbuilder@npm:^13.0.2":
+  version: 13.0.2
+  resolution: "xmlbuilder@npm:13.0.2"
+  checksum: 10c0/e703027bd10808ee93f6626a4ca440e9d295a0b323aed151c39f427f32d23bda0a1af0b9278286fa94c25fc52d46716fa79e17abcda31205fb33bf4bc0ffe575
   languageName: node
   linkType: hard
 

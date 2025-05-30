@@ -7,11 +7,17 @@
 // 'src/pages/HomePage/HomePage.js'         -> HomePage
 // 'src/pages/Admin/BooksPage/BooksPage.js' -> AdminBooksPage
 
+import { canHandleRoute, getRoutingComponent } from "supertokens-auth-react/ui";
+
 import { Router, Route } from "@redwoodjs/router";
 
-import { useAuth } from "./auth";
+import { useAuth, PreBuiltUI } from "./authentication";
 
 const Routes = () => {
+  if (canHandleRoute(PreBuiltUI)) {
+    return getRoutingComponent(PreBuiltUI);
+  }
+
   return (
     <Router useAuth={useAuth}>
       <Route path="/" page={HomePage} name="home" />

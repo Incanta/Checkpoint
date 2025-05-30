@@ -7,9 +7,11 @@
     "@prisma/client": "6.2.1",
     "@redwoodjs/api": "8.6.1",
     "@redwoodjs/api-server": "8.6.1",
-    "@redwoodjs/auth-auth0-api": "8.6.1",
+    "@redwoodjs/auth-supertokens-api": "8.6.1",
     "@redwoodjs/graphql-server": "8.6.1",
+    "inflation": "^2.1.0",
     "njwt": "^2.0.1",
-    "prisma": "6.2.1"
+    "prisma": "6.2.1",
+    "supertokens-node": "^15"
   }
 }

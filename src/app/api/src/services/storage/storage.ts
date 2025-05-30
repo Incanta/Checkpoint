@@ -7,7 +7,7 @@ import jwt from "njwt";
 import { db } from "src/lib/db";
 import { RedwoodUser } from "src/lib/auth";
 
-export const storageToken: QueryResolvers["storageToken"] = async ({ orgId, repoId, write }) => {
+export const storageToken: QueryResolvers["storageToken"] = async ({ orgId, repoId, write }, { context }) => {
   const currentUser: RedwoodUser = context.currentUser as RedwoodUser;
 
   const createToken = () => {

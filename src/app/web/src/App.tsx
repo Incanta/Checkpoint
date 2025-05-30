@@ -5,7 +5,7 @@ import { RedwoodApolloProvider } from "@redwoodjs/web/apollo";
 
 import FatalErrorPage from "src/pages/FatalErrorPage";
 
-import { AuthProvider, useAuth } from "./auth";
+import { AuthProvider, useAuth } from "./authentication";
 
 import "./index.css";
 

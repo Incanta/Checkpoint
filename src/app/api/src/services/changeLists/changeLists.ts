@@ -33,7 +33,7 @@ export const changelists: QueryResolvers["changelists"] = ({ repoId, numbers }) 
 
 export const createChangelist: MutationResolvers["createChangelist"] = async ({
   input,
-}) => {
+}, { context }) => {
   const repo = await db.repo.findUnique({
     where: { id: input.repoId },
     include: {

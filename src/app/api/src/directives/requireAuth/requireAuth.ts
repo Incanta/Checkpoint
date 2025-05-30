@@ -15,9 +15,9 @@ export const schema = gql`
 
 type RequireAuthValidate = ValidatorDirectiveFunc<{ roles?: string[] }>;
 
-const validate: RequireAuthValidate = ({ directiveArgs }) => {
+const validate: RequireAuthValidate = ({ directiveArgs, context }) => {
   const { roles } = directiveArgs;
-  applicationRequireAuth({ roles });
+  applicationRequireAuth({ roles, context });
 };
 
 const requireAuth = createValidatorDirective(schema, validate);

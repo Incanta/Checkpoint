@@ -20,7 +20,7 @@
     "test": "yarn rw test --no-watch api"
   },
   "devDependencies": {
-    "@redwoodjs/auth-auth0-setup": "8.6.1",
+    "@redwoodjs/auth-supertokens-setup": "8.6.1",
     "@redwoodjs/core": "8.6.1",
     "@redwoodjs/project-config": "8.6.1",
     "@typescript-eslint/parser": "^8.22.0",

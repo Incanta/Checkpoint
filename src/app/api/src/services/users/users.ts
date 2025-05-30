@@ -7,7 +7,7 @@ import type {
 import { db } from "src/lib/db";
 import { RedwoodUser } from "src/lib/auth";
 
-export const me: QueryResolvers["me"] = ({}) => {
+export const me: QueryResolvers["me"] = ({}, { context }) => {
   const currentUser: RedwoodUser = context.currentUser as RedwoodUser;
   return db.user.findUnique({
     where: { id: currentUser.id },
