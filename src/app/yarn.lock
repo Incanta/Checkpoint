@@ -4478,6 +4478,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@redwoodjs/auth-custom-setup@npm:8.6.1":
+  version: 8.6.1
+  resolution: "@redwoodjs/auth-custom-setup@npm:8.6.1"
+  dependencies:
+    "@redwoodjs/cli-helpers": "npm:8.6.1"
+  checksum: 10c0/90353d0de2f6221141cb9b6463e6a87aaf0e6e527340ba9d1a1b12f0444aca99bffc382937ae546b7cb411bd47c321b75471b032ae297f28ff31c4115eb98280
+  languageName: node
+  linkType: hard
+
 "@redwoodjs/auth-supertokens-api@npm:8.6.1":
   version: 8.6.1
   resolution: "@redwoodjs/auth-supertokens-api@npm:8.6.1"
@@ -6030,6 +6039,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/uuid@npm:^10.0.0":
+  version: 10.0.0
+  resolution: "@types/uuid@npm:10.0.0"
+  checksum: 10c0/9a1404bf287164481cb9b97f6bb638f78f955be57c40c6513b7655160beb29df6f84c915aaf4089a1559c216557dc4d2f79b48d978742d3ae10b937420ddac60
+  languageName: node
+  linkType: hard
+
 "@types/ws@npm:^8.0.0":
   version: 8.5.14
   resolution: "@types/ws@npm:8.5.14"
@@ -6758,10 +6774,13 @@ __metadata:
     "@redwoodjs/api-server": "npm:8.6.1"
     "@redwoodjs/auth-supertokens-api": "npm:8.6.1"
     "@redwoodjs/graphql-server": "npm:8.6.1"
+    "@types/uuid": "npm:^10.0.0"
     inflation: "npm:^2.1.0"
+    jose: "npm:^6.0.11"
     njwt: "npm:^2.0.1"
     prisma: "npm:6.2.1"
     supertokens-node: "npm:^15"
+    uuid: "npm:^11.1.0"
   languageName: unknown
   linkType: soft
 
@@ -12715,6 +12734,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"jose@npm:^6.0.11":
+  version: 6.0.11
+  resolution: "jose@npm:6.0.11"
+  checksum: 10c0/d290be4532174e7a53730b7fb84c74327531172bd403b196c592b312b73eedb7489949837bfe831fdbd280799bfc5ba778bc807495a73eda08ae6c49414f405a
+  languageName: node
+  linkType: hard
+
 "js-levenshtein@npm:^1.1.6":
   version: 1.1.6
   resolution: "js-levenshtein@npm:1.1.6"
@@ -16128,6 +16154,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "root-workspace-0b6124@workspace:."
   dependencies:
+    "@redwoodjs/auth-custom-setup": "npm:8.6.1"
     "@redwoodjs/auth-supertokens-setup": "npm:8.6.1"
     "@redwoodjs/core": "npm:8.6.1"
     "@redwoodjs/project-config": "npm:8.6.1"
@@ -18057,6 +18084,15 @@ __metadata:
   bin:
     uuid: dist/bin/uuid
   checksum: 10c0/eab18c27fe4ab9fb9709a5d5f40119b45f2ec8314f8d4cf12ce27e4c6f4ffa4a6321dc7db6c515068fa373c075b49691ba969f0010bf37f44c37ca40cd6bf7fe
+  languageName: node
+  linkType: hard
+
+"uuid@npm:^11.1.0":
+  version: 11.1.0
+  resolution: "uuid@npm:11.1.0"
+  bin:
+    uuid: dist/esm/bin/uuid
+  checksum: 10c0/34aa51b9874ae398c2b799c88a127701408cd581ee89ec3baa53509dd8728cbb25826f2a038f9465f8b7be446f0fbf11558862965b18d21c993684297628d4d3
   languageName: node
   linkType: hard
 

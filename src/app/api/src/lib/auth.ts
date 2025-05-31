@@ -3,6 +3,7 @@ import { AuthenticationError, ForbiddenError } from "@redwoodjs/graphql-server";
 import { db } from "./db";
 import Session from "supertokens-node/recipe/session";
 import supertokens from "supertokens-node";
+import config from "@incanta/config";
 
 /**
  * Represents the user attributes returned by the decoding the
@@ -15,6 +16,21 @@ export type RedwoodUser = {
   email: string;
   checkpointAdmin?: boolean;
 };
+
+export async function authDecoder(token: string, type: string): Promise<Decoded | null> {
+  if(type !== "api-token") {
+    return null;
+  }
+
+  const { jwtVerify } = await import("jose");
+
+  const signingKey = await config.getWithSecrets<string>("auth.api-tokens.signing-key");
+  const secret = new TextEncoder().encode(signingKey);
+
+  const decoded = await jwtVerify(token, secret);
+
+  return decoded.payload;
+}
 
 /**
  * getCurrentUser returns the user information together with
@@ -47,40 +63,50 @@ export const getCurrentUser = async (
     return null;
   }
 
-  const sessionInfo = await Session.getSessionInformation(decoded.sessionHandle as string);
-  const userResult = await supertokens.getUsersNewestFirst({
-    tenantId: sessionInfo.tenantId,
-    query: {
-      userId: sessionInfo.userId,
+  let user: RedwoodUser | null = null;
+
+  if (jwt.type === "supertokens") {
+    const sessionInfo = await Session.getSessionInformation(decoded.sessionHandle as string);
+    const userResult = await supertokens.getUsersNewestFirst({
+      tenantId: sessionInfo.tenantId,
+      query: {
+        userId: sessionInfo.userId,
+      }
+    });
+
+    if (userResult.users.length === 0) {
+      console.warn("No user found for session:", sessionInfo);
+      return null;
     }
-  });
 
-  if (userResult.users.length === 0) {
-    console.warn("No user found for session:", sessionInfo);
-    return null;
-  }
+    const email = userResult.users[0].user?.email as string;
 
-  const email = userResult.users[0].user?.email as string;
+    if (!email) {
+      console.warn("No email found for user:", userResult.users[0]);
+      return null;
+    }
 
-  if (!email) {
-    console.warn("No email found for user:", userResult.users[0]);
-    return null;
-  }
-
-  let user = await db.user.findUnique({
-    where: {
-      email,
-    },
-  });
-
-  if (!user) {
-    user = await db.user.create({
-      data: {
-        name: email,
-        username: email,
+    user = await db.user.findUnique({
+      where: {
         email,
       },
     });
+
+    if (!user) {
+      user = await db.user.create({
+        data: {
+          name: email,
+          username: email,
+          email,
+        },
+      });
+    }
+  } else if (jwt.type === "api-token") {
+    // For API tokens, we assume the email is stored in the decoded token
+  }
+
+  if (!user) {
+    return null;
   }
 
   const result: RedwoodUser = {

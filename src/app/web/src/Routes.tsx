@@ -12,6 +12,7 @@ import { canHandleRoute, getRoutingComponent } from "supertokens-auth-react/ui";
 import { Router, Route } from "@redwoodjs/router";
 
 import { useAuth, PreBuiltUI } from "./authentication";
+import ApiTokens from "./pages/ApiTokensPage/ApiTokensPage";
 
 const Routes = () => {
   if (canHandleRoute(PreBuiltUI)) {
@@ -21,6 +22,7 @@ const Routes = () => {
   return (
     <Router useAuth={useAuth}>
       <Route path="/" page={HomePage} name="home" />
+      <Route path="/tokens" page={ApiTokens} name="api-tokens" />
       <Route notfound page={NotFoundPage} />
     </Router>
   );

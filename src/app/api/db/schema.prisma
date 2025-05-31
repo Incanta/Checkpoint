@@ -26,6 +26,7 @@ model User {
   specificRepoRoles RepoRole[]
   changelists       Changelist[]
   workspaces        Workspace[]
+  apiTokens         ApiToken[]
 }
 
 enum RepoAccess {
@@ -221,4 +222,18 @@ model Workspace {
   repo   Repo   @relation(fields: [repoId], references: [id])
 
   fileCheckouts FileCheckout[]
+}
+
+model ApiToken {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  expiresAt DateTime?
+
+  name       String
+  token      String  @unique
+  deviceCode String? @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 }

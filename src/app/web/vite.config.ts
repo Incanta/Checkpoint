@@ -12,8 +12,11 @@ dns.setDefaultResultOrder("verbatim");
 const viteConfig: UserConfig = {
   plugins: [redwood()],
   server: {
-    allowedHosts: ["redwood", "web"]
-  }
+    allowedHosts: ["redwood", "web"],
+    watch: {
+      usePolling: true,
+    },
+  },
 };
 
 export default defineConfig(viteConfig);

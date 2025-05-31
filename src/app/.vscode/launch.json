@@ -15,11 +15,11 @@
         "<node_internals>/**"
       ],
       "type": "node",
-      "localRoot": "${workspaceFolder}/node_modules/@redwoodjs/api-server/dist",
-      "remoteRoot": "${workspaceFolder}/node_modules/@redwoodjs/api-server/dist",
+      "localRoot": "${workspaceFolder}/api/dist",
+      "remoteRoot": "/home/node/app/api/dist",
       "sourceMaps": true,
-      "restart": true,
-      "preLaunchTask": "WaitForDevServer",
+      // "restart": true,
+      // "preLaunchTask": "WaitForDevServer",
     },
     {
       "name": "Launch Web debugger",
