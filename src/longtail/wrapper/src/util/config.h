@@ -44,4 +44,7 @@ void MarkFileRenamed(
     const std::string &oldFilePath,
     const std::string &currentFilePath);
 
+bool EnsureGlobalDb();
+bool EnsureWorkspaceDb(Checkpoint::Workspace *workspace);
+
 }  // namespace CheckpointConfig

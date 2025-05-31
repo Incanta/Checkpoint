@@ -167,7 +167,7 @@ Checkpoint::ErrorResult* Checkpoint::Submit(
     return result;
   }
 
-  WorkspaceStateResult* state = GetWorkspaceState(workspace->localRoot);
+  WorkspaceStateResult* state = GetWorkspaceState(workspace);
 
   if (state->success) {
     json stateData = json::parse(state->state->filesJson);

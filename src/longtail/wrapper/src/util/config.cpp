@@ -219,7 +219,7 @@ void MigrateDatabase(sqlite3 *db) {
   }
 }
 
-bool EnsureGlobalDb() {
+bool CheckpointConfig::EnsureGlobalDb() {
   if (GlobalDb == nullptr) {
     std::string configDir = CheckpointConfig::GetConfigDir();
     std::string configFilePath = configDir + CheckpointConfig::sep + "global.db";
@@ -233,7 +233,7 @@ bool EnsureGlobalDb() {
   return true;
 }
 
-bool EnsureWorkspaceDb(Checkpoint::Workspace *workspace) {
+bool CheckpointConfig::EnsureWorkspaceDb(Checkpoint::Workspace *workspace) {
   if (WorkspaceDb == nullptr || WorkspaceDbPath != std::string(workspace->localRoot)) {
     if (WorkspaceDb != nullptr) {
       sqlite3_close(WorkspaceDb);

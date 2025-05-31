@@ -20,7 +20,7 @@ Checkpoint::WorkspaceStateResult* Checkpoint::GetWorkspaceState(Checkpoint::Work
     return result;
   }
 
-  std::ifstream stateFile(fs::path(localRoot) / "state.json");
+  std::ifstream stateFile(fs::path(workspace->localRoot) / "state.json");
   if (!stateFile.is_open()) {
     result->state = new Checkpoint::WorkspaceState();
     result->state->changelistNumber = 0;

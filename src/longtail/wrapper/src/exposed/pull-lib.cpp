@@ -118,7 +118,7 @@ Checkpoint::ErrorResult* Checkpoint::Pull(
     return result;
   }
 
-  WorkspaceStateResult* state = GetWorkspaceState(workspace->localRoot);
+  WorkspaceStateResult* state = GetWorkspaceState(workspace);
   if (!state->success) {
     std::string error = "Failed to get workspace state";
     result->success = false;
