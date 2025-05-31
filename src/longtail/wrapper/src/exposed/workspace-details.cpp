@@ -45,6 +45,11 @@ Checkpoint::WorkspaceResult* Checkpoint::GetWorkspaceDetails(const char* path) {
 
   json configData = json::parse(contents);
 
+  if (configData.contains("serverId")) {
+    result->workspace->serverId = new char[configData["serverId"].get<std::string>().length() + 1];
+    strcpy(result->workspace->serverId, configData["serverId"].get<std::string>().c_str());
+  }
+
   if (configData.contains("orgId")) {
     result->workspace->orgId = new char[configData["orgId"].get<std::string>().length() + 1];
     strcpy(result->workspace->orgId, configData["orgId"].get<std::string>().c_str());
@@ -88,6 +93,7 @@ Checkpoint::ErrorResult* SaveWorkspaceDetails(Checkpoint::Workspace* workspace) 
   }
 
   json configData;
+  configData["serverId"] = workspace->serverId;
   configData["orgId"] = workspace->orgId;
   configData["repoId"] = workspace->repoId;
   configData["branchName"] = workspace->branchName;
@@ -113,6 +119,9 @@ void Checkpoint::FreeWorkspace(Checkpoint::WorkspaceResult* result) {
     delete[] result->error;
   }
   if (result->workspace != nullptr) {
+    if (result->workspace->serverId != nullptr) {
+      delete[] result->workspace->serverId;
+    }
     if (result->workspace->orgId != nullptr) {
       delete[] result->workspace->orgId;
     }

@@ -10,6 +10,7 @@ using json = nlohmann::json;
 namespace GraphQLClient {
 
 json Request(
+    std::string serverId,
     const std::string& query,
     const json& variables);
 

@@ -2,12 +2,21 @@
 
 #include <cpr/cpr.h>
 
+#include "../exposed/types.h"
 #include "config.h"
 
 json GraphQLClient::Request(
+    std::string serverId,
     const std::string& query,
     const json& variables) {
-  if (CheckpointConfig::GetAuthToken().length() == 0) {
+  Checkpoint::Server serverConfig = CheckpointConfig::GetServerConfig(serverId);
+  if (serverConfig.id.empty()) {
+    json result = {
+        {"error", "Server id '" + serverId + "' not configured"}};
+    return result;
+  }
+
+  if (serverConfig.accessToken.empty()) {
     json result = {
         {"error", "Not logged in"}};
     return result;
@@ -18,10 +27,10 @@ json GraphQLClient::Request(
       {"variables", variables}};
 
   cpr::Response r = cpr::Post(
-      cpr::Url{CheckpointConfig::GetGraphQLUrl()},
-      cpr::Bearer{CheckpointConfig::GetAuthToken()},
+      cpr::Url{serverConfig.graphqlUrl},
+      cpr::Bearer{serverConfig.accessToken},
       cpr::Header{{"Content-Type", "application/json"}},
-      cpr::Header{{"auth-provider", "auth0"}},
+      cpr::Header{{"auth-provider", "api-token"}},
       cpr::Body{payload.dump()});
 
   if (r.status_code != 200) {

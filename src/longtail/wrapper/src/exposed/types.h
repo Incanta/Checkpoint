@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
 #include <cstdint>
+#include <string>
 
 namespace Checkpoint {
 
@@ -18,6 +18,7 @@ struct ErrorResult {
 };
 
 struct WorkspaceConfig {
+  char* serverId = nullptr;
   char* orgId = nullptr;
   char* repoId = nullptr;
   char* branchName = nullptr;
@@ -43,6 +44,21 @@ struct WorkspaceStateResult {
   bool success;
   char* error = nullptr;
   WorkspaceState* state = nullptr;
+};
+
+struct Server {
+  std::string id;
+
+  std::string name;
+  std::string baseUrl;
+
+  std::string graphqlUrl;
+
+  std::string accessToken;
+  int expiresIn = -1;
+  std::string idToken;
+  std::string scope;
+  std::string tokenType;
 };
 
 struct Modification {

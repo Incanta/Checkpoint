@@ -14,12 +14,13 @@
 
 namespace Checkpoint {
 
-DLL_EXPORT WhoamiResult* Whoami();
-DLL_EXPORT ErrorResult* Login();
+DLL_EXPORT ErrorResult* RefreshServerDetails(const char* serverBaseUrl);
+DLL_EXPORT WhoamiResult* Whoami(const char* serverId);
+DLL_EXPORT ErrorResult* Login(const char* serverId);
 DLL_EXPORT WorkspaceResult* GetWorkspaceDetails(const char* path);
 DLL_EXPORT ErrorResult* SaveWorkspaceDetails(Workspace* workspace);
-DLL_EXPORT WorkspaceStateResult* GetWorkspaceState(const char* localRoot);
-DLL_EXPORT ErrorResult* SaveWorkspaceState(const char* localRoot, WorkspaceState* state);
+DLL_EXPORT WorkspaceStateResult* GetWorkspaceState(Workspace* workspace);
+DLL_EXPORT ErrorResult* SaveWorkspaceState(Workspace* workspace, WorkspaceState* state);
 DLL_EXPORT ErrorResult* Submit(
     Workspace* workspace,
     const char* message,
@@ -28,7 +29,7 @@ DLL_EXPORT ErrorResult* Submit(
     size_t numModifications,
     Modification* modifications);
 DLL_EXPORT ErrorResult* Pull(Workspace* workspace, const char* changelistId);
-DLL_EXPORT ErrorResult* Add(Workspace* workspace, size_t numFiles, const char* paths);
+DLL_EXPORT ErrorResult* Stage(Workspace* workspace, size_t numFiles, const char* paths, bool isStaged = true);
 DLL_EXPORT ErrorResult* Checkout(Workspace* workspace, size_t numFiles, const char* paths, bool* isLocked);
 
 DLL_EXPORT bool TryAcquireLock(Workspace* workspace);

@@ -44,7 +44,7 @@ Checkpoint::ErrorResult* Checkpoint::Pull(
   storageTokenVariables["repoId"] = workspace->repoId;
   storageTokenVariables["write"] = true;
 
-  json storageTokenResult = GraphQLClient::Request(storageTokenQuery, storageTokenVariables);
+  json storageTokenResult = GraphQLClient::Request(workspace->serverId, storageTokenQuery, storageTokenVariables);
 
   if (storageTokenResult.contains("error")) {
     std::string error = storageTokenResult["error"];
@@ -100,7 +100,7 @@ Checkpoint::ErrorResult* Checkpoint::Pull(
   json changelistVariables;
   changelistVariables["id"] = changelistId;
 
-  json changelistResult = GraphQLClient::Request(changelistQuery, changelistVariables);
+  json changelistResult = GraphQLClient::Request(workspace->serverId, changelistQuery, changelistVariables);
 
   if (changelistResult.contains("error")) {
     std::string error = changelistResult["error"];
@@ -147,7 +147,7 @@ Checkpoint::ErrorResult* Checkpoint::Pull(
     changelistsVariables["numbers"].push_back(changelist);
   }
 
-  json changelistsResult = GraphQLClient::Request(changelistsQuery, changelistsVariables);
+  json changelistsResult = GraphQLClient::Request(workspace->serverId, changelistsQuery, changelistsVariables);
   if (changelistsResult.contains("error")) {
     std::string error = changelistsResult["error"];
     result->success = false;
@@ -241,7 +241,7 @@ Checkpoint::ErrorResult* Checkpoint::Pull(
     filesVariables["ids"].push_back(deletion);
   }
 
-  json filesResult = GraphQLClient::Request(filesQuery, filesVariables);
+  json filesResult = GraphQLClient::Request(workspace->serverId, filesQuery, filesVariables);
   if (filesResult.contains("error")) {
     std::string error = filesResult["error"];
     result->success = false;

@@ -3,7 +3,7 @@
 #include "../util/graphql-client.h"
 #include "main.h"
 
-Checkpoint::WhoamiResult* Checkpoint::Whoami() {
+Checkpoint::WhoamiResult* Checkpoint::Whoami(const char* serverId) {
   Checkpoint::WhoamiResult* result = new Checkpoint::WhoamiResult();
 
   std::string query = R"EOF(
@@ -17,7 +17,7 @@ Checkpoint::WhoamiResult* Checkpoint::Whoami() {
 
   json variables;
 
-  json jsonResult = GraphQLClient::Request(query, variables);
+  json jsonResult = GraphQLClient::Request(serverId, query, variables);
 
   if (jsonResult.contains("error")) {
     std::string error = jsonResult["error"];

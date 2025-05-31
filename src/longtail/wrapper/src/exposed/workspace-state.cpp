@@ -6,12 +6,13 @@
 
 namespace fs = std::filesystem;
 
-Checkpoint::WorkspaceStateResult* Checkpoint::GetWorkspaceState(const char* localRoot) {
+Checkpoint::WorkspaceStateResult* Checkpoint::GetWorkspaceState(Checkpoint::Workspace* workspace) {
   Checkpoint::WorkspaceStateResult* result = new Checkpoint::WorkspaceStateResult();
 
   if (
-      strlen(localRoot) == 0 ||
-      !fs::exists(fs::path(localRoot))) {
+      workspace == nullptr ||
+      strlen(workspace->localRoot) == 0 ||
+      !fs::exists(fs::path(workspace->localRoot))) {
     std::string error = "Invalid workspace local root";
     result->success = false;
     result->error = new char[error.length() + 1];
@@ -49,15 +50,16 @@ Checkpoint::WorkspaceStateResult* Checkpoint::GetWorkspaceState(const char* loca
   return result;
 }
 
-Checkpoint::ErrorResult* SaveWorkspaceState(const char* localRoot, Checkpoint::WorkspaceState* state) {
+Checkpoint::ErrorResult* SaveWorkspaceState(Checkpoint::Workspace* workspace, Checkpoint::WorkspaceState* state) {
   Checkpoint::ErrorResult* result = new Checkpoint::ErrorResult();
 
   if (
+      workspace == nullptr ||
       state == nullptr ||
       state->filesJson == nullptr ||
       strlen(state->filesJson) == 0 ||
-      strlen(localRoot) == 0 ||
-      !fs::exists(fs::path(localRoot))) {
+      strlen(workspace->localRoot) == 0 ||
+      !fs::exists(fs::path(workspace->localRoot))) {
     std::string error = "Invalid workspace state";
     result->success = false;
     result->error = new char[error.length() + 1];
@@ -65,9 +67,9 @@ Checkpoint::ErrorResult* SaveWorkspaceState(const char* localRoot, Checkpoint::W
     return result;
   }
 
-  fs::create_directories(fs::path(localRoot));
+  fs::create_directories(fs::path(workspace->localRoot));
 
-  std::ofstream stateFile(fs::path(localRoot) / "state.json");
+  std::ofstream stateFile(fs::path(workspace->localRoot) / "state.json");
   if (!stateFile.is_open()) {
     std::string error = "Failed to open state file for writing";
     result->success = false;

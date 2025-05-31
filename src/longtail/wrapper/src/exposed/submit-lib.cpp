@@ -55,7 +55,7 @@ Checkpoint::ErrorResult* Checkpoint::Submit(
   variables["repoId"] = workspace->repoId;
   variables["write"] = true;
 
-  json storageTokenResult = GraphQLClient::Request(query, variables);
+  json storageTokenResult = GraphQLClient::Request(workspace->serverId, query, variables);
 
   if (storageTokenResult.contains("error")) {
     std::string error = storageTokenResult["error"];
@@ -105,6 +105,24 @@ Checkpoint::ErrorResult* Checkpoint::Submit(
 
   memset(handle, 0, sizeof(WrapperAsyncHandle));
 
+  Checkpoint::Server serverConfig = CheckpointConfig::GetServerConfig(workspace);
+  if (serverConfig.id.empty()) {
+    std::string error = "Server configuration not found for workspace";
+    result->success = false;
+    result->error = new char[error.length() + 1];
+    strcpy(result->error, error.c_str());
+    Longtail_Free(handle);
+    return result;
+  }
+  if (serverConfig.accessToken.empty()) {
+    std::string error = "Access token not found for server";
+    result->success = false;
+    result->error = new char[error.length() + 1];
+    strcpy(result->error, error.c_str());
+    Longtail_Free(handle);
+    return result;
+  }
+
   int32_t err = SubmitSync(
       workspace->branchName,
       message,
@@ -122,7 +140,7 @@ Checkpoint::ErrorResult* Checkpoint::Submit(
       backendUrl.c_str(),
       storageToken.c_str(),
       tokenExpiration * 1000,
-      CheckpointConfig::GetAuthToken().c_str(),
+      serverConfig.accessToken.c_str(),
       keepCheckedOut,
       workspaceId,
       numModifications,

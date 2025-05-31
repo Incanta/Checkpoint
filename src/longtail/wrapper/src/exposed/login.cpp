@@ -28,81 +28,86 @@ void openURL(std::string url) {
 #endif
 }
 
-Checkpoint::ErrorResult* Checkpoint::Login() {
+std::string randomCode() {
+  const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const size_t length = 8;  // Length of the random code
+  std::string result;
+  result.reserve(length + (length / 4 - 1));  // Reserve space for the code and hyphens
+
+  for (size_t i = 0; i < length; ++i) {
+    if (i == 3) {  // Insert a hyphen after the third character
+      result += '-';
+    }
+
+    result += charset[rand() % (sizeof(charset) - 1)];
+  }
+
+  return result;
+}
+
+Checkpoint::ErrorResult* Checkpoint::Login(const char* serverId) {
   Checkpoint::ErrorResult* result = new Checkpoint::ErrorResult();
 
-  cpr::Response deviceCodeResult = cpr::Post(
-      cpr::Url{CheckpointConfig::GetAuth0Url() + "/oauth/device/code"},
-      cpr::Header{{"Content-Type", "application/x-www-form-urlencoded"}},
-      cpr::Body{"client_id=" + CheckpointConfig::GetAuth0ClientId() + "&audience=" + CheckpointConfig::GetAuth0Audience() + "&scope=openid profile email"});
-
-  if (deviceCodeResult.status_code != 200) {
-    result->success = false;
-    result->error = new char[deviceCodeResult.status_line.length() + 1];
-    strcpy(result->error, deviceCodeResult.status_line.c_str());
-    return result;
-  }
-
-  json response = json::parse(deviceCodeResult.text);
-
-  int expires_in = response["expires_in"];
-  std::time_t expirationTime = std::time(nullptr) + expires_in;
-
-  std::string verification_uri = response["verification_uri_complete"];
-  openURL(verification_uri);
-
-  json tokenBody;
-
-  while (true) {
-    std::time_t currentTime = std::time(nullptr);
-    if (currentTime >= expirationTime) {
-      std::string error = "Login expired";
-      result->success = false;
-      result->error = new char[error.length() + 1];
-      strcpy(result->error, error.c_str());
-      return result;
-    }
-
-    cpr::Response tokenResponse = cpr::Post(
-        cpr::Url{CheckpointConfig::GetAuth0Url() + "/oauth/token"},
-        cpr::Header{{"Content-Type", "application/x-www-form-urlencoded"}},
-        cpr::Body{"client_id=" + CheckpointConfig::GetAuth0ClientId() + "&grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=" + std::string(response["device_code"])});
-
-    json tokenResponseJson = json::parse(tokenResponse.text);
-
-    if (tokenResponseJson.contains("error")) {
-      if (tokenResponseJson["error"] == "expired_token") {
-        std::string error = "Login expired";
-        result->success = false;
-        result->error = new char[error.length() + 1];
-        strcpy(result->error, error.c_str());
-        return result;
-      }
-
-      int waitTime = 1;
-      if (tokenResponseJson.contains("interval")) {
-        waitTime = tokenResponseJson["interval"];
-      }
-      std::this_thread::sleep_for(std::chrono::seconds(waitTime));
-    } else {
-      tokenBody = tokenResponseJson;
-      break;
-    }
-  }
-
-  fs::create_directories(CheckpointConfig::GetConfigDir());
-
-  std::ofstream authFile(CheckpointConfig::GetConfigDir() + CheckpointConfig::sep + "auth.json");
-  if (!authFile.is_open()) {
-    std::string error = "Failed to open auth file for writing";
+  Checkpoint::Server serverConfig = CheckpointConfig::GetServerConfig(serverId);
+  if (serverConfig.id.empty()) {
+    std::string error = "Server id '" + std::string(serverId) + "' not configured";
     result->success = false;
     result->error = new char[error.length() + 1];
     strcpy(result->error, error.c_str());
     return result;
   }
-  authFile << tokenBody.dump(2);
 
-  WhoamiResult* whoami = Checkpoint::Whoami();
+  std::string randomCodeStr = randomCode();
+  std::cout << "Please open the following URL in your browser to log in: "
+            << serverConfig.baseUrl + "/tokens" << std::endl
+            << std::endl;
+
+  std::cout << "Create a new API token with the Device Code:" << std::endl
+            << std::endl
+            << "\t" << randomCodeStr << std::endl
+            << std::endl;
+
+  openURL(serverConfig.baseUrl + "/tokens");
+
+  json tokenBody;
+
+  std::string query = R"EOF(
+    query getApiToken($deviceCode: String!) {
+      apiToken(deviceCode: $deviceCode) {
+        id
+        token
+        expiresAt
+      }
+    }
+  )EOF";
+
+  json variables;
+  variables["deviceCode"] = randomCodeStr;
+
+  while (true) {
+    tokenBody = GraphQLClient::Request(serverId, query, variables);
+
+    if (tokenBody.contains("error")) {
+      std::cout << "Error: " << tokenBody["error"] << std::endl;
+      std::this_thread::sleep_for(std::chrono::seconds(5));
+      continue;
+    }
+
+    if (!tokenBody.contains("data") || !tokenBody["data"].contains("apiToken") || !tokenBody["data"]["apiToken"].contains("token")) {
+      std::cout << "Invalid response format" << std::endl;
+      result->success = false;
+      result->error = new char[std::string("Invalid response format").length() + 1];
+      strcpy(result->error, "Invalid response format");
+      return result;
+    }
+
+    break;
+  }
+
+  serverConfig.accessToken = tokenBody["data"]["apiToken"]["token"];
+  CheckpointConfig::RefreshServerDetails(serverConfig);
+
+  WhoamiResult* whoami = Checkpoint::Whoami(serverId);
 
   if (!whoami->success) {
     std::string whoamiError = "Failed to get user information: " + std::string(whoami->error);

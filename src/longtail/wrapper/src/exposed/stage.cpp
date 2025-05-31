@@ -9,10 +9,11 @@
 
 namespace fs = std::filesystem;
 
-Checkpoint::ErrorResult* Checkpoint::Add(
+Checkpoint::ErrorResult* Checkpoint::Stage(
     Checkpoint::Workspace* workspace,
     size_t numFiles,
-    const char* paths) {
+    const char* paths,
+    bool isStaged) {
   Checkpoint::ErrorResult* result = new Checkpoint::ErrorResult();
 
   if (
@@ -63,53 +64,10 @@ Checkpoint::ErrorResult* Checkpoint::Add(
     }
   }
 
-  // TODO need to check if the files are already in the workspace
-
-  if (!Checkpoint::AcquireLock(workspace)) {
-    std::string error = "Failed to acquire workspace lock";
-    result->success = false;
-    result->error = new char[error.length() + 1];
-    strcpy(result->error, error.c_str());
-    return result;
-  }
-
-  fs::path addFilePath = fs::path(workspace->localRoot) / ".checkpoint" / "add.json";
-  std::ifstream addFile(addFilePath);
-
-  if (!addFile.is_open()) {
-    Checkpoint::ReleaseLock(workspace);
-    std::string error = "Could not open add file";
-    result->success = false;
-    result->error = new char[error.length() + 1];
-    strcpy(result->error, error.c_str());
-    return result;
-  }
-
-  std::string contents((std::istreambuf_iterator<char>(addFile)), std::istreambuf_iterator<char>());
-  addFile.close();
-  json addData = json::parse(contents);
-
   for (const auto& filePath : filePaths) {
-    if (addData.contains(filePath)) {
-      continue;
-    }
-
-    addData[filePath] = true;
+    CheckpointConfig::StageFile(workspace, isStaged, filePath);
   }
 
-  std::ofstream addFileOut(addFilePath);
-  if (!addFileOut.is_open()) {
-    Checkpoint::ReleaseLock(workspace);
-    std::string error = "Could not open add file for writing";
-    result->success = false;
-    result->error = new char[error.length() + 1];
-    strcpy(result->error, error.c_str());
-    return result;
-  }
-  addFileOut << addData.dump(2);
-  addFileOut.close();
-
-  Checkpoint::ReleaseLock(workspace);
   result->success = true;
   return result;
 }
