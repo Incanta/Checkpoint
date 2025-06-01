@@ -84,6 +84,7 @@ services:
       - ./src/app:/home/node/app
       - node_modules_redwood:/home/node/app/node_modules
       - node_modules_redwood_api:/home/node/app/api/node_modules
+      - node_modules_redwood_web:/home/node/app/web/node_modules
     ports:
       - 18911:18911 # debug api port
     depends_on:
@@ -194,6 +195,7 @@ services:
 volumes:
   node_modules_redwood:
   node_modules_redwood_api:
+  node_modules_redwood_web:
   node_modules_backend:
 
 networks:
