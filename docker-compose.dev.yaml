@@ -84,6 +84,7 @@ services:
       - ./src/app:/home/node/app
       - node_modules_redwood:/home/node/app/node_modules
       - node_modules_redwood_api:/home/node/app/api/node_modules
+      - node_modules_redwood_web:/home/node/app/web/node_modules
     ports:
       - 18911:18911 # debug api port
     depends_on:
@@ -117,7 +118,7 @@ services:
       test: ["CMD-SHELL", "cat /initialised.txt && pg_isready -U redwood"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 30
     entrypoint: [ "/bin/bash", "-c","
       docker-entrypoint.sh postgres &
       rm -f /initialised.txt || true &&
@@ -194,6 +195,7 @@ services:
 volumes:
   node_modules_redwood:
   node_modules_redwood_api:
+  node_modules_redwood_web:
   node_modules_backend:
 
 networks:
