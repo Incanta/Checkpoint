@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 
 import { FatalErrorBoundary, RedwoodProvider } from "@redwoodjs/web";
-import { RedwoodApolloProvider } from "@redwoodjs/web/apollo";
 
 import FatalErrorPage from "src/pages/FatalErrorPage";
+import { TRPCProvider } from "src/components/TRPCProvider";
 
-import { AuthProvider, useAuth } from "./authentication";
+import { AuthProvider } from "./authentication";
 
 import "./index.css";
 
@@ -17,9 +17,9 @@ const App = ({ children }: AppProps) => (
   <FatalErrorBoundary page={FatalErrorPage}>
     <RedwoodProvider titleTemplate="%PageTitle | %AppTitle">
       <AuthProvider>
-        <RedwoodApolloProvider useAuth={useAuth}>
+        <TRPCProvider>
           {children}
-        </RedwoodApolloProvider>
+        </TRPCProvider>
       </AuthProvider>
     </RedwoodProvider>
   </FatalErrorBoundary>

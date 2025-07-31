@@ -1,66 +1,33 @@
 import { useAuth } from "src/authentication";
-
-import { gql, useMutation, useQuery } from "@apollo/client";
+import { trpc } from "src/utils/trpc";
 
 import { Form, Submit, TextField } from "@redwoodjs/forms";
-
-const ME_QUERY = gql`
-  query me {
-    me {
-      id
-      email
-    }
-  }
-`;
-
-const ORGS_QUERY = gql`
-  query orgs {
-    myOrgs {
-      id
-      name
-      repos {
-        id
-        name
-      }
-    }
-  }
-`;
-
-const CREATE_ORG_MUTATION = gql`
-  mutation CreateOrg($name: String!) {
-    createOrg(input: { name: $name }) {
-      id
-      name
-    }
-  }
-`;
-
-const CREATE_REPO_MUTATION = gql`
-  mutation CreateRepo($orgId: String!, $name: String!) {
-    createRepo(input: { orgId: $orgId, name: $name }) {
-      id
-      name
-    }
-  }
-`;
 
 const HomePage = () => {
   const { isAuthenticated, signUp, logIn, logOut, userMetadata } = useAuth();
 
-  const { data, loading, error } = useQuery(ME_QUERY);
+  const { data: meData, isLoading: meLoading, error: meError } = trpc.users.me.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
 
-  const {
-    data: orgsData,
-    loading: orgsLoading,
-    error: orgsError,
-  } = useQuery(ORGS_QUERY);
+  const { data: orgsData, isLoading: orgsLoading, error: orgsError } = trpc.orgs.myOrgs.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
 
-  const [createOrg] = useMutation(CREATE_ORG_MUTATION, {
-    refetchQueries: [{ query: ORGS_QUERY }],
+  const utils = trpc.useUtils();
+
+  const createOrgMutation = trpc.orgs.create.useMutation({
+    onSuccess: () => {
+      utils.orgs.myOrgs.invalidate();
+    },
   });
 
-  const [createRepo] = useMutation(CREATE_REPO_MUTATION, {
-    refetchQueries: [{ query: ORGS_QUERY }],
+  const createRepoMutation = trpc.repos.create.useMutation({
+    onSuccess: () => {
+      utils.orgs.myOrgs.invalidate();
+    },
   });
 
   if (!isAuthenticated) {
@@ -73,26 +40,26 @@ const HomePage = () => {
     );
   }
 
-  if (loading || orgsLoading) {
+  if (meLoading || orgsLoading) {
     return <div>Loading...</div>;
   }
 
-  if (error || orgsError) {
-    return <div>Error: {error?.message || orgsError?.message}</div>;
+  if (meError || orgsError) {
+    return <div>Error: {meError?.message || orgsError?.message}</div>;
   }
 
   return (
     <>
       <button onClick={() => logOut()}>log out</button>
       <br />
-      <p>Logged in as {data.me.email}</p>
+      <p>Logged in as {meData?.email}</p>
       <p>Orgs:</p>
       <Form
         onSubmit={() => {
           const inputElement = document.querySelector(
             'input[name="orgName"]',
           ) as any;
-          createOrg({ variables: { name: inputElement.value } });
+          createOrgMutation.mutate({ name: inputElement.value });
           inputElement.value = "";
         }}
       >
@@ -100,7 +67,7 @@ const HomePage = () => {
         <Submit>Create Org</Submit>
       </Form>
       <ul>
-        {orgsData.myOrgs.map((org) => (
+        {orgsData?.map((org) => (
           <li key={org.id}>
             <span>
               {org.name} ({org.id})<br />
@@ -109,8 +76,9 @@ const HomePage = () => {
                   const inputElement = document.querySelector(
                     `input[name="repoName-${org.id}"]`,
                   ) as any;
-                  createRepo({
-                    variables: { orgId: org.id, name: inputElement.value },
+                  createRepoMutation.mutate({
+                    orgId: org.id, 
+                    name: inputElement.value 
                   });
                   inputElement.value = "";
                 }}
@@ -123,7 +91,7 @@ const HomePage = () => {
               </Form>
             </span>
             <ul>
-              {org.repos.map((repo) => (
+              {org.repos?.map((repo) => (
                 <li key={repo.id}>
                   {repo.name} ({repo.id})
                 </li>

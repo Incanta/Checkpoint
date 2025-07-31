@@ -33,6 +33,13 @@ export const orgsRouter = router({
             },
           },
         },
+        include: {
+          repos: {
+            where: {
+              deletedAt: null,
+            },
+          },
+        },
       })
     }),
 
