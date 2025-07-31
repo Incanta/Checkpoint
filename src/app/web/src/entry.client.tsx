@@ -4,29 +4,26 @@ import App from "./App";
 import Routes from "./Routes";
 
 /**
- * When `#redwood-app` isn't empty then it's very likely that you're using
- * prerendering. So React attaches event listeners to the existing markup
- * rather than replacing it.
- * https://react.dev/reference/react-dom/client/hydrateRoot
+ * Find the app element to mount React to
  */
-const redwoodAppElement = document.getElementById("redwood-app");
+const appElement = document.getElementById("redwood-app") || document.getElementById("root");
 
-if (!redwoodAppElement) {
+if (!appElement) {
   throw new Error(
-    "Could not find an element with ID 'redwood-app'. Please ensure it " +
-      "exists in your 'web/src/index.html' file.",
+    "Could not find an element with ID 'redwood-app' or 'root'. Please ensure it " +
+      "exists in your HTML file.",
   );
 }
 
-if (redwoodAppElement.children?.length > 0) {
+if (appElement.children?.length > 0) {
   hydrateRoot(
-    redwoodAppElement,
+    appElement,
     <App>
       <Routes />
     </App>,
   );
 } else {
-  const root = createRoot(redwoodAppElement);
+  const root = createRoot(appElement);
   root.render(
     <App>
       <Routes />

@@ -1,31 +1,29 @@
-// In this file, all Page components from 'src/pages` are auto-imported. Nested
-// directories are supported, and should be uppercase. Each subdirectory will be
-// prepended onto the component name.
-//
-// Examples:
-//
-// 'src/pages/HomePage/HomePage.js'         -> HomePage
-// 'src/pages/Admin/BooksPage/BooksPage.js' -> AdminBooksPage
-
+// Routes configuration using React Router
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { canHandleRoute, getRoutingComponent } from "supertokens-auth-react/ui";
 
-import { Router, Route } from "@redwoodjs/router";
-
 import { useAuth, PreBuiltUI } from "./authentication";
-import ApiTokens from "./pages/ApiTokensPage/ApiTokensPage";
+import HomePage from "./pages/HomePage/HomePage";
+import ApiTokensPage from "./pages/ApiTokensPage/ApiTokensPage";
+import NotFoundPage from "./pages/NotFoundPage/NotFoundPage";
 
-const Routes = () => {
+const AppRoutes = () => {
+  const { isAuthenticated } = useAuth();
+
+  // Handle SuperTokens authentication routes
   if (canHandleRoute(PreBuiltUI)) {
     return getRoutingComponent(PreBuiltUI);
   }
 
   return (
-    <Router useAuth={useAuth}>
-      <Route path="/" page={HomePage} name="home" />
-      <Route path="/tokens" page={ApiTokens} name="api-tokens" />
-      <Route notfound page={NotFoundPage} />
-    </Router>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/tokens" element={<ApiTokensPage />} />
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </BrowserRouter>
   );
 };
 
-export default Routes;
+export default AppRoutes;
