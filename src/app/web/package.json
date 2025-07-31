@@ -16,10 +16,14 @@
     "@redwoodjs/router": "8.6.1",
     "@redwoodjs/web": "8.6.1",
     "@redwoodjs/web-server": "8.6.1",
+    "@tanstack/react-query": "^5.84.0",
+    "@trpc/client": "^11.4.3",
+    "@trpc/react-query": "^11.4.3",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "supertokens-auth-react": "~0.39.1",
-    "supertokens-web-js": "~0.10.0"
+    "supertokens-web-js": "~0.10.0",
+    "zod": "^4.0.14"
   },
   "devDependencies": {
     "@redwoodjs/vite": "8.6.1",
