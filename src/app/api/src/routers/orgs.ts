@@ -1,16 +1,23 @@
 import { z } from 'zod'
 import { router, protectedProcedure } from '../lib/trpc'
-import { RepoAccess } from '@prisma/client'
+
+// Manual enum definitions until Prisma client is generated
+const RepoAccess = {
+  NONE: 'NONE',
+  READ: 'READ', 
+  WRITE: 'WRITE',
+  ADMIN: 'ADMIN'
+} as const
 
 const createOrgInput = z.object({
   name: z.string(),
-  defaultRepoAccess: z.nativeEnum(RepoAccess).optional().default('WRITE'),
+  defaultRepoAccess: z.enum(['NONE', 'READ', 'WRITE', 'ADMIN']).optional().default('WRITE'),
   defaultCanCreateRepos: z.boolean().optional().default(true),
 })
 
 const updateOrgInput = z.object({
   name: z.string().optional(),
-  defaultRepoAccess: z.nativeEnum(RepoAccess).optional(),
+  defaultRepoAccess: z.enum(['NONE', 'READ', 'WRITE', 'ADMIN']).optional(),
   defaultCanCreateRepos: z.boolean().optional(),
 })
 

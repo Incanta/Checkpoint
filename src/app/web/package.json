@@ -11,23 +11,24 @@
     ]
   },
   "dependencies": {
-    "@redwoodjs/auth-supertokens-web": "8.6.1",
-    "@redwoodjs/forms": "8.6.1",
-    "@redwoodjs/router": "8.6.1",
-    "@redwoodjs/web": "8.6.1",
-    "@redwoodjs/web-server": "8.6.1",
     "@tanstack/react-query": "^5.84.0",
     "@trpc/client": "^11.4.3",
     "@trpc/react-query": "^11.4.3",
+    "@trpc/server": "^11.4.3",
+    "@types/react-router-dom": "^5.3.3",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "react-error-boundary": "^6.0.0",
+    "react-router-dom": "^7.7.1",
     "supertokens-auth-react": "~0.39.1",
     "supertokens-web-js": "~0.10.0",
     "zod": "^4.0.14"
   },
   "devDependencies": {
-    "@redwoodjs/vite": "8.6.1",
     "@types/react": "^18.2.55",
-    "@types/react-dom": "^18.2.19"
+    "@types/react-dom": "^18.2.19",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.9.2",
+    "vite": "^6.0.7"
   }
 }

@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-
-import { FatalErrorBoundary, RedwoodProvider } from "@redwoodjs/web";
+import { ErrorBoundary } from "react-error-boundary";
 
 import FatalErrorPage from "src/pages/FatalErrorPage";
 import { TRPCProvider } from "src/components/TRPCProvider";
@@ -13,16 +12,18 @@ interface AppProps {
   children?: ReactNode;
 }
 
+function ErrorFallback({ error }: { error: Error }) {
+  return <FatalErrorPage error={error} />;
+}
+
 const App = ({ children }: AppProps) => (
-  <FatalErrorBoundary page={FatalErrorPage}>
-    <RedwoodProvider titleTemplate="%PageTitle | %AppTitle">
-      <AuthProvider>
-        <TRPCProvider>
-          {children}
-        </TRPCProvider>
-      </AuthProvider>
-    </RedwoodProvider>
-  </FatalErrorBoundary>
+  <ErrorBoundary FallbackComponent={ErrorFallback}>
+    <AuthProvider>
+      <TRPCProvider>
+        {children}
+      </TRPCProvider>
+    </AuthProvider>
+  </ErrorBoundary>
 );
 
 export default App;

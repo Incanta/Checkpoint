@@ -19,21 +19,21 @@
     "migrate:clean": "rm -rf api/db/migrations api/db/dev.db*",
     "migrate:dev": "node scripts/migrate.js init",
     "gen:types": "cd api && yarn prisma generate",
-    "dev:docker": "yarn rw prisma migrate dev && yarn rw dev",
-    "test": "yarn rw test --no-watch api"
+    "build": "yarn build:api && yarn build:web",
+    "build:api": "cd api && yarn tsc",
+    "build:web": "cd web && yarn vite build",
+    "test": "cd api && yarn vitest run"
   },
   "devDependencies": {
-    "@redwoodjs/auth-custom-setup": "8.6.1",
-    "@redwoodjs/auth-supertokens-setup": "8.6.1",
-    "@redwoodjs/core": "8.6.1",
-    "@redwoodjs/project-config": "8.6.1",
     "@typescript-eslint/parser": "^8.22.0",
     "commander": "^14.0.0",
     "concurrently": "^9.2.0",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-prefer-arrow": "^1.2.3",
     "npm-run-all": "^4.1.5",
-    "typescript-eslint": "^8.22.0"
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.22.0",
+    "vitest": "^3.2.4"
   },
   "prisma": {
     "seed": "yarn rw exec seed"

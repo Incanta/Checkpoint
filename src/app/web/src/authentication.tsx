@@ -2,54 +2,112 @@ import SuperTokens, { SuperTokensWrapper } from "supertokens-auth-react";
 import Session from "supertokens-auth-react/recipe/session";
 import ThirdPartyEmailPassword from "supertokens-auth-react/recipe/thirdpartyemailpassword";
 import { ThirdPartyEmailPasswordPreBuiltUI } from "supertokens-auth-react/recipe/thirdpartyemailpassword/prebuiltui";
+import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 
-import { createAuth } from "@redwoodjs/auth-supertokens-web";
-import { isBrowser } from "@redwoodjs/prerender/browserUtils";
-
-const websiteDomain =
-  // @ts-ignore
-  process.env.SUPERTOKENS_WEBSITE_DOMAIN;
-// @ts-ignore
+const websiteDomain = process.env.SUPERTOKENS_WEBSITE_DOMAIN;
 const apiDomain = process.env.SUPERTOKENS_API_DOMAIN || websiteDomain;
-const apiGatewayPath =
-  // @ts-ignore
-  process.env.SUPERTOKENS_API_GATEWAY_PATH || "/.redwood/functions";
-
-const superTokensClient = {
-  sessionRecipe: Session,
-  redirectToAuth: SuperTokens.redirectToAuth,
-};
+const apiGatewayPath = process.env.SUPERTOKENS_API_GATEWAY_PATH || "/auth";
 
 export const PreBuiltUI = [ThirdPartyEmailPasswordPreBuiltUI];
 
-isBrowser &&
+// Initialize SuperTokens only in browser
+if (typeof window !== 'undefined') {
   SuperTokens.init({
     appInfo: {
-      // @ts-ignore
-      appName: process.env.SUPERTOKENS_APP_NAME,
-      apiDomain,
-      websiteDomain,
+      appName: process.env.SUPERTOKENS_APP_NAME || 'Checkpoint VCS',
+      apiDomain: apiDomain || 'http://localhost:8911',
+      websiteDomain: websiteDomain || 'http://localhost:8910',
       apiGatewayPath,
       websiteBasePath: "/auth",
       apiBasePath: "/auth",
     },
-    // useShadowDom: true,
     recipeList: [Session.init(), ThirdPartyEmailPassword.init()],
   });
-
-const { AuthProvider: SuperTokensAuthProvider, useAuth } =
-  createAuth(superTokensClient);
-
-interface Props {
-  children: React.ReactNode;
 }
 
-const AuthProvider = ({ children }: Props) => {
+// Auth context
+interface AuthContextType {
+  isAuthenticated: boolean;
+  currentUser: any;
+  loading: boolean;
+  signOut: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType>({
+  isAuthenticated: false,
+  currentUser: null,
+  loading: true,
+  signOut: async () => {},
+});
+
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+const CustomAuthProvider = ({ children }: AuthProviderProps) => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const sessionExists = await Session.doesSessionExist();
+        setIsAuthenticated(sessionExists);
+        
+        if (sessionExists) {
+          // You can fetch user data here if needed
+          // const userInfo = await Session.getAccessTokenPayloadSecurely();
+          // setCurrentUser(userInfo);
+        }
+      } catch (error) {
+        console.error('Auth check failed:', error);
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  const signOut = async () => {
+    try {
+      await Session.signOut();
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+    } catch (error) {
+      console.error('Sign out failed:', error);
+    }
+  };
+
+  return (
+    <AuthContext.Provider value={{ 
+      isAuthenticated, 
+      currentUser, 
+      loading, 
+      signOut 
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+const AuthProvider = ({ children }: AuthProviderProps) => {
   return (
     <SuperTokensWrapper>
-      <SuperTokensAuthProvider>{children}</SuperTokensAuthProvider>
+      <CustomAuthProvider>{children}</CustomAuthProvider>
     </SuperTokensWrapper>
   );
+};
+
+const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 };
 
 export { AuthProvider, useAuth };

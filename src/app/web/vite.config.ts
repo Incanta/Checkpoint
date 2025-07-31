@@ -1,22 +1,26 @@
-import dns from "dns";
-
-import type { UserConfig } from "vite";
 import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { resolve } from "path";
 
-import redwood from "@redwoodjs/vite";
-
-// So that Vite will load on localhost instead of `127.0.0.1`.
-// See: https://vitejs.dev/config/server-options.html#server-host.
-dns.setDefaultResultOrder("verbatim");
-
-const viteConfig: UserConfig = {
-  plugins: [redwood()],
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      src: resolve(__dirname, "src"),
+    },
+  },
   server: {
-    allowedHosts: ["redwood", "web"],
+    port: 8910,
+    host: "0.0.0.0",
     watch: {
       usePolling: true,
     },
   },
-};
-
-export default defineConfig(viteConfig);
+  define: {
+    // Define environment variables for the client
+    'process.env.SUPERTOKENS_APP_NAME': JSON.stringify(process.env.SUPERTOKENS_APP_NAME),
+    'process.env.SUPERTOKENS_WEBSITE_DOMAIN': JSON.stringify(process.env.SUPERTOKENS_WEBSITE_DOMAIN),
+    'process.env.SUPERTOKENS_JWKS_URL': JSON.stringify(process.env.SUPERTOKENS_JWKS_URL),
+    'process.env.SUPERTOKENS_CONNECTION_URI': JSON.stringify(process.env.SUPERTOKENS_CONNECTION_URI),
+  },
+});
