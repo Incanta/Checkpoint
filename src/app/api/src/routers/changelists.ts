@@ -1,11 +1,18 @@
 import { z } from 'zod'
 import { router, protectedProcedure } from '../lib/trpc'
-import { FileChangeType } from '@prisma/client'
+
+// Manual enum definitions until Prisma client is generated
+const FileChangeType = {
+  ADDED: 'ADDED',
+  MODIFIED: 'MODIFIED',
+  DELETED: 'DELETED',
+  RENAMED: 'RENAMED'
+} as const
 
 const modificationInput = z.object({
   path: z.string(),
   oldPath: z.string().optional(),
-  type: z.nativeEnum(FileChangeType),
+  type: z.enum(['ADDED', 'MODIFIED', 'DELETED', 'RENAMED']),
 })
 
 const createChangelistInput = z.object({
