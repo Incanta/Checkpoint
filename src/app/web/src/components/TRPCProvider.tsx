@@ -9,7 +9,7 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
     trpc.createClient({
       links: [
         httpBatchLink({
-          url: '/api/trpc',
+          url: 'http://localhost:8911/api/trpc',
           headers() {
             // Add authentication headers here
             const token = localStorage.getItem('authToken')

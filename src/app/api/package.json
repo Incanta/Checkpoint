@@ -19,6 +19,7 @@
     "zod": "^4.0.14"
   },
   "devDependencies": {
-    "@types/uuid": "^10.0.0"
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.20.3"
   }
 }
