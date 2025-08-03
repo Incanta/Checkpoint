@@ -2,7 +2,7 @@
 #include <string>
 
 #include "../util/config.h"
-#include "../util/graphql-client.h"
+#include "../util/trpc-client.h"
 #include "main.h"
 
 namespace fs = std::filesystem;
@@ -36,26 +36,13 @@ Checkpoint::ErrorResult* Checkpoint::Submit(
     return result;
   }
 
-  std::string query = R"EOF(
-    query getStorageToken(
-      $orgId: String!
-      $repoId: String!
-      $write: Boolean!
-    ) {
-      storageToken(orgId: $orgId, repoId: $repoId, write: $write) {
-        token
-        expiration
-        backendUrl
-      }
-    }
-  )EOF";
+  json input = {
+    {"orgId", workspace->orgId},
+    {"repoId", workspace->repoId}, 
+    {"write", true}
+  };
 
-  json variables;
-  variables["orgId"] = workspace->orgId;
-  variables["repoId"] = workspace->repoId;
-  variables["write"] = true;
-
-  json storageTokenResult = GraphQLClient::Request(workspace->serverId, query, variables);
+  json storageTokenResult = tRPCClient::Query(workspace->serverId, "storage.getToken", input);
 
   if (storageTokenResult.contains("error")) {
     std::string error = storageTokenResult["error"];

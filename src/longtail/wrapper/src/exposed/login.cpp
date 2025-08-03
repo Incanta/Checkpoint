@@ -4,7 +4,7 @@
 #include <string>
 
 #include "../util/config.h"
-#include "../util/graphql-client.h"
+#include "../util/trpc-client.h"
 #include "main.h"
 #ifdef _WIN32
 #include <Windows.h>
@@ -71,21 +71,9 @@ Checkpoint::ErrorResult* Checkpoint::Login(const char* serverId) {
 
   json tokenBody;
 
-  std::string query = R"EOF(
-    query getApiToken($deviceCode: String!) {
-      apiToken(deviceCode: $deviceCode) {
-        id
-        token
-        expiresAt
-      }
-    }
-  )EOF";
-
-  json variables;
-  variables["deviceCode"] = randomCodeStr;
-
   while (true) {
-    tokenBody = GraphQLClient::Request(serverId, query, variables);
+    json input = {{"deviceCode", randomCodeStr}};
+    tokenBody = tRPCClient::Query(serverId, "auth.getApiToken", input);
 
     if (tokenBody.contains("error")) {
       std::cout << "Error: " << tokenBody["error"] << std::endl;

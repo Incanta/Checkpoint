@@ -1,23 +1,14 @@
 #include <string>
 
-#include "../util/graphql-client.h"
+#include "../util/trpc-client.h"
 #include "main.h"
 
 Checkpoint::WhoamiResult* Checkpoint::Whoami(const char* serverId) {
   Checkpoint::WhoamiResult* result = new Checkpoint::WhoamiResult();
 
-  std::string query = R"EOF(
-    query {
-      me {
-        id
-        email
-      }
-    }
-  )EOF";
+  json input = json::object(); // Empty input for user.me query
 
-  json variables;
-
-  json jsonResult = GraphQLClient::Request(serverId, query, variables);
+  json jsonResult = tRPCClient::Query(serverId, "user.me", input);
 
   if (jsonResult.contains("error")) {
     std::string error = jsonResult["error"];
@@ -27,10 +18,11 @@ Checkpoint::WhoamiResult* Checkpoint::Whoami(const char* serverId) {
     return result;
   }
 
-  if (jsonResult.contains("data") && jsonResult["data"].contains("me")) {
-    json me = jsonResult["data"]["me"];
-    std::string id = me["id"];
-    std::string email = me["email"];
+  // tRPC returns the result directly, not wrapped in data object
+  if (jsonResult.contains("result") && jsonResult["result"].contains("data")) {
+    json data = jsonResult["result"]["data"];
+    std::string id = data["id"];
+    std::string email = data["email"];
     result->success = true;
     result->id = new char[id.length() + 1];
     strcpy(result->id, id.c_str());
