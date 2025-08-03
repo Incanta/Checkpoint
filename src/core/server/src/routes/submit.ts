@@ -17,7 +17,7 @@ import {
   type LongtailLogLevel,
 } from "@checkpointvcs/common";
 import { ptr, toArrayBuffer } from "bun:ffi";
-import { gql, GraphQLClient } from "graphql-request";
+import { createTRPCHTTPClient } from "@checkpointvcs/app-new/client";
 
 interface JWTClaims {
   iss: string;
@@ -180,42 +180,28 @@ export function routeSubmit(): Record<string, Endpoint> {
           );
         }
 
-        const client = new GraphQLClient(
-          config.get<string>("checkpoint.api.url"),
-          {
-            headers: {
-              Authorization: `Bearer ${payload.apiToken}`,
-              "auth-provider": "auth0",
-            },
-          }
-        );
+        const client = createTRPCHTTPClient({
+          url: `${config.get<string>("checkpoint.api.url")}/api/trpc`,
+          headers: {
+            Authorization: `Bearer ${payload.apiToken}`,
+            "auth-provider": "auth0",
+          },
+        });
 
         try {
-          const createChangelistResponse: any = await client.request(
-            gql`
-              mutation CreateChangelist($input: CreateChangelistInput!) {
-                createChangelist(input: $input) {
-                  id
-                  number
-                }
-              }
-            `,
-            {
-              input: {
-                message: payload.message,
-                repoId: claims.repoId,
-                versionIndex: payload.versionIndex,
-                branchName: payload.branchName,
-                modifications: payload.modifications,
-                keepCheckedOut: payload.keepCheckedOut,
-                workspaceId: payload.workspaceId,
-              },
-            }
-          );
+          const createChangelistResponse = await client.changelist.createChangelist.mutate({
+            message: payload.message,
+            repoId: claims.repoId,
+            versionIndex: payload.versionIndex,
+            branchName: payload.branchName,
+            modifications: payload.modifications,
+            keepCheckedOut: payload.keepCheckedOut,
+            workspaceId: payload.workspaceId,
+          });
 
           const responseMessage: RequestResponse = {
-            id: createChangelistResponse.createChangelist.id,
-            number: createChangelistResponse.createChangelist.number,
+            id: createChangelistResponse.id,
+            number: createChangelistResponse.number,
           };
 
           return new Response(JSON.stringify(responseMessage), { status: 200 });

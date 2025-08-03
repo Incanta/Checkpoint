@@ -3,8 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "dist/lib/trpc-client.js",
+  "types": "dist/lib/trpc-client.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/lib/trpc-client.js",
+      "types": "./dist/lib/trpc-client.d.ts"
+    },
+    "./client": {
+      "import": "./dist/lib/trpc-client.js",
+      "types": "./dist/lib/trpc-client.d.ts"
+    }
+  },
   "scripts": {
     "build": "next build",
+    "build:lib": "tsc --project tsconfig.lib.json",
     "check": "next lint && tsc --noEmit",
     "db:generate": "prisma migrate dev",
     "db:migrate": "prisma migrate deploy",

@@ -2,7 +2,7 @@ import config from "@incanta/config";
 import type { Command } from "commander";
 import open from "open";
 import { URLSearchParams } from "url";
-import { gql, GraphQLClient } from "graphql-request";
+import { createTRPCHTTPClient } from "@checkpointvcs/app-new/client";
 import { promises as fs } from "fs";
 import path from "path";
 import os from "os";
@@ -93,30 +93,20 @@ export async function loginCommand(program: Command): Promise<void> {
         JSON.stringify(tokenBody)
       );
 
-      const client = new GraphQLClient(
-        config.get<string>("checkpoint.api.url"),
-        {
-          headers: {
-            Authorization: `Bearer ${tokenBody.access_token}`,
-            "auth-provider": "auth0",
-          },
-        }
-      );
+      const client = createTRPCHTTPClient({
+        url: `${config.get<string>("checkpoint.api.url")}/api/trpc`,
+        headers: {
+          Authorization: `Bearer ${tokenBody.access_token}`,
+          "auth-provider": "auth0",
+        },
+      });
 
-      const meResponse: any = await client.request(
-        gql`
-          query {
-            me {
-              email
-            }
-          }
-        `
-      );
+      const meResponse = await client.user.me.query();
 
-      if (!meResponse?.me) {
+      if (!meResponse) {
         throw new Error("Failed to get user information");
       }
 
-      console.log(`Logged in as ${meResponse.me.email}`);
+      console.log(`Logged in as ${meResponse.email}`);
     });
 }

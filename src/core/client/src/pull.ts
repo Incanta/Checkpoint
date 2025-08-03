@@ -14,7 +14,7 @@ import {
   saveWorkspaceState,
   type Workspace,
 } from "./util";
-import { gql, GraphQLClient } from "graphql-request";
+import { createTRPCHTTPClient } from "@checkpointvcs/app-new/client";
 import { promises as fs } from "fs";
 import path from "path";
 

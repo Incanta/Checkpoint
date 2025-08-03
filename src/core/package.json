@@ -16,6 +16,7 @@
     "server": "NODE_CONFIG_DIR=server/config bun run server/src/index.ts"
   },
   "dependencies": {
+    "@checkpointvcs/app-new": "file:../app-new",
     "@incanta/config": "^0.6.5",
     "async-sema": "^3.1.1",
     "graphql-request": "^7.1.2",

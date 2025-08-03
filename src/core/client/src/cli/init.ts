@@ -3,7 +3,7 @@ import type { Command } from "commander";
 import { promises as fs } from "fs";
 import path from "path";
 import { getAuthToken, type WorkspaceConfig } from "../util";
-import { gql, GraphQLClient } from "graphql-request";
+import { createTRPCHTTPClient } from "@checkpointvcs/app-new/client";
 import inquirer from "inquirer";
 
 export async function initCommand(program: Command): Promise<void> {
@@ -26,37 +26,22 @@ export async function initCommand(program: Command): Promise<void> {
 
       const apiToken = await getAuthToken();
 
-      const client = new GraphQLClient(
-        config.get<string>("checkpoint.api.url"),
-        {
-          headers: {
-            Authorization: `Bearer ${apiToken}`,
-            "auth-provider": "auth0",
-          },
-        }
-      );
+      const client = createTRPCHTTPClient({
+        url: `${config.get<string>("checkpoint.api.url")}/api/trpc`,
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          "auth-provider": "auth0",
+        },
+      });
 
-      const orgsResponse: any = await client.request(
-        gql`
-          query {
-            myOrgs {
-              id
-              name
-              repos {
-                id
-                name
-              }
-            }
-          }
-        `
-      );
+      const orgsResponse = await client.org.myOrgs.query();
 
       const { org: selectedOrg } = await inquirer.prompt([
         {
           name: "org",
           type: "list",
           message: "Select an organization",
-          choices: orgsResponse.myOrgs.map((org: any) => ({
+          choices: orgsResponse.map((org) => ({
             name: org.name,
             value: org.id,
           })),
@@ -68,9 +53,9 @@ export async function initCommand(program: Command): Promise<void> {
           name: "repo",
           type: "list",
           message: "Select a repo",
-          choices: orgsResponse.myOrgs
-            .find((org: any) => org.id === selectedOrg)
-            .repos.map((repo: any) => ({
+          choices: orgsResponse
+            .find((org) => org.id === selectedOrg)!
+            .repos!.map((repo) => ({
               name: repo.name,
               value: repo.id,
             })),
