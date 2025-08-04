@@ -131,6 +131,9 @@ export const authConfig = {
   secret: config.get<string>("auth.jwt.secret"),
   providers,
   adapter: PrismaAdapter(db),
+  pages: {
+    signIn: "/signin",
+  },
   callbacks: {
     session: ({ session, user }) => ({
       ...session,

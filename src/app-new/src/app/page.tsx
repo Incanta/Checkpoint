@@ -17,13 +17,23 @@ export default async function Home() {
               Checkpoint<span className="text-[hsl(280,100%,70%)]">VCS</span>
             </h1>
             <div className="flex flex-col items-center gap-4">
-              <p className="text-xl">Please sign in to access your organizations and repositories</p>
-              <Link
-                href="/api/auth/signin"
-                className="rounded-full bg-white/10 px-10 py-3 font-semibold no-underline transition hover:bg-white/20"
-              >
-                Sign in
-              </Link>
+              <p className="text-xl">
+                Please sign in to access your organizations and repositories
+              </p>
+              <div className="flex gap-4">
+                <Link
+                  href="/signin"
+                  className="rounded-full bg-white/10 px-10 py-3 font-semibold no-underline transition hover:bg-white/20"
+                >
+                  Sign in
+                </Link>
+                <Link
+                  href="/register"
+                  className="rounded-full bg-[hsl(280,100%,70%)] px-10 py-3 font-semibold no-underline transition hover:bg-[hsl(280,100%,60%)]"
+                >
+                  Register
+                </Link>
+              </div>
             </div>
           </div>
         </main>
@@ -56,7 +66,7 @@ export default async function Home() {
               Sign out
             </Link>
           </div>
-          
+
           <CheckpointHome />
         </div>
       </main>
