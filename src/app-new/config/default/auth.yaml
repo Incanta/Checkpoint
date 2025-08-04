@@ -1,0 +1,49 @@
+api-tokens:
+  signing-key: "secret"
+
+jwt:
+  secret: "secret"
+
+credentials:
+  enabled: false
+  hash:
+    iterations: 210000
+    length: 512
+
+auth0:
+  enabled: false
+  client:
+    id: ""
+    secret: ""
+  issuer: ""
+
+github:
+  enabled: false
+  client:
+    id: ""
+    secret: ""
+
+gitlab:
+  enabled: false
+  client:
+    id: ""
+    secret: ""
+
+okta:
+  enabled: false
+  client:
+    id: ""
+    secret: ""
+  issuer: ""
+
+slack:
+  enabled: false
+  client:
+    id: ""
+    secret: ""
+
+discord:
+  enabled: false
+  client:
+    id: ""
+    secret: ""
