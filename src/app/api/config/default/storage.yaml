@@ -1,7 +1,0 @@
-signing-keys:
-  read: "secret"
-  write: "secret"
-
-token-expiration: 600
-
-backend-url: "http://localhost:3000"
