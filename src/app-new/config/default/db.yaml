@@ -1,0 +1,3 @@
+# Prisma
+# https://www.prisma.io/docs/reference/database-reference/connection-urls#env
+url: "file:./db.sqlite"

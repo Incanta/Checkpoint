@@ -3,7 +3,7 @@
 
 #include "../util/config.h"
 #include "../util/diff.h"
-#include "../util/graphql-client.h"
+#include "../util/trpc-client.h"
 #include "main.h"
 
 namespace fs = std::filesystem;

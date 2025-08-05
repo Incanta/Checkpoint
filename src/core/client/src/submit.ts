@@ -14,7 +14,7 @@ import {
   saveWorkspaceState,
   type Workspace,
 } from "./util";
-import { gql, GraphQLClient } from "graphql-request";
+import { createTRPCHTTPClient } from "@checkpointvcs/app-new/client";
 
 export async function submit(
   workspace: Workspace,
@@ -26,46 +26,32 @@ export async function submit(
 ): Promise<void> {
   const apiToken = await getAuthToken();
 
-  const client = new GraphQLClient(config.get<string>("checkpoint.api.url"), {
+  const client = createTRPCHTTPClient({
+    url: `${config.get<string>("checkpoint.api.url")}/api/trpc`,
     headers: {
       Authorization: `Bearer ${apiToken}`,
       "auth-provider": "auth0",
     },
   });
 
-  const storageTokenResponse: any = await client.request(
-    gql`
-      query getStorageToken(
-        $orgId: String!
-        $repoId: String!
-        $write: Boolean!
-      ) {
-        storageToken(orgId: $orgId, repoId: $repoId, write: $write) {
-          token
-          expiration
-          backendUrl
-        }
-      }
-    `,
-    {
-      orgId: workspace.orgId,
-      repoId: workspace.repoId,
-      write: true,
-    }
-  );
+  const storageTokenResponse = await client.storage.getToken.query({
+    orgId: workspace.orgId,
+    repoId: workspace.repoId,
+    write: true,
+  });
 
   if (
-    !storageTokenResponse.storageToken ||
-    !storageTokenResponse.storageToken.token ||
-    !storageTokenResponse.storageToken.expiration ||
-    !storageTokenResponse.storageToken.backendUrl
+    !storageTokenResponse ||
+    !storageTokenResponse.token ||
+    !storageTokenResponse.expiration ||
+    !storageTokenResponse.backendUrl
   ) {
     throw new Error("Could not get storage token");
   }
 
-  const token = storageTokenResponse.storageToken.token;
-  const tokenExpirationMs = storageTokenResponse.storageToken.expiration * 1000;
-  const backendUrl = storageTokenResponse.storageToken.backendUrl;
+  const token = storageTokenResponse.token;
+  const tokenExpirationMs = storageTokenResponse.expiration * 1000;
+  const backendUrl = storageTokenResponse.backendUrl;
 
   // on windows, requires PATH to include libraries folder
   const lib = CreateLongtailLibrary();

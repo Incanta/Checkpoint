@@ -4,7 +4,7 @@ import { promisify } from "util";
 import path from "path";
 import { promises as fs } from "fs";
 import os from "os";
-import { gql, GraphQLClient } from "graphql-request";
+import { createTRPCHTTPClient } from "@checkpointvcs/app-new/client";
 
 export function relativePath(from: string, to: string): string {
   return path.relative(from, to).replace(/\\/g, "/");
@@ -159,32 +159,24 @@ export async function getLatestChangelistId(
 ): Promise<string> {
   const apiToken = await getAuthToken();
 
-  const client = new GraphQLClient(config.get<string>("checkpoint.api.url"), {
+  const client = createTRPCHTTPClient({
+    url: `${config.get<string>("checkpoint.api.url")}/api/trpc`,
     headers: {
       Authorization: `Bearer ${apiToken}`,
       "auth-provider": "auth0",
     },
   });
 
-  const branchResponse: any = await client.request(
-    gql`
-      query getBranch($repoId: String!, $branchName: String!) {
-        branch(repoId: $repoId, name: $branchName) {
-          headNumber
-        }
-      }
-    `,
-    {
-      repoId: workspace.repoId,
-      branchName: workspace.branchName,
-    }
-  );
+  const branch = await client.branch.getBranch.query({
+    repoId: workspace.repoId,
+    name: workspace.branchName,
+  });
 
-  if (!branchResponse.branch) {
+  if (!branch) {
     throw new Error("Could not get latest changelist number");
   }
 
-  const changelistNumber = branchResponse.branch.headNumber;
+  const changelistNumber = branch.headNumber;
 
   return getChangelistId(workspace, changelistNumber);
 }
@@ -195,33 +187,22 @@ export async function getChangelistId(
 ): Promise<string> {
   const apiToken = await getAuthToken();
 
-  const client = new GraphQLClient(config.get<string>("checkpoint.api.url"), {
+  const client = createTRPCHTTPClient({
+    url: `${config.get<string>("checkpoint.api.url")}/api/trpc`,
     headers: {
       Authorization: `Bearer ${apiToken}`,
       "auth-provider": "auth0",
     },
   });
 
-  const changelistResponse: any = await client.request(
-    gql`
-      query getChangelist($repoId: String!, $changelistNumber: Int!) {
-        changelists(repoId: $repoId, numbers: [$changelistNumber]) {
-          id
-        }
-      }
-    `,
-    {
-      repoId: workspace.repoId,
-      changelistNumber: changelistNumber,
-    }
-  );
+  const changelists = await client.changelist.getChangelists.query({
+    repoId: workspace.repoId,
+    numbers: [changelistNumber],
+  });
 
-  if (
-    !changelistResponse.changelists ||
-    changelistResponse.changelists.length === 0
-  ) {
+  if (!changelists || changelists.length === 0) {
     throw new Error("Could not get changelist ID");
   }
 
-  return changelistResponse.changelists[0].id;
+  return changelists[0]!.id;
 }

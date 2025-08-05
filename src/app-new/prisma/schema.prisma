@@ -1,0 +1,311 @@
+// Don't forget to tell Prisma about your edits to this file using
+// `yarn rw prisma migrate dev` or `yarn rw prisma db push`.
+// `migrate` is like committing while `push` is for prototyping.
+// Read more about both here:
+// https://www.prisma.io/docs/orm/prisma-migrate
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = "native"
+}
+
+model User {
+  id       String  @id @default(cuid())
+  name     String?
+  username String  @unique
+
+  email         String    @unique
+  emailVerified DateTime?
+
+  image String?
+
+  // Only used for credentials auth (in dev)
+  salt String?
+  hash String?
+
+  checkpointAdmin Boolean @default(false)
+
+  orgs              OrgUser[]
+  specificRepoRoles RepoRole[]
+  changelists       Changelist[]
+  workspaces        Workspace[]
+  apiTokens         ApiToken[]
+
+  // NextAuth
+  accounts      Account[]
+  sessions      Session[]
+  Authenticator Authenticator[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum RepoAccess {
+  NONE
+  READ
+  WRITE
+  ADMIN
+}
+
+enum OrgRole {
+  MEMBER
+  BILLING
+  ADMIN
+}
+
+model Org {
+  id        String    @id @default(cuid())
+  deletedAt DateTime?
+  deletedBy String?
+
+  name String @unique
+
+  defaultRepoAccess     RepoAccess @default(WRITE)
+  defaultCanCreateRepos Boolean    @default(true)
+
+  users OrgUser[]
+  repos Repo[]
+}
+
+model OrgUser {
+  id             String  @id @default(cuid())
+  role           OrgRole @default(MEMBER)
+  canCreateRepos Boolean @default(true)
+
+  org   Org    @relation(fields: [orgId], references: [id])
+  orgId String
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@unique([orgId, userId])
+}
+
+model Repo {
+  id        String    @id @default(cuid())
+  deletedAt DateTime?
+  deletedBy String?
+
+  name String
+
+  public Boolean @default(false)
+
+  org   Org    @relation(fields: [orgId], references: [id])
+  orgId String
+
+  additionalRoles RepoRole[]
+
+  files       File[]
+  changelists Changelist[]
+  branches    Branch[]        @relation("RepoBranch")
+  tags        ChangelistTag[]
+  workspaces  Workspace[]
+
+  @@unique([orgId, name])
+}
+
+model RepoRole {
+  id String @id @default(cuid())
+
+  access RepoAccess
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@unique([repoId, userId])
+}
+
+model Branch {
+  id String @id @default(cuid())
+
+  repo   Repo   @relation("RepoBranch", fields: [repoId], references: [id])
+  repoId String
+
+  name       String
+  headNumber Int
+
+  isDefault Boolean @default(false)
+
+  @@unique([repoId, name])
+}
+
+model Changelist {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  number       Int
+  message      String
+  versionIndex String
+  stateTree    Json
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  user   User?   @relation(fields: [userId], references: [id])
+  userId String?
+
+  parent       Changelist?  @relation("ChangelistToParent", fields: [repoId, parentNumber], references: [repoId, number])
+  children     Changelist[] @relation("ChangelistToParent")
+  parentNumber Int?
+
+  fileChanges FileChange[]
+  tags        ChangelistTag[]
+
+  @@unique([repoId, number])
+}
+
+model ChangelistTag {
+  id String @id @default(cuid())
+
+  name String
+
+  changelist Changelist @relation(fields: [repoId, number], references: [repoId, number])
+  repoId     String
+  number     Int
+
+  repo Repo @relation(fields: [repoId], references: [id])
+
+  @@unique([repoId, name])
+}
+
+enum FileChangeType {
+  ADD
+  DELETE
+  MODIFY
+}
+
+model FileChange {
+  id String @id @default(cuid())
+
+  file   File   @relation(fields: [fileId], references: [id])
+  fileId String
+
+  changelist       Changelist @relation(fields: [repoId, changelistNumber], references: [repoId, number])
+  repoId           String
+  changelistNumber Int
+
+  type    FileChangeType
+  oldPath String?
+}
+
+model File {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  path String
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  changes   FileChange[]
+  checkouts FileCheckout[]
+}
+
+model FileCheckout {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  removedAt DateTime?
+
+  locked Boolean @default(false)
+
+  fileId String
+  file   File   @relation(fields: [fileId], references: [id])
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+}
+
+model Workspace {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  name String
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  repoId String
+  repo   Repo   @relation(fields: [repoId], references: [id])
+
+  fileCheckouts FileCheckout[]
+}
+
+model ApiToken {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  expiresAt DateTime?
+
+  name       String
+  token      String  @unique
+  deviceCode String? @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+// NextAuth models
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+model Authenticator {
+  credentialID         String  @unique
+  userId               String
+  providerAccountId    String
+  credentialPublicKey  String
+  counter              Int
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, credentialID])
+}
