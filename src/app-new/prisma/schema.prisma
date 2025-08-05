@@ -15,11 +15,16 @@ generator client {
 }
 
 model User {
-  id       String @id @default(cuid())
-  name     String
-  username String @unique
-  email    String @unique
+  id       String  @id @default(cuid())
+  name     String?
+  username String  @unique
 
+  email         String    @unique
+  emailVerified DateTime?
+
+  image String?
+
+  // Only used for credentials auth (in dev)
   salt String?
   hash String?
 
@@ -30,6 +35,14 @@ model User {
   changelists       Changelist[]
   workspaces        Workspace[]
   apiTokens         ApiToken[]
+
+  // NextAuth
+  accounts      Account[]
+  sessions      Session[]
+  Authenticator Authenticator[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum RepoAccess {
@@ -241,48 +254,58 @@ model ApiToken {
   user   User   @relation(fields: [userId], references: [id])
 }
 
-// Necessary for Next auth
-model Account {
-  id                       String       @id @default(cuid())
-  userId                   String
-  type                     String
-  provider                 String
-  providerAccountId        String
-  refresh_token            String? // @db.Text
-  access_token             String? // @db.Text
-  expires_at               Int?
-  token_type               String?
-  scope                    String?
-  id_token                 String? // @db.Text
-  session_state            String?
-  user                     NextAuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-  refresh_token_expires_in Int?
+// NextAuth models
 
-  @@unique([provider, providerAccountId])
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
 }
 
 model Session {
-  id           String       @id @default(cuid())
-  sessionToken String       @unique
+  sessionToken String   @unique
   userId       String
   expires      DateTime
-  user         NextAuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-model NextAuthUser {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime?
-  image         String?
-  accounts      Account[]
-  sessions      Session[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model VerificationToken {
   identifier String
-  token      String   @unique
+  token      String
   expires    DateTime
 
-  @@unique([identifier, token])
+  @@id([identifier, token])
+}
+
+model Authenticator {
+  credentialID         String  @unique
+  userId               String
+  providerAccountId    String
+  credentialPublicKey  String
+  counter              Int
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, credentialID])
 }

@@ -59,6 +59,16 @@ export const authRouter = createTRPCRouter({
         },
       });
 
+      // Create Account record for credentials provider to enable database sessions
+      await ctx.db.account.create({
+        data: {
+          userId: user.id,
+          type: "credentials",
+          provider: "credentials",
+          providerAccountId: user.id,
+        },
+      });
+
       return {
         success: true,
         user,
