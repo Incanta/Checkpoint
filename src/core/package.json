@@ -13,7 +13,9 @@
     "lint": "eslint **/*.{js,ts,tsx}",
     "cli": "NODE_CONFIG_DIR=client/config bun run client/src/bin.ts",
     "package": "bun package.ts",
-    "server": "NODE_CONFIG_DIR=server/config bun run server/src/index.ts"
+    "server": "NODE_CONFIG_DIR=server/config bun run server/src/index.ts",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@checkpointvcs/app": "link:@checkpointvcs/app",

@@ -29,7 +29,11 @@
     "lint:fix": "next lint --fix",
     "preview": "next build && next start",
     "start": "config-env --env=prod next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:db:setup": "DATABASE_URL=file:./test.db prisma db push",
+    "test:db:cleanup": "rm -f test.db"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.7.2",
