@@ -1,0 +1,31 @@
+{
+  "name": "@checkpointvcs/checkpoint",
+  "version": "1.0.0",
+  "private": true,
+  "license": "(Elastic-2.0 OR AGPL-3.0)",
+  "workspaces": [
+    "src/app",
+    "src/core",
+    "src/core/client",
+    "src/core/server", 
+    "src/core/common",
+    "src/desktop",
+    "src/longtail/wrapper"
+  ],
+  "scripts": {
+    "test": "jest",
+    "test:integration": "jest --testPathPattern=tests/integration",
+    "test:watch": "jest --watch",
+    "test:setup": "docker-compose -f docker-compose.test.yaml up -d",
+    "test:teardown": "docker-compose -f docker-compose.test.yaml down -v",
+    "test:full": "npm run test:setup && npm run test:integration && npm run test:teardown"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.5",
+    "@types/node": "^20.14.10",
+    "jest": "^29.7.0",
+    "jest-environment-node": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.8.2"
+  }
+}

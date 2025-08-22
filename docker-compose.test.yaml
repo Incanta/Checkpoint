@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # SeaweedFS for testing
+  master-test:
+    image: checkpointvcs/seaweedfs:local
+    build:
+      context: ./src/seaweedfs/docker
+      dockerfile: Dockerfile.local
+    pull_policy: never
+    command: "master -ip=master-test -ip.bind=0.0.0.0 -port=9333"
+    ports:
+      - "19333:9333"
+    volumes:
+      - test-seaweed-config:/etc/seaweedfs
+    networks:
+      - checkpoint-test
+    environment:
+      - NODE_ENV=test
+
+  volume-test:
+    image: checkpointvcs/seaweedfs:local
+    build:
+      context: ./src/seaweedfs/docker
+      dockerfile: Dockerfile.local
+    pull_policy: never
+    command: 'volume -mserver="master-test:9333" -ip.bind=0.0.0.0 -port=8080'
+    depends_on:
+      - master-test
+    ports:
+      - "18080:8080"
+    volumes:
+      - test-seaweed-data:/data
+      - test-seaweed-config:/etc/seaweedfs
+    networks:
+      - checkpoint-test
+
+  filer-test:
+    image: checkpointvcs/seaweedfs:local
+    build:
+      context: ./src/seaweedfs/docker
+      dockerfile: Dockerfile.local
+    pull_policy: never
+    command: 'filer -master="master-test:9333" -ip.bind=0.0.0.0 -port=8888'
+    depends_on:
+      - master-test
+      - volume-test
+    ports:
+      - "18888:8888"
+    volumes:
+      - test-seaweed-config:/etc/seaweedfs
+    networks:
+      - checkpoint-test
+
+  # Redis for testing
+  redis-test:
+    image: redis:alpine
+    ports:
+      - "16379:6379"
+    networks:
+      - checkpoint-test
+    command: redis-server --save ""
+    tmpfs:
+      - /data
+
+volumes:
+  test-seaweed-data:
+  test-seaweed-config:
+
+networks:
+  checkpoint-test:
+    driver: bridge

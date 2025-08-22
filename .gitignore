@@ -1,1 +1,16 @@
 *.pdb
+
+# Test files and artifacts
+*.test.db
+test.db
+test.db-*
+coverage/
+.nyc_output/
+
+# Jest
+jest-coverage/
+.jest/
+
+# Test data
+tests/temp/
+tests/fixtures/generated/
