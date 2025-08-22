@@ -1,9 +1,8 @@
-import config from "@incanta/config";
 import type { Command } from "commander";
 import { promises as fs } from "fs";
 import path from "path";
-import { getAuthToken, type WorkspaceConfig } from "../util";
-import { createTRPCHTTPClient } from "@checkpointvcs/app-new/client";
+import { type WorkspaceConfig } from "../util";
+import { CreateApiClient } from "@checkpointvcs/common";
 import inquirer from "inquirer";
 
 export async function initCommand(program: Command): Promise<void> {
@@ -24,15 +23,7 @@ export async function initCommand(program: Command): Promise<void> {
 
       await fs.mkdir(workspaceConfigDir);
 
-      const apiToken = await getAuthToken();
-
-      const client = createTRPCHTTPClient({
-        url: `${config.get<string>("checkpoint.api.url")}/api/trpc`,
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          "auth-provider": "auth0",
-        },
-      });
+      const client = CreateApiClient();
 
       const orgsResponse = await client.org.myOrgs.query();
 

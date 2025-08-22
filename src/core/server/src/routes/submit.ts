@@ -1,4 +1,3 @@
-import type { Endpoint } from ".";
 import {
   string,
   object,
@@ -15,9 +14,13 @@ import {
   decodeHandle,
   GetLogLevel,
   type LongtailLogLevel,
+  CreateApiClient
 } from "@checkpointvcs/common";
 import { ptr, toArrayBuffer } from "bun:ffi";
-import { createTRPCHTTPClient } from "@checkpointvcs/app-new/client";
+import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import type { AppRouter } from "@checkpointvcs/app";
+import superjson from "superjson";
+import type { BunRequest } from "bun";
 
 interface JWTClaims {
   iss: string;
@@ -51,10 +54,10 @@ interface RequestResponse {
   number: number;
 }
 
-export function routeSubmit(): Record<string, Endpoint> {
+export function routeSubmit() {
   return {
     "/submit": {
-      POST: async (request): Promise<typeof Response> => {
+      POST: async (request: BunRequest) => {
         const body = (await request.formData()) as any;
 
         const payload: RequestSchema = JSON.parse(body.get("payload"));
@@ -180,13 +183,7 @@ export function routeSubmit(): Record<string, Endpoint> {
           );
         }
 
-        const client = createTRPCHTTPClient({
-          url: `${config.get<string>("checkpoint.api.url")}/api/trpc`,
-          headers: {
-            Authorization: `Bearer ${payload.apiToken}`,
-            "auth-provider": "auth0",
-          },
-        });
+        const client = CreateApiClient();
 
         try {
           const createChangelistResponse = await client.changelist.createChangelist.mutate({

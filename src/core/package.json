@@ -16,20 +16,21 @@
     "server": "NODE_CONFIG_DIR=server/config bun run server/src/index.ts"
   },
   "dependencies": {
-    "@checkpointvcs/app-new": "file:../app-new",
+    "@checkpointvcs/app": "link:@checkpointvcs/app",
     "@incanta/config": "^0.6.5",
+    "@trpc/client": "^11.4.4",
     "async-sema": "^3.1.1",
-    "graphql-request": "^7.1.2",
     "inquirer": "^12.5.0",
     "lodash.merge": "^4.6.2",
     "njwt": "^2.0.1",
     "open": "^10.1.0",
     "pino": "^9.6.0",
     "pino-pretty": "^11.3.0",
+    "superjson": "^2.2.2",
     "yup": "^1.6.1"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.14",
+    "@types/bun": "^1.2.19",
     "@types/lodash.merge": "^4.6.9",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",

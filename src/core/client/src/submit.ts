@@ -7,6 +7,7 @@ import {
   GetLogLevel,
   type LongtailLogLevel,
   type Modification,
+  CreateApiClient
 } from "@checkpointvcs/common";
 import {
   getAuthToken,
@@ -14,7 +15,6 @@ import {
   saveWorkspaceState,
   type Workspace,
 } from "./util";
-import { createTRPCHTTPClient } from "@checkpointvcs/app-new/client";
 
 export async function submit(
   workspace: Workspace,
@@ -26,13 +26,7 @@ export async function submit(
 ): Promise<void> {
   const apiToken = await getAuthToken();
 
-  const client = createTRPCHTTPClient({
-    url: `${config.get<string>("checkpoint.api.url")}/api/trpc`,
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-      "auth-provider": "auth0",
-    },
-  });
+  const client = CreateApiClient();
 
   const storageTokenResponse = await client.storage.getToken.query({
     orgId: workspace.orgId,

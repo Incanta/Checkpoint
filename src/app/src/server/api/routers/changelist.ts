@@ -7,6 +7,33 @@ import {
 } from "~/server/api/trpc";
 
 export const changelistRouter = createTRPCRouter({
+  getChangelist: protectedProcedure
+    .input(z.object({
+      id: z.string(),
+    }))
+    .query(async ({ ctx, input }) => {
+      // Find the Checkpoint user associated with this NextAuth user
+      const checkpointUser = await ctx.db.user.findUnique({
+        where: { email: ctx.session.user.email! },
+      });
+
+      if (!checkpointUser) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Checkpoint user not found for this authenticated user"
+        });
+      }
+
+      // Check repo access (similar to other routers)
+      // ... access check logic ...
+
+      return ctx.db.changelist.findUnique({
+        where: {
+          id: input.id,
+        },
+      });
+    }),
+
   getChangelists: protectedProcedure
     .input(z.object({
       repoId: z.string(),
@@ -19,9 +46,9 @@ export const changelistRouter = createTRPCRouter({
       });
 
       if (!checkpointUser) {
-        throw new TRPCError({ 
-          code: "NOT_FOUND", 
-          message: "Checkpoint user not found for this authenticated user" 
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Checkpoint user not found for this authenticated user"
         });
       }
 
@@ -59,9 +86,9 @@ export const changelistRouter = createTRPCRouter({
       });
 
       if (!checkpointUser) {
-        throw new TRPCError({ 
-          code: "NOT_FOUND", 
-          message: "Checkpoint user not found for this authenticated user" 
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Checkpoint user not found for this authenticated user"
         });
       }
 

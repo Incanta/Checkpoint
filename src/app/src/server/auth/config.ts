@@ -52,7 +52,7 @@ if (config.get<boolean>("auth.credentials.enabled")) {
       if (user?.salt && user.hash) {
         const hash = await computePasswordHash(
           credentials?.password as string | undefined ?? "",
-          user.salt as string
+          user.salt
         );
 
         if (hash === user.hash) {
@@ -138,7 +138,7 @@ if (config.get<boolean>("auth.credentials.enabled")) {
  *
  * @see https://next-auth.js.org/configuration/options
  */
-export const authConfig = {
+export const authConfig: NextAuthConfig = {
   secret: config.get<string>("auth.jwt.secret"),
   providers,
   adapter: PrismaAdapter(db),

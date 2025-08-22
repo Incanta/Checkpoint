@@ -3,7 +3,7 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Launch CodeLLDB",
+      "name": "Debug C++ for Core Client",
       "program": "bun",
       "args": [
         "../client/src/bin.ts",
@@ -17,6 +17,19 @@
       "env": {
         "NODE_CONFIG_DIR": "${workspaceFolder}/client/config"
       }
-    }
+    },
+    {
+      "name": "Debug C++ in Backend Server",
+      "type": "lldb",
+      "request": "launch",
+      "program": "bun",
+      "args": [
+        "server/src/index.ts"
+      ],
+      "cwd": "${workspaceFolder:Core}",
+      "env": {
+        "NODE_CONFIG_DIR": "${workspaceFolder:Core}/server/config"
+      }
+    },
   ]
 }

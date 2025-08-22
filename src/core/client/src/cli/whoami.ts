@@ -1,22 +1,12 @@
-import config from "@incanta/config";
 import type { Command } from "commander";
-import { getAuthToken } from "../util";
-import { createTRPCHTTPClient } from "@checkpointvcs/app-new/client";
+import { CreateApiClient } from "@checkpointvcs/common";
 
 export async function whoamiCommand(program: Command): Promise<void> {
   program
     .command("whoami")
     .description("Check logged in user")
     .action(async () => {
-      const apiToken = await getAuthToken();
-
-      const client = createTRPCHTTPClient({
-        url: `${config.get<string>("checkpoint.api.url")}/api/trpc`,
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          "auth-provider": "auth0",
-        },
-      });
+      const client = CreateApiClient();
 
       let meResponse: any;
       try {

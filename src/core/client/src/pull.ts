@@ -7,14 +7,13 @@ import {
   DiffState,
   GetLogLevel,
   type LongtailLogLevel,
+  CreateApiClient
 } from "@checkpointvcs/common";
 import {
-  getAuthToken,
   getWorkspaceState,
   saveWorkspaceState,
   type Workspace,
 } from "./util";
-import { createTRPCHTTPClient } from "@checkpointvcs/app-new/client";
 import { promises as fs } from "fs";
 import path from "path";
 
@@ -25,67 +24,33 @@ export async function pull(
     "longtail.log-level"
   )
 ): Promise<void> {
-  const apiToken = await getAuthToken();
+  const client = CreateApiClient();
 
-  const client = new GraphQLClient(config.get<string>("checkpoint.api.url"), {
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-      "auth-provider": "auth0",
-    },
+  const storageTokenResponse = await client.storage.getToken.query({
+    orgId: workspace.orgId,
+    repoId: workspace.repoId,
+    write: true,
   });
 
-  const storageTokenResponse: any = await client.request(
-    gql`
-      query getStorageToken(
-        $orgId: String!
-        $repoId: String!
-        $write: Boolean!
-      ) {
-        storageToken(orgId: $orgId, repoId: $repoId, write: $write) {
-          token
-          expiration
-          backendUrl
-        }
-      }
-    `,
-    {
-      orgId: workspace.orgId,
-      repoId: workspace.repoId,
-      write: true,
-    }
-  );
-
   if (
-    !storageTokenResponse.storageToken ||
-    !storageTokenResponse.storageToken.token ||
-    !storageTokenResponse.storageToken.expiration ||
-    !storageTokenResponse.storageToken.backendUrl
+    !storageTokenResponse.token ||
+    !storageTokenResponse.expiration ||
+    !storageTokenResponse.backendUrl
   ) {
     throw new Error("Could not get storage token");
   }
 
-  const token = storageTokenResponse.storageToken.token;
-  const tokenExpirationMs = storageTokenResponse.storageToken.expiration * 1000;
-  const backendUrl = storageTokenResponse.storageToken.backendUrl;
+  const token = storageTokenResponse.token;
+  const tokenExpirationMs = storageTokenResponse.expiration * 1000;
+  const backendUrl = storageTokenResponse.backendUrl;
 
   const filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
     res.text()
   );
 
-  const changelistResponse: any = await client.request(
-    gql`
-      query getChangelist($id: String!) {
-        changelist(id: $id) {
-          number
-          versionIndex
-          stateTree
-        }
-      }
-    `,
-    {
-      id: changelistId,
-    }
-  );
+  const changelistResponse: any = await client.changelist.getChangelist.query({
+    id: changelistId,
+  });
 
   const workspaceState = await getWorkspaceState();
 
@@ -94,21 +59,10 @@ export async function pull(
     changelistResponse.changelist.stateTree
   );
 
-  const changelistsResponse: any = await client.request(
-    gql`
-      query getChangelists($repoId: String!, $numbers: [Int!]!) {
-        changelists(repoId: $repoId, numbers: $numbers) {
-          id
-          number
-          versionIndex
-        }
-      }
-    `,
-    {
-      repoId: workspace.repoId,
-      numbers: diff.changelistsToPull,
-    }
-  );
+  const changelistsResponse: any = await client.changelist.getChangelists.query({
+    repoId: workspace.repoId,
+    numbers: diff.changelistsToPull,
+  });
 
   const sortedChangelists = changelistsResponse.changelists.sort(
     (a: any, b: any) => a.number - b.number
@@ -199,15 +153,7 @@ export async function pull(
   }
 
   if (!errored) {
-    const filesResponse: any = await client.request(
-      gql`
-        query files($ids: [String!]!) {
-          files(ids: $ids) {
-            id
-            path
-          }
-        }
-      `,
+    const filesResponse: any = await client.file.getFiles.query(
       {
         ids: diff.deletions,
       }
