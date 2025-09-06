@@ -24,7 +24,7 @@ export async function pull(
     "longtail.log-level"
   )
 ): Promise<void> {
-  const client = CreateApiClient();
+  const client = await CreateApiClient();
 
   const storageTokenResponse = await client.storage.getToken.query({
     orgId: workspace.orgId,

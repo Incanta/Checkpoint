@@ -4,4 +4,4 @@ signing-keys:
 
 token-expiration: 600
 
-backend-url: "http://localhost:3000"
+backend-url: "http://localhost:3001"

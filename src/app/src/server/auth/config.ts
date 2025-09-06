@@ -13,6 +13,14 @@ import DiscordProvider from "next-auth/providers/discord";
 import { db } from "~/server/db";
 import { computePasswordHash } from "./credentials";
 import type { Provider } from "next-auth/providers";
+import type { DefaultJWT } from "next-auth/jwt";
+
+export interface Session extends DefaultSession {
+  user: {
+    id: string;
+    // username: string;
+  } & DefaultSession["user"];
+}
 
 /**
  * Module augmentation for `next-auth` types. Allows us to add custom properties to the `session`
@@ -21,18 +29,22 @@ import type { Provider } from "next-auth/providers";
  * @see https://next-auth.js.org/getting-started/typescript#module-augmentation
  */
 declare module "next-auth" {
+  interface JWT extends DefaultJWT {
+    id: string;
+    // username: string;
+  }
+
   interface Session extends DefaultSession {
     user: {
       id: string;
-      // ...other properties
-      // role: UserRole;
+      // username: string;
     } & DefaultSession["user"];
   }
 
-  // interface User {
-  //   // ...other properties
-  //   // role: UserRole;
-  // }
+  interface User {
+    id?: string;
+    // username: string;
+  }
 }
 
 const providers: Provider[] = [];
@@ -149,10 +161,12 @@ export const authConfig: NextAuthConfig = {
     strategy: config.get<boolean>("auth.credentials.enabled") ? "jwt" : "database",
   },
   callbacks: {
-    // jwt: ({ token, user }) => {
-    //   console.log("JWT callback triggered", { token, user });
-    //   return token;
-    // },
+    jwt: ({ token, user, account, ...obj }) => {
+      console.log("JWT callback triggered", { token, user, obj });
+      token.id = "myid";
+      token.username = "wassup";
+      return token;
+    },
     // session: ({ session, user }) => {
     //   console.log("Session callback triggered", { session, user });
     //   return {
@@ -163,5 +177,16 @@ export const authConfig: NextAuthConfig = {
     //     },
     //   };
     // },
+    session: ({ session, user, token }) => {
+      console.log("Session callback triggered", { session, user, token });
+      return {
+        ...session,
+        user: {
+          ...session.user,
+          id: "wassup",
+          // username: token.username,
+        },
+      };
+    },
   },
 } satisfies NextAuthConfig;

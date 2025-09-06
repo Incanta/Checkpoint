@@ -13,6 +13,7 @@ import { ZodError } from "zod";
 
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
+import type { Session } from "~/server/auth/config";
 
 /**
  * 1. CONTEXT
@@ -27,7 +28,40 @@ import { db } from "~/server/db";
  * @see https://trpc.io/docs/server/context
  */
 export const createTRPCContext = async (opts: { headers: Headers }) => {
-  const session = await auth();
+  let session: Session | null = null;
+
+  const authorization = opts.headers.get("authorization");
+  if (authorization?.startsWith("Bearer ")) {
+    const apiToken = authorization.replace("Bearer ", "");
+    const apiTokenData = await db.apiToken.findUnique({
+      where: {
+        token: apiToken,
+        OR: [
+          {
+            expiresAt: null
+          },
+          {
+            expiresAt: {
+              gte: new Date()
+            }
+          }
+        ]
+      },
+      include: {
+        user: true
+      }
+    });
+
+    if (apiTokenData) {
+      // TODO MIKE HERE: not sure about the default expires here?
+      session = {
+        user: apiTokenData.user,
+        expires: apiTokenData.expiresAt?.toISOString() ?? new Date(Date.now() + 3600 * 24 * 7 * 1000).toISOString(),
+      };
+    }
+  } else {
+    session = await auth();
+  }
 
   return {
     db,

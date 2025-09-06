@@ -6,7 +6,7 @@ export async function whoamiCommand(program: Command): Promise<void> {
     .command("whoami")
     .description("Check logged in user")
     .action(async () => {
-      const client = CreateApiClient();
+      const client = await CreateApiClient();
 
       let meResponse: any;
       try {

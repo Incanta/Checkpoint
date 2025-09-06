@@ -23,7 +23,7 @@ export async function initCommand(program: Command): Promise<void> {
 
       await fs.mkdir(workspaceConfigDir);
 
-      const client = CreateApiClient();
+      const client = await CreateApiClient();
 
       const orgsResponse = await client.org.myOrgs.query();
 

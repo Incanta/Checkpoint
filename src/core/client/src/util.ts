@@ -3,7 +3,6 @@ import { exec as nativeExec } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import { promises as fs } from "fs";
-import os from "os";
 import { CreateApiClient } from "@checkpointvcs/common";
 
 export function relativePath(from: string, to: string): string {
@@ -54,19 +53,6 @@ export async function exec(
   }
 
   return result;
-}
-
-export async function getAuthToken(): Promise<string> {
-  try {
-    const auth = await fs.readFile(
-      path.join(os.homedir(), ".config", "checkpoint", "auth.json"),
-      "utf-8"
-    );
-    return JSON.parse(auth).access_token;
-  } catch (e) {
-    console.error("Could not read authentication token; please login");
-    process.exit(1);
-  }
 }
 
 export interface WorkspaceState {
@@ -157,9 +143,7 @@ export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
 export async function getLatestChangelistId(
   workspace: Workspace
 ): Promise<string> {
-  const apiToken = await getAuthToken();
-
-    const client = CreateApiClient();
+  const client = await CreateApiClient();
 
   const branch = await client.branch.getBranch.query({
     repoId: workspace.repoId,
@@ -179,9 +163,7 @@ export async function getChangelistId(
   workspace: Workspace,
   changelistNumber: number
 ): Promise<string> {
-  const apiToken = await getAuthToken();
-
-  const client = CreateApiClient();
+  const client = await CreateApiClient();
 
   const changelists = await client.changelist.getChangelists.query({
     repoId: workspace.repoId,

@@ -6,6 +6,7 @@ import { storageRouter } from "~/server/api/routers/storage";
 import { branchRouter } from "~/server/api/routers/branch";
 import { changelistRouter } from "~/server/api/routers/changelist";
 import { fileRouter } from "./routers/file";
+import { apiTokenRouter } from "./routers/api-token";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 
 /**
@@ -22,6 +23,7 @@ export const appRouter = createTRPCRouter({
   branch: branchRouter,
   changelist: changelistRouter,
   file: fileRouter,
+  apiToken: apiTokenRouter,
 });
 
 // export type definition of API

@@ -25,6 +25,10 @@
       "path": "src/unreal"
     },
     {
+      "name": "Desktop Vite",
+      "path": "src/desktop-vite"
+    },
+    {
       "name": "Desktop",
       "path": "src/desktop"
     },
@@ -183,6 +187,9 @@
     "typescript.format.enable": false,
     "[cpp]": {
       "editor.defaultFormatter": "ms-vscode.cpptools"
+    },
+    "[typescript]": {
+      "editor.defaultFormatter": "esbenp.prettier-vscode"
     }
   }
 }

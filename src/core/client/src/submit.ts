@@ -7,10 +7,10 @@ import {
   GetLogLevel,
   type LongtailLogLevel,
   type Modification,
-  CreateApiClient
+  CreateApiClient,
+  GetAuthToken,
 } from "@checkpointvcs/common";
 import {
-  getAuthToken,
   getWorkspaceState,
   saveWorkspaceState,
   type Workspace,
@@ -24,9 +24,13 @@ export async function submit(
     "longtail.log-level"
   )
 ): Promise<void> {
-  const apiToken = await getAuthToken();
+  const apiToken = await GetAuthToken();
 
-  const client = CreateApiClient();
+  if (!apiToken) {
+    throw new Error("Could not get API token");
+  }
+
+  const client = await CreateApiClient();
 
   const storageTokenResponse = await client.storage.getToken.query({
     orgId: workspace.orgId,
@@ -104,7 +108,7 @@ export async function submit(
   const filerUrlBuffer = createStringBuffer(filerUrl);
   const backendUrlBuffer = createStringBuffer(backendUrl);
   const tokenBuffer = createStringBuffer(token);
-  const apiJwtBuffer = createStringBuffer(apiToken);
+  const apiTokenBuffer = createStringBuffer(apiToken);
 
   const asyncHandle = lib.SubmitAsync(
     ptr(branchNameBuffer.buffer),
@@ -123,7 +127,7 @@ export async function submit(
     ptr(backendUrlBuffer.buffer),
     ptr(tokenBuffer.buffer),
     tokenExpirationMs,
-    ptr(apiJwtBuffer.buffer),
+    ptr(apiTokenBuffer.buffer),
     modifications.length,
     ptr(buffer),
     GetLogLevel(logLevel)

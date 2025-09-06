@@ -1,2 +1,1 @@
-api:
-  url: "http://localhost:8911/graphql"
+host: "http://checkpoint.localhost:3000"

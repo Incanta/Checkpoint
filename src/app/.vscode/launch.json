@@ -2,23 +2,27 @@
   "configurations": [
     {
       "name": "Next.js: debug server-side",
-      "type": "node-terminal",
+      "type": "node",
       "request": "launch",
-      "command": "yarn dev"
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": [
+        "dev"
+      ],
     },
     {
       "name": "Next.js: debug client-side",
       "type": "chrome",
       "request": "launch",
-      "url": "http://localhost:3000"
+      "url": "http://checkpoint.localhost:3000"
     },
   ],
   "compounds": [
     {
-      "name": "Next.js: debug all",
+      "name": "Run Checkpoint Dev",
       "configurations": [
         "Next.js: debug server-side",
-        "Next.js: debug client-side"
+        "Next.js: debug client-side",
+        "Debug C++ in Backend Server"
       ]
     }
   ]

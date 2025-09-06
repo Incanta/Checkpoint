@@ -14,7 +14,8 @@ import { app, BrowserWindow, shell, ipcMain } from "electron";
 import { autoUpdater } from "electron-updater";
 import log from "electron-log";
 import MenuBuilder from "./menu";
-import { resolveHtmlPath } from "./util";
+import { resolveHtmlPath, createDaemonClient } from "./util";
+import { store } from "../common/state/store";
 
 class AppUpdater {
   public constructor() {
@@ -26,10 +27,34 @@ class AppUpdater {
 
 let mainWindow: BrowserWindow | null = null;
 
-ipcMain.on("ipc-example", async (event, arg) => {
-  const msgTemplate = (pingPong: string): string => `IPC test: ${pingPong}`;
-  console.log(msgTemplate(arg));
-  event.reply("ipc-example", msgTemplate("pong"));
+ipcMain.handle("auth:getUser", async () => {
+  try {
+    const client = createDaemonClient();
+
+    const user = await client.auth.getUser.query();
+
+    return { success: true, user };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+});
+
+ipcMain.handle("auth:login", async (event, onCodeCallback) => {
+  try {
+    const client = createDaemonClient();
+
+    const { code } = await client.auth.login.query();
+
+    return { success: true, code };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
 });
 
 if (process.env.NODE_ENV === "production") {
