@@ -9,6 +9,7 @@ interface AtomState {
 }
 
 const AtomLookup: Map<string, AtomState> = new Map();
+const pendingAtomValues: Map<string, unknown> = new Map();
 
 // More reliable way to detect main process in modern Electron
 const isMain =
@@ -16,16 +17,28 @@ const isMain =
   typeof process !== "undefined" &&
   process.versions?.electron;
 
+const applyIncomingAtomValue = (key: string, value: unknown): void => {
+  const atomState = AtomLookup.get(key);
+
+  if (!atomState) {
+    if (!isMain) {
+      pendingAtomValues.set(key, value);
+    }
+    return;
+  }
+
+  atomState.shouldSync = false;
+  store.set(atomState.atom, value);
+};
+
 if (isMain) {
   // Dynamic import to avoid bundling issues
   import("electron")
     .then(({ ipcMain }) => {
-      ipcMain.on(`atom:value`, (event, key, value) => {
-        const atom = AtomLookup.get(key);
-        if (atom) {
-          atom.shouldSync = false;
-          store.set(atom.atom, value);
-        }
+      ipcMain.on(`atom:value`, (_event, payload) => {
+        if (!payload) return;
+        const { key, value } = payload as { key: string; value: unknown };
+        applyIncomingAtomValue(key, value);
       });
 
       ipcMain.on("state:get", (event) => {
@@ -37,20 +50,22 @@ if (isMain) {
     })
     .catch(console.error);
 } else if (typeof window !== "undefined" && window.electron) {
-  import("./all");
-  window.electron.ipcRenderer.on(`atom:value`, (data) => {
-    console.log("Received atom:value", data.key, data.value);
-    const atom = AtomLookup.get(data.key as string);
-    if (atom) {
-      atom.shouldSync = false;
-      store.set(atom.atom, data.value);
-    }
-  });
+  void import("./all")
+    .then(() => {
+      const queuedValues = Array.from(pendingAtomValues.entries());
+      pendingAtomValues.clear();
 
-  setTimeout(() => {
-    // request initial atom values from main process
-    window.electron.ipcRenderer.sendMessage("state:get", null);
-  }, 2000);
+      queuedValues.forEach(([key, value]) => {
+        applyIncomingAtomValue(key, value);
+      });
+
+      window.electron?.ipcRenderer.sendMessage("state:get", null);
+    })
+    .catch(console.error);
+
+  window.electron.ipcRenderer.on(`atom:value`, (data) => {
+    applyIncomingAtomValue(data.key, data.value);
+  });
 }
 
 export function syncAtom(atom: WritableAtom<any, any, any>, key: string): void {
@@ -79,4 +94,12 @@ export function syncAtom(atom: WritableAtom<any, any, any>, key: string): void {
       window.electron.ipcRenderer.sendMessage("atom:value", { key, value });
     }
   });
+
+  if (!isMain) {
+    const pendingValue = pendingAtomValues.get(key);
+    if (pendingValue !== undefined) {
+      pendingAtomValues.delete(key);
+      applyIncomingAtomValue(key, pendingValue);
+    }
+  }
 }
