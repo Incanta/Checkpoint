@@ -1,4 +1,5 @@
 import { createStore, WritableAtom } from "jotai";
+import { ipcSend } from "../../main/channels";
 
 export const store = createStore();
 
@@ -19,24 +20,37 @@ if (isMain) {
   // Dynamic import to avoid bundling issues
   import("electron")
     .then(({ ipcMain }) => {
-      ipcMain.handle(`atom:value`, (event, key, value) => {
+      ipcMain.on(`atom:value`, (event, key, value) => {
         const atom = AtomLookup.get(key);
         if (atom) {
           atom.shouldSync = false;
           store.set(atom.atom, value);
         }
       });
+
+      ipcMain.on("state:get", (event) => {
+        AtomLookup.forEach((atomState, key) => {
+          const value = store.get(atomState.atom);
+          ipcSend(event.sender, "atom:value", { key, value });
+        });
+      });
     })
     .catch(console.error);
 } else if (typeof window !== "undefined" && window.electron) {
-  window.electron.ipcRenderer.on(`atom:value`, (key, value) => {
-    console.log("Received atom:value", key, value);
-    const atom = AtomLookup.get(key as string);
+  import("./all");
+  window.electron.ipcRenderer.on(`atom:value`, (data) => {
+    console.log("Received atom:value", data.key, data.value);
+    const atom = AtomLookup.get(data.key as string);
     if (atom) {
       atom.shouldSync = false;
-      store.set(atom.atom, value);
+      store.set(atom.atom, data.value);
     }
   });
+
+  setTimeout(() => {
+    // request initial atom values from main process
+    window.electron.ipcRenderer.sendMessage("state:get", null);
+  }, 2000);
 }
 
 export function syncAtom(atom: WritableAtom<any, any, any>, key: string): void {
@@ -57,12 +71,12 @@ export function syncAtom(atom: WritableAtom<any, any, any>, key: string): void {
         .then(({ BrowserWindow }) => {
           const windows = BrowserWindow.getAllWindows();
           windows.forEach((window: any) => {
-            window.webContents.send("atom:value", key, value);
+            ipcSend(window.webContents, "atom:value", { key, value });
           });
         })
         .catch(console.error);
     } else if (typeof window !== "undefined" && window.electron) {
-      window.electron.ipcRenderer.sendMessage("atom:value", key, value);
+      window.electron.ipcRenderer.sendMessage("atom:value", { key, value });
     }
   });
 }

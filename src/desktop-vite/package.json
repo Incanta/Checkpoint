@@ -18,6 +18,7 @@
     "@trpc/client": "^11.5.0",
     "@trpc/server": "^11.5.0",
     "jotai": "^2.13.1",
+    "primereact": "^10.9.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.8.2",

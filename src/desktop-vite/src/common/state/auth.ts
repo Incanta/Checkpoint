@@ -12,5 +12,11 @@ export interface Account {
 export const accountsAtom = atom<Account[] | null>(null);
 syncAtom(accountsAtom, "accounts");
 
-export const authCodeAtom = atom<string | null>(null);
-syncAtom(authCodeAtom, "authCode");
+export interface AuthAttempt {
+  serverEndpoint: string;
+  authCode: string | null;
+  finished: boolean;
+}
+
+export const authAttemptAtom = atom<AuthAttempt | null>(null);
+syncAtom(authAttemptAtom, "authAttempt");

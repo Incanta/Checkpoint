@@ -10,4 +10,16 @@ export namespace MockedData {
       name: "User One",
     },
   ];
+
+  export const workspaces: any[] = [
+    {
+      id: "1",
+      accountId: "1",
+      name: "Personal",
+      orgId: "org1",
+      repoId: "repo1",
+      path: "/path/to/personal",
+      pending: [],
+    },
+  ];
 }

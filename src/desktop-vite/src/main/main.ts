@@ -2,8 +2,7 @@ import { app, BrowserWindow } from "electron";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountsAtom } from "../common/state/auth";
-import { store } from "../common/state/store";
+import DaemonHandler from "./daemon-handler";
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,6 +29,8 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 
 let win: BrowserWindow | null;
 
+const daemonHandler = new DaemonHandler();
+
 function createWindow() {
   win = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
@@ -37,6 +38,8 @@ function createWindow() {
       preload: path.join(__dirname, "preload.mjs"),
     },
   });
+
+  win.setBounds({ x: 1920 + 1920 / 2 - 600 / 2, y: -300 });
 
   // Test active push message to Renderer-process.
   win.webContents.on("did-finish-load", () => {
@@ -50,9 +53,7 @@ function createWindow() {
     win.loadFile(path.join(RENDERER_DIST, "index.html"));
   }
 
-  setTimeout(() => {
-    store.set(accountsAtom, []);
-  }, 1000);
+  daemonHandler.init();
 }
 
 // Quit when all windows are closed, except on macOS. There, it's common
