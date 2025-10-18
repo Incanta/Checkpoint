@@ -1,5 +1,5 @@
 import { createStore, WritableAtom } from "jotai";
-import { ipcSend } from "../../main/channels";
+import { ipcOn, ipcSend } from "../../main/channels";
 
 export const store = createStore();
 
@@ -35,13 +35,13 @@ if (isMain) {
   // Dynamic import to avoid bundling issues
   import("electron")
     .then(({ ipcMain }) => {
-      ipcMain.on(`atom:value`, (_event, payload) => {
+      ipcOn(ipcMain, `atom:value`, (_event, payload) => {
         if (!payload) return;
         const { key, value } = payload as { key: string; value: unknown };
         applyIncomingAtomValue(key, value);
       });
 
-      ipcMain.on("state:get", (event) => {
+      ipcOn(ipcMain, "state:get", (event) => {
         AtomLookup.forEach((atomState, key) => {
           const value = store.get(atomState.atom);
           ipcSend(event.sender, "atom:value", { key, value });
@@ -68,31 +68,35 @@ if (isMain) {
   });
 }
 
+export function pushAtom(atom: WritableAtom<any, any, any>, key: string): void {
+  const atomState = AtomLookup.get(key);
+
+  if (atomState === undefined || atomState.shouldSync === false) {
+    if (atomState) atomState.shouldSync = true;
+    return;
+  }
+
+  const value = store.get(atom);
+  if (isMain) {
+    // Dynamic import to avoid bundling issues in renderer
+    import("electron")
+      .then(({ BrowserWindow }) => {
+        const windows = BrowserWindow.getAllWindows();
+        windows.forEach((window: any) => {
+          ipcSend(window.webContents, "atom:value", { key, value });
+        });
+      })
+      .catch(console.error);
+  } else if (typeof window !== "undefined" && window.electron) {
+    window.electron.ipcRenderer.sendMessage("atom:value", { key, value });
+  }
+}
+
 export function syncAtom(atom: WritableAtom<any, any, any>, key: string): void {
   AtomLookup.set(key, { atom, shouldSync: true });
 
   store.sub(atom, () => {
-    const atomState = AtomLookup.get(key);
-
-    if (atomState === undefined || atomState.shouldSync === false) {
-      if (atomState) atomState.shouldSync = true;
-      return;
-    }
-
-    const value = store.get(atom);
-    if (isMain) {
-      // Dynamic import to avoid bundling issues in renderer
-      import("electron")
-        .then(({ BrowserWindow }) => {
-          const windows = BrowserWindow.getAllWindows();
-          windows.forEach((window: any) => {
-            ipcSend(window.webContents, "atom:value", { key, value });
-          });
-        })
-        .catch(console.error);
-    } else if (typeof window !== "undefined" && window.electron) {
-      window.electron.ipcRenderer.sendMessage("atom:value", { key, value });
-    }
+    pushAtom(atom, key);
   });
 
   if (!isMain) {

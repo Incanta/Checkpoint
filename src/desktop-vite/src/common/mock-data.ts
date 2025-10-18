@@ -1,13 +1,18 @@
 import { Account } from "./state/auth";
 
 export namespace MockedData {
+  export const availableAccounts: number[] = [0];
+
   export const accounts: Account[] = [
     {
-      id: "1",
-      serverEndpoint: "https://checkpointvcs.com",
-      email: "user@gmail.com",
-      username: "user1",
-      name: "User One",
+      daemonId: "daemon-1",
+      endpoint: "https://checkpointvcs.com",
+      details: {
+        id: "1",
+        email: "user@gmail.com",
+        username: "user1",
+        name: "User One",
+      },
     },
   ];
 

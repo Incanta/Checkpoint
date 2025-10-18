@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -29,7 +29,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 
 let win: BrowserWindow | null;
 
-const daemonHandler = new DaemonHandler();
+const daemonHandler = new DaemonHandler(ipcMain);
 
 function createWindow() {
   win = new BrowserWindow({
