@@ -1,6 +1,6 @@
 import type { IpcMain } from "electron";
 import { MockedData } from "../common/mock-data";
-import { Account, accountsAtom, currentAccount } from "../common/state/auth";
+import { User, usersAtom, currentUser } from "../common/state/auth";
 import { store } from "../common/state/store";
 import { Channels, ipcOn, ipcSend } from "./channels";
 import {
@@ -28,7 +28,7 @@ export default class DaemonHandler {
 
   public async init(): Promise<void> {
     if (this.isMocked) {
-      store.set(accountsAtom, []);
+      store.set(usersAtom, []);
     }
 
     ipcOn(this.ipcMain, "auth:login", async (_event, data) => {
@@ -36,106 +36,52 @@ export default class DaemonHandler {
     });
 
     ipcOn(this.ipcMain, "workspace:get-directory", async (event, data) => {
-      const currentWorkspace = store.get(currentWorkspaceAtom);
-      if (!currentWorkspace) return;
-
-      const dirPath = data.path;
-
-      if (this.isMocked) {
-        const dirEntries = await fs.readdir(
-          path.join(currentWorkspace.rootPath, dirPath),
-          { withFileTypes: true },
-        );
-        const children = await Promise.all(
-          dirEntries.map(async (entry) => {
-            const entryPath = path.join(
-              currentWorkspace.rootPath,
-              dirPath,
-              entry.name,
-            );
-            const stats = await fs.stat(entryPath);
-
-            const f: File = {
-              path: entry.name,
-              type: entry.isDirectory() ? FileType.Directory : FileType.Text, // Simplified for this example
-              size: stats.size,
-              modifiedAt: stats.mtimeMs,
-              status: FileStatus.Unknown,
-              id: null,
-              changelist: null,
-            };
-
-            return f;
-          }),
-        );
-
-        // Send the directory contents back to the renderer process
-        ipcSend(event.sender, "workspace:directory-contents", {
-          path: dirPath,
-          directory: {
-            children,
-            containsChanges: false,
-          },
-        });
-      } else {
-        // TODO retrieve from daemon
-      }
+      this.workspaceGetDirectory(data, event.sender);
     });
 
     ipcOn(this.ipcMain, "workspace:diff:file", async (event, data) => {
-      const currentWorkspace = store.get(currentWorkspaceAtom);
-      if (!currentWorkspace) return;
-
-      if (this.isMocked) {
-        const filePath = path.join(currentWorkspace.rootPath, data.path);
-        // const fileContent = await fs.readFile(filePath, "utf-8");
-
-        store.set(workspaceDiffAtom, {
-          left: `hello world`,
-          right: `hello checkpoint`,
-        });
-      }
+      this.workspaceDiffFile(data);
     });
   }
 
   private async handleLogin(data: Channels["auth:login"]): Promise<void> {
     if (this.isMocked) {
-      for (const availableAccount of MockedData.availableAccounts) {
-        if (MockedData.accounts[availableAccount].endpoint === data.endpoint) {
-          const account = MockedData.accounts[availableAccount];
-          MockedData.availableAccounts.splice(
-            MockedData.availableAccounts.indexOf(availableAccount),
+      for (const availableUser of MockedData.availableUsers) {
+        if (MockedData.users[availableUser].endpoint === data.endpoint) {
+          const user = MockedData.users[availableUser];
+          MockedData.availableUsers.splice(
+            MockedData.availableUsers.indexOf(availableUser),
             1,
           );
 
-          const nextAuthAccount: Account = {
-            ...account,
+          const nextAuthUser: User = {
+            ...user,
             daemonId: data.daemonId,
             details: null,
             auth: { code: "1234" },
           };
 
-          store.set(currentAccount, nextAuthAccount);
+          store.set(currentUser, nextAuthUser);
 
           setTimeout(() => {
-            const currentAuthAccount = store.get(currentAccount);
+            const currentAuthUser = store.get(currentUser);
 
-            if (!currentAuthAccount) return;
+            if (!currentAuthUser) return;
 
-            const nextAccount: Account = {
-              ...currentAuthAccount,
-              details: account.details,
+            const nextUser: User = {
+              ...currentAuthUser,
+              details: user.details,
               auth: undefined,
             };
 
-            store.set(currentAccount, nextAccount);
+            store.set(currentUser, nextUser);
 
-            const currentAccounts = store.get(accountsAtom) || [];
-            const nextAccounts = currentAccounts
+            const currentUsers = store.get(usersAtom) || [];
+            const nextUsers = currentUsers
               .filter((a) => a.daemonId !== data.daemonId)
-              .concat(nextAccount);
+              .concat(nextUser);
 
-            store.set(accountsAtom, nextAccounts);
+            store.set(usersAtom, nextUsers);
 
             store.set(workspacesAtom, MockedData.workspaces);
             this.selectWorkspace(MockedData.workspaces[0]);
@@ -145,7 +91,8 @@ export default class DaemonHandler {
         }
       }
     } else {
-      // TODO: real implementation to interact with the daemon
+      // tell the daemon that we want to log in; daemon should respond with a code
+      // wait for daemon to give us the user details (maybe via polling)
     }
   }
 
@@ -158,5 +105,72 @@ export default class DaemonHandler {
         containsChanges: false,
       },
     });
+  }
+
+  private async workspaceGetDirectory(
+    data: Channels["workspace:get-directory"],
+    sender: Electron.WebContents,
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) return;
+
+    const dirPath = data.path;
+
+    if (this.isMocked) {
+      const dirEntries = await fs.readdir(
+        path.join(currentWorkspace.rootPath, dirPath),
+        { withFileTypes: true },
+      );
+      const children = await Promise.all(
+        dirEntries.map(async (entry) => {
+          const entryPath = path.join(
+            currentWorkspace.rootPath,
+            dirPath,
+            entry.name,
+          );
+          const stats = await fs.stat(entryPath);
+
+          const f: File = {
+            path: entry.name,
+            type: entry.isDirectory() ? FileType.Directory : FileType.Text, // Simplified for this example
+            size: stats.size,
+            modifiedAt: stats.mtimeMs,
+            status: FileStatus.Unknown,
+            id: null,
+            changelist: null,
+          };
+
+          return f;
+        }),
+      );
+
+      // Send the directory contents back to the renderer process
+      ipcSend(sender, "workspace:directory-contents", {
+        path: dirPath,
+        directory: {
+          children,
+          containsChanges: false,
+        },
+      });
+    } else {
+      // TODO retrieve from daemon
+    }
+  }
+
+  private async workspaceDiffFile(
+    data: Channels["workspace:diff:file"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) return;
+
+    if (this.isMocked) {
+      const filePath = path.join(currentWorkspace.rootPath, data.path);
+      // const fileContent = await fs.readFile(filePath, "utf-8");
+
+      store.set(workspaceDiffAtom, {
+        left: `hello world`,
+        right: `hello checkpoint`,
+      });
+    }
   }
 }

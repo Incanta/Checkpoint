@@ -2,12 +2,12 @@ import { useAtomValue } from "jotai";
 import { useNavigate } from "react-router-dom";
 import { ipc } from "../ipc";
 import { nanoid } from "nanoid";
-import { currentAccount } from "../../../common/state/auth";
+import { currentUser } from "../../../common/state/auth";
 import { useState } from "react";
 
 export default function Page(): React.ReactElement {
   const [daemonId] = useState(nanoid());
-  const account = useAtomValue(currentAccount);
+  const user = useAtomValue(currentUser);
   const [url, setUrl] = useState("https://checkpointvcs.com");
   const navigate = useNavigate();
 
@@ -31,10 +31,10 @@ export default function Page(): React.ReactElement {
         >
           Login
         </button>
-        {account?.auth?.code && account.details === null && (
-          <p>Enter the code in the browser: {account.auth.code}</p>
+        {user?.auth?.code && user.details === null && (
+          <p>Enter the code in the browser: {user.auth.code}</p>
         )}
-        {account?.details && (
+        {user?.details && (
           <>
             <p>Login successful!</p>
             <button

@@ -23,7 +23,7 @@ export default function Page(): React.ReactElement {
           zIndex: 1,
         }}
       >
-        {/* Workspace breadcrumb selector (Account > Org > Repo > Workspace > Branch) */}
+        {/* Workspace breadcrumb selector (User > Org > Repo > Workspace > Branch) */}
       </div>
       <div className="row-span-1 flex">
         <div

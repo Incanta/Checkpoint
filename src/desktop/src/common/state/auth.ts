@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { syncAtom } from "./store";
 
-export interface Account {
+export interface User {
   daemonId: string;
   endpoint: string;
   auth?: {
@@ -15,8 +15,8 @@ export interface Account {
   };
 }
 
-export const accountsAtom = atom<Account[] | null>(null);
-syncAtom(accountsAtom, "accounts");
+export const usersAtom = atom<User[] | null>(null);
+syncAtom(usersAtom, "users");
 
-export const currentAccount = atom<Account | null>(null);
-syncAtom(currentAccount, "currentAccount");
+export const currentUser = atom<User | null>(null);
+syncAtom(currentUser, "currentUser");

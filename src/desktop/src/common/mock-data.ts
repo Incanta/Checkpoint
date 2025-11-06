@@ -1,10 +1,10 @@
-import { Account } from "./state/auth";
+import { User } from "./state/auth";
 import { FileStatus, FileType, Workspace } from "./state/workspace";
 
 export namespace MockedData {
-  export const availableAccounts: number[] = [0];
+  export const availableUsers: number[] = [0];
 
-  export const accounts: Account[] = [
+  export const users: User[] = [
     {
       daemonId: "daemon-1",
       endpoint: "https://checkpointvcs.com",
@@ -20,7 +20,7 @@ export namespace MockedData {
   export const workspaces: Workspace[] = [
     {
       id: "1",
-      accountId: "1",
+      userId: "1",
       name: "Personal",
       repoId: "repo1",
       rootPath: "E:/epic/engine/UE_Redwood",

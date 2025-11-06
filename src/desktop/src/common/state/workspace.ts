@@ -3,7 +3,7 @@ import { syncAtom } from "./store";
 
 export interface Workspace {
   id: string;
-  accountId: string;
+  userId: string;
   repoId: string;
   name: string;
   rootPath: string;

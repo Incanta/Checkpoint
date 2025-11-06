@@ -6,7 +6,7 @@ export type Channels = {
   "atom:value": { key: string; value: any };
 
   "auth:login": { daemonId: string; endpoint: string };
-  "auth:select-account": { daemonId: string };
+  "auth:select-user": { daemonId: string };
 
   "workspace:select": { id: string };
   "workspace:create-branch": { name: string };
