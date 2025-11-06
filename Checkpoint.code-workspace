@@ -25,10 +25,6 @@
       "path": "src/unreal"
     },
     {
-      "name": "Desktop Vite",
-      "path": "src/desktop-vite"
-    },
-    {
       "name": "Desktop",
       "path": "src/desktop"
     },
