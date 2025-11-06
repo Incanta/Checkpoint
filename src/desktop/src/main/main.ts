@@ -49,7 +49,7 @@ function createWindow() {
 
   attachTitlebarToWindow(win);
 
-  win.setBounds({ x: 1920 + 1920 / 2 - 600 / 2, y: -300 });
+  // win.setBounds({ x: 1920 + 1920 / 2 - 600 / 2, y: -300 });
   win.setMinimumSize(1050, 530);
 
   // Test active push message to Renderer-process.
