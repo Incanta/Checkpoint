@@ -1,6 +1,7 @@
 // Disable no-unused-vars, broken for spread args
 /* eslint no-unused-vars: off */
 import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
+import { Titlebar, TitlebarColor } from "@incanta/custom-electron-titlebar";
 import { Channels } from "./channels";
 
 const electronHandler = {
@@ -34,3 +35,13 @@ const electronHandler = {
 contextBridge.exposeInMainWorld("electron", electronHandler);
 
 export type ElectronHandler = typeof electronHandler;
+
+window.addEventListener("DOMContentLoaded", () => {
+  // Title bar implementation
+  new Titlebar({
+    backgroundColor: TitlebarColor.fromHex("#2c2c2c"),
+    titleHorizontalAlignment: "center",
+    minWidth: 1050,
+    minHeight: 530,
+  } as any);
+});

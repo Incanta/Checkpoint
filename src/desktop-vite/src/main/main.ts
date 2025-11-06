@@ -2,6 +2,10 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  setupTitlebar,
+  attachTitlebarToWindow,
+} from "@incanta/custom-electron-titlebar/main";
 import DaemonHandler from "./daemon-handler";
 
 const require = createRequire(import.meta.url);
@@ -23,6 +27,8 @@ export const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 export const MAIN_DIST = path.join(process.env.APP_ROOT, "dist/main");
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist/renderer");
 
+setupTitlebar();
+
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, "public")
   : RENDERER_DIST;
@@ -37,9 +43,14 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
     },
+    titleBarStyle: "hidden",
+    titleBarOverlay: true,
   });
 
+  attachTitlebarToWindow(win);
+
   win.setBounds({ x: 1920 + 1920 / 2 - 600 / 2, y: -300 });
+  win.setMinimumSize(1050, 530);
 
   // Test active push message to Renderer-process.
   win.webContents.on("did-finish-load", () => {

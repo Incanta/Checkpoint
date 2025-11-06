@@ -1,0 +1,473 @@
+import React, { useEffect, useRef, useState } from "react";
+import {
+  TreeTable,
+  TreeTableSelectionKeysType,
+  TreeTableTogglerTemplateOptions,
+} from "primereact/treetable";
+import { Column, ColumnPassThroughOptions } from "primereact/column";
+import { ScrollPanel } from "primereact/scrollpanel";
+import { TreeNode } from "primereact/treenode";
+import { useAtomValue } from "jotai";
+import {
+  currentWorkspaceAtom,
+  FileStatus,
+  FileType,
+  workspaceDiffAtom,
+  workspaceDirectoriesAtom,
+} from "../../common/state/workspace";
+import { ipc } from "../pages/ipc";
+import { Splitter, SplitterPanel } from "primereact/splitter";
+import Button from "./Button";
+import styles from "./Editor.module.css";
+import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
+
+export default function WorkspacePendingChanges() {
+  const currentWorkspace = useAtomValue(currentWorkspaceAtom);
+  const workspaceDiff = useAtomValue(workspaceDiffAtom);
+
+  const [nodes, setNodes] = useState<TreeNode[]>([]);
+  const [selectedNodeKeys, setSelectedNodeKeys] =
+    useState<TreeTableSelectionKeysType | null>(null);
+
+  const [editor, setEditor] =
+    useState<monaco.editor.IStandaloneDiffEditor | null>(null);
+  const monacoEl = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (monacoEl?.current && workspaceDiff) {
+      setEditor((editor) => {
+        if (editor) {
+          editor.dispose();
+          monacoEl.current!.innerHTML = "";
+        }
+        const newEditor = monaco.editor.createDiffEditor(monacoEl.current!, {
+          theme: "vs-dark",
+          automaticLayout: true,
+        });
+
+        newEditor.setModel({
+          original: monaco.editor.createModel(
+            workspaceDiff ? workspaceDiff.left : "",
+            "text/plain",
+          ),
+          modified: monaco.editor.createModel(
+            workspaceDiff ? workspaceDiff.right : "",
+            "text/plain",
+          ),
+        });
+
+        newEditor.getOriginalEditor().updateOptions({ readOnly: true });
+        newEditor.getModifiedEditor().updateOptions({ readOnly: true });
+
+        return newEditor;
+      });
+    }
+
+    return () => editor?.dispose();
+  }, [monacoEl.current, workspaceDiff]);
+
+  useEffect(() => {
+    if (!currentWorkspace) {
+      setNodes([]);
+      return;
+    }
+
+    const changedNode: TreeNode = {
+      id: "changed",
+      key: "changed",
+      data: {
+        name: "Changed Files",
+        status: "",
+        size: "",
+        modified: "",
+        type: "",
+        changeset: "",
+      },
+      leaf: false,
+      children: [],
+    };
+
+    const movedNode: TreeNode = {
+      id: "moved",
+      key: "moved",
+      data: {
+        name: "Moved Files",
+        status: "",
+        size: "",
+        modified: "",
+        type: "",
+        changeset: "",
+      },
+      leaf: false,
+      children: [],
+    };
+
+    const deletedNode: TreeNode = {
+      id: "deleted",
+      key: "deleted",
+      data: {
+        name: "Deleted Files",
+        status: "",
+        size: "",
+        modified: "",
+        type: "",
+        changeset: "",
+      },
+      leaf: false,
+      children: [],
+    };
+
+    const addedNode: TreeNode = {
+      id: "added",
+      key: "added",
+      data: {
+        name: "Added Files",
+        status: "",
+        size: "",
+        modified: "",
+        type: "",
+        changeset: "",
+      },
+      leaf: false,
+      children: [],
+    };
+
+    const newNodes: TreeNode[] = [
+      changedNode,
+      movedNode,
+      deletedNode,
+      addedNode,
+    ];
+
+    for (const file of currentWorkspace.pendingChanges.files) {
+      const relativePath = file.path.replace(currentWorkspace.rootPath, "");
+      const pathParts = relativePath
+        .split("/")
+        .filter((part) => part.length > 0);
+
+      const filename = pathParts.pop();
+      if (!filename) continue;
+
+      // TODO MIKE HERE: how to handle conflicted status?
+
+      let parentNode: TreeNode | null = null;
+      switch (file.status) {
+        case FileStatus.ChangedCheckedOut:
+        case FileStatus.ChangedNotCheckedOut:
+          parentNode = changedNode;
+          break;
+        case FileStatus.Renamed:
+          parentNode = movedNode;
+          break;
+        case FileStatus.Deleted:
+          parentNode = deletedNode;
+          break;
+        case FileStatus.Added:
+        case FileStatus.Local:
+          parentNode = addedNode;
+          break;
+        default:
+          continue;
+      }
+
+      let currentNode: TreeNode = parentNode;
+      for (const part of pathParts) {
+        const childNode = currentNode.children?.find(
+          (child) => (child.key as string).split("/").pop() === part,
+        );
+
+        if (childNode) {
+          currentNode = childNode;
+        } else {
+          const newChildNode: TreeNode = {
+            id: currentNode.id + "/" + part,
+            key: currentNode.key + "/" + part,
+            data: {
+              name: part,
+              status: "",
+              size: "",
+              modified: "",
+              type: "Directory",
+              changeset: "",
+            },
+            leaf: false,
+            children: [],
+          };
+
+          if (!currentNode.children) {
+            currentNode.children = [];
+          }
+          currentNode.children.push(newChildNode);
+          currentNode = newChildNode;
+        }
+      }
+
+      if (!currentNode.children) {
+        currentNode.children = [];
+      }
+      currentNode.children.push({
+        id: currentNode.id + "/" + filename,
+        key: currentNode.key + "/" + filename,
+        data: {
+          path: file.path,
+          name: filename,
+          status: FileStatus[file.status],
+          size: file.size.toString() + " B",
+          modified: new Date(file.modifiedAt).toLocaleDateString(),
+          type: FileType[file.type],
+          changeset: file.changelist ? file.changelist.toString() : "",
+          onclick: () => {
+            console.log("Clicked file:", file.path);
+          },
+        },
+        leaf: file.type !== FileType.Directory,
+      });
+    }
+
+    setNodes(newNodes);
+  }, [currentWorkspace]);
+
+  const nodeLookup: { [key: string]: TreeNode } = {};
+
+  useEffect(() => {
+    nodeLookup["/"] = nodes[0];
+  }, []);
+
+  const columnPt: ColumnPassThroughOptions = {
+    headerCell: {
+      style: {
+        borderColor: "#1A1A1A",
+        borderWidth: "0 1px 0 0",
+        borderStyle: "solid",
+        paddingLeft: "0.5rem",
+      },
+    },
+    bodyCell: {
+      style: {
+        paddingLeft: "0.5rem",
+      },
+    },
+    rowToggler: {
+      className: "treetable-toggler",
+      style: {
+        backgroundColor: "transparent",
+        padding: "0.4rem",
+      },
+    },
+  };
+
+  return (
+    <div className="grid grid-rows-[2.7rem_calc(100vh-6.7rem)] gap-4">
+      <div
+        className="row-span-1"
+        style={{
+          backgroundColor: "#2C2C2C",
+          borderColor: "#1A1A1A",
+          borderWidth: "0 0 1px 0",
+          borderStyle: "solid",
+          padding: "0.3rem",
+        }}
+      >
+        <Button label="Refresh" />
+        <Button label="Submit" />
+        <Button label="Undo" />
+      </div>
+      <div
+        className="row-span-1"
+        style={{ textAlign: "left", overflow: "hidden" }}
+      >
+        <Splitter
+          layout="vertical"
+          className="w-full h-full"
+          pt={{
+            gutter: {
+              className: "pending-changes-splitter-gutter",
+            },
+          }}
+        >
+          <SplitterPanel
+            className="flex"
+            size={10}
+            style={{
+              backgroundColor: "#2C2C2C",
+            }}
+          >
+            <textarea
+              className="w-full m-[0.5rem] p-[0.5rem]"
+              placeholder="Add a message to submit..."
+              style={{
+                textAlign: "start",
+                resize: "none",
+                backgroundColor: "#272727",
+                borderRadius: "0.3rem",
+                border: "1px solid #1A1A1A",
+                color: "#DDDDDD",
+                marginBottom: "0",
+                outlineColor: "#646cff",
+                zIndex: 1,
+              }}
+            />
+          </SplitterPanel>
+          <SplitterPanel className="flex" size={60}>
+            {/* <ScrollPanel
+          style={{
+            width: "100%",
+            height: "100%",
+            textAlign: "left",
+          }}
+        > */}
+            <TreeTable
+              value={nodes}
+              tableStyle={{ minWidth: "50rem" }}
+              columnResizeMode="expand"
+              resizableColumns
+              showGridlines
+              scrollable
+              selectionMode="checkbox"
+              selectionKeys={selectedNodeKeys}
+              onSelectionChange={(e) =>
+                setSelectedNodeKeys(e.value as TreeTableSelectionKeysType)
+              }
+              onRowClick={(event) => {
+                const target = event.originalEvent.target as HTMLElement;
+                if (target && target.tagName === "INPUT") {
+                  return;
+                }
+                if (event.node.data?.path) {
+                  ipc.sendMessage("workspace:diff:file", {
+                    path: event.node.data.path,
+                  });
+                }
+              }}
+              onExpand={(event) => {
+                const node = event.node;
+                if (node && (!node.children || node.children.length === 0)) {
+                  ipc.once("workspace:directory-contents", (data) => {
+                    const directory = data.directory;
+                    node.children = directory.children.map((file) => ({
+                      id: node.id + "/" + file.path.split("/").pop(),
+                      key: node.key + "/" + file.path.split("/").pop(),
+                      data: {
+                        name: file.path.split("/").pop() || "",
+                        status: FileStatus[file.status],
+                        size: file.size.toString() + " B",
+                        modified: new Date(
+                          file.modifiedAt,
+                        ).toLocaleDateString(),
+                        type: FileType[file.type],
+                        changeset: file.changelist
+                          ? file.changelist.toString()
+                          : "",
+                      },
+                      leaf: file.type !== FileType.Directory,
+                    }));
+                    setNodes([...nodes]);
+                  });
+
+                  ipc.sendMessage("workspace:get-directory", {
+                    path: node.id!,
+                  });
+                }
+              }}
+              pt={{
+                thead: {
+                  style: {
+                    borderColor: "#1A1A1A",
+                    borderWidth: "0 0 1px 0",
+                    borderStyle: "solid",
+                    paddingLeft: "0.5rem",
+                  },
+                },
+                scrollableWrapper: {
+                  style: {
+                    height: "100%",
+                  },
+                },
+                scrollable: {
+                  style: {
+                    height: "100%",
+                  },
+                },
+                scrollableBody: {
+                  style: {
+                    maxHeight: "initial",
+                  },
+                },
+                resizeHelper: {
+                  style: {
+                    width: "0.1rem",
+                    backgroundColor: "#888888",
+                  },
+                },
+              }}
+              style={{ height: "100%" }}
+            >
+              <Column
+                field="name"
+                header="Name"
+                expander
+                resizeable
+                sortable
+                pt={columnPt}
+              ></Column>
+              <Column
+                field="status"
+                header="Status"
+                resizeable
+                sortable
+                pt={columnPt}
+              ></Column>
+              <Column
+                field="size"
+                header="Size"
+                resizeable
+                sortable
+                pt={columnPt}
+              ></Column>
+              <Column
+                field="modified"
+                header="Date Modified"
+                resizeable
+                sortable
+                pt={columnPt}
+              ></Column>
+              <Column
+                field="type"
+                header="Type"
+                resizeable
+                sortable
+                pt={columnPt}
+              ></Column>
+              <Column
+                field="changeset"
+                header="Changeset"
+                resizeable
+                sortable
+                pt={columnPt}
+              ></Column>
+            </TreeTable>
+            {/* </ScrollPanel> */}
+          </SplitterPanel>
+          <SplitterPanel className="flex" size={30}>
+            {workspaceDiff && (
+              <div className={styles.Editor} ref={monacoEl}></div>
+            )}
+            {!workspaceDiff && (
+              <div
+                className="h-full w-full"
+                style={{ backgroundColor: "#2c2c2c" }}
+              >
+                <div
+                  className="m-auto text-gray-500"
+                  style={{ textAlign: "center" }}
+                >
+                  Select a file to view the diff
+                </div>
+              </div>
+            )}
+          </SplitterPanel>
+        </Splitter>
+      </div>
+    </div>
+  );
+}

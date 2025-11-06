@@ -18,5 +18,5 @@ export interface Account {
 export const accountsAtom = atom<Account[] | null>(null);
 syncAtom(accountsAtom, "accounts");
 
-export const authAccountAtom = atom<Account | null>(null);
-syncAtom(authAccountAtom, "authAccount");
+export const currentAccount = atom<Account | null>(null);
+syncAtom(currentAccount, "currentAccount");
