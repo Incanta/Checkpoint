@@ -8,6 +8,8 @@ import { changelistRouter } from "~/server/api/routers/changelist";
 import { fileRouter } from "./routers/file";
 import { apiTokenRouter } from "./routers/api-token";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
+import { workspaceRouter } from "./routers/workspace";
+import { versionRouter } from "./routers/version";
 
 /**
  * This is the primary router for your server.
@@ -24,6 +26,8 @@ export const appRouter = createTRPCRouter({
   changelist: changelistRouter,
   file: fileRouter,
   apiToken: apiTokenRouter,
+  workspace: workspaceRouter,
+  version: versionRouter,
 });
 
 // export type definition of API

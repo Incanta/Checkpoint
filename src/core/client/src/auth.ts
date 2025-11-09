@@ -1,12 +1,12 @@
-import config from "@incanta/config";
-import {
-  CreateApiClient,
-  SaveAuthToken
-} from "@checkpointvcs/common";
+import { CreateApiClientUnauth, SaveAuthToken } from "@checkpointvcs/common";
 import open from "open";
 
-export async function AuthenticateDevice(onCodeForDisplay: (code: string) => void): Promise<void> {
-  const client = await CreateApiClient();
+export async function AuthenticateDevice(
+  endpoint: string,
+  daemonId: string,
+  onCodeForDisplay: (code: string) => void,
+): Promise<void> {
+  const client = await CreateApiClientUnauth(endpoint);
 
   const deviceCodeResponse = await client.apiToken.getCode.query();
 
@@ -18,7 +18,7 @@ export async function AuthenticateDevice(onCodeForDisplay: (code: string) => voi
 
   onCodeForDisplay(code);
 
-  await open(`${config.get<string>("checkpoint.host")}/devices?${code}`);
+  await open(`${endpoint}/devices?${code}`);
 
   let apiToken: string;
   while (true) {
@@ -35,5 +35,5 @@ export async function AuthenticateDevice(onCodeForDisplay: (code: string) => voi
     }
   }
 
-  await SaveAuthToken(apiToken);
+  await SaveAuthToken(daemonId, endpoint, apiToken);
 }

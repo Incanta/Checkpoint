@@ -1,26 +1,25 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
-import {
-  createTRPCRouter,
-  protectedProcedure,
-} from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 
 export const changelistRouter = createTRPCRouter({
   getChangelist: protectedProcedure
-    .input(z.object({
-      id: z.string(),
-    }))
+    .input(
+      z.object({
+        id: z.string(),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       // Find the Checkpoint user associated with this NextAuth user
       const checkpointUser = await ctx.db.user.findUnique({
-        where: { email: ctx.session.user.email! },
+        where: { id: ctx.session.user.id },
       });
 
       if (!checkpointUser) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user"
+          message: "Checkpoint user not found for this authenticated user",
         });
       }
 
@@ -35,20 +34,22 @@ export const changelistRouter = createTRPCRouter({
     }),
 
   getChangelists: protectedProcedure
-    .input(z.object({
-      repoId: z.string(),
-      numbers: z.array(z.number()),
-    }))
+    .input(
+      z.object({
+        repoId: z.string(),
+        numbers: z.array(z.number()),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       // Find the Checkpoint user associated with this NextAuth user
       const checkpointUser = await ctx.db.user.findUnique({
-        where: { email: ctx.session.user.email! },
+        where: { id: ctx.session.user.id },
       });
 
       if (!checkpointUser) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user"
+          message: "Checkpoint user not found for this authenticated user",
         });
       }
 
@@ -66,29 +67,33 @@ export const changelistRouter = createTRPCRouter({
     }),
 
   createChangelist: protectedProcedure
-    .input(z.object({
-      message: z.string(),
-      repoId: z.string(),
-      versionIndex: z.string(),
-      branchName: z.string(),
-      modifications: z.array(z.object({
-        delete: z.boolean(),
-        path: z.string(),
-        oldPath: z.string().optional(),
-      })),
-      keepCheckedOut: z.boolean(),
-      workspaceId: z.string(),
-    }))
+    .input(
+      z.object({
+        message: z.string(),
+        repoId: z.string(),
+        versionIndex: z.string(),
+        branchName: z.string(),
+        modifications: z.array(
+          z.object({
+            delete: z.boolean(),
+            path: z.string(),
+            oldPath: z.string().optional(),
+          }),
+        ),
+        keepCheckedOut: z.boolean(),
+        workspaceId: z.string(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       // Find the Checkpoint user associated with this NextAuth user
       const checkpointUser = await ctx.db.user.findUnique({
-        where: { email: ctx.session.user.email! },
+        where: { id: ctx.session.user.id },
       });
 
       if (!checkpointUser) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user"
+          message: "Checkpoint user not found for this authenticated user",
         });
       }
 

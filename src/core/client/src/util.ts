@@ -1,9 +1,8 @@
-import config from "@incanta/config";
 import { exec as nativeExec } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import { promises as fs } from "fs";
-import { CreateApiClient } from "@checkpointvcs/common";
+import { CreateApiClientAuth } from "@checkpointvcs/common";
 
 export function relativePath(from: string, to: string): string {
   return path.relative(from, to).replace(/\\/g, "/");
@@ -23,7 +22,7 @@ export async function getWorkspaceRoot(directory: string): Promise<string> {
 
   if (dirParts.length === 0) {
     console.error(
-      "Could not find a Checkpoint workspace; run this from a child directory of an initialized workspace."
+      "Could not find a Checkpoint workspace; run this from a child directory of an initialized workspace.",
     );
     process.exit(1);
   }
@@ -34,7 +33,7 @@ export async function getWorkspaceRoot(directory: string): Promise<string> {
 
 export async function exec(
   command: string,
-  cwd: string | null = null
+  cwd: string | null = null,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   const exec = promisify(nativeExec);
   let result: { stdout: string; stderr: string; code: number } = {
@@ -69,6 +68,7 @@ export interface WorkspaceConfig {
 
 export interface Workspace extends WorkspaceConfig {
   localRoot: string;
+  daemonId: string;
 }
 
 export async function getWorkspaceDetails(): Promise<Workspace> {
@@ -83,13 +83,13 @@ export async function getWorkspaceDetails(): Promise<Workspace> {
     return details;
   } catch (e) {
     throw new Error(
-      "Could not read workspace configuration, did you initialize this workspace properly?"
+      "Could not read workspace configuration, did you initialize this workspace properly?",
     );
   }
 }
 
 export async function saveWorkspaceDetails(
-  workspace: WorkspaceConfig
+  workspace: WorkspaceConfig,
 ): Promise<void> {
   const workspaceRoot = await getWorkspaceRoot(process.cwd());
   const workspaceConfigDir = path.join(workspaceRoot, ".checkpoint");
@@ -98,11 +98,11 @@ export async function saveWorkspaceDetails(
     await fs.mkdir(workspaceConfigDir, { recursive: true });
     await fs.writeFile(
       path.join(workspaceConfigDir, "config.json"),
-      JSON.stringify(workspace, null, 2)
+      JSON.stringify(workspace, null, 2),
     );
   } catch (e) {
     throw new Error(
-      "Could not write workspace configuration, did you initialize this workspace properly?"
+      "Could not write workspace configuration, did you initialize this workspace properly?",
     );
   }
 }
@@ -131,19 +131,19 @@ export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
     await fs.mkdir(workspaceConfigDir, { recursive: true });
     await fs.writeFile(
       path.join(workspaceConfigDir, "state.json"),
-      JSON.stringify(state, null, 2)
+      JSON.stringify(state, null, 2),
     );
   } catch (e) {
     throw new Error(
-      "Could not write workspace state, did you initialize this workspace properly?"
+      "Could not write workspace state, did you initialize this workspace properly?",
     );
   }
 }
 
 export async function getLatestChangelistId(
-  workspace: Workspace
+  workspace: Workspace,
 ): Promise<string> {
-  const client = await CreateApiClient();
+  const client = await CreateApiClientAuth(workspace.daemonId);
 
   const branch = await client.branch.getBranch.query({
     repoId: workspace.repoId,
@@ -161,9 +161,9 @@ export async function getLatestChangelistId(
 
 export async function getChangelistId(
   workspace: Workspace,
-  changelistNumber: number
+  changelistNumber: number,
 ): Promise<string> {
-  const client = await CreateApiClient();
+  const client = await CreateApiClientAuth(workspace.daemonId);
 
   const changelists = await client.changelist.getChangelists.query({
     repoId: workspace.repoId,

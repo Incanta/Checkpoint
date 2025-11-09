@@ -7,30 +7,30 @@ import {
   GetLogLevel,
   type LongtailLogLevel,
   type Modification,
-  CreateApiClient,
-  GetAuthToken,
+  CreateApiClientAuth,
+  GetAuthConfigUser,
 } from "@checkpointvcs/common";
-import {
-  getWorkspaceState,
-  saveWorkspaceState,
-  type Workspace,
-} from "./util";
+import { getWorkspaceState, saveWorkspaceState, type Workspace } from "./util";
 
 export async function submit(
   workspace: Workspace,
   message: string,
   modifications: Modification[],
   logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
-    "longtail.log-level"
-  )
+    "longtail.log-level",
+  ),
 ): Promise<void> {
-  const apiToken = await GetAuthToken();
+  const user = await GetAuthConfigUser(workspace.daemonId);
 
-  if (!apiToken) {
-    throw new Error("Could not get API token");
+  if (!user) {
+    throw new Error("Could not get user");
   }
 
-  const client = await CreateApiClient();
+  if (!user.apiToken) {
+    throw new Error("User not authenticated");
+  }
+
+  const client = await CreateApiClientAuth(workspace.daemonId);
 
   const storageTokenResponse = await client.storage.getToken.query({
     orgId: workspace.orgId,
@@ -70,18 +70,18 @@ export async function submit(
     view.setBigUint64(
       viewIndex,
       BigInt(ptr(modificationPathsBuffer[i].buffer)),
-      true
+      true,
     );
     viewIndex += 8;
 
     if (modifications[i].oldPath) {
       modificationOldPathsBuffer.push(
-        createStringBuffer(modifications[i].oldPath!)
+        createStringBuffer(modifications[i].oldPath!),
       );
       view.setBigUint64(
         viewIndex,
         BigInt(ptr(modificationOldPathsBuffer[i].buffer)),
-        true
+        true,
       );
     } else {
       view.setBigUint64(viewIndex, BigInt(0), true);
@@ -90,25 +90,25 @@ export async function submit(
   }
 
   const filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
-    res.text()
+    res.text(),
   );
 
   const branchNameBuffer = createStringBuffer(workspace.branchName);
   const messageBuffer = createStringBuffer(message);
   const hashingAlgoBuffer = createStringBuffer(
-    config.get<string>("longtail.hashing-algo")
+    config.get<string>("longtail.hashing-algo"),
   );
   const compressionAlgoBuffer = createStringBuffer(
-    config.get<string>("longtail.compression-algo")
+    config.get<string>("longtail.compression-algo"),
   );
   const localRootBuffer = createStringBuffer(workspace.localRoot);
   const remoteRootBuffer = createStringBuffer(
-    `/${workspace.orgId}/${workspace.repoId}`
+    `/${workspace.orgId}/${workspace.repoId}`,
   );
   const filerUrlBuffer = createStringBuffer(filerUrl);
   const backendUrlBuffer = createStringBuffer(backendUrl);
   const tokenBuffer = createStringBuffer(token);
-  const apiTokenBuffer = createStringBuffer(apiToken);
+  const apiTokenBuffer = createStringBuffer(user.apiToken);
 
   const asyncHandle = lib.SubmitAsync(
     ptr(branchNameBuffer.buffer),
@@ -130,7 +130,7 @@ export async function submit(
     ptr(apiTokenBuffer.buffer),
     modifications.length,
     ptr(buffer),
-    GetLogLevel(logLevel)
+    GetLogLevel(logLevel),
   );
 
   if (asyncHandle === 0 || asyncHandle === null) {
@@ -143,7 +143,7 @@ export async function submit(
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const decoded = decodeHandle(
-      new Uint8Array(toArrayBuffer(asyncHandle, 0, 272))
+      new Uint8Array(toArrayBuffer(asyncHandle, 0, 272)),
     );
 
     if (decoded.currentStep !== lastStep) {
@@ -153,7 +153,7 @@ export async function submit(
     if (decoded.completed) {
       if (decoded.error !== 0) {
         console.log(
-          `Completed with exit code: ${decoded.error} and last step ${decoded.currentStep}`
+          `Completed with exit code: ${decoded.error} and last step ${decoded.currentStep}`,
         );
       }
       flagForGC = false;
@@ -165,7 +165,7 @@ export async function submit(
 
   const decoded = decodeHandle(
     new Uint8Array(toArrayBuffer(asyncHandle, 0, 2320)),
-    true
+    true,
   );
 
   if (decoded.error === 0) {
@@ -206,7 +206,7 @@ export async function submit(
 
   if (decoded.error !== 0) {
     throw new Error(
-      `Error submitting changes: ${decoded.error} ${decoded.currentStep}`
+      `Error submitting changes: ${decoded.error} ${decoded.currentStep}`,
     );
   }
 }

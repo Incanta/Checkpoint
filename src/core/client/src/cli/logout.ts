@@ -8,9 +8,7 @@ export async function logoutCommand(program: Command): Promise<void> {
     .command("logout")
     .description("Logout from Checkpoint")
     .action(async () => {
-      await fs.rm(
-        path.join(os.homedir(), ".config", "checkpoint", "auth.json")
-      );
+      await fs.rm(path.join(os.homedir(), ".checkpoint", "auth.json"));
 
       console.log(`Logged out.`);
     });

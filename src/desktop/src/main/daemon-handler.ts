@@ -1,4 +1,5 @@
 import type { IpcMain } from "electron";
+import { CreateDaemonClient } from "@checkpointvcs/daemon";
 import { MockedData } from "../common/mock-data";
 import { User, usersAtom, currentUser } from "../common/state/auth";
 import { store } from "../common/state/store";
@@ -91,8 +92,59 @@ export default class DaemonHandler {
         }
       }
     } else {
-      // tell the daemon that we want to log in; daemon should respond with a code
-      // wait for daemon to give us the user details (maybe via polling)
+      const client = await CreateDaemonClient();
+      const loginResponse = await client.auth.login.query({
+        endpoint: data.endpoint,
+        daemonId: data.daemonId,
+      });
+
+      const nextAuthUser: User = {
+        daemonId: data.daemonId,
+        endpoint: data.endpoint,
+        details: null,
+        auth: { code: loginResponse.code },
+      };
+
+      store.set(currentUser, nextAuthUser);
+
+      // wait for daemon to give us the user details
+      for (let i = 0; i < 5 * 60; i++) {
+        try {
+          const { user } = await client.auth.getUser.query({
+            daemonId: data.daemonId,
+          });
+
+          const currentAuthUser = store.get(currentUser);
+
+          if (!currentAuthUser) return;
+
+          const nextUser: User = {
+            ...currentAuthUser,
+            details: {
+              id: user.id,
+              email: user.email,
+              name: user.name,
+              username: user.username,
+            },
+            auth: undefined,
+          };
+
+          store.set(currentUser, nextUser);
+
+          const currentUsers = store.get(usersAtom) || [];
+          const nextUsers = currentUsers
+            .filter((a) => a.daemonId !== data.daemonId)
+            .concat(nextUser);
+
+          store.set(usersAtom, nextUsers);
+        } catch (e) {
+          //
+        }
+
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+      }
+
+      throw new Error("Timed out waiting for device authorization");
     }
   }
 

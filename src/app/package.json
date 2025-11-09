@@ -1,6 +1,7 @@
 {
   "name": "@checkpointvcs/app",
   "version": "0.1.0",
+  "minDesktopVersion": "0.1.0",
   "private": true,
   "type": "module",
   "packageManager": "yarn@1.22.22",
