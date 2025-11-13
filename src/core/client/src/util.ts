@@ -60,7 +60,6 @@ export interface WorkspaceState {
 }
 
 export interface WorkspaceConfig {
-  orgId: string;
   repoId: string;
   branchName: string;
   workspaceName: string;

@@ -1,7 +1,7 @@
 import type { IpcMain } from "electron";
 import { CreateDaemonClient } from "@checkpointvcs/daemon";
 import { MockedData } from "../common/mock-data";
-import { User, usersAtom, currentUser } from "../common/state/auth";
+import { User, usersAtom, currentUserAtom } from "../common/state/auth";
 import { store } from "../common/state/store";
 import { Channels, ipcOn, ipcSend } from "./channels";
 import {
@@ -43,6 +43,14 @@ export default class DaemonHandler {
     ipcOn(this.ipcMain, "workspace:diff:file", async (event, data) => {
       this.workspaceDiffFile(data);
     });
+
+    ipcOn(this.ipcMain, "workspace:pull", async (event, data) => {
+      this.workspacePull(data);
+    });
+
+    ipcOn(this.ipcMain, "workspace:submit", async (event, data) => {
+      this.workspaceSubmit(data);
+    });
   }
 
   private async handleLogin(data: Channels["auth:login"]): Promise<void> {
@@ -62,10 +70,10 @@ export default class DaemonHandler {
             auth: { code: "1234" },
           };
 
-          store.set(currentUser, nextAuthUser);
+          store.set(currentUserAtom, nextAuthUser);
 
           setTimeout(() => {
-            const currentAuthUser = store.get(currentUser);
+            const currentAuthUser = store.get(currentUserAtom);
 
             if (!currentAuthUser) return;
 
@@ -75,7 +83,7 @@ export default class DaemonHandler {
               auth: undefined,
             };
 
-            store.set(currentUser, nextUser);
+            store.set(currentUserAtom, nextUser);
 
             const currentUsers = store.get(usersAtom) || [];
             const nextUsers = currentUsers
@@ -105,7 +113,7 @@ export default class DaemonHandler {
         auth: { code: loginResponse.code },
       };
 
-      store.set(currentUser, nextAuthUser);
+      store.set(currentUserAtom, nextAuthUser);
 
       // wait for daemon to give us the user details
       for (let i = 0; i < 5 * 60; i++) {
@@ -114,7 +122,7 @@ export default class DaemonHandler {
             daemonId: data.daemonId,
           });
 
-          const currentAuthUser = store.get(currentUser);
+          const currentAuthUser = store.get(currentUserAtom);
 
           if (!currentAuthUser) return;
 
@@ -129,7 +137,7 @@ export default class DaemonHandler {
             auth: undefined,
           };
 
-          store.set(currentUser, nextUser);
+          store.set(currentUserAtom, nextUser);
 
           const currentUsers = store.get(usersAtom) || [];
           const nextUsers = currentUsers
@@ -156,6 +164,60 @@ export default class DaemonHandler {
         children: [],
         containsChanges: false,
       },
+    });
+  }
+
+  private async workspacePull(data: Channels["workspace:pull"]): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) {
+      return;
+    }
+
+    if (this.isMocked) {
+      return;
+    }
+
+    const currentUser = store.get(currentUserAtom);
+
+    if (!currentUser) {
+      throw new Error(
+        "Could not find local user account; please try restarting the app",
+      );
+    }
+
+    const client = await CreateDaemonClient();
+    const pullResponse = await client.workspaces.pull.query({
+      daemonId: currentUser.daemonId,
+      workspaceId: currentWorkspace.id,
+      ...data,
+    });
+  }
+
+  private async workspaceSubmit(
+    data: Channels["workspace:submit"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) {
+      return;
+    }
+
+    if (this.isMocked) {
+      return;
+    }
+
+    const currentUser = store.get(currentUserAtom);
+
+    if (!currentUser) {
+      throw new Error(
+        "Could not find local user account; please try restarting the app",
+      );
+    }
+
+    const client = await CreateDaemonClient();
+    const pullResponse = await client.workspaces.submit.query({
+      daemonId: currentUser.daemonId,
+      workspaceId: currentWorkspace.id,
+      ...data,
     });
   }
 
@@ -205,7 +267,26 @@ export default class DaemonHandler {
         },
       });
     } else {
-      // TODO retrieve from daemon
+      const currentUser = store.get(currentUserAtom);
+
+      if (!currentUser) {
+        throw new Error(
+          "Could not find local user account; please try restarting the app",
+        );
+      }
+
+      const client = await CreateDaemonClient();
+      const directoryResponse = await client.workspaces.getDirectory.query({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        path: data.path,
+      });
+
+      // Send the directory contents back to the renderer process
+      ipcSend(sender, "workspace:directory-contents", {
+        path: dirPath,
+        directory: directoryResponse,
+      });
     }
   }
 
@@ -216,13 +297,28 @@ export default class DaemonHandler {
     if (!currentWorkspace) return;
 
     if (this.isMocked) {
-      const filePath = path.join(currentWorkspace.rootPath, data.path);
-      // const fileContent = await fs.readFile(filePath, "utf-8");
-
       store.set(workspaceDiffAtom, {
         left: `hello world`,
         right: `hello checkpoint`,
       });
+    } else {
+      const currentUser = store.get(currentUserAtom);
+
+      if (!currentUser) {
+        throw new Error(
+          "Could not find local user account; please try restarting the app",
+        );
+      }
+
+      const client = await CreateDaemonClient();
+
+      const diffResponse = await client.workspaces.diffFile.query({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        path: data.path,
+      });
+
+      store.set(workspaceDiffAtom, diffResponse);
     }
   }
 }

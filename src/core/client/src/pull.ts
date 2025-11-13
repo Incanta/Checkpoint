@@ -7,27 +7,23 @@ import {
   DiffState,
   GetLogLevel,
   type LongtailLogLevel,
-  CreateApiClient
+  CreateApiClientAuth,
 } from "@checkpointvcs/common";
-import {
-  getWorkspaceState,
-  saveWorkspaceState,
-  type Workspace,
-} from "./util";
+import { getWorkspaceState, saveWorkspaceState, type Workspace } from "./util";
 import { promises as fs } from "fs";
 import path from "path";
 
 export async function pull(
   workspace: Workspace,
+  orgId: string,
   changelistId: string, // implies branch name
   logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
-    "longtail.log-level"
-  )
+    "longtail.log-level",
+  ),
 ): Promise<void> {
-  const client = await CreateApiClient();
+  const client = await CreateApiClientAuth(workspace.daemonId);
 
   const storageTokenResponse = await client.storage.getToken.query({
-    orgId: workspace.orgId,
     repoId: workspace.repoId,
     write: true,
   });
@@ -45,7 +41,7 @@ export async function pull(
   const backendUrl = storageTokenResponse.backendUrl;
 
   const filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
-    res.text()
+    res.text(),
   );
 
   const changelistResponse: any = await client.changelist.getChangelist.query({
@@ -56,20 +52,22 @@ export async function pull(
 
   const diff = DiffState(
     workspaceState.files,
-    changelistResponse.changelist.stateTree
+    changelistResponse.changelist.stateTree,
   );
 
-  const changelistsResponse: any = await client.changelist.getChangelists.query({
-    repoId: workspace.repoId,
-    numbers: diff.changelistsToPull,
-  });
+  const changelistsResponse: any = await client.changelist.getChangelists.query(
+    {
+      repoId: workspace.repoId,
+      numbers: diff.changelistsToPull,
+    },
+  );
 
   const sortedChangelists = changelistsResponse.changelists.sort(
-    (a: any, b: any) => a.number - b.number
+    (a: any, b: any) => a.number - b.number,
   );
 
   const versionsToPull: string[] = sortedChangelists.map(
-    (changelist: any) => changelist.versionIndex
+    (changelist: any) => changelist.versionIndex,
   );
 
   // on windows, requires PATH to include libraries folder
@@ -85,7 +83,7 @@ export async function pull(
     const versionIndexBuffer = createStringBuffer(versionIndex);
     const localRootBuffer = createStringBuffer(workspace.localRoot);
     const remoteRootBuffer = createStringBuffer(
-      `/${workspace.orgId}/${workspace.repoId}`
+      `/${orgId}/${workspace.repoId}`,
     );
     const filerUrlBuffer = createStringBuffer(filerUrl);
     const tokenBuffer = createStringBuffer(token);
@@ -99,7 +97,7 @@ export async function pull(
       ptr(filerUrlBuffer.buffer),
       ptr(tokenBuffer.buffer),
       tokenExpirationMs,
-      GetLogLevel(logLevel)
+      GetLogLevel(logLevel),
     );
 
     if (asyncHandle === 0 || asyncHandle === null) {
@@ -111,7 +109,7 @@ export async function pull(
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const decoded = decodeHandle(
-        new Uint8Array(toArrayBuffer(asyncHandle, 0, 272))
+        new Uint8Array(toArrayBuffer(asyncHandle, 0, 272)),
       );
 
       if (decoded.currentStep !== lastStep) {
@@ -121,7 +119,7 @@ export async function pull(
       if (decoded.completed) {
         if (decoded.error !== 0) {
           console.log(
-            `Completed with exit code: ${decoded.error} and last step ${decoded.currentStep}`
+            `Completed with exit code: ${decoded.error} and last step ${decoded.currentStep}`,
           );
         }
         flagForGC = false;
@@ -133,7 +131,7 @@ export async function pull(
 
     const decoded = decodeHandle(
       new Uint8Array(toArrayBuffer(asyncHandle, 0, 2320)),
-      true
+      true,
     );
 
     if (flagForGC) {
@@ -153,11 +151,9 @@ export async function pull(
   }
 
   if (!errored) {
-    const filesResponse: any = await client.file.getFiles.query(
-      {
-        ids: diff.deletions,
-      }
-    );
+    const filesResponse: any = await client.file.getFiles.query({
+      ids: diff.deletions,
+    });
 
     for (const file of filesResponse.files) {
       if (file.path) {

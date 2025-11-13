@@ -10,14 +10,13 @@ export type Channels = {
 
   "workspace:select": { id: string };
   "workspace:create-branch": { name: string };
-  "workspace:select-branch": { id: string };
+  "workspace:select-branch": { name: string };
   "workspace:get-directory": { path: string };
   "workspace:directory-contents": { path: string; directory: Directory };
   "workspace:configure": null;
   "workspace:refresh": null;
-  "workspace:pull": null;
-  "workspace:pull:files": { fileIds: string[] };
-  "workspace:undo": null;
+  "workspace:pull": { changelistId: number | null; filePaths: string[] | null };
+  "workspace:revert": { filePaths: string[] };
   "workspace:submit": { message: string; modifications: any; shelved: boolean };
   "workspace:diff:file": { path: string };
 };

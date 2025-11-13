@@ -12,7 +12,8 @@ export const orgRouter = router({
     .query(async ({ ctx, input }) => {
       const client = await CreateApiClientAuth(input.daemonId);
 
-      const orgs = await client.org.myOrgs.query();
+      // TODO: figure out how to remove the any
+      const orgs: any = await client.org.myOrgs.query();
       return { orgs };
     }),
 });

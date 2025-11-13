@@ -3,10 +3,14 @@ import { authRouter } from "./routers/auth";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import { GetDaemonListenPort } from "..";
 import { workspaceRouter } from "./routers/workspace";
+import { orgRouter } from "./routers/org";
+import { repoRouter } from "./routers/repo";
 
 const appRouter = router({
   auth: authRouter,
   workspaces: workspaceRouter,
+  orgs: orgRouter,
+  repos: repoRouter,
 });
 
 // Export type router type signature,

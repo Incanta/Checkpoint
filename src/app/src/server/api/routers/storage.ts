@@ -7,7 +7,6 @@ export const storageRouter = createTRPCRouter({
   getToken: protectedProcedure
     .input(
       z.object({
-        orgId: z.string(),
         repoId: z.string(),
         write: z.boolean(),
       }),
@@ -55,7 +54,7 @@ export const storageRouter = createTRPCRouter({
 
       const hasAccess =
         repo.public ||
-        orgUser ||
+        !!orgUser ||
         repo.org.defaultRepoAccess !== "NONE" ||
         (repoRole && repoRole.access !== "NONE");
 
@@ -88,7 +87,7 @@ export const storageRouter = createTRPCRouter({
       return {
         token: "mock-storage-token",
         expiration: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
-        backendUrl: process.env.STORAGE_BACKEND_URL || "http://localhost:8080",
+        backendUrl: process.env.STORAGE_BACKEND_URL ?? "http://localhost:8080",
       };
     }),
 });

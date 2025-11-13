@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import { promises as fs } from "fs";
 import path from "path";
 import { type WorkspaceConfig } from "../util";
-import { CreateApiClient } from "@checkpointvcs/common";
+import { CreateApiClientAuth } from "@checkpointvcs/common";
 import inquirer from "inquirer";
 
 export async function initCommand(program: Command): Promise<void> {
@@ -16,14 +16,14 @@ export async function initCommand(program: Command): Promise<void> {
 
       if (await fs.exists(workspaceConfigDir)) {
         console.error(
-          `A Checkpoint workspace already exists in this directory.`
+          `A Checkpoint workspace already exists in this directory.`,
         );
         process.exit(1);
       }
 
       await fs.mkdir(workspaceConfigDir);
 
-      const client = await CreateApiClient();
+      const client = await CreateApiClientAuth("TODO MIKE HERE");
 
       const orgsResponse = await client.org.myOrgs.query();
 
@@ -54,7 +54,6 @@ export async function initCommand(program: Command): Promise<void> {
       ]);
 
       const workspaceDetails: WorkspaceConfig = {
-        orgId: selectedOrg,
         repoId: selectedRepo,
         branchName: "main",
         workspaceName: name,
@@ -62,11 +61,11 @@ export async function initCommand(program: Command): Promise<void> {
 
       await fs.writeFile(
         path.join(workspaceConfigDir, "config.json"),
-        JSON.stringify(workspaceDetails, null, 2)
+        JSON.stringify(workspaceDetails, null, 2),
       );
 
       console.log(
-        `Initialized Checkpoint workspace; you need to manually run a pull command.`
+        `Initialized Checkpoint workspace; you need to manually run a pull command.`,
       );
     });
 }

@@ -14,6 +14,7 @@ import { getWorkspaceState, saveWorkspaceState, type Workspace } from "./util";
 
 export async function submit(
   workspace: Workspace,
+  orgId: string,
   message: string,
   modifications: Modification[],
   logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
@@ -33,7 +34,6 @@ export async function submit(
   const client = await CreateApiClientAuth(workspace.daemonId);
 
   const storageTokenResponse = await client.storage.getToken.query({
-    orgId: workspace.orgId,
     repoId: workspace.repoId,
     write: true,
   });
@@ -102,9 +102,7 @@ export async function submit(
     config.get<string>("longtail.compression-algo"),
   );
   const localRootBuffer = createStringBuffer(workspace.localRoot);
-  const remoteRootBuffer = createStringBuffer(
-    `/${workspace.orgId}/${workspace.repoId}`,
-  );
+  const remoteRootBuffer = createStringBuffer(`/${orgId}/${workspace.repoId}`);
   const filerUrlBuffer = createStringBuffer(filerUrl);
   const backendUrlBuffer = createStringBuffer(backendUrl);
   const tokenBuffer = createStringBuffer(token);

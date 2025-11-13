@@ -9,4 +9,5 @@ export type Workspace =
   AppRouter["workspace"]["list"]["_def"]["$types"]["output"][number] & {
     localPath: string;
     daemonId: string;
+    branchName: string;
   };

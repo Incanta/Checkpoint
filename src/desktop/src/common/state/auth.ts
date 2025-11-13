@@ -18,5 +18,5 @@ export interface User {
 export const usersAtom = atom<User[] | null>(null);
 syncAtom(usersAtom, "users");
 
-export const currentUser = atom<User | null>(null);
-syncAtom(currentUser, "currentUser");
+export const currentUserAtom = atom<User | null>(null);
+syncAtom(currentUserAtom, "currentUser");
