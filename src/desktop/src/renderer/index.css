@@ -200,3 +200,8 @@ button.treetable-toggler:focus-visible {
 .p-dropdown-items li:hover {
   background-color: #ffffff22 !important;
 }
+
+.p-dialog-mask {
+  background-color: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(0.05rem);
+}

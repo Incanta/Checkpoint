@@ -33,7 +33,7 @@ export default function WorkspaceExplorer() {
 
     for (const absolutePath in workspaceDirectories) {
       const dir = workspaceDirectories[absolutePath];
-      const relativePath = absolutePath.replace(currentWorkspace.rootPath, "");
+      const relativePath = absolutePath.replace(currentWorkspace.localPath, "");
       const pathParts = relativePath
         .split("/")
         .filter((part) => part.length > 0);
@@ -44,7 +44,7 @@ export default function WorkspaceExplorer() {
             id: "/",
             key: "/",
             data: {
-              name: currentWorkspace.rootPath,
+              name: currentWorkspace.localPath,
               status: "",
               size: "",
               modified: "",

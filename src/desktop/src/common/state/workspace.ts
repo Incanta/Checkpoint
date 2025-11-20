@@ -1,18 +1,6 @@
 import { atom } from "jotai";
 import { syncAtom } from "./store";
-
-export interface Workspace {
-  id: string;
-  userId: string;
-  orgId: string;
-  repoId: string;
-  name: string;
-  rootPath: string;
-
-  // current branch
-
-  pendingChanges: WorkspacePendingChanges;
-}
+import { ApiTypes } from "@checkpointvcs/daemon";
 
 export interface WorkspacePendingChanges {
   numChanges: number;
@@ -63,10 +51,10 @@ export interface Directory {
   containsChanges: boolean;
 }
 
-export const workspacesAtom = atom<Workspace[] | null>(null);
+export const workspacesAtom = atom<ApiTypes.Workspace[] | null>(null);
 syncAtom(workspacesAtom, "workspaces");
 
-export const currentWorkspaceAtom = atom<Workspace | null>(null);
+export const currentWorkspaceAtom = atom<ApiTypes.Workspace | null>(null);
 syncAtom(currentWorkspaceAtom, "currentWorkspace");
 
 export const workspaceDirectoriesAtom = atom<Record<string, Directory>>({});

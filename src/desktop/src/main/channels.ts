@@ -10,6 +10,12 @@ export type Channels = {
 
   "set-renderer-url": { url: string };
 
+  "workspace:create": {
+    repoId: string;
+    name: string;
+    path: string;
+    defaultBranchName: string;
+  };
   "workspace:select": { id: string };
   "workspace:create-branch": { name: string };
   "workspace:select-branch": { name: string };
@@ -23,6 +29,7 @@ export type Channels = {
   "workspace:diff:file": { path: string };
 
   "dashboard:refresh": { daemonId: string | null; orgId: string | null };
+  "dashboard:select-workspace-folder": null;
 };
 
 export function ipcSend<T extends keyof Channels>(

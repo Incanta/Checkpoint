@@ -1,5 +1,7 @@
 import { Splitter, SplitterPanel } from "primereact/splitter";
 import Button from "../../components/Button";
+import { Dialog } from "primereact/dialog";
+import { InputText } from "primereact/inputtext";
 import { useEffect, useState } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import {
@@ -17,6 +19,7 @@ import { Dropdown } from "primereact/dropdown";
 import { currentUserAtom, usersAtom } from "../../../common/state/auth";
 import { useNavigate } from "react-router-dom";
 import {
+  dashboardNewWorkspaceFolderAtom,
   dashboardOrgsAtom,
   dashboardReposAtom,
 } from "../../../common/state/dashboard";
@@ -29,10 +32,67 @@ export default function Dashboard(): React.ReactElement {
   const repos = useAtomValue(dashboardReposAtom);
   const workspaces = useAtomValue(workspacesAtom);
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
+  const [dashboardNewWorkspaceFolder, setDashboardNewWorkspaceFolder] = useAtom(
+    dashboardNewWorkspaceFolderAtom,
+  );
 
   const [currentOrgId, setCurrentOrgId] = useState<string | null>(
     currentWorkspace?.orgId || null,
   );
+
+  const [isCreateWorkspaceDialogVisible, setIsCreateWorkspaceDialogVisible] =
+    useState(false);
+  const [workspaceFormRepoId, setWorkspaceFormRepoId] = useState<string | null>(
+    null,
+  );
+  const [workspaceNameInput, setWorkspaceNameInput] = useState("");
+  const [workspacePathInput, setWorkspacePathInput] = useState("");
+  const selectedWorkspaceRepo = workspaceFormRepoId
+    ? repos.find((repo) => repo.id === workspaceFormRepoId)
+    : null;
+  const isWorkspaceFormInvalid =
+    workspaceNameInput.trim() === "" || workspacePathInput.trim() === "";
+
+  const resetWorkspaceForm = () => {
+    setWorkspaceFormRepoId(null);
+    setWorkspaceNameInput("");
+    setWorkspacePathInput("");
+    setDashboardNewWorkspaceFolder("");
+  };
+
+  const openCreateWorkspaceDialog = (repoId: string) => {
+    setWorkspaceFormRepoId(repoId);
+    setIsCreateWorkspaceDialogVisible(true);
+  };
+
+  const hideCreateWorkspaceDialog = () => {
+    setIsCreateWorkspaceDialogVisible(false);
+    resetWorkspaceForm();
+  };
+
+  const handleBrowseWorkspacePath = async () => {
+    ipc.sendMessage("dashboard:select-workspace-folder", null);
+  };
+
+  const handleCreateWorkspace = () => {
+    if (!workspaceFormRepoId) {
+      hideCreateWorkspaceDialog();
+      return;
+    }
+
+    ipc.sendMessage("workspace:create", {
+      repoId: workspaceFormRepoId,
+      name: workspaceNameInput,
+      path: workspacePathInput,
+      defaultBranchName: "main",
+    });
+
+    hideCreateWorkspaceDialog();
+  };
+
+  useEffect(() => {
+    setWorkspacePathInput(dashboardNewWorkspaceFolder);
+  }, [dashboardNewWorkspaceFolder]);
 
   useEffect(() => {
     if (users && users.length > 0 && !currentUser) {
@@ -153,6 +213,7 @@ export default function Dashboard(): React.ReactElement {
                             label={<FontAwesomeIcon icon={faPlus} />}
                             tooltip="Create new workspace..."
                             className="ml-[1rem] text-[0.8em] p-[0.25rem]"
+                            onClick={() => openCreateWorkspaceDialog(repo.id)}
                           />
                         </div>
                       </div>
@@ -192,8 +253,11 @@ export default function Dashboard(): React.ReactElement {
                               <div className="text-[0.9em]" title={ws.name}>
                                 {ws.name}
                               </div>
-                              <div className="text-[0.6em]" title={ws.rootPath}>
-                                {ws.rootPath}
+                              <div
+                                className="text-[0.6em]"
+                                title={ws.localPath}
+                              >
+                                {ws.localPath}
                               </div>
                             </div>
                             <div className="col-span-1">
@@ -248,6 +312,79 @@ export default function Dashboard(): React.ReactElement {
           </Splitter>
         </div>
       </div>
+      <Dialog
+        header="Create Workspace"
+        visible={isCreateWorkspaceDialogVisible}
+        style={{
+          width: "32rem",
+          backgroundColor: "#2C2C2C",
+          padding: "1rem",
+          borderRadius: "0.5rem",
+          boxShadow: "0.2rem 0.2rem 2rem 0.1rem #00000094",
+        }}
+        modal
+        onHide={hideCreateWorkspaceDialog}
+        footer={
+          <div className="flex w-full justify-end gap-2">
+            <button
+              type="button"
+              className="px-3 py-2 rounded bg-[#3b3b3b] text-white"
+              onClick={hideCreateWorkspaceDialog}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="px-4 py-2 rounded bg-[#2563EB] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleCreateWorkspace}
+              disabled={isWorkspaceFormInvalid}
+            >
+              Create Workspace
+            </button>
+          </div>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          {selectedWorkspaceRepo && (
+            <div className="text-[0.8em] text-white/70">
+              Repository:{" "}
+              <span className="text-white">
+                {currentOrgId !== null
+                  ? orgs.find((o) => o.id === currentOrgId)?.name + " / "
+                  : ""}
+                {selectedWorkspaceRepo.name}
+              </span>
+            </div>
+          )}
+          <label className="flex flex-col gap-2 text-[0.85em]">
+            <span>Workspace Name</span>
+            <InputText
+              className="w-full"
+              value={workspaceNameInput}
+              onChange={(e) => setWorkspaceNameInput(e.target.value)}
+              placeholder="My Workspace"
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-[0.85em]">
+            <span>Workspace Path</span>
+            <div className="flex gap-2">
+              <InputText
+                className="flex-1"
+                value={workspacePathInput}
+                onChange={(e) => setWorkspacePathInput(e.target.value)}
+                placeholder="C:\\Projects\\MyWorkspace"
+              />
+              <button
+                type="button"
+                className="px-3 py-2 rounded bg-[#3b3b3b] text-white"
+                onClick={handleBrowseWorkspacePath}
+              >
+                Browse
+              </button>
+            </div>
+          </label>
+        </div>
+      </Dialog>
     </div>
   );
 }

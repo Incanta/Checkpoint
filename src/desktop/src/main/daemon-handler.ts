@@ -1,4 +1,4 @@
-import type { IpcMain } from "electron";
+import { dialog, type IpcMain } from "electron";
 import { CreateDaemonClient } from "@checkpointvcs/daemon";
 import { MockedData } from "../common/mock-data";
 import { User, usersAtom, currentUserAtom } from "../common/state/auth";
@@ -9,7 +9,6 @@ import {
   File,
   FileStatus,
   FileType,
-  Workspace,
   workspaceDiffAtom,
   workspaceDirectoriesAtom,
   workspacesAtom,
@@ -17,12 +16,14 @@ import {
 import { promises as fs } from "fs";
 import path from "path";
 import {
+  dashboardNewWorkspaceFolderAtom,
+  dashboardNewWorkspaceProgressAtom,
   dashboardOrgsAtom,
   dashboardReposAtom,
 } from "../common/state/dashboard";
+import type { ApiTypes } from "@checkpointvcs/daemon";
 
 export default class DaemonHandler {
-  // Your implementation here
   private isMocked: boolean;
   private ipcMain: IpcMain;
   private webContents: Electron.WebContents | null = null;
@@ -41,24 +42,32 @@ export default class DaemonHandler {
       const client = await CreateDaemonClient();
 
       const users = await client.auth.getUsers.query();
-      store.set(
-        usersAtom,
-        users.users.map((user) => ({
-          daemonId: user.daemonId,
-          endpoint: user.endpoint,
-          details: {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            username: user.username,
-          },
-          auth: undefined,
-        })),
-      );
+      const usersValue = users.users.map((user) => ({
+        daemonId: user.daemonId,
+        endpoint: user.endpoint,
+        details: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          username: user.username,
+        },
+        auth: undefined,
+      }));
+
+      store.set(usersAtom, usersValue);
+
+      // TODO remember the last active user
+      if (usersValue.length > 0) {
+        store.set(currentUserAtom, usersValue[0]);
+      }
     }
 
     ipcOn(this.ipcMain, "auth:login", async (_event, data) => {
       this.handleLogin(data);
+    });
+
+    ipcOn(this.ipcMain, "workspace:create", async (event, data) => {
+      this.workspaceCreate(data);
     });
 
     ipcOn(this.ipcMain, "workspace:select", async (_event, data) => {
@@ -86,31 +95,24 @@ export default class DaemonHandler {
     });
 
     ipcOn(this.ipcMain, "dashboard:refresh", async (event, data) => {
-      // For simplicity, just re-fetch users
-      if (!this.isMocked) {
-        if (!data.daemonId) {
-          store.set(dashboardOrgsAtom, []);
-          store.set(dashboardReposAtom, []);
-          return;
-        }
-
-        const client = await CreateDaemonClient();
-
-        const orgs = await client.orgs.list.query({ daemonId: data.daemonId });
-        store.set(dashboardOrgsAtom, orgs.orgs);
-
-        if (!data.orgId) {
-          store.set(dashboardReposAtom, []);
-          return;
-        }
-
-        const repos = await client.repos.list.query({
-          daemonId: data.daemonId,
-          orgId: data.orgId,
-        });
-        store.set(dashboardReposAtom, repos.repos);
-      }
+      this.refreshDashboard(data);
     });
+
+    ipcOn(
+      this.ipcMain,
+      "dashboard:select-workspace-folder",
+      async (event, data) => {
+        if (!this.isMocked) {
+          const results = await dialog.showOpenDialog({
+            properties: ["openDirectory"],
+          });
+
+          if (!results.canceled && results.filePaths.length > 0) {
+            store.set(dashboardNewWorkspaceFolderAtom, results.filePaths[0]);
+          }
+        }
+      },
+    );
   }
 
   private async handleLogin(data: Channels["auth:login"]): Promise<void> {
@@ -219,11 +221,83 @@ export default class DaemonHandler {
     }
   }
 
-  private async selectWorkspace(workspace: Workspace): Promise<void> {
-    store.set(workspacesAtom, MockedData.workspaces);
+  private async refreshDashboard(
+    data: Channels["dashboard:refresh"],
+  ): Promise<void> {
+    if (!this.isMocked) {
+      if (!data.daemonId) {
+        store.set(dashboardOrgsAtom, []);
+        store.set(dashboardReposAtom, []);
+        return;
+      }
+
+      const client = await CreateDaemonClient();
+
+      const orgs = await client.orgs.list.query({ daemonId: data.daemonId });
+      store.set(dashboardOrgsAtom, orgs.orgs);
+
+      if (!data.orgId) {
+        store.set(dashboardReposAtom, []);
+        return;
+      }
+
+      const reposResponse = await client.repos.list.query({
+        daemonId: data.daemonId,
+        orgId: data.orgId,
+      });
+      store.set(dashboardReposAtom, reposResponse.repos);
+
+      const workspacesResponse = await client.workspaces.list.local.query({
+        daemonId: data.daemonId,
+      });
+
+      store.set(workspacesAtom, workspacesResponse.workspaces);
+    }
+  }
+
+  private async workspaceCreate(
+    data: Channels["workspace:create"],
+  ): Promise<void> {
+    if (!this.isMocked) {
+      const currentUser = store.get(currentUserAtom);
+
+      if (!currentUser) {
+        store.set(dashboardNewWorkspaceProgressAtom, {
+          complete: true,
+          error: "User not selected",
+        });
+
+        return;
+      }
+
+      store.set(dashboardNewWorkspaceProgressAtom, {
+        complete: false,
+        error: "",
+      });
+
+      const client = await CreateDaemonClient();
+
+      const workspaceResponse = await client.workspaces.create.mutate({
+        daemonId: currentUser.daemonId,
+        ...data,
+      });
+
+      await this.refreshDashboard({
+        daemonId: currentUser.daemonId,
+        orgId: workspaceResponse.workspace.orgId,
+      });
+
+      store.set(dashboardNewWorkspaceProgressAtom, {
+        complete: true,
+        error: "",
+      });
+    }
+  }
+
+  private async selectWorkspace(workspace: ApiTypes.Workspace): Promise<void> {
     store.set(currentWorkspaceAtom, workspace);
     store.set(workspaceDirectoriesAtom, {
-      [workspace.rootPath]: {
+      [workspace.localPath]: {
         children: [],
         containsChanges: false,
       },
@@ -283,7 +357,7 @@ export default class DaemonHandler {
     }
 
     const client = await CreateDaemonClient();
-    const pullResponse = await client.workspaces.submit.query({
+    const submitResponse = await client.workspaces.submit.query({
       daemonId: currentUser.daemonId,
       workspaceId: currentWorkspace.id,
       ...data,
@@ -300,13 +374,13 @@ export default class DaemonHandler {
 
     if (this.isMocked) {
       const dirEntries = await fs.readdir(
-        path.join(currentWorkspace.rootPath, dirPath),
+        path.join(currentWorkspace.localPath, dirPath),
         { withFileTypes: true },
       );
       const children = await Promise.all(
         dirEntries.map(async (entry) => {
           const entryPath = path.join(
-            currentWorkspace.rootPath,
+            currentWorkspace.localPath,
             dirPath,
             entry.name,
           );
