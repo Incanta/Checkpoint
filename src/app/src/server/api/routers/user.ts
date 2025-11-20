@@ -20,28 +20,6 @@ export const userRouter = createTRPCRouter({
     return checkpointUser;
   }),
 
-  createUser: protectedProcedure
-    .input(
-      z.object({
-        name: z.string().min(1),
-        username: z.string().min(1),
-        email: z.string().email(),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      // Only allow in test environments for now
-      if (process.env.NODE_ENV !== "test") {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "createUser is only available in testing environments",
-        });
-      }
-
-      return ctx.db.user.create({
-        data: input,
-      });
-    }),
-
   updateUser: protectedProcedure
     .input(
       z.object({

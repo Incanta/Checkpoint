@@ -7,7 +7,8 @@ export const changelistRouter = createTRPCRouter({
   getChangelist: protectedProcedure
     .input(
       z.object({
-        id: z.string(),
+        repoId: z.string(),
+        changelistNumber: z.number(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -28,7 +29,10 @@ export const changelistRouter = createTRPCRouter({
 
       return ctx.db.changelist.findUnique({
         where: {
-          id: input.id,
+          repoId_number: {
+            repoId: input.repoId,
+            number: input.changelistNumber,
+          },
         },
       });
     }),

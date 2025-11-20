@@ -46,11 +46,25 @@ export const workspaceRouter = createTRPCRouter({
         });
       }
 
+      const repo = await ctx.db.repo.findUnique({
+        where: { id: input.repoId },
+      });
+
+      if (!repo) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Repository not found",
+        });
+      }
+
+      // TODO check auth
+
       const newWorkspace = await ctx.db.workspace.create({
         data: {
           name: input.name,
           userId: checkpointUser.id,
           repoId: input.repoId,
+          orgId: repo.orgId,
         },
       });
 

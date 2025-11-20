@@ -54,7 +54,7 @@ export const branchRouter = createTRPCRouter({
 
       const hasAccess =
         repo.public ||
-        orgUser ||
+        !!orgUser ||
         repo.org.defaultRepoAccess !== "NONE" ||
         (repoRole && repoRole.access !== "NONE");
 

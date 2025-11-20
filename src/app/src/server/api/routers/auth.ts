@@ -9,7 +9,7 @@ export const authRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const existingUser = await ctx.db.user.findUnique({
+      const existingUser = await ctx.db.user.findFirst({
         where: { username: input.username },
         select: { id: true },
       });
