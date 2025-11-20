@@ -4,14 +4,14 @@
       "type": "lldb",
       "request": "launch",
       "name": "Debug C++ for Core Client",
-      "program": "bun",
+      "program": "c:/Users/seese/.bun/bin/bun",
       "args": [
         "../client/src/bin.ts",
         "commit",
         "-m",
         "remove hello",
         "--longtail-log-level",
-        "debug",
+        "debug"
       ],
       "cwd": "${workspaceFolder}/wk",
       "env": {
@@ -19,10 +19,10 @@
       }
     },
     {
-      "name": "Debug C++ in Backend Server",
+      "name": "Backend",
       "type": "lldb",
       "request": "launch",
-      "program": "bun",
+      "program": "c:/Users/seese/.bun/bin/bun",
       "args": [
         "server/src/index.ts"
       ],
@@ -31,5 +31,17 @@
         "NODE_CONFIG_DIR": "${workspaceFolder:Core}/server/config"
       }
     },
+    {
+      "name": "Daemon",
+      "type": "bun",
+      "request": "launch",
+      "program": "src/bin.ts",
+      "cwd": "${workspaceFolder:Core}/daemon",
+      "presentation": {
+        "hidden": false,
+        "group": "",
+        "order": 1
+      }
+    }
   ]
 }

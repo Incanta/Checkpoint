@@ -1,7 +1,7 @@
 {
   "configurations": [
     {
-      "name": "Next.js: debug server-side",
+      "name": "API",
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "yarn",
@@ -10,7 +10,7 @@
       ],
     },
     {
-      "name": "Next.js: debug client-side",
+      "name": "Chrome",
       "type": "chrome",
       "request": "launch",
       "url": "http://checkpoint.localhost:3000"
@@ -18,12 +18,16 @@
   ],
   "compounds": [
     {
-      "name": "Run Checkpoint Dev",
+      "name": "Server Webapp",
       "configurations": [
-        "Next.js: debug server-side",
-        "Next.js: debug client-side",
-        "Debug C++ in Backend Server"
-      ]
+        "API",
+        "Backend"
+      ],
+      "presentation": {
+        "hidden": false,
+        "group": "",
+        "order": 1
+      }
     }
   ]
 }
