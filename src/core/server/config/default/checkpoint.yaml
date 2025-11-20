@@ -1,2 +1,2 @@
 api:
-  url: "http://redwood:8911/graphql"
+  url: "http://checkpoint.localhost:3000"

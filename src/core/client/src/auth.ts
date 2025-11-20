@@ -4,7 +4,7 @@ import open from "open";
 export async function AuthenticateDevice(
   endpoint: string,
   daemonId: string,
-  onCodeForDisplay: (code: string) => void,
+  onCodeForDisplay: (code: string, url: string) => void,
 ): Promise<void> {
   const client = await CreateApiClientUnauth(endpoint);
 
@@ -15,10 +15,11 @@ export async function AuthenticateDevice(
   }
 
   const { code } = deviceCodeResponse;
+  const url = `${endpoint}/devices?${code}`;
 
-  onCodeForDisplay(code);
+  onCodeForDisplay(code, url);
 
-  await open(`${endpoint}/devices?${code}`);
+  await open(url);
 
   let apiToken: string;
   while (true) {

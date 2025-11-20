@@ -10,13 +10,14 @@ import {
   CreateApiClientAuth,
 } from "@checkpointvcs/common";
 import { getWorkspaceState, saveWorkspaceState, type Workspace } from "./util";
-import { promises as fs } from "fs";
+import { existsSync, promises as fs } from "fs";
 import path from "path";
 
 export async function pull(
   workspace: Workspace,
   orgId: string,
-  changelistId: string, // implies branch name
+  changelistNumber: number | null,
+  filePaths: string[] | null = null, // TODO: implement partial pulls
   logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
     "longtail.log-level",
   ),
@@ -44,25 +45,41 @@ export async function pull(
     res.text(),
   );
 
-  const changelistResponse: any = await client.changelist.getChangelist.query({
-    id: changelistId,
+  if (changelistNumber === null) {
+    const branchResponse = await client.branch.getBranch.query({
+      repoId: workspace.repoId,
+      name: workspace.branchName,
+    });
+
+    if (!branchResponse) {
+      throw new Error("Could not get branch information");
+    }
+
+    changelistNumber = branchResponse.headNumber;
+  }
+
+  const changelistResponse = await client.changelist.getChangelist.query({
+    repoId: workspace.repoId,
+    changelistNumber: changelistNumber,
   });
+
+  if (!changelistResponse) {
+    throw new Error("Could not get changelist information");
+  }
 
   const workspaceState = await getWorkspaceState();
 
   const diff = DiffState(
     workspaceState.files,
-    changelistResponse.changelist.stateTree,
+    changelistResponse.stateTree as Record<string, number>,
   );
 
-  const changelistsResponse: any = await client.changelist.getChangelists.query(
-    {
-      repoId: workspace.repoId,
-      numbers: diff.changelistsToPull,
-    },
-  );
+  const changelistsResponse = await client.changelist.getChangelists.query({
+    repoId: workspace.repoId,
+    numbers: diff.changelistsToPull,
+  });
 
-  const sortedChangelists = changelistsResponse.changelists.sort(
+  const sortedChangelists = changelistsResponse.sort(
     (a: any, b: any) => a.number - b.number,
   );
 
@@ -106,7 +123,6 @@ export async function pull(
 
     let flagForGC = true;
 
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const decoded = decodeHandle(
         new Uint8Array(toArrayBuffer(asyncHandle, 0, 272)),
@@ -159,7 +175,7 @@ export async function pull(
       if (file.path) {
         const filePath = path.join(workspace.localRoot, file.path);
 
-        if (await fs.exists(filePath)) {
+        if (existsSync(filePath)) {
           await fs.rm(filePath, {
             force: true,
           });
@@ -168,8 +184,8 @@ export async function pull(
     }
 
     await saveWorkspaceState({
-      changelistNumber: changelistResponse.changelist.number,
-      files: changelistResponse.changelist.stateTree,
+      changelistNumber: changelistResponse.number,
+      files: changelistResponse.stateTree as Record<string, number>,
     });
   }
 

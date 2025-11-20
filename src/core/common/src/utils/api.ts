@@ -5,7 +5,9 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import type { AuthConfig, AuthConfigUser } from "../types/auth-config";
+import { existsSync } from "fs";
 
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export async function CreateApiClientUnauth(endpoint: string) {
   const client = createTRPCClient<ApiAppRouter>({
     links: [
@@ -19,6 +21,29 @@ export async function CreateApiClientUnauth(endpoint: string) {
   return client;
 }
 
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
+export async function CreateApiClientAuthManual(
+  endpoint: string,
+  token: string,
+) {
+  const client = createTRPCClient<ApiAppRouter>({
+    links: [
+      httpBatchLink({
+        url: `${endpoint}/api/trpc`,
+        transformer: superjson,
+        async headers() {
+          return {
+            Authorization: `Bearer ${token}`,
+          };
+        },
+      }),
+    ],
+  });
+
+  return client;
+}
+
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export async function CreateApiClientAuth(daemonId: string) {
   let user: AuthConfigUser | null = null;
   try {
@@ -27,10 +52,12 @@ export async function CreateApiClientAuth(daemonId: string) {
     //
   } finally {
     if (!user) {
+      // eslint-disable-next-line no-unsafe-finally
       throw new Error(`Could not find a user under daemon ID ${daemonId}`);
     }
 
     if (!user.apiToken) {
+      // eslint-disable-next-line no-unsafe-finally
       throw new Error(`Device isn't authorized yet.`);
     }
   }
@@ -59,7 +86,7 @@ export async function SaveAuthToken(
 ): Promise<void> {
   const authDir = path.join(os.homedir(), ".checkpoint");
 
-  if (!(await fs.exists(authDir))) {
+  if (!existsSync(authDir)) {
     await fs.mkdir(authDir, { recursive: true });
   }
 
@@ -67,7 +94,7 @@ export async function SaveAuthToken(
 
   let authConfig: AuthConfig | null = null;
 
-  if (await fs.exists(authFilePath)) {
+  if (existsSync(authFilePath)) {
     const authConfigStr = await fs.readFile(authFilePath, "utf-8");
     try {
       authConfig = JSON.parse(authConfigStr);
@@ -95,7 +122,7 @@ export async function DeleteAuthToken(daemonId: string): Promise<void> {
 
   let authConfig: AuthConfig | null = null;
 
-  if (await fs.exists(authFilePath)) {
+  if (existsSync(authFilePath)) {
     const authConfigStr = await fs.readFile(authFilePath, "utf-8");
     try {
       authConfig = JSON.parse(authConfigStr);
@@ -124,7 +151,7 @@ export async function GetAllAuthConfigUsers(): Promise<
 
     const auth: AuthConfig = JSON.parse(authStr);
 
-    return auth.users;
+    return auth.users || [];
   } catch (e) {
     //
   }
@@ -142,6 +169,10 @@ export async function GetAuthConfigUser(
     );
 
     const auth: AuthConfig = JSON.parse(authStr);
+
+    if (!auth.users) {
+      return null;
+    }
 
     const user = auth.users[daemonId];
 

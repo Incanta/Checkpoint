@@ -64,7 +64,7 @@ function createWindow() {
     win.loadFile(path.join(RENDERER_DIST, "index.html"));
   }
 
-  daemonHandler.init();
+  daemonHandler.init(win.webContents);
 }
 
 // Quit when all windows are closed, except on macOS. There, it's common

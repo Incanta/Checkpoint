@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { promises as fs } from "fs";
+import { existsSync, promises as fs } from "fs";
 import path from "path";
 import { type WorkspaceConfig } from "../util";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
@@ -14,7 +14,7 @@ export async function initCommand(program: Command): Promise<void> {
       const workspace = process.cwd();
       const workspaceConfigDir = path.join(workspace, ".checkpoint");
 
-      if (await fs.exists(workspaceConfigDir)) {
+      if (existsSync(workspaceConfigDir)) {
         console.error(
           `A Checkpoint workspace already exists in this directory.`,
         );

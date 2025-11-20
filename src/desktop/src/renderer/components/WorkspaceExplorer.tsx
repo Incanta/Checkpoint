@@ -14,6 +14,8 @@ import {
   workspaceDirectoriesAtom,
 } from "../../common/state/workspace";
 import { ipc } from "../pages/ipc";
+import Button from "./Button";
+import prettyBytes from "pretty-bytes";
 
 export default function WorkspaceExplorer() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
@@ -38,7 +40,7 @@ export default function WorkspaceExplorer() {
 
       if (pathParts.length === 0) {
         if (newNodes.length === 0) {
-          newNodes.push({
+          const node: TreeNode = {
             id: "/",
             key: "/",
             data: {
@@ -47,12 +49,12 @@ export default function WorkspaceExplorer() {
               size: "",
               modified: "",
               type: "Directory",
-              changeset: "",
+              changelist: "",
             },
             leaf: false,
-            expanded: false,
             children: [],
-          });
+          };
+          newNodes.push(node);
         }
       } else {
         let currentNode: TreeNode = newNodes[0];
@@ -73,7 +75,7 @@ export default function WorkspaceExplorer() {
                 size: "",
                 modified: "",
                 type: "Directory",
-                changeset: "",
+                changelist: "",
               },
               leaf: false,
               children: [],
@@ -97,7 +99,7 @@ export default function WorkspaceExplorer() {
             size: file.size.toString() + " B",
             modified: new Date(file.modifiedAt).toLocaleDateString(),
             type: FileType[file.type],
-            changeset: file.changelist ? file.changelist.toString() : "",
+            changelist: file.changelist ? file.changelist.toString() : "",
           },
           leaf: file.type !== FileType.Directory,
         }));
@@ -139,15 +141,17 @@ export default function WorkspaceExplorer() {
   return (
     <div className="grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4">
       <div
-        className="row-span-1"
+        className="row-span-1 space-x-[0.3rem]"
         style={{
+          backgroundColor: "#2C2C2C",
           borderColor: "#1A1A1A",
           borderWidth: "0 0 1px 0",
           borderStyle: "solid",
-          paddingLeft: "0.5rem",
+          padding: "0.3rem",
         }}
       >
-        <span>Header</span>
+        <Button className="p-[0.3rem] text-[0.8em]" label="Refresh" />
+        <Button className="p-[0.3rem] text-[0.8em]" label="Pull" />
       </div>
       <div
         className="row-span-1"
@@ -178,15 +182,18 @@ export default function WorkspaceExplorer() {
                   data: {
                     name: file.path.split("/").pop() || "",
                     status: FileStatus[file.status],
-                    size: file.size.toString() + " B",
+                    size: prettyBytes(file.size),
                     modified: new Date(file.modifiedAt).toLocaleDateString(),
                     type: FileType[file.type],
-                    changeset: file.changelist
+                    changelist: file.changelist
                       ? file.changelist.toString()
                       : "",
                   },
                   leaf: file.type !== FileType.Directory,
                 }));
+                if (node.id === "/" && directory.children.length > 0) {
+                  node.expanded = true;
+                }
                 setNodes([...nodes]);
               });
 
@@ -265,8 +272,8 @@ export default function WorkspaceExplorer() {
             pt={columnPt}
           ></Column>
           <Column
-            field="changeset"
-            header="Changeset"
+            field="changelist"
+            header="Changelist"
             resizeable
             sortable
             pt={columnPt}

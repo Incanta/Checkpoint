@@ -1,7 +1,6 @@
 import { dlopen, FFIType } from "bun:ffi";
 import path from "path";
 import os from "os";
-import fs from "fs";
 
 export type LongtailLogLevel = "debug" | "info" | "warn" | "error" | "off";
 
@@ -48,9 +47,8 @@ export function CreateLongtailLibrary() {
 
   const libPath = path.join(__dirname, "..", "..", "..", "libraries", folder);
   process.env["PATH"] = `${process.env["PATH"]};${libPath}`;
-  process.env[
-    "LD_LIBRARY_PATH"
-  ] = `${process.env["LD_LIBRARY_PATH"]};${libPath}`;
+  process.env["LD_LIBRARY_PATH"] =
+    `${process.env["LD_LIBRARY_PATH"]};${libPath}`;
 
   const { symbols: lib } = dlopen(library, {
     SubmitAsync: {
@@ -120,7 +118,7 @@ export function createStringBuffer(s: string): Buffer {
 
 export function decodeHandle(
   handle: Uint8Array,
-  includeResult: boolean = false
+  includeResult: boolean = false,
 ): {
   currentStep: string;
   result: any;
@@ -140,7 +138,7 @@ export function decodeHandle(
     try {
       const end = resultString.search("\0");
       result = JSON.parse(
-        resultString.substring(0, end === -1 ? resultString.length : end)
+        resultString.substring(0, end === -1 ? resultString.length : end),
       );
     } catch (e) {
       console.error("Failed to parse result string as JSON:", e);

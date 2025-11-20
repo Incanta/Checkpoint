@@ -1,6 +1,4 @@
 import type { Command } from "commander";
-import { CreateApiClient } from "@checkpointvcs/common";
-import { AuthenticateDevice } from "../auth";
 
 export async function loginCommand(program: Command): Promise<void> {
   program
@@ -9,18 +7,18 @@ export async function loginCommand(program: Command): Promise<void> {
     .action(async () => {
       console.log("Logging in...");
 
-      await AuthenticateDevice((code) => {
-        console.log(`Authorize this device with code:\n${code}`);
-      });
+      // await AuthenticateDevice((code) => {
+      //   console.log(`Authorize this device with code:\n${code}`);
+      // });
 
-      const client = await CreateApiClient();
+      // const client = await CreateApiClient();
 
-      const meResponse = await client.user.me.query();
+      // const meResponse = await client.user.me.query();
 
-      if (!meResponse) {
-        throw new Error("Failed to get user information");
-      }
+      // if (!meResponse) {
+      //   throw new Error("Failed to get user information");
+      // }
 
-      console.log(`Logged in as ${meResponse.email}`);
+      // console.log(`Logged in as ${meResponse.email}`);
     });
 }

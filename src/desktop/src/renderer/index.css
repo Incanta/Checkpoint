@@ -184,3 +184,19 @@ button.treetable-toggler:focus-visible {
 .workspace-menu-item:hover {
   background-color: #ffffff22 !important;
 }
+
+.p-dropdown-panel {
+  background-color: #00000088;
+  backdrop-filter: blur(10px);
+  padding: 0.5rem;
+  border-radius: 0.3rem;
+}
+
+.p-dropdown-items li {
+  padding: 0.5rem;
+  border-radius: 0.3rem;
+}
+
+.p-dropdown-items li:hover {
+  background-color: #ffffff22 !important;
+}

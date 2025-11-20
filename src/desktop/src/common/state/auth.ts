@@ -6,11 +6,12 @@ export interface User {
   endpoint: string;
   auth?: {
     code: string;
+    url: string;
   };
   details: null | {
     id: string;
     email: string;
-    username: string;
+    username: string | null;
     name: string | null;
   };
 }

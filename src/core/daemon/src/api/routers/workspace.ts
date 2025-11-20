@@ -5,7 +5,7 @@ import { DaemonManager } from "daemon/src/daemon-manager";
 import { DaemonConfig } from "daemon/src/daemon-config";
 import fs from "fs/promises";
 import path from "path";
-import { submit } from "@checkpointvcs/client";
+import { pull, submit } from "@checkpointvcs/client";
 
 export const workspaceRouter = router({
   list: {
@@ -51,6 +51,7 @@ export const workspaceRouter = router({
       const newWorkspaceApi = await client.workspace.create.mutate({
         name: input.name,
         repoId: input.repoId,
+        defaultBranchName: input.defaultBranchName,
       });
 
       const newWorkspace = {
@@ -190,7 +191,28 @@ export const workspaceRouter = router({
         throw new Error(`Could not find workspace ID ${input.workspaceId}`);
       }
 
-      // TODO: figure out what we're going to do here
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      const repo = await client.repo.getRepo.query({ id: workspace.repoId });
+
+      if (!repo) {
+        throw new Error(
+          `Could not find repo for workspace ID ${input.workspaceId}`,
+        );
+      }
+
+      await pull(
+        {
+          repoId: workspace.repoId,
+          branchName: workspace.branchName,
+          workspaceName: workspace.name,
+          localRoot: workspace.localPath,
+          daemonId: workspace.daemonId,
+        },
+        repo.orgId,
+        input.changelistId,
+        input.filePaths,
+      );
     }),
 
   submit: publicProcedure

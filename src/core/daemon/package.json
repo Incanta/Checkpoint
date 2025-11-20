@@ -2,12 +2,14 @@
   "name": "@checkpointvcs/daemon",
   "version": "1.0.0",
   "description": "",
+  "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "license": "(Elastic-2.0 OR AGPL-3.0)",
   "type": "module",
   "scripts": {
+    "build": "tsc --project tsconfig.json",
     "build:lib": "tsc --project tsconfig.lib.json",
-    "start": "bun run src/bin.ts"
+    "start": "bun --inspect run src/bin.ts"
   },
   "devDependencies": {},
   "dependencies": {

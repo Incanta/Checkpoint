@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { promises as fs } from "fs";
+import { existsSync, promises as fs } from "fs";
 import path from "path";
 import { getWorkspaceDetails, getWorkspaceRoot } from "../util";
 import { submit } from "../submit";
@@ -12,11 +12,11 @@ export async function submitCommand(program: Command): Promise<void> {
     .description("Submit staged files")
     .requiredOption(
       "-m, --message <message>",
-      "Changelist message; this must be the last option in the command line"
+      "Changelist message; this must be the last option in the command line",
     )
     .option(
       "--longtail-log-level <level>",
-      "Set the log level for the underlying longtail library (debug, info, warn, error, off)"
+      "Set the log level for the underlying longtail library (debug, info, warn, error, off)",
     )
     .action(
       async (options: {
@@ -28,9 +28,9 @@ export async function submitCommand(program: Command): Promise<void> {
         const stagedFile = path.join(workspaceConfigDir, "staged.json");
 
         const lockFile = path.join(workspaceConfigDir, "workspace.lock");
-        if (await fs.exists(lockFile)) {
+        if (existsSync(lockFile)) {
           console.error(
-            `Workspace is locked by another client. If you are sure that is not the case, remove the lock file at ${lockFile}.`
+            `Workspace is locked by another client. If you are sure that is not the case, remove the lock file at ${lockFile}.`,
           );
           process.exit(1);
         }
@@ -39,7 +39,7 @@ export async function submitCommand(program: Command): Promise<void> {
         try {
           await fs.writeFile(lockFile, "");
 
-          const stagedFiles: Modification[] = (await fs.exists(stagedFile))
+          const stagedFiles: Modification[] = existsSync(stagedFile)
             ? JSON.parse(await fs.readFile(stagedFile, "utf-8"))
             : [];
 
@@ -51,9 +51,10 @@ export async function submitCommand(program: Command): Promise<void> {
 
           await submit(
             workspaceDetails,
+            "orgID-todo",
             options.message,
             stagedFiles,
-            options.longtailLogLevel
+            options.longtailLogLevel,
           );
         } catch (e: any) {
           if (e.message) {
@@ -72,6 +73,6 @@ export async function submitCommand(program: Command): Promise<void> {
         }
 
         process.exit(exitCode);
-      }
+      },
     );
 }

@@ -5,11 +5,15 @@ import { nanoid } from "nanoid";
 import { currentUserAtom } from "../../../common/state/auth";
 import { useState } from "react";
 
-export default function Page(): React.ReactElement {
+export default function Login(): React.ReactElement {
   const [daemonId] = useState(nanoid());
   const user = useAtomValue(currentUserAtom);
-  const [url, setUrl] = useState("https://checkpointvcs.com");
+  const [url, setUrl] = useState("http://checkpoint.localhost:3000");
   const navigate = useNavigate();
+
+  if (user?.details) {
+    setTimeout(() => navigate("/dashboard"), 0);
+  }
 
   return (
     <div className="grid">
@@ -33,18 +37,6 @@ export default function Page(): React.ReactElement {
         </button>
         {user?.auth?.code && user.details === null && (
           <p>Enter the code in the browser: {user.auth.code}</p>
-        )}
-        {user?.details && (
-          <>
-            <p>Login successful!</p>
-            <button
-              onClick={() => {
-                navigate("/workspace");
-              }}
-            >
-              Dashboard
-            </button>
-          </>
         )}
       </div>
     </div>

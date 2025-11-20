@@ -257,9 +257,9 @@ export default function WorkspacePendingChanges() {
   };
 
   return (
-    <div className="grid grid-rows-[2.7rem_calc(100vh-6.7rem)] gap-4">
+    <div className="grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4">
       <div
-        className="row-span-1"
+        className="row-span-1 space-x-[0.3rem]"
         style={{
           backgroundColor: "#2C2C2C",
           borderColor: "#1A1A1A",
@@ -268,9 +268,9 @@ export default function WorkspacePendingChanges() {
           padding: "0.3rem",
         }}
       >
-        <Button label="Refresh" />
-        <Button label="Submit" />
-        <Button label="Undo" />
+        <Button className="p-[0.3rem] text-[0.8em]" label="Refresh" />
+        <Button className="p-[0.3rem] text-[0.8em]" label="Submit" />
+        <Button className="p-[0.3rem] text-[0.8em]" label="Undo" />
       </div>
       <div
         className="row-span-1"

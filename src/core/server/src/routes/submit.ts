@@ -9,17 +9,14 @@ import {
 import jwt from "njwt";
 import config from "@incanta/config";
 import {
+  CreateApiClientAuthManual,
   CreateLongtailLibrary,
   createStringBuffer,
   decodeHandle,
   GetLogLevel,
   type LongtailLogLevel,
-  CreateApiClient
 } from "@checkpointvcs/common";
 import { ptr, toArrayBuffer } from "bun:ffi";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
-import type { AppRouter } from "@checkpointvcs/app";
-import superjson from "superjson";
 import type { BunRequest } from "bun";
 
 interface JWTClaims {
@@ -42,11 +39,12 @@ const RequestSchema = object({
       delete: boolean().required(),
       path: string().required(),
       oldPath: string().optional(),
-    }).required()
+    }).required(),
   ).required(),
   keepCheckedOut: boolean().required(),
   workspaceId: string().required(),
 });
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 interface RequestSchema extends InferType<typeof RequestSchema> {}
 
 interface RequestResponse {
@@ -85,7 +83,7 @@ export function routeSubmit() {
 
         const verifiedToken = jwt.verify(
           token,
-          config.get("seaweedfs.jwt.signing-key")
+          config.get("seaweedfs.jwt.signing-key"),
         );
 
         if (!verifiedToken) {
@@ -105,21 +103,21 @@ export function routeSubmit() {
           if (!payload.versionIndex) {
             return new Response(
               "Version index is required if you are uploading a store index",
-              { status: 400 }
+              { status: 400 },
             );
           }
 
           const filerUrl = `http${
             config.get<boolean>("seaweedfs.connection.filer.tls") ? "s" : ""
           }://${config.get<string>(
-            "seaweedfs.connection.filer.host"
+            "seaweedfs.connection.filer.host",
           )}:${config.get<string>("seaweedfs.connection.filer.port")}`;
 
           const basePath = `/${claims.orgId}/${claims.repoId}`;
 
           const lib = CreateLongtailLibrary();
           const logLevel = GetLogLevel(
-            config.get<LongtailLogLevel>("longtail.log-level")
+            config.get<LongtailLogLevel>("longtail.log-level"),
           );
 
           const basePathBuffer = createStringBuffer(basePath);
@@ -133,7 +131,7 @@ export function routeSubmit() {
             ptr(tokenBuffer.buffer),
             ptr(storeIndexBuffer),
             storeIndexBuffer.byteLength,
-            logLevel
+            logLevel,
           );
 
           if (asyncHandle === 0 || asyncHandle === null) {
@@ -143,10 +141,9 @@ export function routeSubmit() {
           let flagForGC = true;
           let lastStep = "";
 
-          // eslint-disable-next-line no-constant-condition
           while (true) {
             const decoded = decodeHandle(
-              new Uint8Array(toArrayBuffer(asyncHandle, 0, 272))
+              new Uint8Array(toArrayBuffer(asyncHandle, 0, 272)),
             );
 
             if (decoded.currentStep !== lastStep) {
@@ -156,7 +153,7 @@ export function routeSubmit() {
 
             if (decoded.completed) {
               console.log(
-                `Completed with exit code: ${decoded.error} and last step ${decoded.currentStep}`
+                `Completed with exit code: ${decoded.error} and last step ${decoded.currentStep}`,
               );
               flagForGC = false;
               break;
@@ -179,22 +176,26 @@ export function routeSubmit() {
         ) {
           return new Response(
             "The storeIndex multipart is required if you have any new/modified files.",
-            { status: 400 }
+            { status: 400 },
           );
         }
 
-        const client = CreateApiClient();
+        const client = await CreateApiClientAuthManual(
+          config.get<string>("checkpoint.api.url"),
+          payload.apiToken,
+        );
 
         try {
-          const createChangelistResponse = await client.changelist.createChangelist.mutate({
-            message: payload.message,
-            repoId: claims.repoId,
-            versionIndex: payload.versionIndex,
-            branchName: payload.branchName,
-            modifications: payload.modifications,
-            keepCheckedOut: payload.keepCheckedOut,
-            workspaceId: payload.workspaceId,
-          });
+          const createChangelistResponse =
+            await client.changelist.createChangelist.mutate({
+              message: payload.message,
+              repoId: claims.repoId,
+              versionIndex: payload.versionIndex,
+              branchName: payload.branchName,
+              modifications: payload.modifications,
+              keepCheckedOut: payload.keepCheckedOut,
+              workspaceId: payload.workspaceId,
+            });
 
           const responseMessage: RequestResponse = {
             id: createChangelistResponse.id,

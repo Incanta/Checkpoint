@@ -8,6 +8,8 @@ export type Channels = {
   "auth:login": { daemonId: string; endpoint: string };
   "auth:select-user": { daemonId: string };
 
+  "set-renderer-url": { url: string };
+
   "workspace:select": { id: string };
   "workspace:create-branch": { name: string };
   "workspace:select-branch": { name: string };
@@ -19,6 +21,8 @@ export type Channels = {
   "workspace:revert": { filePaths: string[] };
   "workspace:submit": { message: string; modifications: any; shelved: boolean };
   "workspace:diff:file": { path: string };
+
+  "dashboard:refresh": { daemonId: string | null; orgId: string | null };
 };
 
 export function ipcSend<T extends keyof Channels>(

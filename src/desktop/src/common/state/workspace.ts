@@ -4,6 +4,7 @@ import { syncAtom } from "./store";
 export interface Workspace {
   id: string;
   userId: string;
+  orgId: string;
   repoId: string;
   name: string;
   rootPath: string;

@@ -13,10 +13,10 @@ export const repoRouter = router({
     .query(async ({ ctx, input }) => {
       const client = await CreateApiClientAuth(input.daemonId);
 
-      const orgs = await client.repo.list.query({
+      const repos = await client.repo.list.query({
         orgId: input.orgId,
       });
 
-      return { orgs };
+      return { repos };
     }),
 });

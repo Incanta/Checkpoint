@@ -11,12 +11,17 @@ import Login from "./pages/Login/Login";
 import Dashboard from "./pages/Dashboard/Dashboard";
 import Workspace from "./pages/Workspace/Workspace";
 
+window.electron.ipcRenderer.on("set-renderer-url", (data: { url: string }) => {
+  window.location.href = data.url;
+});
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <Provider store={store}>
       <Router>
         <Routes>
           <Route path="/" element={<Loading />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/welcome" element={<Welcome />} />
           <Route path="/login" element={<Login />} />
           <Route path="/workspace" element={<Workspace />} />

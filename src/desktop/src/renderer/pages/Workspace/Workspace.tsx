@@ -1,15 +1,22 @@
-import { useAtom } from "jotai";
+import { useAtomValue } from "jotai";
 import { useNavigate } from "react-router-dom";
 import WorkspaceMenu from "../../components/WorkspaceMenu";
-import { Splitter, SplitterPanel } from "primereact/splitter";
-import { TabView, TabPanel } from "primereact/tabview";
 import WorkspaceExplorer from "../../components/WorkspaceExplorer";
 import WorkspacePendingChanges from "../../components/WorkspacePendingChanges";
 import { useState } from "react";
+import { Dropdown } from "primereact/dropdown";
+import {
+  currentWorkspaceAtom,
+  workspacesAtom,
+} from "../../../common/state/workspace";
+import { ipc } from "../ipc";
 
-export default function Page(): React.ReactElement {
+export default function Workspace(): React.ReactElement {
+  const workspaces = useAtomValue(workspacesAtom);
+  const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const [activeTabIndex, setActiveTabIndex] = useState<number>(0);
   const [expanded, setExpanded] = useState<boolean>(true);
+  const navigate = useNavigate();
 
   return (
     <div className="grid grid-rows-[2.5rem_calc(100vh-4rem-30px)_1.5rem] gap-4">
@@ -21,9 +28,34 @@ export default function Page(): React.ReactElement {
           borderWidth: "0 0 1px 0",
           borderStyle: "solid",
           zIndex: 1,
+          alignItems: "center",
+          marginLeft: "0.5rem",
         }}
       >
-        {/* Workspace breadcrumb selector (User > Org > Repo > Workspace > Branch) */}
+        <span className="mr-[0.5rem]">Workspace:</span>
+        <Dropdown
+          value={currentWorkspace?.id}
+          onChange={(e) => {
+            if (e.value === "configure") {
+              navigate("/dashboard");
+            } else {
+              ipc.sendMessage("workspace:select", {
+                id: e.value,
+              });
+            }
+          }}
+          options={(
+            workspaces?.map((ws) => ({ label: ws.name, value: ws.id })) || []
+          ).concat({ label: "Configure...", value: "configure" })}
+          placeholder="Select a Workspace"
+          pt={{
+            trigger: {
+              style: {
+                marginLeft: "0.2rem",
+              },
+            },
+          }}
+        />
       </div>
       <div className="row-span-1 flex">
         <div

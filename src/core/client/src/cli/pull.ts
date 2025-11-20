@@ -1,12 +1,7 @@
 import type { Command } from "commander";
-import { promises as fs } from "fs";
+import { existsSync, promises as fs } from "fs";
 import path from "path";
-import {
-  getChangelistId,
-  getLatestChangelistId,
-  getWorkspaceDetails,
-  getWorkspaceRoot,
-} from "../util";
+import { getWorkspaceDetails, getWorkspaceRoot } from "../util";
 import { pull } from "../pull";
 import type { LongtailLogLevel } from "common/src";
 
@@ -17,11 +12,11 @@ export async function pullCommand(program: Command): Promise<void> {
     .option(
       "-c, --changelist <cl>",
       "Pull a specific changelist number (default: latest)",
-      "latest"
+      "latest",
     )
     .option(
       "--longtail-log-level <level>",
-      "Set the log level for the underlying longtail library (debug, info, warn, error, off)"
+      "Set the log level for the underlying longtail library (debug, info, warn, error, off)",
     )
     .description("Pull latest files")
     .action(
@@ -33,9 +28,9 @@ export async function pullCommand(program: Command): Promise<void> {
         const workspaceConfigDir = path.join(workspace, ".checkpoint");
 
         const lockFile = path.join(workspaceConfigDir, "workspace.lock");
-        if (await fs.exists(lockFile)) {
+        if (existsSync(lockFile)) {
           console.error(
-            `Workspace is locked by another client. If you are sure that is not the case, remove the lock file at ${lockFile}.`
+            `Workspace is locked by another client. If you are sure that is not the case, remove the lock file at ${lockFile}.`,
           );
           process.exit(1);
         }
@@ -51,21 +46,20 @@ export async function pullCommand(program: Command): Promise<void> {
             isNaN(Number(options.changelist))
           ) {
             console.error(
-              `Invalid changelist number: ${options.changelist}. Please provide a valid number or use "latest".`
+              `Invalid changelist number: ${options.changelist}. Please provide a valid number or use "latest".`,
             );
             process.exit(1);
           }
 
           const getLatest = options.changelist === "latest";
 
-          const changelistId = getLatest
-            ? await getLatestChangelistId(workspaceDetails)
-            : await getChangelistId(
-                workspaceDetails,
-                Math.floor(Number(options.changelist))
-              );
-
-          await pull(workspaceDetails, changelistId, options.longtailLogLevel);
+          await pull(
+            workspaceDetails,
+            "TODO orgID",
+            getLatest ? null : Math.floor(Number(options.changelist)),
+            null,
+            options.longtailLogLevel,
+          );
         } catch (e: any) {
           if (e.message) {
             console.error(e.message);
@@ -82,6 +76,6 @@ export async function pullCommand(program: Command): Promise<void> {
         }
 
         process.exit(exitCode);
-      }
+      },
     );
 }

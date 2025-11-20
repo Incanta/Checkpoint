@@ -770,6 +770,11 @@
     "@babel/helper-string-parser" "^7.27.1"
     "@babel/helper-validator-identifier" "^7.27.1"
 
+"@checkpointvcs/daemon@^1.0.0":
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/@checkpointvcs/daemon/-/daemon-1.0.0.tgz#2b6a1f1056929a06bc62aebbe4cc54dcffd0626d"
+  integrity sha512-BsQIc99i6nvOc9y0Zgqj3XeaghMOhblXDQeO9a8CYXX4zw2VZgcXdyJBjr/BEJ3HFZ+yrYKj9v9U5k3hZUfFFQ==
+
 "@develar/schema-utils@~2.6.5":
   version "2.6.5"
   resolved "https://registry.yarnpkg.com/@develar/schema-utils/-/schema-utils-2.6.5.tgz#3ece22c5838402419a6e0425f85742b961d9b6c6"
@@ -5125,6 +5130,11 @@ prettier@^3.6.2:
   version "3.6.2"
   resolved "https://registry.yarnpkg.com/prettier/-/prettier-3.6.2.tgz#ccda02a1003ebbb2bfda6f83a074978f608b9393"
   integrity sha512-I7AIg5boAr5R0FFtJ6rCfD+LFsWHp81dolrFD8S79U9tb8Az2nGrJncnMSnys+bpQJfRUzqs9hnA81OAA3hCuQ==
+
+pretty-bytes@^7.1.0:
+  version "7.1.0"
+  resolved "https://registry.yarnpkg.com/pretty-bytes/-/pretty-bytes-7.1.0.tgz#d788c9906241dbdcd4defab51b6d7470243db9bd"
+  integrity sha512-nODzvTiYVRGRqAOvE84Vk5JDPyyxsVk0/fbA/bq7RqlnhksGpset09XTxbpvLTIjoaF7K8Z8DG8yHtKGTPSYRw==
 
 primereact@^10.9.7:
   version "10.9.7"

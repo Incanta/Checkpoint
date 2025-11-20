@@ -16,28 +16,61 @@ import {
 } from "../common/state/workspace";
 import { promises as fs } from "fs";
 import path from "path";
+import {
+  dashboardOrgsAtom,
+  dashboardReposAtom,
+} from "../common/state/dashboard";
 
 export default class DaemonHandler {
   // Your implementation here
   private isMocked: boolean;
   private ipcMain: IpcMain;
+  private webContents: Electron.WebContents | null = null;
 
   constructor(ipcMain: IpcMain) {
     this.isMocked = process.env.USE_MOCK_DATA === "true";
     this.ipcMain = ipcMain;
   }
 
-  public async init(): Promise<void> {
+  public async init(webContents: Electron.WebContents): Promise<void> {
+    this.webContents = webContents;
+
     if (this.isMocked) {
       store.set(usersAtom, []);
+    } else {
+      const client = await CreateDaemonClient();
+
+      const users = await client.auth.getUsers.query();
+      store.set(
+        usersAtom,
+        users.users.map((user) => ({
+          daemonId: user.daemonId,
+          endpoint: user.endpoint,
+          details: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            username: user.username,
+          },
+          auth: undefined,
+        })),
+      );
     }
 
     ipcOn(this.ipcMain, "auth:login", async (_event, data) => {
       this.handleLogin(data);
     });
 
+    ipcOn(this.ipcMain, "workspace:select", async (_event, data) => {
+      const workspaces = store.get(workspacesAtom) || [];
+      const workspace = workspaces.find((ws) => ws.id === data.id);
+      if (workspace) {
+        this.selectWorkspace(workspace);
+      }
+    });
+
     ipcOn(this.ipcMain, "workspace:get-directory", async (event, data) => {
-      this.workspaceGetDirectory(data, event.sender);
+      this.workspaceGetDirectory(data);
     });
 
     ipcOn(this.ipcMain, "workspace:diff:file", async (event, data) => {
@@ -50,6 +83,33 @@ export default class DaemonHandler {
 
     ipcOn(this.ipcMain, "workspace:submit", async (event, data) => {
       this.workspaceSubmit(data);
+    });
+
+    ipcOn(this.ipcMain, "dashboard:refresh", async (event, data) => {
+      // For simplicity, just re-fetch users
+      if (!this.isMocked) {
+        if (!data.daemonId) {
+          store.set(dashboardOrgsAtom, []);
+          store.set(dashboardReposAtom, []);
+          return;
+        }
+
+        const client = await CreateDaemonClient();
+
+        const orgs = await client.orgs.list.query({ daemonId: data.daemonId });
+        store.set(dashboardOrgsAtom, orgs.orgs);
+
+        if (!data.orgId) {
+          store.set(dashboardReposAtom, []);
+          return;
+        }
+
+        const repos = await client.repos.list.query({
+          daemonId: data.daemonId,
+          orgId: data.orgId,
+        });
+        store.set(dashboardReposAtom, repos.repos);
+      }
     });
   }
 
@@ -67,7 +127,10 @@ export default class DaemonHandler {
             ...user,
             daemonId: data.daemonId,
             details: null,
-            auth: { code: "1234" },
+            auth: {
+              code: "1234",
+              url: "http://checkpoint.localhost:3000/devices/1234",
+            },
           };
 
           store.set(currentUserAtom, nextAuthUser);
@@ -110,7 +173,7 @@ export default class DaemonHandler {
         daemonId: data.daemonId,
         endpoint: data.endpoint,
         details: null,
-        auth: { code: loginResponse.code },
+        auth: { code: loginResponse.code, url: loginResponse.url },
       };
 
       store.set(currentUserAtom, nextAuthUser);
@@ -165,6 +228,12 @@ export default class DaemonHandler {
         containsChanges: false,
       },
     });
+
+    if (this.webContents) {
+      ipcSend(this.webContents, "set-renderer-url", {
+        url: "/workspace",
+      });
+    }
   }
 
   private async workspacePull(data: Channels["workspace:pull"]): Promise<void> {
@@ -223,10 +292,9 @@ export default class DaemonHandler {
 
   private async workspaceGetDirectory(
     data: Channels["workspace:get-directory"],
-    sender: Electron.WebContents,
   ): Promise<void> {
     const currentWorkspace = store.get(currentWorkspaceAtom);
-    if (!currentWorkspace) return;
+    if (!currentWorkspace || !this.webContents) return;
 
     const dirPath = data.path;
 
@@ -259,7 +327,7 @@ export default class DaemonHandler {
       );
 
       // Send the directory contents back to the renderer process
-      ipcSend(sender, "workspace:directory-contents", {
+      ipcSend(this.webContents, "workspace:directory-contents", {
         path: dirPath,
         directory: {
           children,
@@ -283,7 +351,7 @@ export default class DaemonHandler {
       });
 
       // Send the directory contents back to the renderer process
-      ipcSend(sender, "workspace:directory-contents", {
+      ipcSend(this.webContents, "workspace:directory-contents", {
         path: dirPath,
         directory: directoryResponse,
       });

@@ -1,4 +1,4 @@
-import { promises as fs } from "fs";
+import { existsSync, promises as fs } from "fs";
 import path from "path";
 import { homedir } from "os";
 import type { Workspace } from "./types/api-types";
@@ -85,14 +85,14 @@ export class DaemonConfig {
   }
 
   public static async Load(): Promise<void> {
-    if (!fs.exists(path.dirname(DaemonConfig.configPath))) {
+    if (!existsSync(path.dirname(DaemonConfig.configPath))) {
       await fs.mkdir(path.dirname(DaemonConfig.configPath), {
         recursive: true,
       });
     }
 
     let shouldSave = true;
-    if (await fs.exists(DaemonConfig.configPath)) {
+    if (existsSync(DaemonConfig.configPath)) {
       const configStr = await fs.readFile(DaemonConfig.configPath, "utf-8");
 
       try {
@@ -111,7 +111,7 @@ export class DaemonConfig {
   }
 
   public static async Save(): Promise<void> {
-    if (!fs.exists(path.dirname(DaemonConfig.configPath))) {
+    if (!existsSync(path.dirname(DaemonConfig.configPath))) {
       await fs.mkdir(path.dirname(DaemonConfig.configPath), {
         recursive: true,
       });
