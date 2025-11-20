@@ -1,4 +1,0 @@
-credentials:
-  enabled: true
-  hash:
-    iterations: 1

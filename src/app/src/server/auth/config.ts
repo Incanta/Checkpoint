@@ -1,7 +1,6 @@
 import config from "@incanta/config";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { type DefaultSession, type NextAuthConfig } from "next-auth";
-import CredentialsProvider from "next-auth/providers/credentials";
 import Auth0Provider from "next-auth/providers/auth0";
 import KeycloakProvider from "next-auth/providers/keycloak";
 import GitHubProvider from "next-auth/providers/github";
@@ -11,7 +10,6 @@ import SlackProvider from "next-auth/providers/slack";
 import DiscordProvider from "next-auth/providers/discord";
 
 import { db } from "~/server/db";
-import { computePasswordHash } from "./credentials";
 import type { Provider } from "next-auth/providers";
 import type { DefaultJWT } from "next-auth/jwt";
 
@@ -49,100 +47,70 @@ declare module "next-auth" {
 
 const providers: Provider[] = [];
 
-if (config.get<boolean>("auth.credentials.enabled")) {
-  const credentialsProvider = CredentialsProvider({
-    name: "Credentials",
-    credentials: {
-      username: { label: "Username", type: "text" },
-      password: { label: "Password", type: "password" },
-    },
-    async authorize(credentials) {
-      const user = await db.user.findUnique({
-        where: { username: credentials?.username as string | undefined ?? "" },
-      });
-
-      if (user?.salt && user.hash) {
-        const hash = await computePasswordHash(
-          credentials?.password as string | undefined ?? "",
-          user.salt
-        );
-
-        if (hash === user.hash) {
-          return user;
-        }
-      }
-
-      return null;
-    },
+if (config.get<boolean>("auth.auth0.enabled")) {
+  const auth0Provider = Auth0Provider({
+    clientId: config.get<string>("auth.auth0.client.id"),
+    clientSecret: config.get<string>("auth.auth0.client.secret"),
+    issuer: config.get<string>("auth.auth0.issuer"),
   });
 
-  providers.push(credentialsProvider);
-} else {
-  if (config.get<boolean>("auth.auth0.enabled")) {
-    const auth0Provider = Auth0Provider({
-      clientId: config.get<string>("auth.auth0.client.id"),
-      clientSecret: config.get<string>("auth.auth0.client.secret"),
-      issuer: config.get<string>("auth.auth0.issuer"),
-    });
+  providers.push(auth0Provider);
+}
 
-    providers.push(auth0Provider);
-  }
+if (config.get<boolean>("auth.keycloak.enabled")) {
+  const keycloakProvider = KeycloakProvider({
+    clientId: config.get<string>("auth.keycloak.client.id"),
+    clientSecret: config.get<string>("auth.keycloak.client.secret"),
+    issuer: config.get<string>("auth.keycloak.issuer"),
+  });
 
-  if (config.get<boolean>("auth.keycloak.enabled")) {
-    const keycloakProvider = KeycloakProvider({
-      clientId: config.get<string>("auth.keycloak.client.id"),
-      clientSecret: config.get<string>("auth.keycloak.client.secret"),
-      issuer: config.get<string>("auth.keycloak.issuer"),
-    });
+  providers.push(keycloakProvider);
+}
 
-    providers.push(keycloakProvider);
-  }
+if (config.get<boolean>("auth.github.enabled")) {
+  const githubProvider = GitHubProvider({
+    clientId: config.get<string>("auth.github.client.id"),
+    clientSecret: config.get<string>("auth.github.client.secret"),
+  });
 
-  if (config.get<boolean>("auth.github.enabled")) {
-    const githubProvider = GitHubProvider({
-      clientId: config.get<string>("auth.github.client.id"),
-      clientSecret: config.get<string>("auth.github.client.secret"),
-    });
+  providers.push(githubProvider);
+}
 
-    providers.push(githubProvider);
-  }
+if (config.get<boolean>("auth.gitlab.enabled")) {
+  const gitlabProvider = GitLabProvider({
+    clientId: config.get<string>("auth.gitlab.client.id"),
+    clientSecret: config.get<string>("auth.gitlab.client.secret"),
+  });
 
-  if (config.get<boolean>("auth.gitlab.enabled")) {
-    const gitlabProvider = GitLabProvider({
-      clientId: config.get<string>("auth.gitlab.client.id"),
-      clientSecret: config.get<string>("auth.gitlab.client.secret"),
-    });
+  providers.push(gitlabProvider);
+}
 
-    providers.push(gitlabProvider);
-  }
+if (config.get<boolean>("auth.okta.enabled")) {
+  const oktaProvider = OktaProvider({
+    clientId: config.get<string>("auth.okta.client.id"),
+    clientSecret: config.get<string>("auth.okta.client.secret"),
+    issuer: config.get<string>("auth.okta.issuer"),
+  });
 
-  if (config.get<boolean>("auth.okta.enabled")) {
-    const oktaProvider = OktaProvider({
-      clientId: config.get<string>("auth.okta.client.id"),
-      clientSecret: config.get<string>("auth.okta.client.secret"),
-      issuer: config.get<string>("auth.okta.issuer"),
-    });
+  providers.push(oktaProvider);
+}
 
-    providers.push(oktaProvider);
-  }
+if (config.get<boolean>("auth.slack.enabled")) {
+  const slackProvider = SlackProvider({
+    clientId: config.get<string>("auth.slack.client.id"),
+    clientSecret: config.get<string>("auth.slack.client.secret"),
+  });
 
-  if (config.get<boolean>("auth.slack.enabled")) {
-    const slackProvider = SlackProvider({
-      clientId: config.get<string>("auth.slack.client.id"),
-      clientSecret: config.get<string>("auth.slack.client.secret"),
-    });
+  providers.push(slackProvider);
+}
 
-    providers.push(slackProvider);
-  }
+if (config.get<boolean>("auth.discord.enabled")) {
+  const discordProvider = DiscordProvider({
+    clientId: config.get<string>("auth.discord.client.id"),
+    clientSecret: config.get<string>("auth.discord.client.secret"),
+  });
 
-  if (config.get<boolean>("auth.discord.enabled")) {
-    const discordProvider = DiscordProvider({
-      clientId: config.get<string>("auth.discord.client.id"),
-      clientSecret: config.get<string>("auth.discord.client.secret"),
-    });
-
-    providers.push(discordProvider);
-  }
+  providers.push(discordProvider);
 }
 
 /**
@@ -156,37 +124,5 @@ export const authConfig: NextAuthConfig = {
   adapter: PrismaAdapter(db),
   pages: {
     signIn: "/signin",
-  },
-  session: {
-    strategy: config.get<boolean>("auth.credentials.enabled") ? "jwt" : "database",
-  },
-  callbacks: {
-    jwt: ({ token, user, account, ...obj }) => {
-      console.log("JWT callback triggered", { token, user, obj });
-      token.id = "myid";
-      token.username = "wassup";
-      return token;
-    },
-    // session: ({ session, user }) => {
-    //   console.log("Session callback triggered", { session, user });
-    //   return {
-    //     ...session,
-    //     user: {
-    //       ...session.user,
-    //       id: user.id,
-    //     },
-    //   };
-    // },
-    session: ({ session, user, token }) => {
-      console.log("Session callback triggered", { session, user, token });
-      return {
-        ...session,
-        user: {
-          ...session.user,
-          id: "wassup",
-          // username: token.username,
-        },
-      };
-    },
   },
 } satisfies NextAuthConfig;

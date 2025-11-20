@@ -17,16 +17,12 @@ generator client {
 model User {
   id       String  @id @default(cuid())
   name     String?
-  username String  @unique
+  username String?
 
   email         String    @unique
   emailVerified DateTime?
 
   image String?
-
-  // Only used for credentials auth (in dev)
-  salt String?
-  hash String?
 
   checkpointAdmin Boolean @default(false)
 
@@ -68,8 +64,9 @@ model Org {
   defaultRepoAccess     RepoAccess @default(WRITE)
   defaultCanCreateRepos Boolean    @default(true)
 
-  users OrgUser[]
-  repos Repo[]
+  users      OrgUser[]
+  repos      Repo[]
+  workspaces Workspace[]
 }
 
 model OrgUser {
@@ -236,6 +233,9 @@ model Workspace {
 
   repoId String
   repo   Repo   @relation(fields: [repoId], references: [id])
+
+  orgId String
+  org   Org    @relation(fields: [orgId], references: [id])
 
   fileCheckouts FileCheckout[]
 }

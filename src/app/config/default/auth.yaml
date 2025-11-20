@@ -4,20 +4,6 @@ api-tokens:
 jwt:
   secret: "secret"
 
-# We use this provider in development for testing purposes, but it's HIGHLY DISCOURAGED
-# to use in production. Ultimately, there are a lot of security
-# issues with using this provider that we have not addressed in this application.
-# There's also lacking functionality (like password resets).
-# See https://authjs.dev/getting-started/authentication/credentials  for details
-# why this provider is not recommended for production. We recommend using any
-# of the other providers listed below.
-# ALSO IF THIS IS ENABLED, ALL OTHER PROVIDERS ARE IGNORED
-credentials:
-  enabled: false
-  hash:
-    iterations: 210000
-    length: 512
-
 auth0:
   enabled: false
   client:

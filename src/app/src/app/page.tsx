@@ -27,12 +27,6 @@ export default async function Home() {
                 >
                   Sign in
                 </Link>
-                <Link
-                  href="/register"
-                  className="rounded-full bg-[hsl(280,100%,70%)] px-10 py-3 font-semibold no-underline transition hover:bg-[hsl(280,100%,60%)]"
-                >
-                  Register
-                </Link>
               </div>
             </div>
           </div>
