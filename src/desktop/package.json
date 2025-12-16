@@ -23,7 +23,7 @@
     "@incanta/custom-electron-titlebar": "^5.0.0",
     "@tailwindcss/vite": "^4.1.12",
     "@trpc/client": "^11.5.0",
-    "@trpc/server": "^11.5.0",
+    "@trpc/server": "^11.8.0",
     "jotai": "^2.13.1",
     "monaco-editor": "^0.54.0",
     "nanoid": "^5.1.6",
