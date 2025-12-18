@@ -9,17 +9,18 @@ import { TreeNode } from "primereact/treenode";
 import { useAtomValue } from "jotai";
 import {
   currentWorkspaceAtom,
-  FileStatus,
-  FileType,
   workspaceDirectoriesAtom,
+  workspacePendingChangesAtom,
 } from "../../common/state/workspace";
 import { ipc } from "../pages/ipc";
 import Button from "./Button";
 import prettyBytes from "pretty-bytes";
+import { FileStatus, FileType } from "@checkpointvcs/daemon/dist/types";
 
 export default function WorkspaceExplorer() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const workspaceDirectories = useAtomValue(workspaceDirectoriesAtom);
+  const workspacePendingChanges = useAtomValue(workspacePendingChangesAtom);
 
   const [nodes, setNodes] = useState<TreeNode[]>([]);
 
@@ -89,20 +90,28 @@ export default function WorkspaceExplorer() {
           }
         }
 
-        currentNode.children = dir.children.map((file) => ({
-          id: currentNode.id + "/" + file.path.split("/").pop(),
-          key: currentNode.key + "/" + file.path.split("/").pop(),
-          data: {
-            name: file.path.split("/").pop() || "",
-            status:
-              file.status === FileStatus.Unknown ? "" : FileStatus[file.status],
-            size: file.size.toString() + " B",
-            modified: new Date(file.modifiedAt).toLocaleDateString(),
-            type: FileType[file.type],
-            changelist: file.changelist ? file.changelist.toString() : "",
-          },
-          leaf: file.type !== FileType.Directory,
-        }));
+        currentNode.children = dir.children.map((file) => {
+          let status =
+            file.status === FileStatus.Unknown ? "" : FileStatus[file.status];
+          if (workspacePendingChanges?.files[file.path]) {
+            status =
+              FileStatus[workspacePendingChanges.files[file.path].status];
+          }
+
+          return {
+            id: currentNode.id + "/" + file.path.split("/").pop(),
+            key: currentNode.key + "/" + file.path.split("/").pop(),
+            data: {
+              name: file.path.split("/").pop() || "",
+              status,
+              size: file.size.toString() + " B",
+              modified: new Date(file.modifiedAt).toLocaleDateString(),
+              type: FileType[file.type],
+              changelist: file.changelist ? file.changelist.toString() : "",
+            },
+            leaf: file.type !== FileType.Directory,
+          };
+        });
       }
     }
 
@@ -150,7 +159,13 @@ export default function WorkspaceExplorer() {
           padding: "0.3rem",
         }}
       >
-        <Button className="p-[0.3rem] text-[0.8em]" label="Refresh" />
+        <Button
+          className="p-[0.3rem] text-[0.8em]"
+          label="Refresh"
+          onClick={() => {
+            ipc.sendMessage("workspace:refresh", null);
+          }}
+        />
         <Button className="p-[0.3rem] text-[0.8em]" label="Pull" />
       </div>
       <div
@@ -176,21 +191,41 @@ export default function WorkspaceExplorer() {
             if (node && (!node.children || node.children.length === 0)) {
               ipc.once("workspace:directory-contents", (data) => {
                 const directory = data.directory;
-                node.children = directory.children.map((file) => ({
-                  id: node.id + "/" + file.path.split("/").pop(),
-                  key: node.key + "/" + file.path.split("/").pop(),
-                  data: {
-                    name: file.path.split("/").pop() || "",
-                    status: FileStatus[file.status],
-                    size: prettyBytes(file.size),
-                    modified: new Date(file.modifiedAt).toLocaleDateString(),
-                    type: FileType[file.type],
-                    changelist: file.changelist
-                      ? file.changelist.toString()
-                      : "",
-                  },
-                  leaf: file.type !== FileType.Directory,
-                }));
+                node.children = directory.children.map((file) => {
+                  const relativePath =
+                    (node.id === "/" ? "" : node.id) +
+                    "/" +
+                    file.path.split("/").pop();
+                  const absolutePath =
+                    currentWorkspace!.localPath.split(/[/\\\/]/).join("/") +
+                    relativePath;
+                  let status =
+                    file.type === FileType.Directory
+                      ? ""
+                      : FileStatus[file.status];
+                  if (workspacePendingChanges?.files[absolutePath]) {
+                    status =
+                      FileStatus[
+                        workspacePendingChanges.files[absolutePath].status
+                      ];
+                  }
+
+                  return {
+                    id: relativePath,
+                    key: relativePath,
+                    data: {
+                      name: file.path.split("/").pop() || "",
+                      status,
+                      size: prettyBytes(file.size),
+                      modified: new Date(file.modifiedAt).toLocaleDateString(),
+                      type: FileType[file.type],
+                      changelist: file.changelist
+                        ? file.changelist.toString()
+                        : "",
+                    },
+                    leaf: file.type !== FileType.Directory,
+                  };
+                });
                 if (node.id === "/" && directory.children.length > 0) {
                   node.expanded = true;
                 }

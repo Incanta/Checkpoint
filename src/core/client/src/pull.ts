@@ -98,7 +98,7 @@ export async function pull(
     }
 
     const versionIndexBuffer = createStringBuffer(versionIndex);
-    const localRootBuffer = createStringBuffer(workspace.localRoot);
+    const localPathBuffer = createStringBuffer(workspace.localPath);
     const remoteRootBuffer = createStringBuffer(
       `/${orgId}/${workspace.repoId}`,
     );
@@ -109,7 +109,7 @@ export async function pull(
       ptr(versionIndexBuffer.buffer),
       config.get<boolean>("longtail.enable-mmap-indexing") ? 1 : 0,
       config.get<boolean>("longtail.enable-mmap-block-store") ? 1 : 0,
-      ptr(localRootBuffer.buffer),
+      ptr(localPathBuffer.buffer),
       ptr(remoteRootBuffer.buffer),
       ptr(filerUrlBuffer.buffer),
       ptr(tokenBuffer.buffer),
@@ -152,7 +152,7 @@ export async function pull(
 
     if (flagForGC) {
       console.log(versionIndexBuffer);
-      console.log(localRootBuffer);
+      console.log(localPathBuffer);
       console.log(remoteRootBuffer);
       console.log(filerUrlBuffer);
       console.log(tokenBuffer);
@@ -173,7 +173,7 @@ export async function pull(
 
     for (const file of filesResponse.files) {
       if (file.path) {
-        const filePath = path.join(workspace.localRoot, file.path);
+        const filePath = path.join(workspace.localPath, file.path);
 
         if (existsSync(filePath)) {
           await fs.rm(filePath, {

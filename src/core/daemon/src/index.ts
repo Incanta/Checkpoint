@@ -7,7 +7,7 @@ import type { AppRouter } from "./api";
 
 export type { AppRouter } from "./api";
 
-export type * as ApiTypes from "./types/api-types";
+export * from "./types";
 
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export async function CreateDaemonClient() {

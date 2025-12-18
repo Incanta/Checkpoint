@@ -1,5 +1,5 @@
 import type { IpcMain, IpcMainEvent, WebContents } from "electron";
-import { Directory } from "../common/state/workspace";
+import { Directory, Modification } from "@checkpointvcs/daemon";
 
 export type Channels = {
   "state:get": null;
@@ -25,7 +25,11 @@ export type Channels = {
   "workspace:refresh": null;
   "workspace:pull": { changelistId: number | null; filePaths: string[] | null };
   "workspace:revert": { filePaths: string[] };
-  "workspace:submit": { message: string; modifications: any; shelved: boolean };
+  "workspace:submit": {
+    message: string;
+    modifications: Modification[];
+    shelved: boolean;
+  };
   "workspace:diff:file": { path: string };
 
   "dashboard:refresh": { daemonId: string | null; orgId: string | null };

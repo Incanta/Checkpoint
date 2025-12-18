@@ -10,24 +10,31 @@ import { TreeNode } from "primereact/treenode";
 import { useAtomValue } from "jotai";
 import {
   currentWorkspaceAtom,
-  FileStatus,
-  FileType,
   workspaceDiffAtom,
-  workspaceDirectoriesAtom,
+  workspacePendingChangesAtom,
 } from "../../common/state/workspace";
 import { ipc } from "../pages/ipc";
 import { Splitter, SplitterPanel } from "primereact/splitter";
 import Button from "./Button";
 import styles from "./Editor.module.css";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
+import {
+  FileStatus,
+  FileType,
+  Modification,
+} from "@checkpointvcs/daemon/dist/types";
 
 export default function WorkspacePendingChanges() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
+  const workspacePendingChanges = useAtomValue(workspacePendingChangesAtom);
   const workspaceDiff = useAtomValue(workspaceDiffAtom);
 
+  const treeTableRef = useRef<TreeTable>(null);
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [selectedNodeKeys, setSelectedNodeKeys] =
     useState<TreeTableSelectionKeysType | null>(null);
+
+  const [commitMessage, setCommitMessage] = useState<string>("");
 
   const [editor, setEditor] =
     useState<monaco.editor.IStandaloneDiffEditor | null>(null);
@@ -81,7 +88,7 @@ export default function WorkspacePendingChanges() {
         size: "",
         modified: "",
         type: "",
-        changeset: "",
+        changelist: "",
       },
       leaf: false,
       children: [],
@@ -96,7 +103,7 @@ export default function WorkspacePendingChanges() {
         size: "",
         modified: "",
         type: "",
-        changeset: "",
+        changelist: "",
       },
       leaf: false,
       children: [],
@@ -111,7 +118,7 @@ export default function WorkspacePendingChanges() {
         size: "",
         modified: "",
         type: "",
-        changeset: "",
+        changelist: "",
       },
       leaf: false,
       children: [],
@@ -126,7 +133,7 @@ export default function WorkspacePendingChanges() {
         size: "",
         modified: "",
         type: "",
-        changeset: "",
+        changelist: "",
       },
       leaf: false,
       children: [],
@@ -139,99 +146,98 @@ export default function WorkspacePendingChanges() {
       addedNode,
     ];
 
-    for (const file of currentWorkspace.pendingChanges.files) {
-      const relativePath = file.path.replace(currentWorkspace.rootPath, "");
-      const pathParts = relativePath
-        .split("/")
-        .filter((part) => part.length > 0);
+    if (workspacePendingChanges) {
+      for (const filePath in workspacePendingChanges.files) {
+        const file = workspacePendingChanges.files[filePath];
+        const relativePath = file.path
+          .replace(currentWorkspace.localPath, "")
+          .replace(/^[\/\\]/, "");
+        const pathParts = relativePath
+          .split(/[\/\\]/)
+          .filter((part) => part.length > 0);
 
-      const filename = pathParts.pop();
-      if (!filename) continue;
+        const filename = pathParts.pop();
+        if (!filename) continue;
 
-      // TODO MIKE HERE: how to handle conflicted status?
+        // TODO MIKE HERE: how to handle conflicted status?
 
-      let parentNode: TreeNode | null = null;
-      switch (file.status) {
-        case FileStatus.ChangedCheckedOut:
-        case FileStatus.ChangedNotCheckedOut:
-          parentNode = changedNode;
-          break;
-        case FileStatus.Renamed:
-          parentNode = movedNode;
-          break;
-        case FileStatus.Deleted:
-          parentNode = deletedNode;
-          break;
-        case FileStatus.Added:
-        case FileStatus.Local:
-          parentNode = addedNode;
-          break;
-        default:
-          continue;
-      }
-
-      let currentNode: TreeNode = parentNode;
-      for (const part of pathParts) {
-        const childNode = currentNode.children?.find(
-          (child) => (child.key as string).split("/").pop() === part,
-        );
-
-        if (childNode) {
-          currentNode = childNode;
-        } else {
-          const newChildNode: TreeNode = {
-            id: currentNode.id + "/" + part,
-            key: currentNode.key + "/" + part,
-            data: {
-              name: part,
-              status: "",
-              size: "",
-              modified: "",
-              type: "Directory",
-              changeset: "",
-            },
-            leaf: false,
-            children: [],
-          };
-
-          if (!currentNode.children) {
-            currentNode.children = [];
-          }
-          currentNode.children.push(newChildNode);
-          currentNode = newChildNode;
+        let parentNode: TreeNode | null = null;
+        switch (file.status) {
+          case FileStatus.ChangedCheckedOut:
+          case FileStatus.ChangedNotCheckedOut:
+            parentNode = changedNode;
+            break;
+          case FileStatus.Renamed:
+            parentNode = movedNode;
+            break;
+          case FileStatus.Deleted:
+            parentNode = deletedNode;
+            break;
+          case FileStatus.Added:
+          case FileStatus.Local:
+            parentNode = addedNode;
+            break;
+          default:
+            continue;
         }
-      }
 
-      if (!currentNode.children) {
-        currentNode.children = [];
-      }
-      currentNode.children.push({
-        id: currentNode.id + "/" + filename,
-        key: currentNode.key + "/" + filename,
-        data: {
-          path: file.path,
-          name: filename,
-          status: FileStatus[file.status],
-          size: file.size.toString() + " B",
-          modified: new Date(file.modifiedAt).toLocaleDateString(),
-          type: FileType[file.type],
-          changeset: file.changelist ? file.changelist.toString() : "",
-          onclick: () => {
-            console.log("Clicked file:", file.path);
+        let currentNode: TreeNode = parentNode;
+        for (const part of pathParts) {
+          const childNode = currentNode.children?.find(
+            (child) => (child.key as string).split("/").pop() === part,
+          );
+
+          if (childNode) {
+            currentNode = childNode;
+          } else {
+            const newChildNode: TreeNode = {
+              id: currentNode.id + "/" + part,
+              key: currentNode.key + "/" + part,
+              data: {
+                name: part,
+                status: "",
+                size: "",
+                modified: "",
+                type: "Directory",
+                changelist: "",
+              },
+              leaf: false,
+              children: [],
+            };
+
+            if (!currentNode.children) {
+              currentNode.children = [];
+            }
+            currentNode.children.push(newChildNode);
+            currentNode = newChildNode;
+          }
+        }
+
+        if (!currentNode.children) {
+          currentNode.children = [];
+        }
+        currentNode.children.push({
+          id: currentNode.id + "/" + filename,
+          key: currentNode.key + "/" + filename,
+          data: {
+            path: file.path,
+            name: filename,
+            status: FileStatus[file.status],
+            size: file.size.toString() + " B",
+            modified: new Date(file.modifiedAt).toLocaleDateString(),
+            type: FileType[file.type],
+            changelist: file.changelist ? file.changelist.toString() : "",
+            onclick: () => {
+              console.log("Clicked file:", file.path);
+            },
           },
-        },
-        leaf: file.type !== FileType.Directory,
-      });
+          leaf: file.type !== FileType.Directory,
+        });
+      }
     }
 
     setNodes(newNodes);
-  }, [currentWorkspace]);
-
-  const nodeLookup: { [key: string]: TreeNode } = {};
-
-  useEffect(() => {
-    nodeLookup["/"] = nodes[0];
-  }, []);
+  }, [currentWorkspace, workspacePendingChanges]);
 
   const columnPt: ColumnPassThroughOptions = {
     headerCell: {
@@ -268,8 +274,56 @@ export default function WorkspacePendingChanges() {
           padding: "0.3rem",
         }}
       >
-        <Button className="p-[0.3rem] text-[0.8em]" label="Refresh" />
-        <Button className="p-[0.3rem] text-[0.8em]" label="Submit" />
+        <Button
+          className="p-[0.3rem] text-[0.8em]"
+          label="Refresh"
+          onClick={() => {
+            ipc.sendMessage("workspace:refresh", null);
+          }}
+        />
+        <Button
+          className="p-[0.3rem] text-[0.8em]"
+          label="Submit"
+          onClick={() => {
+            const keys: TreeTableSelectionKeysType =
+              (treeTableRef.current?.props.selectionKeys as
+                | TreeTableSelectionKeysType
+                | undefined) || {};
+
+            const modifications: Modification[] = [];
+            for (const key in keys) {
+              if ((keys[key] as any).partialChecked) {
+                continue;
+              }
+
+              const adjustedKey = key
+                .replace("changed", "")
+                .replace("moved", "")
+                .replace("deleted", "")
+                .replace("added", "")
+                .trim();
+
+              const absolutePath = currentWorkspace!.localPath + adjustedKey;
+
+              const pendingChange =
+                workspacePendingChanges!.files[absolutePath];
+
+              if (adjustedKey && pendingChange) {
+                // todo implement renamed/moved
+                modifications.push({
+                  path: adjustedKey,
+                  delete: pendingChange.status === FileStatus.Deleted,
+                });
+              }
+            }
+
+            ipc.sendMessage("workspace:submit", {
+              message: commitMessage,
+              modifications,
+              shelved: false,
+            });
+          }}
+        />
         <Button className="p-[0.3rem] text-[0.8em]" label="Undo" />
       </div>
       <div
@@ -306,6 +360,8 @@ export default function WorkspacePendingChanges() {
                 outlineColor: "#646cff",
                 zIndex: 1,
               }}
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
             />
           </SplitterPanel>
           <SplitterPanel className="flex" size={60}>
@@ -317,6 +373,7 @@ export default function WorkspacePendingChanges() {
           }}
         > */}
             <TreeTable
+              ref={treeTableRef}
               value={nodes}
               tableStyle={{ minWidth: "50rem" }}
               columnResizeMode="expand"
@@ -355,7 +412,7 @@ export default function WorkspacePendingChanges() {
                           file.modifiedAt,
                         ).toLocaleDateString(),
                         type: FileType[file.type],
-                        changeset: file.changelist
+                        changelist: file.changelist
                           ? file.changelist.toString()
                           : "",
                       },
@@ -439,8 +496,8 @@ export default function WorkspacePendingChanges() {
                 pt={columnPt}
               ></Column>
               <Column
-                field="changeset"
-                header="Changeset"
+                field="changelist"
+                header="Changelist"
                 resizeable
                 sortable
                 pt={columnPt}

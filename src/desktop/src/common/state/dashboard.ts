@@ -1,11 +1,11 @@
 import { atom } from "jotai";
 import { syncAtom } from "./store";
-import { ApiTypes } from "@checkpointvcs/daemon";
+import { Org, Repo } from "@checkpointvcs/daemon";
 
-export const dashboardOrgsAtom = atom<ApiTypes.Org[]>([]);
+export const dashboardOrgsAtom = atom<Org[]>([]);
 syncAtom(dashboardOrgsAtom, "dashboardOrgs");
 
-export const dashboardReposAtom = atom<ApiTypes.Repo[]>([]);
+export const dashboardReposAtom = atom<Repo[]>([]);
 syncAtom(dashboardReposAtom, "dashboardRepos");
 
 export const dashboardNewWorkspaceFolderAtom = atom<string>("");

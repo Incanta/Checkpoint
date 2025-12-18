@@ -1,5 +1,5 @@
 import { User } from "./state/auth";
-import { FileStatus, FileType, Workspace } from "./state/workspace";
+import { FileStatus, FileType, Workspace } from "@checkpointvcs/daemon";
 
 export namespace MockedData {
   export const availableUsers: number[] = [0];
@@ -24,8 +24,12 @@ export namespace MockedData {
       name: "Personal",
       orgId: "org1",
       repoId: "repo1",
-      rootPath: "E:/epic/engine/UE_Redwood",
+      createdAt: new Date(),
+      deletedAt: null,
 
+      localPath: "E:/epic/engine/UE_Redwood",
+      daemonId: "daemon-1",
+      branchName: "main",
       pendingChanges: {
         numChanges: 3,
         files: [

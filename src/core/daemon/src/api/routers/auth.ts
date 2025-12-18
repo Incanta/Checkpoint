@@ -6,7 +6,7 @@ import {
   GetAllAuthConfigUsers,
 } from "@checkpointvcs/common";
 import { z } from "zod";
-import type { User } from "daemon/src/types/api-types";
+import type { User } from "daemon/src/types";
 
 export const authRouter = router({
   login: publicProcedure

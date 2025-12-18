@@ -66,7 +66,7 @@ export interface WorkspaceConfig {
 }
 
 export interface Workspace extends WorkspaceConfig {
-  localRoot: string;
+  localPath: string;
   daemonId: string;
 }
 
@@ -78,7 +78,7 @@ export async function getWorkspaceDetails(): Promise<Workspace> {
   try {
     const config = await fs.readFile(configPath, "utf-8");
     const details: Workspace = JSON.parse(config);
-    details.localRoot = workspace;
+    details.localPath = workspace;
     return details;
   } catch (e) {
     throw new Error(

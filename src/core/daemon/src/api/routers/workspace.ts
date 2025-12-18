@@ -6,6 +6,12 @@ import { DaemonConfig } from "daemon/src/daemon-config";
 import fs from "fs/promises";
 import path from "path";
 import { pull, submit } from "@checkpointvcs/client";
+import {
+  FileStatus,
+  FileType,
+  type File,
+  type Workspace,
+} from "daemon/src/types";
 
 export const workspaceRouter = router({
   list: {
@@ -35,6 +41,25 @@ export const workspaceRouter = router({
       }),
   },
 
+  refresh: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const workspaces = DaemonManager.Get().workspaces.get(input.daemonId);
+      if (workspaces) {
+        const workspace = workspaces.find((w) => w.id === input.workspaceId);
+        if (workspace) {
+          return await DaemonManager.Get().refreshWorkspaceContents(workspace);
+        }
+
+        return null;
+      }
+    }),
+
   create: publicProcedure
     .input(
       z.object({
@@ -54,9 +79,9 @@ export const workspaceRouter = router({
         defaultBranchName: input.defaultBranchName,
       });
 
-      const newWorkspace = {
+      const newWorkspace: Workspace = {
         ...newWorkspaceApi,
-        localPath: input.path,
+        localPath: input.path.replace(/\\/g, "/"),
         daemonId: input.daemonId,
         branchName: input.defaultBranchName,
       };
@@ -97,6 +122,8 @@ export const workspaceRouter = router({
         throw new Error(`Could not find workspace ID ${input.workspaceId}`);
       }
 
+      const pendingChanges = manager.workspacePendingChanges.get(workspace.id);
+
       const dirEntries = await fs.readdir(
         path.join(workspace.localPath, input.path),
         { withFileTypes: true },
@@ -110,17 +137,15 @@ export const workspaceRouter = router({
           );
           const stats = await fs.stat(entryPath);
 
-          // TODO: types
-          const f: /* File */ any = {
+          const f: File = {
             path: entry.name,
-            type: entry.isDirectory()
-              ? /* FileType.Directory */ 1
-              : /* FileType.Text */ 2,
+            type: entry.isDirectory() ? FileType.Directory : FileType.Text,
             size: stats.size,
             modifiedAt: stats.mtimeMs,
-            status: /* FileStatus.Unknown */ 0,
-            id: null,
-            changelist: null,
+            status:
+              pendingChanges?.files[entry.name]?.status || FileStatus.Unknown,
+            id: null, // todo
+            changelist: null, // todo
           };
 
           return f;
@@ -206,7 +231,7 @@ export const workspaceRouter = router({
           repoId: workspace.repoId,
           branchName: workspace.branchName,
           workspaceName: workspace.name,
-          localRoot: workspace.localPath,
+          localPath: workspace.localPath,
           daemonId: workspace.daemonId,
         },
         repo.orgId,
@@ -262,7 +287,7 @@ export const workspaceRouter = router({
           repoId: workspace.repoId,
           branchName: workspace.branchName,
           workspaceName: workspace.name,
-          localRoot: workspace.localPath,
+          localPath: workspace.localPath,
           daemonId: workspace.daemonId,
         },
         repo.orgId,

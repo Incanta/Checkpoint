@@ -101,7 +101,7 @@ export async function submit(
   const compressionAlgoBuffer = createStringBuffer(
     config.get<string>("longtail.compression-algo"),
   );
-  const localRootBuffer = createStringBuffer(workspace.localRoot);
+  const localPathBuffer = createStringBuffer(workspace.localPath);
   const remoteRootBuffer = createStringBuffer(`/${orgId}/${workspace.repoId}`);
   const filerUrlBuffer = createStringBuffer(filerUrl);
   const backendUrlBuffer = createStringBuffer(backendUrl);
@@ -119,7 +119,7 @@ export async function submit(
     ptr(compressionAlgoBuffer.buffer),
     config.get<boolean>("longtail.enable-mmap-indexing") ? 1 : 0,
     config.get<boolean>("longtail.enable-mmap-block-store") ? 1 : 0,
-    ptr(localRootBuffer.buffer),
+    ptr(localPathBuffer.buffer),
     ptr(remoteRootBuffer.buffer),
     ptr(filerUrlBuffer.buffer),
     ptr(backendUrlBuffer.buffer),
@@ -138,7 +138,6 @@ export async function submit(
   let flagForGC = true;
   let lastStep = "";
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const decoded = decodeHandle(
       new Uint8Array(toArrayBuffer(asyncHandle, 0, 272)),
@@ -190,7 +189,7 @@ export async function submit(
     console.log(messageBuffer);
     console.log(hashingAlgoBuffer);
     console.log(compressionAlgoBuffer);
-    console.log(localRootBuffer);
+    console.log(localPathBuffer);
     console.log(remoteRootBuffer);
     console.log(filerUrlBuffer);
     console.log(backendUrlBuffer);

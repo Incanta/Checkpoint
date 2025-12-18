@@ -1,16 +1,18 @@
 import { dialog, type IpcMain } from "electron";
-import { CreateDaemonClient } from "@checkpointvcs/daemon";
+import {
+  CreateDaemonClient,
+  FileStatus,
+  FileType,
+} from "@checkpointvcs/daemon";
 import { MockedData } from "../common/mock-data";
 import { User, usersAtom, currentUserAtom } from "../common/state/auth";
 import { store } from "../common/state/store";
 import { Channels, ipcOn, ipcSend } from "./channels";
 import {
   currentWorkspaceAtom,
-  File,
-  FileStatus,
-  FileType,
   workspaceDiffAtom,
   workspaceDirectoriesAtom,
+  workspacePendingChangesAtom,
   workspacesAtom,
 } from "../common/state/workspace";
 import { promises as fs } from "fs";
@@ -21,7 +23,7 @@ import {
   dashboardOrgsAtom,
   dashboardReposAtom,
 } from "../common/state/dashboard";
-import type { ApiTypes } from "@checkpointvcs/daemon";
+import type { File, Workspace } from "@checkpointvcs/daemon";
 
 export default class DaemonHandler {
   private isMocked: boolean;
@@ -76,6 +78,10 @@ export default class DaemonHandler {
       if (workspace) {
         this.selectWorkspace(workspace);
       }
+    });
+
+    ipcOn(this.ipcMain, "workspace:refresh", async (event, data) => {
+      this.workspaceRefresh();
     });
 
     ipcOn(this.ipcMain, "workspace:get-directory", async (event, data) => {
@@ -294,7 +300,7 @@ export default class DaemonHandler {
     }
   }
 
-  private async selectWorkspace(workspace: ApiTypes.Workspace): Promise<void> {
+  private async selectWorkspace(workspace: Workspace): Promise<void> {
     store.set(currentWorkspaceAtom, workspace);
     store.set(workspaceDirectoriesAtom, {
       [workspace.localPath]: {
@@ -303,11 +309,29 @@ export default class DaemonHandler {
       },
     });
 
+    this.workspaceRefresh();
+
     if (this.webContents) {
       ipcSend(this.webContents, "set-renderer-url", {
         url: "/workspace",
       });
     }
+  }
+
+  private async workspaceRefresh(): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+
+    if (!currentWorkspace) {
+      return;
+    }
+
+    const client = await CreateDaemonClient();
+    const pendingChanges = await client.workspaces.refresh.query({
+      daemonId: currentWorkspace.daemonId,
+      workspaceId: currentWorkspace.id,
+    });
+
+    store.set(workspacePendingChangesAtom, pendingChanges || null);
   }
 
   private async workspacePull(data: Channels["workspace:pull"]): Promise<void> {
@@ -357,7 +381,7 @@ export default class DaemonHandler {
     }
 
     const client = await CreateDaemonClient();
-    const submitResponse = await client.workspaces.submit.query({
+    await client.workspaces.submit.query({
       daemonId: currentUser.daemonId,
       workspaceId: currentWorkspace.id,
       ...data,

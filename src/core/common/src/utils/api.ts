@@ -114,7 +114,7 @@ export async function SaveAuthToken(
     apiToken,
   };
 
-  await fs.writeFile(authFilePath, JSON.stringify(authConfig));
+  await fs.writeFile(authFilePath, JSON.stringify(authConfig, null, 2));
 }
 
 export async function DeleteAuthToken(daemonId: string): Promise<void> {
@@ -137,7 +137,7 @@ export async function DeleteAuthToken(daemonId: string): Promise<void> {
 
   delete authConfig.users[daemonId];
 
-  await fs.writeFile(authFilePath, JSON.stringify(authConfig));
+  await fs.writeFile(authFilePath, JSON.stringify(authConfig, null, 2));
 }
 
 export async function GetAllAuthConfigUsers(): Promise<

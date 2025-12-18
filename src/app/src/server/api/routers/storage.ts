@@ -1,5 +1,7 @@
+import config from "@incanta/config";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import njwt from "njwt";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 
@@ -82,12 +84,32 @@ export const storageRouter = createTRPCRouter({
         }
       }
 
-      // TODO: Generate actual storage token from SeaweedFS or configured storage backend
-      // For now, return a mock response
+      const token = njwt.create(
+        {
+          iss: "checkpoint-vcs",
+          sub: checkpointUser.id,
+          userId: checkpointUser.id,
+          orgId: repo.orgId,
+          repoId: repo.id,
+          mode: input.write ? "write" : "read",
+          basePath: `/${repo.orgId}/${repo.id}`,
+        },
+        config.get<string>(
+          "storage.signing-keys." + (input.write ? "write" : "read"),
+        ),
+      );
+
+      token.setExpiration(
+        Date.now() +
+          config.get<number>("storage.token-expiration-seconds") * 1000,
+      );
+
       return {
-        token: "mock-storage-token",
-        expiration: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
-        backendUrl: process.env.STORAGE_BACKEND_URL ?? "http://localhost:8080",
+        token: token.compact(),
+        expiration:
+          Math.floor(Date.now() / 1000) +
+          config.get<number>("storage.token-expiration"),
+        backendUrl: config.get<string>("storage.backend-url"),
       };
     }),
 });
