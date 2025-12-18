@@ -23,7 +23,7 @@ export default defineConfig({
           onstartArgs.startup([
             ".",
             "--no-sandbox",
-            "--remote-debugging-port=9229",
+            "--remote-debugging-port=19229",
           ]);
         },
       },
