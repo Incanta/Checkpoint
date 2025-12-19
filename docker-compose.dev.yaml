@@ -17,11 +17,11 @@ services:
       CHECKPOINT_HOSTNAME: "checkpoint.localhost"
 
   master:
-    image: checkpointvcs/seaweedfs:local
+    image: registry.digitalocean.com/incanta-generic-cr/checkpointvcs/seaweedfs
     build:
       context: ./src/seaweedfs/docker
       dockerfile: Dockerfile.local
-    pull_policy: never
+    pull_policy: always
     command: "master -ip=master -ip.bind=0.0.0.0"
     volumes:
       - ./.data/seaweed-config/security.toml:/etc/seaweedfs/security.toml
@@ -29,11 +29,11 @@ services:
       - checkpoint
 
   volume:
-    image: checkpointvcs/seaweedfs:local
+    image: registry.digitalocean.com/incanta-generic-cr/checkpointvcs/seaweedfs
     build:
       context: ./src/seaweedfs/docker
       dockerfile: Dockerfile.local
-    pull_policy: never
+    pull_policy: always
     command: 'volume -mserver="master:9333" -ip.bind=0.0.0.0 -port=8080'
     depends_on:
       - master
