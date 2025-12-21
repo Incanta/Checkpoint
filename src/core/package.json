@@ -15,12 +15,12 @@
     "cli": "NODE_CONFIG_DIR=client/config bun run client/src/bin.ts",
     "package": "bun package.ts",
     "server": "NODE_CONFIG_DIR=server/config bun run server/src/index.ts",
-    "daemon": "NODE_CONFIG_DIR=daemon/config bun start"
+    "daemon": "NODE_CONFIG_DIR=daemon/config bun run daemon/src/bin.ts"
   },
   "dependencies": {
     "@checkpointvcs/app": "link:@checkpointvcs/app",
-    "@incanta/config": "^0.6.5",
-    "@trpc/client": "^11.4.4",
+    "@incanta/config": "^2.1.4",
+    "@trpc/client": "^11.8.1",
     "async-sema": "^3.1.1",
     "inquirer": "^12.5.0",
     "lodash.merge": "^4.6.2",

@@ -1150,10 +1150,10 @@
   resolved "https://registry.yarnpkg.com/@humanwhocodes/retry/-/retry-0.4.3.tgz#c2b9d2e374ee62c586d3adbea87199b1d7a7a6ba"
   integrity sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ==
 
-"@incanta/config@^2.1.3":
-  version "2.1.3"
-  resolved "https://registry.yarnpkg.com/@incanta/config/-/config-2.1.3.tgz#b8dce6208d57868de8958e32539ddd521480aeb0"
-  integrity sha512-kGAwmsdKVrq6S2otXAo1eghZzL0aY9cbuVYRSmtTk+X4sc6DP4yjjPQnG9SLrcJO8ujsi1kMVGSPYLAQsQavcQ==
+"@incanta/config@^2.1.4":
+  version "2.1.4"
+  resolved "https://registry.yarnpkg.com/@incanta/config/-/config-2.1.4.tgz#158c70e27c08329c4ff5f5ee2c0bd23e17d8b2af"
+  integrity sha512-yqoJ9dJuCX7NhcW32UQ7ddF1N7c+8B75kc0d1co1SnDGAmxHJb1Lgw4ctrHJBWQVB5Hudu54seu0ivQRx9xjAA==
   dependencies:
     "@aws-sdk/client-secrets-manager" "^3.839.0"
     "@azure/identity" "^4.10.1"
@@ -1977,15 +1977,15 @@
   resolved "https://registry.yarnpkg.com/@tootallnate/once/-/once-2.0.0.tgz#f544a148d3ab35801c1f633a7441fd87c2e484bf"
   integrity sha512-XCuKFP5PS55gnMVu3dty8KPatLqUoy/ZYzDzAGCQ8JNFCkLXzmI7vNHCR+XpbZaMWQK/vQubr7PkYq8g470J/A==
 
-"@trpc/client@^11.5.0":
-  version "11.5.0"
-  resolved "https://registry.yarnpkg.com/@trpc/client/-/client-11.5.0.tgz#2bf991599b9c93e0d8f2c7a033d57bafe94352a4"
-  integrity sha512-32oH+KOAdo73jJKjU9tyG+vCjID6A28NgXwUNr691O5HjpF5yyTX51Zzyee8YtGzU89Nw/drCHdfA4gD7BN2eg==
+"@trpc/client@^11.8.1":
+  version "11.8.1"
+  resolved "https://registry.yarnpkg.com/@trpc/client/-/client-11.8.1.tgz#9763ed7cf50b62f01cb163728159f256ef8ddcee"
+  integrity sha512-L/SJFGanr9xGABmuDoeXR4xAdHJmsXsiF9OuH+apecJ+8sUITzVT1EPeqp0ebqA6lBhEl5pPfg3rngVhi/h60Q==
 
-"@trpc/server@^11.8.0":
-  version "11.8.0"
-  resolved "https://registry.yarnpkg.com/@trpc/server/-/server-11.8.0.tgz#2f6b37e79a6774628be0a050c8ef8b4e55385222"
-  integrity sha512-DphyQnLuyX2nwJCQGWQ9zYz4hZGvRhSBqDhQ0SH3tDhQ3PU4u68xofA0pJ741Ir4InEAFD+TtJVLAQy+wVOkiQ==
+"@trpc/server@^11.8.1":
+  version "11.8.1"
+  resolved "https://registry.yarnpkg.com/@trpc/server/-/server-11.8.1.tgz#0850e511497630bdf4c720ae10a71ddd66966d7e"
+  integrity sha512-P4rzZRpEL7zDFgjxK65IdyH0e41FMFfTkQkuq0BA5tKcr7E6v9/v38DEklCpoDN6sPiB1Sigy/PUEzHENhswDA==
 
 "@tybys/wasm-util@^0.10.0":
   version "0.10.0"
