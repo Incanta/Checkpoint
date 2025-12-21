@@ -70,6 +70,15 @@ services:
     networks:
       - checkpoint
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.7
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    command: start-dev
+    ports:
+      - "8080:8080"
+
 volumes:
   node_modules_redwood:
   node_modules_redwood_api:
