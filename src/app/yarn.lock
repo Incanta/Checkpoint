@@ -914,10 +914,10 @@
   resolved "https://registry.yarnpkg.com/@img/sharp-win32-x64/-/sharp-win32-x64-0.34.3.tgz#d20c89bd41b1dd3d76d8575714aaaa3c43204b6a"
   integrity sha512-OWwz05d++TxzLEv4VnsTz5CmZ6mI6S05sfQGEMrNrQcOEERbX46332IvE7pO/EUiw7jUrrS40z/M7kPyjfl04g==
 
-"@incanta/config@^2.1.3":
-  version "2.1.3"
-  resolved "https://registry.yarnpkg.com/@incanta/config/-/config-2.1.3.tgz#b8dce6208d57868de8958e32539ddd521480aeb0"
-  integrity sha512-kGAwmsdKVrq6S2otXAo1eghZzL0aY9cbuVYRSmtTk+X4sc6DP4yjjPQnG9SLrcJO8ujsi1kMVGSPYLAQsQavcQ==
+"@incanta/config@^2.1.4":
+  version "2.1.4"
+  resolved "https://registry.yarnpkg.com/@incanta/config/-/config-2.1.4.tgz#158c70e27c08329c4ff5f5ee2c0bd23e17d8b2af"
+  integrity sha512-yqoJ9dJuCX7NhcW32UQ7ddF1N7c+8B75kc0d1co1SnDGAmxHJb1Lgw4ctrHJBWQVB5Hudu54seu0ivQRx9xjAA==
   dependencies:
     "@aws-sdk/client-secrets-manager" "^3.839.0"
     "@azure/identity" "^4.10.1"
