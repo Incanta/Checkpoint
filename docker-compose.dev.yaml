@@ -44,11 +44,11 @@ services:
       - checkpoint
 
   filer:
-    image: checkpointvcs/seaweedfs:local
+    image: registry.digitalocean.com/incanta-generic-cr/checkpointvcs/seaweedfs
     build:
       context: ./src/seaweedfs/docker
       dockerfile: Dockerfile.local
-    pull_policy: never
+    pull_policy: always
     command: 'filer -master="master:9333" -ip.bind=0.0.0.0 -metricsPort=9326'
     tty: true
     stdin_open: true
