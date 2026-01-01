@@ -108,7 +108,7 @@ export const storageRouter = createTRPCRouter({
         token: token.compact(),
         expiration:
           Math.floor(Date.now() / 1000) +
-          config.get<number>("storage.token-expiration"),
+          config.get<number>("storage.token-expiration-seconds"),
         backendUrl: config.get<string>("storage.backend-url"),
       };
     }),
