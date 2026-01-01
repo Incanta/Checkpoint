@@ -10,6 +10,7 @@ import {
   workspacesAtom,
 } from "../../../common/state/workspace";
 import { ipc } from "../ipc";
+import WorkspaceHistory from "../../components/WorkspaceHistory";
 
 export default function Workspace(): React.ReactElement {
   const workspaces = useAtomValue(workspacesAtom);
@@ -72,6 +73,7 @@ export default function Workspace(): React.ReactElement {
           <div className="col-span-1 flex">
             {activeTabIndex === 0 && <WorkspaceExplorer />}
             {activeTabIndex === 1 && <WorkspacePendingChanges />}
+            {activeTabIndex === 2 && <WorkspaceHistory />}
           </div>
         </div>
       </div>

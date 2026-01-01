@@ -12,6 +12,7 @@ import {
   currentWorkspaceAtom,
   workspaceDiffAtom,
   workspaceDirectoriesAtom,
+  workspaceHistoryAtom,
   workspacePendingChangesAtom,
   workspacesAtom,
 } from "../common/state/workspace";
@@ -82,6 +83,10 @@ export default class DaemonHandler {
 
     ipcOn(this.ipcMain, "workspace:refresh", async (event, data) => {
       this.workspaceRefresh();
+    });
+
+    ipcOn(this.ipcMain, "workspace:history", async (event, data) => {
+      this.workspaceHistory();
     });
 
     ipcOn(this.ipcMain, "workspace:get-directory", async (event, data) => {
@@ -316,6 +321,23 @@ export default class DaemonHandler {
         url: "/workspace",
       });
     }
+  }
+
+  private async workspaceHistory(): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+
+    if (!currentWorkspace) {
+      return;
+    }
+
+    const client = await CreateDaemonClient();
+
+    const changelists = await client.workspaces.history.query({
+      daemonId: currentWorkspace.daemonId,
+      workspaceId: currentWorkspace.id,
+    });
+
+    store.set(workspaceHistoryAtom, changelists);
   }
 
   private async workspaceRefresh(): Promise<void> {

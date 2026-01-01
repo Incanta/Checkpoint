@@ -75,10 +75,7 @@
     },
     "git.autoRepositoryDetection": "openEditors",
     "C_Cpp.intelliSenseEngine": "default",
-    "cSpell.words": [
-      "koffi",
-      "longtail"
-    ],
+    "cSpell.words": ["koffi", "longtail"],
     "yaml.schemas": {
       "https://www.artillery.io/schema.json": []
     },
@@ -186,6 +183,7 @@
     },
     "[typescript]": {
       "editor.defaultFormatter": "esbenp.prettier-vscode"
-    }
+    },
+    "prisma.pinToPrisma6": true
   }
 }

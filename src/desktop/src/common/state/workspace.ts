@@ -4,6 +4,7 @@ import {
   Directory,
   Workspace,
   WorkspacePendingChanges,
+  ApiTypes,
 } from "@checkpointvcs/daemon";
 
 export const workspacesAtom = atom<Workspace[] | null>(null);
@@ -24,3 +25,6 @@ export const workspaceDiffAtom = atom<{ left: string; right: string } | null>(
   null,
 );
 syncAtom(workspaceDiffAtom, "workspaceDiff");
+
+export const workspaceHistoryAtom = atom<ApiTypes.Changelist[] | null>(null);
+syncAtom(workspaceHistoryAtom, "workspaceHistory");

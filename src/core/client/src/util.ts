@@ -166,7 +166,12 @@ export async function getChangelistId(
 
   const changelists = await client.changelist.getChangelists.query({
     repoId: workspace.repoId,
-    numbers: [changelistNumber],
+    branchName: workspace.branchName,
+    start: {
+      number: changelistNumber,
+      timestamp: null,
+    },
+    count: 1,
   });
 
   if (!changelists || changelists.length === 0) {

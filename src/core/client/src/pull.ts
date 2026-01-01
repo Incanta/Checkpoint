@@ -74,10 +74,11 @@ export async function pull(
     changelistResponse.stateTree as Record<string, number>,
   );
 
-  const changelistsResponse = await client.changelist.getChangelists.query({
-    repoId: workspace.repoId,
-    numbers: diff.changelistsToPull,
-  });
+  const changelistsResponse =
+    await client.changelist.getChangelistsWithNumbers.query({
+      repoId: workspace.repoId,
+      numbers: diff.changelistsToPull,
+    });
 
   const sortedChangelists = changelistsResponse.sort(
     (a: any, b: any) => a.number - b.number,

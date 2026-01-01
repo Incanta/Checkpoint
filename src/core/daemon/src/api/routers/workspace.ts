@@ -295,4 +295,66 @@ export const workspaceRouter = router({
         input.modifications,
       );
     }),
+
+  history: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+      }),
+    )
+    .output(
+      z.array(
+        z.object({
+          number: z.number(),
+          id: z.string(),
+          createdAt: z.date(),
+          updatedAt: z.date(),
+          userId: z.string().nullable(),
+          repoId: z.string(),
+          message: z.string(),
+          versionIndex: z.string(),
+          stateTree: z.any(),
+          parentNumber: z.number().nullable(),
+        }),
+      ),
+    )
+    .query(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      const repo = await client.repo.getRepo.query({ id: workspace.repoId });
+
+      if (!repo) {
+        throw new Error(
+          `Could not find repo for workspace ID ${input.workspaceId}`,
+        );
+      }
+
+      const changelists = await client.changelist.getChangelists.query({
+        repoId: repo.id,
+        branchName: workspace.branchName,
+        start: {
+          number: null,
+          timestamp: null,
+        },
+        count: 100,
+      });
+
+      return changelists;
+    }),
 });

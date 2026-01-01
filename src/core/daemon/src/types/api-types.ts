@@ -12,4 +12,7 @@ export namespace ApiTypes {
 
   export type Workspace =
     AppRouter["workspace"]["list"]["_def"]["$types"]["output"][number];
+
+  export type Changelist =
+    AppRouter["changelist"]["getChangelists"]["_def"]["$types"]["output"][number];
 }

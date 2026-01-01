@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import type { Changelist } from "@prisma/client";
 
 export const changelistRouter = createTRPCRouter({
   getChangelist: protectedProcedure
@@ -37,7 +38,7 @@ export const changelistRouter = createTRPCRouter({
       });
     }),
 
-  getChangelists: protectedProcedure
+  getChangelistsWithNumbers: protectedProcedure
     .input(
       z.object({
         repoId: z.string(),
@@ -60,7 +61,7 @@ export const changelistRouter = createTRPCRouter({
       // Check repo access (similar to other routers)
       // ... access check logic ...
 
-      return ctx.db.changelist.findMany({
+      return await ctx.db.changelist.findMany({
         where: {
           repoId: input.repoId,
           number: {
@@ -68,6 +69,133 @@ export const changelistRouter = createTRPCRouter({
           },
         },
       });
+    }),
+
+  getChangelists: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        branchName: z.string(),
+        start: z.object({
+          number: z.number().nullable(),
+          timestamp: z.date().nullable(),
+        }),
+        count: z.number().min(1).max(100),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      // Find the Checkpoint user associated with this NextAuth user
+      const checkpointUser = await ctx.db.user.findUnique({
+        where: { id: ctx.session.user.id },
+      });
+
+      if (!checkpointUser) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Checkpoint user not found for this authenticated user",
+        });
+      }
+
+      // Check repo access (similar to other routers)
+      // ... access check logic ...
+
+      let startNumber: number | Date | null = null;
+
+      if (input.start.number === null && input.start.timestamp === null) {
+        // our starting place is the headNumber for the branch
+        const branch = await ctx.db.branch.findUnique({
+          where: {
+            repoId_name: {
+              repoId: input.repoId,
+              name: input.branchName,
+            },
+          },
+        });
+
+        if (!branch) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `Could not find branch ${input.branchName} in the repo`,
+          });
+        }
+
+        startNumber = branch.headNumber;
+      } else if (
+        input.start.number !== null &&
+        input.start.timestamp === null
+      ) {
+        startNumber = input.start.number;
+      } else {
+        startNumber = input.start.timestamp;
+      }
+
+      if (startNumber === null) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No valid start number found to retrieve changelists",
+        });
+      }
+
+      let startChangelist: Changelist | null = null;
+      if (typeof startNumber === "object") {
+        // must be a date; find the first changelist less than this date
+        startChangelist = await ctx.db.changelist.findFirst({
+          where: {
+            repoId: input.repoId,
+            createdAt: {
+              lte: startNumber,
+            },
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+        });
+      } else {
+        startChangelist = await ctx.db.changelist.findUnique({
+          where: {
+            repoId_number: {
+              repoId: input.repoId,
+              number: startNumber,
+            },
+          },
+        });
+      }
+
+      if (!startChangelist) {
+        // this probably shouldn't happen
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Could not find a start number to retrieve changelists from",
+        });
+      }
+
+      // TODO MIKE HERE now we need to find the recursive parents; let's be dumb about it for now
+      const changelists = [startChangelist];
+      while (changelists.length < input.count) {
+        const lastChangelist = changelists.at(-1)!;
+
+        if (lastChangelist.parentNumber === null) {
+          break;
+        }
+
+        const parentChangelist = await ctx.db.changelist.findUnique({
+          where: {
+            repoId_number: {
+              repoId: input.repoId,
+              number: lastChangelist.parentNumber,
+            },
+          },
+        });
+
+        if (!parentChangelist) {
+          // TODO MIKE HERE: should log this invalid parent number
+          break;
+        }
+
+        changelists.push(parentChangelist);
+      }
+
+      return changelists;
     }),
 
   createChangelist: protectedProcedure

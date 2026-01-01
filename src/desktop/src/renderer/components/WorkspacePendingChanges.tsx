@@ -396,36 +396,6 @@ export default function WorkspacePendingChanges() {
                   });
                 }
               }}
-              onExpand={(event) => {
-                const node = event.node;
-                if (node && (!node.children || node.children.length === 0)) {
-                  ipc.once("workspace:directory-contents", (data) => {
-                    const directory = data.directory;
-                    node.children = directory.children.map((file) => ({
-                      id: node.id + "/" + file.path.split("/").pop(),
-                      key: node.key + "/" + file.path.split("/").pop(),
-                      data: {
-                        name: file.path.split("/").pop() || "",
-                        status: FileStatus[file.status],
-                        size: file.size.toString() + " B",
-                        modified: new Date(
-                          file.modifiedAt,
-                        ).toLocaleDateString(),
-                        type: FileType[file.type],
-                        changelist: file.changelist
-                          ? file.changelist.toString()
-                          : "",
-                      },
-                      leaf: file.type !== FileType.Directory,
-                    }));
-                    setNodes([...nodes]);
-                  });
-
-                  ipc.sendMessage("workspace:get-directory", {
-                    path: node.id!,
-                  });
-                }
-              }}
               pt={{
                 thead: {
                   style: {

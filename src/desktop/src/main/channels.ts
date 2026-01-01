@@ -23,6 +23,7 @@ export type Channels = {
   "workspace:directory-contents": { path: string; directory: Directory };
   "workspace:configure": null;
   "workspace:refresh": null;
+  "workspace:history": null;
   "workspace:pull": { changelistId: number | null; filePaths: string[] | null };
   "workspace:revert": { filePaths: string[] };
   "workspace:submit": {

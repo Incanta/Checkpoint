@@ -152,7 +152,7 @@ model Changelist {
 
   parent       Changelist?  @relation("ChangelistToParent", fields: [repoId, parentNumber], references: [repoId, number])
   children     Changelist[] @relation("ChangelistToParent")
-  parentNumber Int?
+  parentNumber Int? // NOTE: Merges are handled via forced squashing
 
   fileChanges FileChange[]
   tags        ChangelistTag[]
