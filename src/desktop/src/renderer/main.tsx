@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { MemoryRouter as Router, Routes, Route } from "react-router-dom";
+import { MemoryRouter as Router, Routes, Route } from "react-router";
 import { Provider } from "jotai";
 import { store } from "../common/state/store";
 import "./index.css";

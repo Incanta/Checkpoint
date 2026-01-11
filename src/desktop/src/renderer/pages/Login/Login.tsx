@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { ipc } from "../ipc";
 import { nanoid } from "nanoid";
 import { currentUserAtom } from "../../../common/state/auth";

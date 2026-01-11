@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { useAtomValue } from "jotai";
 import { usersAtom } from "../../../common/state/auth";
 import { currentWorkspaceAtom } from "../../../common/state/workspace";

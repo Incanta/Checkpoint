@@ -17,7 +17,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ipc } from "../ipc";
 import { Dropdown } from "primereact/dropdown";
 import { currentUserAtom, usersAtom } from "../../../common/state/auth";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import {
   dashboardNewWorkspaceFolderAtom,
   dashboardOrgsAtom,

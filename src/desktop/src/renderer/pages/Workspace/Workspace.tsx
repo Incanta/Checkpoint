@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import WorkspaceMenu from "../../components/WorkspaceMenu";
 import WorkspaceExplorer from "../../components/WorkspaceExplorer";
 import WorkspacePendingChanges from "../../components/WorkspacePendingChanges";
