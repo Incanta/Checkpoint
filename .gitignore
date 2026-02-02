@@ -1,2 +1,5 @@
 *.pdb
+.yarnlogs/
+logs
 .yarn
+node_modules

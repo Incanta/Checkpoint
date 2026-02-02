@@ -1,12 +1,16 @@
 #pragma once
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include <bikeshed/longtail_bikeshed.h>
 #include <blake2/longtail_blake2.h>
 #include <blake3/longtail_blake3.h>
 #include <brotli/longtail_brotli.h>
 #include <compressblockstore/longtail_compressblockstore.h>
 #include <compressionregistry/longtail_full_compression_registry.h>
-#include <cpr/cpr.h>
+#include <curl/curl.h>
 #include <filestorage/longtail_filestorage.h>
 #include <fsblockstore/longtail_fsblockstore.h>
 #include <hashregistry/longtail_full_hash_registry.h>

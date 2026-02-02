@@ -17,6 +17,8 @@ export async function submit(
   orgId: string,
   message: string,
   modifications: Modification[],
+  workspaceId: string,
+  keepCheckedOut: boolean = false,
   logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
     "longtail.log-level",
   ),
@@ -107,6 +109,18 @@ export async function submit(
   const backendUrlBuffer = createStringBuffer(backendUrl);
   const tokenBuffer = createStringBuffer(token);
   const apiTokenBuffer = createStringBuffer(user.apiToken);
+  const workspaceIdBuffer = createStringBuffer(workspaceId);
+
+  console.log(`[submit] Calling SubmitAsync:`);
+  console.log(`[submit]   branchName: ${workspace.branchName}`);
+  console.log(`[submit]   message: ${message}`);
+  console.log(`[submit]   localPath: ${workspace.localPath}`);
+  console.log(`[submit]   remoteRoot: /${orgId}/${workspace.repoId}`);
+  console.log(`[submit]   filerUrl: ${filerUrl}`);
+  console.log(`[submit]   jwt token: ${token}`);
+  console.log(`[submit]   backendUrl: ${backendUrl}`);
+  console.log(`[submit]   workspaceId: ${workspaceId}`);
+  console.log(`[submit]   modifications: ${modifications.length}`);
 
   const asyncHandle = lib.SubmitAsync(
     ptr(branchNameBuffer.buffer),
@@ -126,6 +140,8 @@ export async function submit(
     ptr(tokenBuffer.buffer),
     tokenExpirationMs,
     ptr(apiTokenBuffer.buffer),
+    keepCheckedOut ? 1 : 0,
+    ptr(workspaceIdBuffer.buffer),
     modifications.length,
     ptr(buffer),
     GetLogLevel(logLevel),
@@ -145,12 +161,15 @@ export async function submit(
 
     if (decoded.currentStep !== lastStep) {
       lastStep = decoded.currentStep;
+      console.log(
+        `[submit] Step: ${decoded.currentStep.substring(0, decoded.currentStep.indexOf("\0"))}`,
+      );
     }
 
     if (decoded.completed) {
       if (decoded.error !== 0) {
         console.log(
-          `Completed with exit code: ${decoded.error} and last step ${decoded.currentStep}`,
+          `Completed with exit code: ${decoded.error} and last step ${decoded.currentStep.substring(0, decoded.currentStep.indexOf("\0"))}`,
         );
       }
       flagForGC = false;
@@ -166,14 +185,26 @@ export async function submit(
   );
 
   if (decoded.error === 0) {
-    const workspaceState = await getWorkspaceState();
+    const workspaceState = await getWorkspaceState(workspace);
+
+    workspaceState.changelistNumber = decoded.result.changelistNumber;
+
+    const fileIds = await client.file.getFileIds.query({
+      repoId: workspace.repoId,
+      paths: modifications.map((mod) => mod.path),
+    });
 
     for (const modification of modifications) {
+      const fileId = fileIds.find((f) => f.path === modification.path)?.id;
+
+      if (!fileId) {
+        continue;
+      }
+
       if (modification.delete) {
-        delete workspaceState.files[modification.path];
+        delete workspaceState.files[fileId];
       } else {
-        workspaceState.files[modification.path] =
-          decoded.result.changelistNumber;
+        workspaceState.files[fileId] = decoded.result.changelistNumber;
       }
     }
 
@@ -181,7 +212,7 @@ export async function submit(
     // because they may need to sync other changes. we don't
     // auto pull during a push.
 
-    await saveWorkspaceState(workspaceState);
+    await saveWorkspaceState(workspace, workspaceState);
   }
 
   if (flagForGC) {
@@ -203,7 +234,9 @@ export async function submit(
 
   if (decoded.error !== 0) {
     throw new Error(
-      `Error submitting changes: ${decoded.error} ${decoded.currentStep}`,
+      `Error submitting changes: ${decoded.error} ${decoded.currentStep.substring(0, decoded.currentStep.indexOf("\0"))}`,
     );
   }
+
+  console.log(`[submit] Submit completed successfully.`);
 }

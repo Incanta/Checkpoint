@@ -240,19 +240,6 @@ export const changelistRouter = createTRPCRouter({
 
       const nextNumber = (lastChangelist?.number ?? -1) + 1;
 
-      // Create the changelist
-      const changelist = await ctx.db.changelist.create({
-        data: {
-          number: nextNumber,
-          message: input.message,
-          versionIndex: input.versionIndex,
-          stateTree: {}, // TODO: implement state tree logic
-          repoId: input.repoId,
-          userId: checkpointUser.id,
-        },
-      });
-
-      // Update branch head if needed
       const branch = await ctx.db.branch.findFirst({
         where: {
           repoId: input.repoId,
@@ -260,12 +247,86 @@ export const changelistRouter = createTRPCRouter({
         },
       });
 
-      if (branch) {
-        await ctx.db.branch.update({
-          where: { id: branch.id },
-          data: { headNumber: nextNumber },
+      if (!branch) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Branch ${input.branchName} not found in the repo`,
         });
       }
+
+      const parentChangelist = await ctx.db.changelist.findUnique({
+        where: {
+          repoId_number: {
+            repoId: input.repoId,
+            number: branch.headNumber,
+          },
+        },
+      });
+
+      if (!parentChangelist) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Parent changelist ${branch.headNumber} not found in the repo`,
+        });
+      }
+
+      /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any */
+      const stateTree: Record<string, number> =
+        parentChangelist.stateTree as any;
+      /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any */
+
+      // Apply modifications to state tree
+      const modifiedFiles = await ctx.db.file.findMany({
+        where: {
+          repoId: input.repoId,
+          path: {
+            in: input.modifications.map((mod) =>
+              mod.path.replaceAll("\\", "/"),
+            ),
+          },
+        },
+      });
+
+      for (const mod of input.modifications) {
+        const modPath = mod.path.replaceAll("\\", "/");
+        let existingFile = modifiedFiles.find((f) => f.path === modPath);
+
+        if (!existingFile && !mod.delete) {
+          // Create new file entry
+          existingFile = await ctx.db.file.create({
+            data: {
+              repoId: input.repoId,
+              path: modPath,
+            },
+          });
+        }
+
+        if (mod.delete) {
+          if (existingFile) {
+            delete stateTree[existingFile.id];
+          }
+        } else {
+          stateTree[existingFile!.id] = nextNumber;
+        }
+      }
+
+      // Create the changelist
+      const changelist = await ctx.db.changelist.create({
+        data: {
+          number: nextNumber,
+          message: input.message,
+          versionIndex: input.versionIndex,
+          parentNumber: branch.headNumber,
+          stateTree: stateTree,
+          repoId: input.repoId,
+          userId: checkpointUser.id,
+        },
+      });
+
+      await ctx.db.branch.update({
+        where: { id: branch.id },
+        data: { headNumber: nextNumber },
+      });
 
       // TODO: Handle file changes and workspace checkout logic
       // For now, just return the basic changelist info

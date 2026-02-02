@@ -3,19 +3,14 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug C++ for Core Client",
+      "name": "Debug C++ for Daemon",
       "program": "c:/Users/seese/.bun/bin/bun",
       "args": [
-        "../client/src/bin.ts",
-        "commit",
-        "-m",
-        "remove hello",
-        "--longtail-log-level",
-        "debug"
+        "daemon/src/bin.ts"
       ],
-      "cwd": "${workspaceFolder}/wk",
+      "cwd": "${workspaceFolder}",
       "env": {
-        "NODE_CONFIG_DIR": "${workspaceFolder}/client/config"
+        "NODE_CONFIG_DIR": "${workspaceFolder}/daemon/config"
       }
     },
     {

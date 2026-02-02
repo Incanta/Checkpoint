@@ -1,6 +1,7 @@
 signing-keys:
   read: "secret"
   write: "secret"
+  system: "system-secret"
 
 token-expiration-seconds: 600
 

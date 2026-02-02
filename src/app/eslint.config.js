@@ -33,6 +33,7 @@ export default tseslint.config(
         "error",
         { checksVoidReturn: { attributes: false } },
       ],
+      "@typescript-eslint/prefer-nullish-coalescing": "off",
     },
   },
   {

@@ -43,9 +43,6 @@ if [[ "$OS_NAME" == "windows" ]]; then
     cp -f ../longtail/${LIB_FOLDER_LOWERCASE}/longtail.* $OUTPUT_DIR
     cp -f ./${LIB_FOLDER_PASCALCASE}/* $OUTPUT_DIR
 
-    cp -f ./_deps/cpr-build/cpr/${LIB_FOLDER_PASCALCASE}/cpr${EXT_NAME} $OUTPUT_DIR
-    cp -f ./_deps/curl-build/lib/${LIB_FOLDER_PASCALCASE}/libcurl-d${EXT_NAME} $OUTPUT_DIR
-    cp -f ./_deps/zlib-build/${LIB_FOLDER_PASCALCASE}/zlibd1${EXT_NAME} $OUTPUT_DIR
     cp -f ../src/exposed/exposed.h $dir/checkpoint.h
   done
 else
