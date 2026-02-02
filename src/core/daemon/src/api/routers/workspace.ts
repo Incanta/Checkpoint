@@ -254,9 +254,14 @@ export const workspaceRouter = router({
           }),
         ),
         shelved: z.boolean(),
+        keepCheckedOut: z.boolean().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
+      console.log(
+        "[daemon.submit] Called with workspaceId:",
+        input.workspaceId,
+      );
       const manager = DaemonManager.Get();
       const workspaces = manager.workspaces.get(input.daemonId);
 
@@ -293,6 +298,8 @@ export const workspaceRouter = router({
         repo.orgId,
         input.message,
         input.modifications,
+        workspace.id,
+        input.keepCheckedOut ?? false,
       );
     }),
 

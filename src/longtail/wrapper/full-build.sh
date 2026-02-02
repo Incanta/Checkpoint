@@ -15,7 +15,6 @@ rm -rf build
 mkdir -p build
 cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug
-cd .. && ./scripts/generate_migrations.sh && cd -
 make -j$(nproc)
 
 if [[ "$OS_NAME" == "windows" ]]; then

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import { createOrgDirectory } from "~/server/storage-service";
 
 export const orgRouter = createTRPCRouter({
   myOrgs: protectedProcedure.query(async ({ ctx }) => {
@@ -145,6 +146,15 @@ export const orgRouter = createTRPCRouter({
         },
       });
 
+      // Create the org directory in storage
+      try {
+        await createOrgDirectory(org.id);
+      } catch (error) {
+        console.error("Failed to create org directory in storage:", error);
+        // Note: We don't fail the org creation here since the DB record is created
+        // The directory can be created later if needed
+      }
+
       return org;
     }),
 
@@ -234,5 +244,81 @@ export const orgRouter = createTRPCRouter({
           deletedBy: checkpointUser.id,
         },
       });
+    }),
+
+  addUserToOrg: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string(),
+        userEmail: z.string().email(),
+        role: z.enum(["ADMIN", "MEMBER"]).default("MEMBER"),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Find the Checkpoint user associated with this NextAuth user
+      const checkpointUser = await ctx.db.user.findUnique({
+        where: { id: ctx.session.user.id },
+      });
+
+      if (!checkpointUser) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Checkpoint user not found for this authenticated user",
+        });
+      }
+
+      // Check if the current user is an admin of the org
+      const orgUser = await ctx.db.orgUser.findFirst({
+        where: {
+          orgId: input.orgId,
+          userId: checkpointUser.id,
+        },
+      });
+
+      if (orgUser?.role !== "ADMIN") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "You do not have permission to add users to this organization",
+        });
+      }
+
+      // Find the user to add by email
+      const userToAdd = await ctx.db.user.findUnique({
+        where: { email: input.userEmail },
+      });
+
+      if (!userToAdd) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "User with the specified email not found",
+        });
+      }
+
+      // Check if user is already in the org
+      const existingOrgUser = await ctx.db.orgUser.findFirst({
+        where: {
+          orgId: input.orgId,
+          userId: userToAdd.id,
+        },
+      });
+
+      if (existingOrgUser) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "User is already a member of this organization",
+        });
+      }
+
+      // Add the user to the org
+      const newOrgUser = await ctx.db.orgUser.create({
+        data: {
+          orgId: input.orgId,
+          userId: userToAdd.id,
+          role: input.role,
+        },
+      });
+
+      return newOrgUser;
     }),
 });

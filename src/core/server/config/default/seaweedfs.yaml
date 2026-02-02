@@ -10,4 +10,5 @@ connection:
 
 jwt:
   signing-key: "secret"
+  system-signing-key: "system-secret"
   expiration-ms: 3000

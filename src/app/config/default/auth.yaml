@@ -4,6 +4,11 @@ api-tokens:
 jwt:
   secret: "secret"
 
+dev:
+  # WARNING: Never enable this in production!
+  # This allows automated tests to create API tokens without OAuth flow
+  allow-dev-login: false
+
 auth0:
   enabled: false
   client:

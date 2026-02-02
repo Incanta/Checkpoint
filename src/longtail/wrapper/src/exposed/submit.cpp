@@ -226,6 +226,8 @@ int32_t SubmitSync(
     return err;
   }
 
+  SetHandleStep(handle, "Getting existing content");
+
   struct Longtail_StoreIndex* existing_remote_store_index;
   err = SyncGetExistingContent(
       store_block_store_api,
@@ -249,6 +251,8 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(job_api);
     return err;
   }
+
+  SetHandleStep(handle, "Create missing store index");
 
   struct Longtail_StoreIndex* remote_missing_store_index;
   err = Longtail_CreateMissingContent(
@@ -275,6 +279,8 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(job_api);
     return err;
   }
+
+  SetHandleStep(handle, "Creating store blocks");
 
   progress = MakeProgressAPI("Writing blocks");
   if (progress) {
@@ -310,6 +316,8 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(job_api);
     return err;
   }
+
+  SetHandleStep(handle, "Flushing compression block store");
 
   struct SyncFlush flushCB;
   err = SyncFlush_Init(&flushCB);
@@ -368,6 +376,8 @@ int32_t SubmitSync(
       return flushCB.m_Err;
     }
   }
+
+  SetHandleStep(handle, "Flushing fs block store");
 
   err = SyncFlush_Init(&flushCB);
   if (err) {
@@ -438,6 +448,8 @@ int32_t SubmitSync(
     version_index_stream << std::string(RemoteBasePath) << std::string("/versions/") << version_file_stream.str();
     std::string target_version_index_path = version_index_stream.str().c_str();
 
+    SetHandleStep(handle, "Writing version index");
+
     err = Longtail_WriteVersionIndex(
         seaweed_storage_api,
         source_version_index,
@@ -460,6 +472,8 @@ int32_t SubmitSync(
       SAFE_DISPOSE_API(job_api);
       return err;
     }
+
+    SetHandleStep(handle, "Writing missing store index to buffer");
 
     err = Longtail_WriteStoreIndexToBuffer(remote_missing_store_index, &missing_store_index_buffer, &missing_store_index_size);
 
@@ -501,21 +515,13 @@ int32_t SubmitSync(
     }
   }
 
-  cpr::Multipart multipart = {
-      {"payload", payload.dump()}};
+  SetHandleStep(handle, "Submitting to backend");
 
-  if (missing_store_index_buffer != 0) {
-    multipart.parts.push_back({"storeIndex", cpr::Buffer{(char*)missing_store_index_buffer, (char*)missing_store_index_buffer + missing_store_index_size, "chunk.bin"}});
-  }
-
-  cpr::Response r = cpr::Post(
-      cpr::Url{std::string(BackendUrl) + "/submit"},
-      cpr::Bearer{std::string(JWT)},
-      multipart);
-
-  if (r.status_code != 200) {
-    SetHandleStep(handle, "Failed to submit to backend");
-    handle->error = r.status_code;
+  // Use libcurl directly for the multipart POST
+  CURL* curl = curl_easy_init();
+  if (!curl) {
+    SetHandleStep(handle, "Failed to initialize curl");
+    handle->error = ENOMEM;
     handle->completed = 1;
     Longtail_Free(remote_missing_store_index);
     Longtail_Free(existing_remote_store_index);
@@ -528,11 +534,81 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
-    return r.status_code;
+    return ENOMEM;
   }
 
+  std::string response_body;
+  auto write_callback = [](void* contents, size_t size, size_t nmemb, void* userp) -> size_t {
+    size_t realsize = size * nmemb;
+    std::string* str = static_cast<std::string*>(userp);
+    str->append(static_cast<char*>(contents), realsize);
+    return realsize;
+  };
+
+  struct curl_slist* headers = nullptr;
+  std::string authHeader = std::string("Authorization: Bearer ") + JWT;
+  headers = curl_slist_append(headers, authHeader.c_str());
+  headers = curl_slist_append(headers, "Connection: close");
+
+  curl_mime* mime = curl_mime_init(curl);
+
+  // Add payload part
+  curl_mimepart* part = curl_mime_addpart(mime);
+  std::string payload_str = payload.dump();
+  curl_mime_name(part, "payload");
+  curl_mime_data(part, payload_str.c_str(), payload_str.size());
+
+  // Add storeIndex part if available
+  if (missing_store_index_buffer != 0) {
+    curl_mimepart* store_part = curl_mime_addpart(mime);
+    curl_mime_name(store_part, "storeIndex");
+    curl_mime_data(store_part, static_cast<const char*>(missing_store_index_buffer), missing_store_index_size);
+    curl_mime_filename(store_part, "chunk.bin");
+  }
+
+  std::string url = std::string(BackendUrl) + "/submit";
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, +write_callback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+  CURLcode res = curl_easy_perform(curl);
+  long http_status_code = 0;
+  if (res == CURLE_OK) {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status_code);
+  }
+
+  curl_mime_free(mime);
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+
+  if (res != CURLE_OK || http_status_code != 200) {
+    SetHandleStep(handle, "Failed to submit to backend");
+    handle->error = http_status_code > 0 ? (int)http_status_code : EIO;
+    handle->completed = 1;
+    Longtail_Free(remote_missing_store_index);
+    Longtail_Free(existing_remote_store_index);
+    Longtail_Free(source_version_index);
+    SAFE_DISPOSE_API(chunker_api);
+    SAFE_DISPOSE_API(store_block_store_api);
+    SAFE_DISPOSE_API(store_block_fsstore_api);
+    SAFE_DISPOSE_API(file_storage_api);
+    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(compression_registry);
+    SAFE_DISPOSE_API(hash_registry);
+    SAFE_DISPOSE_API(job_api);
+    return handle->error;
+  }
+
+  json response_json = json::parse(response_body);
+  int changelistNumber = response_json["number"].get<int>();
+
   json result = {
-      {"changelistNumber", std::string(BranchName)}};
+      {"changelistNumber", changelistNumber}};
 
   strcpy(handle->result, result.dump().c_str());
 

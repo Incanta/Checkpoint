@@ -1,0 +1,27 @@
+{
+  "name": "@checkpointvcs/tests",
+  "version": "1.0.0",
+  "description": "Full system integration tests for Checkpoint",
+  "license": "(Elastic-2.0 OR AGPL-3.0)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "test:watch": "bun test --watch"
+  },
+  "dependencies": {
+    "@checkpointvcs/app": "link:../app",
+    "@checkpointvcs/client": "link:../core/client",
+    "@checkpointvcs/common": "link:../core/common",
+    "@checkpointvcs/daemon": "link:../core/daemon",
+    "@trpc/client": "^11.8.1",
+    "@trpc/server": "^11.8.1",
+    "superjson": "^2.2.2",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.7.3"
+  },
+  "packageManager": "yarn@4.12.0"
+}

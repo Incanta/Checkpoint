@@ -106,9 +106,10 @@ export async function saveWorkspaceDetails(
   }
 }
 
-export async function getWorkspaceState(): Promise<WorkspaceState> {
-  const workspace = await getWorkspaceRoot(process.cwd());
-  const workspaceConfigDir = path.join(workspace, ".checkpoint");
+export async function getWorkspaceState(
+  workspace: Workspace,
+): Promise<WorkspaceState> {
+  const workspaceConfigDir = path.join(workspace.localPath, ".checkpoint");
 
   const statePath = path.join(workspaceConfigDir, "state.json");
   try {
@@ -122,9 +123,11 @@ export async function getWorkspaceState(): Promise<WorkspaceState> {
   }
 }
 
-export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
-  const workspace = await getWorkspaceRoot(process.cwd());
-  const workspaceConfigDir = path.join(workspace, ".checkpoint");
+export async function saveWorkspaceState(
+  workspace: Workspace,
+  state: WorkspaceState,
+): Promise<void> {
+  const workspaceConfigDir = path.join(workspace.localPath, ".checkpoint");
 
   try {
     await fs.mkdir(workspaceConfigDir, { recursive: true });

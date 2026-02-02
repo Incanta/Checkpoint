@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import { createRepoDirectory } from "~/server/storage-service";
 
 export const repoRouter = createTRPCRouter({
   getRepo: protectedProcedure
@@ -146,6 +147,15 @@ export const repoRouter = createTRPCRouter({
             userId: checkpointUser.id,
           },
         });
+      }
+
+      // Create the repo directory in storage
+      try {
+        await createRepoDirectory(input.orgId, repo.id);
+      } catch (error) {
+        console.error("Failed to create repo directory in storage:", error);
+        // Note: We don't fail the repo creation here since the DB record is created
+        // The directory can be created later if needed
       }
 
       return repo;

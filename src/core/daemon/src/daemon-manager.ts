@@ -172,18 +172,26 @@ export class DaemonManager {
   }
 
   public watchWorkspace(workspace: Workspace): void {
-    const watcher = watch(
-      workspace.localPath,
-      { recursive: true },
-      async (eventType, filename) => {
-        Logger.debug(
-          `[DaemonManager] Detected change in workspace ${workspace.name} (${eventType} on ${filename})`,
-        );
+    // Check if the workspace path exists before watching
+    if (!existsSync(workspace.localPath)) {
+      Logger.warn(
+        `[DaemonManager] Workspace path does not exist, skipping watch: ${workspace.localPath}`,
+      );
+      return;
+    }
 
-        // TODO: do something with the changes (e.g. keeping track of modified files)
-      },
-    );
+    // const watcher = watch(
+    //   workspace.localPath,
+    //   { recursive: true },
+    //   async (eventType, filename) => {
+    //     Logger.debug(
+    //       `[DaemonManager] Detected change in workspace ${workspace.name} (${eventType} on ${filename})`,
+    //     );
 
-    this.watchers.push(watcher);
+    //     // TODO: do something with the changes (e.g. keeping track of modified files)
+    //   },
+    // );
+
+    // this.watchers.push(watcher);
   }
 }

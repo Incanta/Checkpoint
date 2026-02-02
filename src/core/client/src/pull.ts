@@ -67,7 +67,7 @@ export async function pull(
     throw new Error("Could not get changelist information");
   }
 
-  const workspaceState = await getWorkspaceState();
+  const workspaceState = await getWorkspaceState(workspace);
 
   const diff = DiffState(
     workspaceState.files,
@@ -168,11 +168,11 @@ export async function pull(
   }
 
   if (!errored) {
-    const filesResponse: any = await client.file.getFiles.query({
+    const filesResponse = await client.file.getFiles.query({
       ids: diff.deletions,
     });
 
-    for (const file of filesResponse.files) {
+    for (const file of filesResponse) {
       if (file.path) {
         const filePath = path.join(workspace.localPath, file.path);
 
@@ -184,7 +184,7 @@ export async function pull(
       }
     }
 
-    await saveWorkspaceState({
+    await saveWorkspaceState(workspace, {
       changelistNumber: changelistResponse.number,
       files: changelistResponse.stateTree as Record<string, number>,
     });

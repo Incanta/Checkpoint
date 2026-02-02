@@ -1,5 +1,33 @@
 #include "main.h"
 
+#include <curl/curl.h>
+
+// Global curl initialization - must be called before any HTTP requests
+// This handles thread-safety initialization for multi-threaded environments
+#ifdef _WIN32
+// Windows: Use DllMain for initialization
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
+  switch (ul_reason_for_call) {
+    case DLL_PROCESS_ATTACH:
+      curl_global_init(CURL_GLOBAL_ALL);
+      break;
+    case DLL_PROCESS_DETACH:
+      curl_global_cleanup();
+      break;
+  }
+  return TRUE;
+}
+#else
+// Unix: Use constructor/destructor attributes
+__attribute__((constructor)) static void InitCurl() {
+  curl_global_init(CURL_GLOBAL_ALL);
+}
+
+__attribute__((destructor)) static void CleanupCurl() {
+  curl_global_cleanup();
+}
+#endif
+
 uint32_t ParseCompressionType(const char* compression_algorithm) {
   if ((compression_algorithm == 0) || (strcmp("none", compression_algorithm) == 0)) {
     return 0;

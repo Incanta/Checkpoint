@@ -27,4 +27,5 @@ export async function InitApi(): Promise<void> {
   await new Promise<void>((resolve) => server.listen(listenPort, resolve));
 
   console.log(`Daemon server listening on port ${listenPort}`);
+  console.log("[healthy] Daemon is ready");
 }

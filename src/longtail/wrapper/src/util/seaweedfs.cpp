@@ -1,13 +1,17 @@
 #include "seaweedfs.h"
 
-#include <cpr/cpr.h>
+#include <curl/curl.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <longtail.h>
 #include <longtail_platform.h>
 #include <string.h>
 
+#include <chrono>
 #include <iostream>
+#include <map>
+#include <string>
+#include <thread>
 
 #include "json.hpp"
 
@@ -16,6 +20,246 @@ using json = nlohmann::json;
 struct SeaweedFSStorageAPI_OpenFile {
   char* m_Path;
 };
+
+// ============================================================================
+// libcurl helper functions
+// ============================================================================
+
+struct CurlResponse {
+  long status_code;
+  std::string body;
+  std::map<std::string, std::string> headers;
+  std::string error;
+};
+
+// Callback for writing response body
+static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+  size_t realsize = size * nmemb;
+  std::string* str = static_cast<std::string*>(userp);
+  str->append(static_cast<char*>(contents), realsize);
+  return realsize;
+}
+
+// Callback for writing response headers
+static size_t HeaderCallback(char* buffer, size_t size, size_t nitems, void* userdata) {
+  size_t realsize = size * nitems;
+  std::map<std::string, std::string>* headers = static_cast<std::map<std::string, std::string>*>(userdata);
+
+  std::string header(buffer, realsize);
+  size_t colonPos = header.find(':');
+  if (colonPos != std::string::npos) {
+    std::string key = header.substr(0, colonPos);
+    std::string value = header.substr(colonPos + 1);
+    // Trim whitespace
+    while (!value.empty() && (value[0] == ' ' || value[0] == '\t')) value.erase(0, 1);
+    while (!value.empty() && (value.back() == '\r' || value.back() == '\n' || value.back() == ' ')) value.pop_back();
+    (*headers)[key] = value;
+  }
+  return realsize;
+}
+
+// Perform HTTP HEAD request
+static CurlResponse HttpHead(const std::string& url, const std::string& jwt) {
+  CurlResponse response;
+  response.status_code = 0;
+
+  CURL* curl = curl_easy_init();
+  if (!curl) {
+    response.error = "Failed to initialize curl";
+    return response;
+  }
+
+  struct curl_slist* headers = nullptr;
+  std::string authHeader = "Authorization: Bearer " + jwt;
+  headers = curl_slist_append(headers, authHeader.c_str());
+  headers = curl_slist_append(headers, "Connection: close");
+
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);  // HEAD request
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, HeaderCallback);
+  curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+  CURLcode res = curl_easy_perform(curl);
+  if (res != CURLE_OK) {
+    response.error = curl_easy_strerror(res);
+  } else {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
+  }
+
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+
+  return response;
+}
+
+// Perform HTTP GET request
+static CurlResponse HttpGet(const std::string& url, const std::string& jwt) {
+  CurlResponse response;
+  response.status_code = 0;
+
+  CURL* curl = curl_easy_init();
+  if (!curl) {
+    response.error = "Failed to initialize curl";
+    return response;
+  }
+
+  struct curl_slist* headers = nullptr;
+  std::string authHeader = "Authorization: Bearer " + jwt;
+  headers = curl_slist_append(headers, authHeader.c_str());
+  headers = curl_slist_append(headers, "Connection: close");
+
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
+  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, HeaderCallback);
+  curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+  CURLcode res = curl_easy_perform(curl);
+  if (res != CURLE_OK) {
+    response.error = curl_easy_strerror(res);
+  } else {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
+  }
+
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+
+  return response;
+}
+
+// Perform HTTP POST request with multipart file upload
+static CurlResponse HttpPostMultipart(const std::string& url, const std::string& jwt, const void* data, size_t dataSize, const char* filename) {
+  CurlResponse response;
+  response.status_code = 0;
+
+  CURL* curl = curl_easy_init();
+  if (!curl) {
+    response.error = "Failed to initialize curl";
+    return response;
+  }
+
+  struct curl_slist* headers = nullptr;
+  std::string authHeader = "Authorization: Bearer " + jwt;
+  headers = curl_slist_append(headers, authHeader.c_str());
+  headers = curl_slist_append(headers, "Connection: close");
+
+  curl_mime* mime = curl_mime_init(curl);
+  curl_mimepart* part = curl_mime_addpart(mime);
+  curl_mime_name(part, "name");
+  curl_mime_data(part, static_cast<const char*>(data), dataSize);
+  curl_mime_filename(part, filename);
+
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+  CURLcode res = curl_easy_perform(curl);
+  if (res != CURLE_OK) {
+    response.error = curl_easy_strerror(res);
+  } else {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
+  }
+
+  curl_mime_free(mime);
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+
+  return response;
+}
+
+// Perform HTTP POST request (no body)
+static CurlResponse HttpPost(const std::string& url, const std::string& jwt) {
+  CurlResponse response;
+  response.status_code = 0;
+
+  CURL* curl = curl_easy_init();
+  if (!curl) {
+    response.error = "Failed to initialize curl";
+    return response;
+  }
+
+  struct curl_slist* headers = nullptr;
+  std::string authHeader = "Authorization: Bearer " + jwt;
+  headers = curl_slist_append(headers, authHeader.c_str());
+  headers = curl_slist_append(headers, "Connection: close");
+
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_POST, 1L);
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0L);
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+  CURLcode res = curl_easy_perform(curl);
+  if (res != CURLE_OK) {
+    response.error = curl_easy_strerror(res);
+  } else {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
+  }
+
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+
+  return response;
+}
+
+// Perform HTTP DELETE request
+static CurlResponse HttpDelete(const std::string& url, const std::string& jwt) {
+  CurlResponse response;
+  response.status_code = 0;
+
+  CURL* curl = curl_easy_init();
+  if (!curl) {
+    response.error = "Failed to initialize curl";
+    return response;
+  }
+
+  struct curl_slist* headers = nullptr;
+  std::string authHeader = "Authorization: Bearer " + jwt;
+  headers = curl_slist_append(headers, authHeader.c_str());
+  headers = curl_slist_append(headers, "Connection: close");
+
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+  CURLcode res = curl_easy_perform(curl);
+  if (res != CURLE_OK) {
+    response.error = curl_easy_strerror(res);
+  } else {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
+  }
+
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+
+  return response;
+}
+
+// ============================================================================
+// SeaweedFS Storage API Implementation
+// ============================================================================
 
 static void SeaweedFSStorageAPI_Dispose(struct Longtail_API* storage_api) {
   MAKE_LOG_CONTEXT_FIELDS(ctx)
@@ -83,19 +327,22 @@ static int SeaweedFSStorageAPI_GetSize(
   LONGTAIL_VALIDATE_INPUT(ctx, out_size != 0, return EINVAL);
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
-
   SeaweedFSStorageAPI_OpenFile* open_file = (struct SeaweedFSStorageAPI_OpenFile*)f;
 
-  cpr::Response r = cpr::Head(cpr::Url{std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path)},
-                              cpr::Bearer{std::string(seaweed_storage_api->m_JWT)});
+  std::string url = std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path);
+
+  CurlResponse r = HttpHead(url, seaweed_storage_api->m_JWT);
 
   if (r.status_code >= 200 && r.status_code < 300) {
-    std::string length = r.header["Content-Length"];
-    *out_size = std::stoull(length);
-    return 0;
+    auto it = r.headers.find("Content-Length");
+    if (it != r.headers.end()) {
+      *out_size = std::stoull(it->second);
+      return 0;
+    }
+    return ENOENT;
   }
 
-  return r.status_code;
+  return r.status_code > 0 ? (int)r.status_code : EIO;
 }
 
 static int SeaweedFSStorageAPI_Read(
@@ -121,29 +368,27 @@ static int SeaweedFSStorageAPI_Read(
   LONGTAIL_VALIDATE_INPUT(ctx, output != 0, return EINVAL);
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
-
   SeaweedFSStorageAPI_OpenFile* open_file = (struct SeaweedFSStorageAPI_OpenFile*)f;
 
-  cpr::Response r = cpr::Get(cpr::Url{std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path)},
-                             cpr::Bearer{std::string(seaweed_storage_api->m_JWT)},
-                             cpr::ReserveSize{1024 * 1024 * 8});
+  std::string url = std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path);
+
+  CurlResponse r = HttpGet(url, seaweed_storage_api->m_JWT);
 
   if (r.status_code >= 200 && r.status_code < 300) {
-    if (offset > r.text.length()) {
-      return -1;
+    if (offset > r.body.length()) {
+      return EIO;
     }
 
-    uint64_t adjustedLength = r.text.length() - offset;
+    uint64_t adjustedLength = r.body.length() - offset;
     if (length < adjustedLength) {
       adjustedLength = length;
     }
 
-    memcpy(output, r.text.c_str() + offset, adjustedLength);
-  } else {
-    return -1;
+    memcpy(output, r.body.c_str() + offset, adjustedLength);
+    return 0;
   }
 
-  return 0;
+  return r.status_code > 0 ? (int)r.status_code : EIO;
 }
 
 static int SeaweedFSStorageAPI_OpenWriteFile(
@@ -210,27 +455,23 @@ static int SeaweedFSStorageAPI_Write(
   LONGTAIL_VALIDATE_INPUT(ctx, input != 0, return EINVAL);
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
-
   SeaweedFSStorageAPI_OpenFile* open_file = (struct SeaweedFSStorageAPI_OpenFile*)f;
 
   std::string url = std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path);
 
   if (offset > 0) {
-    url += std::string("?op=append");
+    url += "?op=append";
   }
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "SeaweedFSStorageAPI_Write: %s", url.c_str());
 
-  cpr::Response r = cpr::Post(cpr::Url{url},
-                              cpr::Bearer{std::string(seaweed_storage_api->m_JWT)},
-                              cpr::Multipart{
-                                  {"name", cpr::Buffer{(char*)input, (char*)input + length, "chunk.bin"}}});
+  CurlResponse r = HttpPostMultipart(url, seaweed_storage_api->m_JWT, input, length, "chunk.bin");
 
   if (r.status_code >= 200 && r.status_code < 300) {
     return 0;
-  } else {
-    return -1;
   }
+
+  return r.status_code > 0 ? (int)r.status_code : EIO;
 }
 
 static int SeaweedFSStorageAPI_SetSize(
@@ -351,10 +592,9 @@ static int SeaweedFSStorageAPI_RenameFile(struct Longtail_StorageAPI* storage_ap
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "SeaweedFSStorageAPI_RenameFile: %s", url.c_str());
 
-  cpr::Response r = cpr::Post(cpr::Url{url},
-                              cpr::Bearer{std::string(seaweed_storage_api->m_JWT)});
+  CurlResponse r = HttpPost(url, seaweed_storage_api->m_JWT);
 
-  return r.status_code >= 200 && r.status_code < 300 ? 0 : r.status_code;
+  return (r.status_code >= 200 && r.status_code < 300) ? 0 : (r.status_code > 0 ? (int)r.status_code : EIO);
 }
 
 static char* SeaweedFSStorageAPI_ConcatPath(struct Longtail_StorageAPI* storage_api, const char* root_path, const char* sub_path) {
@@ -395,9 +635,8 @@ static int SeaweedFSStorageAPI_IsDir(struct Longtail_StorageAPI* storage_api, co
   LONGTAIL_VALIDATE_INPUT(ctx, storage_api != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, path != 0, return EINVAL);
 
-  std::cerr << "SeaweedFSStorageAPI_IsDir called (not expected)" << std::endl;
-
-  return false;
+  // SeaweedFS doesn't have traditional directories
+  return 0;
 }
 
 static int SeaweedFSStorageAPI_IsFile(struct Longtail_StorageAPI* storage_api, const char* path) {
@@ -415,10 +654,11 @@ static int SeaweedFSStorageAPI_IsFile(struct Longtail_StorageAPI* storage_api, c
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
 
-  cpr::Response r = cpr::Head(cpr::Url{std::string(seaweed_storage_api->m_URL) + std::string(path)},
-                              cpr::Bearer{std::string(seaweed_storage_api->m_JWT)});
+  std::string url = std::string(seaweed_storage_api->m_URL) + std::string(path);
 
-  return r.status_code >= 200 && r.status_code < 300;
+  CurlResponse r = HttpHead(url, seaweed_storage_api->m_JWT);
+
+  return (r.status_code >= 200 && r.status_code < 300) ? 1 : 0;
 }
 
 static int SeaweedFSStorageAPI_RemoveDir(struct Longtail_StorageAPI* storage_api, const char* path) {
@@ -434,8 +674,7 @@ static int SeaweedFSStorageAPI_RemoveDir(struct Longtail_StorageAPI* storage_api
   LONGTAIL_VALIDATE_INPUT(ctx, storage_api != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, path != 0, return EINVAL);
 
-  std::cerr << "SeaweedFSStorageAPI_RemoveDir called (not expected)" << std::endl;
-
+  // SeaweedFS doesn't have traditional directories
   return 0;
 }
 
@@ -454,14 +693,15 @@ static int SeaweedFSStorageAPI_RemoveFile(struct Longtail_StorageAPI* storage_ap
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
 
-  cpr::Response r = cpr::Delete(cpr::Url{std::string(seaweed_storage_api->m_URL) + std::string(path)},
-                                cpr::Bearer{std::string(seaweed_storage_api->m_JWT)});
+  std::string url = std::string(seaweed_storage_api->m_URL) + std::string(path);
+
+  CurlResponse r = HttpDelete(url, seaweed_storage_api->m_JWT);
 
   if (r.status_code >= 200 && r.status_code < 300) {
     return 0;
   }
 
-  return r.status_code;
+  return r.status_code > 0 ? (int)r.status_code : EIO;
 }
 
 static int SeaweedFSStorageAPI_StartFind(struct Longtail_StorageAPI* storage_api, const char* path, Longtail_StorageAPI_HIterator* out_iterator) {
@@ -479,9 +719,8 @@ static int SeaweedFSStorageAPI_StartFind(struct Longtail_StorageAPI* storage_api
   LONGTAIL_VALIDATE_INPUT(ctx, path != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, out_iterator != 0, return EINVAL);
 
-  std::cerr << "SeaweedFSStorageAPI_StartFind called (not expected)" << std::endl;
-
-  return 0;
+  // Not implemented for SeaweedFS
+  return ENOENT;
 }
 
 static int SeaweedFSStorageAPI_FindNext(struct Longtail_StorageAPI* storage_api, Longtail_StorageAPI_HIterator iterator) {
@@ -497,9 +736,8 @@ static int SeaweedFSStorageAPI_FindNext(struct Longtail_StorageAPI* storage_api,
   LONGTAIL_VALIDATE_INPUT(ctx, storage_api != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, iterator != 0, return EINVAL);
 
-  std::cerr << "SeaweedFSStorageAPI_FindNext called (not expected)" << std::endl;
-
-  return 0;
+  // Not implemented for SeaweedFS
+  return ENOENT;
 }
 
 static void SeaweedFSStorageAPI_CloseFind(struct Longtail_StorageAPI* storage_api, Longtail_StorageAPI_HIterator iterator) {
@@ -534,9 +772,8 @@ static int SeaweedFSStorageAPI_GetEntryProperties(
   LONGTAIL_FATAL_ASSERT(ctx, iterator != 0, return EINVAL);
   LONGTAIL_FATAL_ASSERT(ctx, out_properties != 0, return EINVAL);
 
-  std::cerr << "SeaweedFSStorageAPI_GetEntryProperties called (not expected)" << std::endl;
-
-  return 1;
+  // Not implemented for SeaweedFS
+  return ENOENT;
 }
 
 static int SeaweedFSStorageAPI_LockFile(struct Longtail_StorageAPI* storage_api, const char* path, Longtail_StorageAPI_HLockFile* out_lock_file) {
@@ -559,12 +796,11 @@ static int SeaweedFSStorageAPI_LockFile(struct Longtail_StorageAPI* storage_api,
 
   strcpy(lock_path, path);
   strcat(lock_path, ".lock");
-  memset(lock_path + strlen(path) + 5, 0, 1);
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "SeaweedFSStorageAPI_LockFile: %s", lock_path);
 
+  // Wait for lock file to not exist
   while (SeaweedFSStorageAPI_IsFile(storage_api, lock_path)) {
-    std::cerr << "SeaweedFSStorageAPI_LockFile: waiting for file not to exist: " << lock_path << std::endl;
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
@@ -573,27 +809,24 @@ static int SeaweedFSStorageAPI_LockFile(struct Longtail_StorageAPI* storage_api,
       sizeof(struct SeaweedFSStorageAPI_OpenFile));
 
   if (!open_file) {
+    Longtail_Free(lock_path);
     return ENOMEM;
   }
 
   std::string url = std::string(seaweed_storage_api->m_URL) + std::string(lock_path);
 
-  cpr::Response r = cpr::Post(cpr::Url{url},
-                              cpr::Bearer{std::string(seaweed_storage_api->m_JWT)},
-                              cpr::Multipart{
-                                  {"name", ""}});
+  // Create lock file with empty content
+  CurlResponse r = HttpPostMultipart(url, seaweed_storage_api->m_JWT, "", 0, "lock");
 
   if (r.status_code >= 200 && r.status_code < 300) {
     memset(open_file, 0, sizeof(struct SeaweedFSStorageAPI_OpenFile));
-
     open_file->m_Path = lock_path;
-
     *out_lock_file = (Longtail_StorageAPI_HLockFile)open_file;
-
     return 0;
   } else {
-    std::cerr << "SeaweedFSStorageAPI_LockFile: failed to lock file: " << path << ". Code: " << r.status_code << ". Status line: " << r.status_line << std::endl;
-    return -1;
+    Longtail_Free(lock_path);
+    Longtail_Free(open_file);
+    return r.status_code > 0 ? (int)r.status_code : EIO;
   }
 }
 
@@ -607,20 +840,19 @@ static int SeaweedFSStorageAPI_UnlockFile(struct Longtail_StorageAPI* storage_ap
   LONGTAIL_FATAL_ASSERT(ctx, lock_file != 0, return EINVAL);
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
-
   SeaweedFSStorageAPI_OpenFile* open_file = (struct SeaweedFSStorageAPI_OpenFile*)lock_file;
 
   std::string url = std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path);
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "SeaweedFSStorageAPI_UnlockFile: %s", url.c_str());
 
-  cpr::Response r = cpr::Delete(cpr::Url{url},
-                                cpr::Bearer{std::string(seaweed_storage_api->m_JWT)});
+  CurlResponse r = HttpDelete(url, seaweed_storage_api->m_JWT);
 
   Longtail_Free(open_file->m_Path);
   Longtail_Free(open_file);
 
-  return r.status_code == 404 || (r.status_code >= 200 && r.status_code < 300) ? 0 : r.status_code;
+  // 404 is OK - lock file might have been deleted already
+  return (r.status_code == 404 || (r.status_code >= 200 && r.status_code < 300)) ? 0 : (r.status_code > 0 ? (int)r.status_code : EIO);
 }
 
 static char* SeaweedFSStorageAPI_GetParentPath(
@@ -659,9 +891,8 @@ static int SeaweedFSStorageAPI_MapFile(
   LONGTAIL_VALIDATE_INPUT(ctx, out_file_map != 0, return EINVAL)
   LONGTAIL_VALIDATE_INPUT(ctx, out_data_ptr != 0, return EINVAL)
 
-  std::cerr << "SeaweedFSStorageAPI_MapFile called (not expected)" << std::endl;
-
-  return 0;
+  // Not supported for remote storage
+  return ENOTSUP;
 }
 
 static void SeaweedFSStorageAPI_UnmapFile(
@@ -675,7 +906,7 @@ static void SeaweedFSStorageAPI_UnmapFile(
   LONGTAIL_VALIDATE_INPUT(ctx, storage_api != 0, return)
   LONGTAIL_VALIDATE_INPUT(ctx, m != 0, return)
 
-  std::cerr << "FSStorageAPI_UnmapFile called (not expected)" << std::endl;
+  // Not supported for remote storage
 }
 
 static int SeaweedFSStorageAPI_Init(
@@ -735,7 +966,7 @@ struct Longtail_StorageAPI* CreateSeaweedFSStorageAPI(const char* url, const cha
   }
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
-  seaweed_storage_api->m_URL = strdup(url);  // TODO MIKE HERE not sure if this is the right way to alloc this (or how do we dealloc)
+  seaweed_storage_api->m_URL = strdup(url);
   seaweed_storage_api->m_JWT = strdup(jwt);
   seaweed_storage_api->m_NumAddedBlocks = 0;
 
