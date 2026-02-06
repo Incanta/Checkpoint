@@ -9,8 +9,16 @@ import {
   type Modification,
   CreateApiClientAuth,
   GetAuthConfigUser,
+  hashFile,
 } from "@checkpointvcs/common";
-import { getWorkspaceState, saveWorkspaceState, type Workspace } from "./util";
+import {
+  getWorkspaceState,
+  saveWorkspaceState,
+  type Workspace,
+  type WorkspaceStateFile,
+} from "./util";
+import path from "path";
+import { promises as fs } from "fs";
 
 export async function submit(
   workspace: Workspace,
@@ -185,7 +193,7 @@ export async function submit(
   );
 
   if (decoded.error === 0) {
-    const workspaceState = await getWorkspaceState(workspace);
+    const workspaceState = await getWorkspaceState(workspace.localPath);
 
     workspaceState.changelistNumber = decoded.result.changelistNumber;
 
@@ -195,16 +203,36 @@ export async function submit(
     });
 
     for (const modification of modifications) {
-      const fileId = fileIds.find((f) => f.path === modification.path)?.id;
+      // Normalize the path (use forward slashes, no leading slash)
+      const normalizedPath = modification.path
+        .replace(/\\/g, "/")
+        .replace(/^\//, "");
+      const fileId = fileIds.find(
+        (f) => f.path === normalizedPath || f.path === modification.path,
+      )?.id;
 
       if (!fileId) {
         continue;
       }
 
       if (modification.delete) {
-        delete workspaceState.files[fileId];
+        // Remove the file entry using the path key
+        delete workspaceState.files[normalizedPath];
       } else {
-        workspaceState.files[fileId] = decoded.result.changelistNumber;
+        // Add/update the file entry with full info
+        const fullPath = path.join(workspace.localPath, modification.path);
+        const stat = await fs.stat(fullPath);
+        const hash = await hashFile(fullPath);
+
+        const stateFile: WorkspaceStateFile = {
+          fileId: fileId,
+          changelist: decoded.result.changelistNumber,
+          hash: hash,
+          size: stat.size,
+          mtime: stat.mtimeMs,
+        };
+
+        workspaceState.files[normalizedPath] = stateFile;
       }
     }
 

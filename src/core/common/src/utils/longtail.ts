@@ -107,6 +107,30 @@ export function CreateLongtailLibrary() {
       ],
       returns: FFIType.pointer,
     },
+    ReadFileFromVersionAsync: {
+      args: [
+        FFIType.cstring, // FilePath
+        FFIType.cstring, // VersionIndexName
+        FFIType.cstring, // RemoteBasePath
+        FFIType.cstring, // FilerUrl
+        FFIType.cstring, // JWT
+        FFIType.u64, // JWTExpirationMs
+        FFIType.int, // LogLevel
+      ],
+      returns: FFIType.pointer,
+    },
+    FreeReadFileHandle: {
+      args: [FFIType.pointer],
+      returns: FFIType.void,
+    },
+    GetReadFileData: {
+      args: [FFIType.pointer],
+      returns: FFIType.pointer,
+    },
+    GetReadFileSize: {
+      args: [FFIType.pointer],
+      returns: FFIType.u64,
+    },
   });
 
   return lib;
@@ -160,4 +184,31 @@ export function cancelHandle(handle: Uint8Array): void {
   const view = new DataView(handle.buffer);
 
   view.setUint32(260, 1, true);
+}
+
+/**
+ * Decode the extended ReadFileAsyncHandle structure.
+ * Layout: WrapperAsyncHandle (2320 bytes) + data pointer (8 bytes) + size (8 bytes)
+ */
+export function decodeReadFileHandle(handle: Uint8Array): {
+  currentStep: string;
+  changingStep: boolean;
+  canceled: boolean;
+  completed: boolean;
+  error: number;
+  dataPointer: bigint;
+  size: bigint;
+} {
+  const view = new DataView(handle.buffer);
+
+  return {
+    currentStep: Buffer.from(handle.slice(0, 256)).toString("utf-8"),
+    changingStep: view.getUint32(256, true) !== 0,
+    canceled: view.getUint32(260, true) !== 0,
+    completed: view.getUint32(264, true) !== 0,
+    error: view.getInt32(268, true),
+    // After the base handle (2320 bytes), we have data pointer and size
+    dataPointer: view.getBigUint64(2320, true),
+    size: view.getBigUint64(2328, true),
+  };
 }

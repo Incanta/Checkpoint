@@ -1,0 +1,10 @@
+connection:
+  master:
+    host: "master"
+  filer:
+    host: "checkpoint.localhost"
+    port: 80
+
+jwt:
+  signing-key: "secret"
+  expiration-ms: 500000

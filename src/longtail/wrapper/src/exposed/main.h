@@ -84,3 +84,13 @@ int32_t PullSync(
     const char* JWT,
     uint64_t JWTExpirationMs,
     WrapperAsyncHandle* handle);
+
+// Extended handle for ReadFileFromVersion that includes the file data
+struct ReadFileAsyncHandle {
+  WrapperAsyncHandle base;
+  void* data;
+  uint64_t size;
+};
+
+// ReadFileFromVersionAsync, FreeReadFileHandle, GetReadFileData, GetReadFileSize
+// are defined in read-file.cpp with DLL_EXPORT

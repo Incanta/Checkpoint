@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import type { Changelist } from "@prisma/client";
+import { FileChangeType, type Changelist } from "@prisma/client";
 
 export const changelistRouter = createTRPCRouter({
   getChangelist: protectedProcedure
@@ -136,7 +136,9 @@ export const changelistRouter = createTRPCRouter({
         });
       }
 
-      let startChangelist: Changelist | null = null;
+      let startChangelist:
+        | (Changelist & { user: { email: string } | null })
+        | null = null;
       if (typeof startNumber === "object") {
         // must be a date; find the first changelist less than this date
         startChangelist = await ctx.db.changelist.findFirst({
@@ -149,6 +151,13 @@ export const changelistRouter = createTRPCRouter({
           orderBy: {
             createdAt: "desc",
           },
+          include: {
+            user: {
+              select: {
+                email: true,
+              },
+            },
+          },
         });
       } else {
         startChangelist = await ctx.db.changelist.findUnique({
@@ -156,6 +165,13 @@ export const changelistRouter = createTRPCRouter({
             repoId_number: {
               repoId: input.repoId,
               number: startNumber,
+            },
+          },
+          include: {
+            user: {
+              select: {
+                email: true,
+              },
             },
           },
         });
@@ -183,6 +199,13 @@ export const changelistRouter = createTRPCRouter({
             repoId_number: {
               repoId: input.repoId,
               number: lastChangelist.parentNumber,
+            },
+          },
+          include: {
+            user: {
+              select: {
+                email: true,
+              },
             },
           },
         });
@@ -287,6 +310,7 @@ export const changelistRouter = createTRPCRouter({
         },
       });
 
+      const fileIdsForPaths: Record<string, string | undefined> = {};
       for (const mod of input.modifications) {
         const modPath = mod.path.replaceAll("\\", "/");
         let existingFile = modifiedFiles.find((f) => f.path === modPath);
@@ -300,6 +324,8 @@ export const changelistRouter = createTRPCRouter({
             },
           });
         }
+
+        fileIdsForPaths[mod.path] = existingFile?.id;
 
         if (mod.delete) {
           if (existingFile) {
@@ -328,8 +354,35 @@ export const changelistRouter = createTRPCRouter({
         data: { headNumber: nextNumber },
       });
 
-      // TODO: Handle file changes and workspace checkout logic
-      // For now, just return the basic changelist info
+      await ctx.db.fileChange.createMany({
+        data: input.modifications
+          .filter((mod) => fileIdsForPaths[mod.path])
+          .map((mod) => {
+            return {
+              repoId: input.repoId,
+              fileId: fileIdsForPaths[mod.path]!,
+              changelistNumber: nextNumber,
+              type: mod.delete ? FileChangeType.DELETE : FileChangeType.MODIFY,
+              oldPath: mod.oldPath ? mod.oldPath.replaceAll("\\", "/") : null,
+            };
+          }),
+      });
+
+      if (!input.keepCheckedOut) {
+        await ctx.db.fileCheckout.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            fileId: {
+              in: Object.values(fileIdsForPaths)
+                .filter((id) => !!id)
+                .map((id) => id!),
+            },
+          },
+          data: {
+            removedAt: new Date(),
+          },
+        });
+      }
 
       return {
         id: changelist.id,

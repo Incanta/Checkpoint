@@ -54,9 +54,17 @@ export async function exec(
   return result;
 }
 
+export interface WorkspaceStateFile {
+  fileId: string;
+  changelist: number;
+  hash: string;
+  size: number;
+  mtime?: number;
+}
+
 export interface WorkspaceState {
   changelistNumber: number;
-  files: Record<string, number>;
+  files: Record<string, WorkspaceStateFile>; // path -> file info
 }
 
 export interface WorkspaceConfig {
@@ -107,9 +115,9 @@ export async function saveWorkspaceDetails(
 }
 
 export async function getWorkspaceState(
-  workspace: Workspace,
+  localPath: string,
 ): Promise<WorkspaceState> {
-  const workspaceConfigDir = path.join(workspace.localPath, ".checkpoint");
+  const workspaceConfigDir = path.join(localPath, ".checkpoint");
 
   const statePath = path.join(workspaceConfigDir, "state.json");
   try {

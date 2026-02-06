@@ -8,8 +8,15 @@ import {
   GetLogLevel,
   type LongtailLogLevel,
   CreateApiClientAuth,
+  hashFile,
 } from "@checkpointvcs/common";
-import { getWorkspaceState, saveWorkspaceState, type Workspace } from "./util";
+import {
+  getWorkspaceState,
+  saveWorkspaceState,
+  type Workspace,
+  type WorkspaceState,
+  type WorkspaceStateFile,
+} from "./util";
 import { existsSync, promises as fs } from "fs";
 import path from "path";
 
@@ -67,7 +74,7 @@ export async function pull(
     throw new Error("Could not get changelist information");
   }
 
-  const workspaceState = await getWorkspaceState(workspace);
+  const workspaceState = await getWorkspaceState(workspace.localPath);
 
   const diff = DiffState(
     workspaceState.files,
@@ -168,6 +175,7 @@ export async function pull(
   }
 
   if (!errored) {
+    // Handle deletions
     const filesResponse = await client.file.getFiles.query({
       ids: diff.deletions,
     });
@@ -184,9 +192,46 @@ export async function pull(
       }
     }
 
+    // Build new state.json with path keys and file info
+    const serverStateTree = changelistResponse.stateTree as Record<
+      string,
+      number
+    >;
+    const allFileIds = Object.keys(serverStateTree);
+
+    // Get all file info from server
+    const allFilesResponse = await client.file.getFiles.query({
+      ids: allFileIds,
+    });
+
+    // Build the new state format: Record<path, WorkspaceStateFile>
+    const newFiles: Record<string, WorkspaceStateFile> = {};
+
+    for (const file of allFilesResponse) {
+      if (!file.path) continue;
+
+      // Normalize path: strip leading slash and use forward slashes
+      const normalizedPath = file.path.replace(/^\//, "").replace(/\\/g, "/");
+      const filePath = path.join(workspace.localPath, normalizedPath);
+      const changelist = serverStateTree[file.id];
+
+      if (existsSync(filePath)) {
+        const stat = await fs.stat(filePath);
+        const hash = await hashFile(filePath);
+
+        newFiles[normalizedPath] = {
+          fileId: file.id,
+          changelist: changelist,
+          hash: hash,
+          size: stat.size,
+          mtime: stat.mtimeMs,
+        };
+      }
+    }
+
     await saveWorkspaceState(workspace, {
       changelistNumber: changelistResponse.number,
-      files: changelistResponse.stateTree as Record<string, number>,
+      files: newFiles,
     });
   }
 

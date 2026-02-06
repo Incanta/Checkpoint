@@ -134,3 +134,28 @@ export function generateTextContent(lines: number = 100): string {
     return lineWords.join(" ");
   }).join("\n");
 }
+
+/**
+ * Read the workspace state.json file
+ */
+export async function readWorkspaceState(workspace: TestWorkspace): Promise<{
+  changelistNumber: number;
+  files: Record<
+    string,
+    {
+      fileId: string;
+      changelist: number;
+      hash: string;
+      size: number;
+      mtime?: number;
+    }
+  >;
+} | null> {
+  const statePath = path.join(workspace.path, ".checkpoint", "state.json");
+  try {
+    const content = await fs.readFile(statePath, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}

@@ -5,9 +5,12 @@ import {
   createTestFile,
   readTestFile,
   listTestFiles,
+  readWorkspaceState,
   type TestWorkspace,
 } from "../utils";
 import { promises as fs } from "fs";
+import os from "os";
+import path from "path";
 
 describe("System Integration Tests", () => {
   let env: TestEnvironment;
@@ -21,11 +24,24 @@ describe("System Integration Tests", () => {
     // Clean up all test workspaces
     for (const workspace of testWorkspaces) {
       try {
-        await workspace.cleanup();
+        // await workspace.cleanup();
       } catch (e) {
         console.warn(`Failed to cleanup workspace: ${e}`);
       }
     }
+
+    const authConfigStr = await fs.readFile(
+      path.join(os.homedir(), ".checkpoint", "auth.json"),
+      "utf-8",
+    );
+    const authConfig = JSON.parse(authConfigStr);
+    for (const user of env.users) {
+      delete authConfig[user.daemonId];
+    }
+    await fs.writeFile(
+      path.join(os.homedir(), ".checkpoint", "auth.json"),
+      JSON.stringify(authConfig, null, 2),
+    );
   });
 
   it("should complete full workflow: org creation, repo, workspace, version, collaboration", async () => {
@@ -156,6 +172,23 @@ This is a test file created at ${new Date().toISOString()}.
     console.log(`[Step 5] Verified history: ${history.length} changelists`);
 
     // ========================================
+    // Step 5b: Verify state.json was created correctly after submission
+    // ========================================
+    const user0StateAfterSubmit = await readWorkspaceState(user0Workspace);
+    expect(user0StateAfterSubmit).not.toBeNull();
+    expect(user0StateAfterSubmit?.changelistNumber).toBe(1);
+    expect(user0StateAfterSubmit?.files).toBeDefined();
+    expect(user0StateAfterSubmit?.files[testFileName]).toBeDefined();
+    expect(user0StateAfterSubmit?.files[testFileName].fileId).toBeDefined();
+    expect(user0StateAfterSubmit?.files[testFileName].changelist).toBe(1);
+    expect(user0StateAfterSubmit?.files[testFileName].hash).toBeDefined();
+    expect(user0StateAfterSubmit?.files[testFileName].size).toBeGreaterThan(0);
+
+    console.log(
+      `[Step 5b] Verified state.json: changelist=${user0StateAfterSubmit?.changelistNumber}, files=${Object.keys(user0StateAfterSubmit?.files ?? {}).length}`,
+    );
+
+    // ========================================
     // Step 6: users[0] adds users[1] to the org
     // ========================================
     const addUserResult = await env.users[0].apiClient.org.addUserToOrg.mutate({
@@ -221,6 +254,41 @@ This is a test file created at ${new Date().toISOString()}.
     console.log(`[Step 8] Pulled latest version to user 1 workspace`);
 
     // ========================================
+    // Step 8b: Verify user1's state.json after pull
+    // ========================================
+    const user1StateAfterPull = await readWorkspaceState(user1Workspace);
+    expect(user1StateAfterPull).not.toBeNull();
+    expect(user1StateAfterPull?.changelistNumber).toBe(1);
+    expect(user1StateAfterPull?.files[testFileName]).toBeDefined();
+    expect(user1StateAfterPull?.files[testFileName].fileId).toBe(
+      user0StateAfterSubmit?.files[testFileName].fileId,
+    );
+    expect(user1StateAfterPull?.files[testFileName].hash).toBe(
+      user0StateAfterSubmit?.files[testFileName].hash,
+    );
+
+    console.log(
+      `[Step 8b] Verified user1 state.json matches user0's state after pull`,
+    );
+
+    // ========================================
+    // Step 8c: Verify pending changes shows no changes after pull
+    // ========================================
+    const pendingChangesAfterPull =
+      await env.users[1].daemonClient.workspaces.refresh.query({
+        daemonId: env.users[1].daemonId,
+        workspaceId: user1WorkspaceId,
+      });
+
+    expect(pendingChangesAfterPull).toBeDefined();
+    expect(pendingChangesAfterPull?.numChanges).toBe(0);
+    expect(Object.keys(pendingChangesAfterPull?.files ?? {}).length).toBe(0);
+
+    console.log(
+      `[Step 8c] Verified no pending changes after pull: numChanges=${pendingChangesAfterPull?.numChanges}`,
+    );
+
+    // ========================================
     // Step 9: Verify that the local workspaces are identical
     // ========================================
     // List files in both workspaces
@@ -267,6 +335,27 @@ This section was added by user 1 to test modification syncing.
     expect(modifiedContent).toBe(modifiedReadmeContent);
 
     console.log(`[Step 10] Modified README.md in user 1 workspace`);
+
+    // ========================================
+    // Step 10b: Verify pending changes detects the modification
+    // ========================================
+    const pendingChangesAfterModify =
+      await env.users[1].daemonClient.workspaces.refresh.query({
+        daemonId: env.users[1].daemonId,
+        workspaceId: user1WorkspaceId,
+      });
+
+    expect(pendingChangesAfterModify).toBeDefined();
+    expect(pendingChangesAfterModify?.numChanges).toBe(1);
+    expect(pendingChangesAfterModify?.files[testFileName]).toBeDefined();
+    // Status should be ChangedNotCheckedOut (10) or ChangedCheckedOut (11)
+    expect([10, 11]).toContain(
+      pendingChangesAfterModify?.files[testFileName]?.status,
+    );
+
+    console.log(
+      `[Step 10b] Verified pending changes detected modification: ${JSON.stringify(pendingChangesAfterModify?.files[testFileName])}`,
+    );
 
     // ========================================
     // Step 11: users[1] submits the modification
@@ -357,6 +446,30 @@ Created at ${new Date().toISOString()}
 
     console.log(
       `[Step 14] Added ${secondFileName} and removed ${testFileName} in user 1 workspace`,
+    );
+
+    // ========================================
+    // Step 14b: Verify pending changes detects both addition and deletion
+    // ========================================
+    const pendingChangesAfterAddDelete =
+      await env.users[1].daemonClient.workspaces.refresh.query({
+        daemonId: env.users[1].daemonId,
+        workspaceId: user1WorkspaceId,
+      });
+
+    expect(pendingChangesAfterAddDelete).toBeDefined();
+    expect(pendingChangesAfterAddDelete?.numChanges).toBe(2);
+
+    // New file should be detected as Local (status 2)
+    expect(pendingChangesAfterAddDelete?.files[secondFileName]).toBeDefined();
+    expect(pendingChangesAfterAddDelete?.files[secondFileName]?.status).toBe(2); // FileStatus.Local
+
+    // Deleted file should be detected as Deleted (status 5)
+    expect(pendingChangesAfterAddDelete?.files[testFileName]).toBeDefined();
+    expect(pendingChangesAfterAddDelete?.files[testFileName]?.status).toBe(5); // FileStatus.Deleted
+
+    console.log(
+      `[Step 14b] Verified pending changes: added=${secondFileName}, deleted=${testFileName}`,
     );
 
     // ========================================
@@ -461,6 +574,25 @@ Created at ${new Date().toISOString()}
 
     console.log(
       `[Step 17] VERIFIED: Workspaces are identical after add/delete operations!`,
+    );
+
+    // ========================================
+    // Step 17b: Verify state.json correctly reflects the add/delete operation
+    // ========================================
+    const user0StateAfterAddDelete = await readWorkspaceState(user0Workspace);
+    expect(user0StateAfterAddDelete).not.toBeNull();
+    expect(user0StateAfterAddDelete?.changelistNumber).toBe(3);
+
+    // CONTRIBUTING.md should be in state.json
+    expect(user0StateAfterAddDelete?.files[secondFileName]).toBeDefined();
+    expect(user0StateAfterAddDelete?.files[secondFileName]?.changelist).toBe(3);
+    expect(user0StateAfterAddDelete?.files[secondFileName]?.hash).toBeDefined();
+
+    // README.md should NOT be in state.json (deleted)
+    expect(user0StateAfterAddDelete?.files[testFileName]).toBeUndefined();
+
+    console.log(
+      `[Step 17b] Verified state.json: changelistNumber=${user0StateAfterAddDelete?.changelistNumber}, has CONTRIBUTING.md=${!!user0StateAfterAddDelete?.files[secondFileName]}, has README.md=${!!user0StateAfterAddDelete?.files[testFileName]}`,
     );
 
     // ========================================
