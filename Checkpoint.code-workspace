@@ -22,11 +22,11 @@
     },
     {
       "name": "Unreal",
-      "path": "src/unreal"
+      "path": "src/clients/unreal"
     },
     {
       "name": "Desktop",
-      "path": "src/desktop"
+      "path": "src/clients/desktop"
     },
     {
       "name": "Root",
