@@ -8,16 +8,16 @@ import {
 } from "yup";
 import jwt from "njwt";
 import config from "@incanta/config";
+import { CreateApiClientAuthManual } from "@checkpointvcs/common";
 import {
-  CreateApiClientAuthManual,
-  CreateLongtailLibrary,
-  createStringBuffer,
-  decodeHandle,
+  mergeAsync,
+  pollHandle,
+  freeHandle,
   GetLogLevel,
   type LongtailLogLevel,
-} from "@checkpointvcs/common";
-import { ptr, toArrayBuffer } from "bun:ffi";
-import type { BunRequest } from "bun";
+} from "@checkpointvcs/longtail-addon";
+import { Router } from "express";
+import multer from "multer";
 
 interface JWTClaims {
   iss: string;
@@ -52,162 +52,139 @@ interface RequestResponse {
   number: number;
 }
 
-export function routeSubmit() {
-  return {
-    "/submit": {
-      POST: async (request: BunRequest) => {
-        const body = (await request.formData()) as any;
+const upload = multer({ storage: multer.memoryStorage() });
 
-        const payload: RequestSchema = JSON.parse(body.get("payload"));
+export function routeSubmit(): Router {
+  const router = Router();
 
-        try {
-          await RequestSchema.validate(payload);
-        } catch (e: any) {
-          if (e instanceof ValidationError) {
-            console.error(e.errors.join("\n"));
-            return new Response(e.errors.join("\n"), { status: 500 });
-          }
-        }
+  router.post("/submit", upload.single("storeIndex"), async (req, res) => {
+    const payload: RequestSchema = JSON.parse(req.body.payload);
 
-        const authorizationHeader = request.headers.toJSON()["authorization"];
-        if (!authorizationHeader) {
-          return new Response("Unauthorized", { status: 401 });
-        }
+    try {
+      await RequestSchema.validate(payload);
+    } catch (e: any) {
+      if (e instanceof ValidationError) {
+        console.error(e.errors.join("\n"));
+        res.status(500).send(e.errors.join("\n"));
+        return;
+      }
+    }
 
-        const [type, token] = authorizationHeader.split(" ");
+    const authorizationHeader = req.headers["authorization"];
+    if (!authorizationHeader) {
+      res.status(401).send("Unauthorized");
+      return;
+    }
 
-        if (type !== "Bearer") {
-          console.error(2);
-          return new Response("Unauthorized", { status: 401 });
-        }
+    const [type, token] = authorizationHeader.split(" ");
 
-        const verifiedToken = jwt.verify(
-          token,
-          config.get("seaweedfs.jwt.signing-key"),
+    if (type !== "Bearer") {
+      console.error(2);
+      res.status(401).send("Unauthorized");
+      return;
+    }
+
+    const verifiedToken = jwt.verify(
+      token,
+      config.get("seaweedfs.jwt.signing-key"),
+    );
+
+    if (!verifiedToken) {
+      console.error(3);
+      res.status(401).send("Unauthorized");
+      return;
+    }
+
+    const claims: JWTClaims = verifiedToken.body.toJSON() as any;
+
+    if (req.file) {
+      const storeIndexBuffer = req.file.buffer;
+
+      if (!storeIndexBuffer) {
+        res.status(400).send("Store index required");
+        return;
+      }
+
+      if (!payload.versionIndex) {
+        res
+          .status(400)
+          .send("Version index is required if you are uploading a store index");
+        return;
+      }
+
+      const filerUrl = `http${
+        config.get<boolean>("seaweedfs.connection.filer.tls") ? "s" : ""
+      }://${config.get<string>(
+        "seaweedfs.connection.filer.host",
+      )}:${config.get<string>("seaweedfs.connection.filer.port")}`;
+
+      const basePath = `/${claims.orgId}/${claims.repoId}`;
+
+      const logLevel = GetLogLevel(
+        config.get<LongtailLogLevel>("longtail.log-level"),
+      );
+
+      const handle = mergeAsync({
+        remoteBasePath: basePath,
+        filerUrl,
+        jwt: token,
+        storeIndexBuffer: Buffer.from(storeIndexBuffer),
+        logLevel,
+      });
+
+      if (!handle) {
+        throw new Error("Failed to create longtail handle");
+      }
+
+      const { status } = await pollHandle(handle, {
+        onStep: (step) => console.log(`Current step: ${step}`),
+      });
+
+      console.log(
+        `Completed with exit code: ${status.error} and last step ${status.currentStep}`,
+      );
+
+      freeHandle(handle);
+    } else if (
+      payload.modifications.some((m) => !m.delete) ||
+      payload.versionIndex
+    ) {
+      res
+        .status(400)
+        .send(
+          "The storeIndex multipart is required if you have any new/modified files.",
         );
+      return;
+    }
 
-        if (!verifiedToken) {
-          console.error(3);
-          return new Response("Unauthorized", { status: 401 });
-        }
+    const client = await CreateApiClientAuthManual(
+      config.get<string>("checkpoint.api.url"),
+      payload.apiToken,
+    );
 
-        const claims: JWTClaims = verifiedToken.body.toJSON() as any;
+    try {
+      const createChangelistResponse =
+        await client.changelist.createChangelist.mutate({
+          message: payload.message,
+          repoId: claims.repoId,
+          versionIndex: payload.versionIndex,
+          branchName: payload.branchName,
+          modifications: payload.modifications,
+          keepCheckedOut: payload.keepCheckedOut,
+          workspaceId: payload.workspaceId,
+        });
 
-        if (body.has("storeIndex")) {
-          const additionalStoreIndex: Blob = body.get("storeIndex");
+      const responseMessage: RequestResponse = {
+        id: createChangelistResponse.id,
+        number: createChangelistResponse.number,
+      };
 
-          if (!additionalStoreIndex) {
-            return new Response("Store index required", { status: 400 });
-          }
+      res.status(200).json(responseMessage);
+    } catch (e: any) {
+      console.error(e.message);
+      res.status(500).send(e.message);
+    }
+  });
 
-          if (!payload.versionIndex) {
-            return new Response(
-              "Version index is required if you are uploading a store index",
-              { status: 400 },
-            );
-          }
-
-          const filerUrl = `http${
-            config.get<boolean>("seaweedfs.connection.filer.tls") ? "s" : ""
-          }://${config.get<string>(
-            "seaweedfs.connection.filer.host",
-          )}:${config.get<string>("seaweedfs.connection.filer.port")}`;
-
-          const basePath = `/${claims.orgId}/${claims.repoId}`;
-
-          const lib = CreateLongtailLibrary();
-          const logLevel = GetLogLevel(
-            config.get<LongtailLogLevel>("longtail.log-level"),
-          );
-
-          const basePathBuffer = createStringBuffer(basePath);
-          const filerUrlBuffer = createStringBuffer(filerUrl);
-          const tokenBuffer = createStringBuffer(token);
-          const storeIndexBuffer = await additionalStoreIndex.arrayBuffer();
-
-          const asyncHandle = lib.MergeAsync(
-            ptr(basePathBuffer.buffer),
-            ptr(filerUrlBuffer.buffer),
-            ptr(tokenBuffer.buffer),
-            ptr(storeIndexBuffer),
-            storeIndexBuffer.byteLength,
-            logLevel,
-          );
-
-          if (asyncHandle === 0 || asyncHandle === null) {
-            throw new Error("Failed to create longtail handle");
-          }
-
-          let flagForGC = true;
-          let lastStep = "";
-
-          while (true) {
-            const decoded = decodeHandle(
-              new Uint8Array(toArrayBuffer(asyncHandle, 0, 272)),
-            );
-
-            if (decoded.currentStep !== lastStep) {
-              console.log(`Current step: ${decoded.currentStep}`);
-              lastStep = decoded.currentStep;
-            }
-
-            if (decoded.completed) {
-              console.log(
-                `Completed with exit code: ${decoded.error} and last step ${decoded.currentStep}`,
-              );
-              flagForGC = false;
-              break;
-            }
-
-            await new Promise<void>((resolve) => setTimeout(resolve, 10));
-          }
-
-          if (flagForGC) {
-            console.log(basePathBuffer);
-            console.log(filerUrlBuffer);
-            console.log(tokenBuffer);
-            console.log(storeIndexBuffer);
-          }
-
-          lib.FreeHandle(asyncHandle);
-        } else if (
-          payload.modifications.some((m) => !m.delete) ||
-          payload.versionIndex
-        ) {
-          return new Response(
-            "The storeIndex multipart is required if you have any new/modified files.",
-            { status: 400 },
-          );
-        }
-
-        const client = await CreateApiClientAuthManual(
-          config.get<string>("checkpoint.api.url"),
-          payload.apiToken,
-        );
-
-        try {
-          const createChangelistResponse =
-            await client.changelist.createChangelist.mutate({
-              message: payload.message,
-              repoId: claims.repoId,
-              versionIndex: payload.versionIndex,
-              branchName: payload.branchName,
-              modifications: payload.modifications,
-              keepCheckedOut: payload.keepCheckedOut,
-              workspaceId: payload.workspaceId,
-            });
-
-          const responseMessage: RequestResponse = {
-            id: createChangelistResponse.id,
-            number: createChangelistResponse.number,
-          };
-
-          return new Response(JSON.stringify(responseMessage), { status: 200 });
-        } catch (e: any) {
-          console.error(e.message);
-          return new Response(e.message, { status: 500 });
-        }
-      },
-    },
-  };
+  return router;
 }

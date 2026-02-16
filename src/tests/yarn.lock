@@ -11,12 +11,6 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@checkpointvcs/client@link:../core/client::locator=%40checkpointvcs%2Ftests%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@checkpointvcs/client@link:../core/client::locator=%40checkpointvcs%2Ftests%40workspace%3A."
-  languageName: node
-  linkType: soft
-
 "@checkpointvcs/common@link:../core/common::locator=%40checkpointvcs%2Ftests%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@checkpointvcs/common@link:../core/common::locator=%40checkpointvcs%2Ftests%40workspace%3A."
@@ -34,7 +28,6 @@ __metadata:
   resolution: "@checkpointvcs/tests@workspace:."
   dependencies:
     "@checkpointvcs/app": "link:../app"
-    "@checkpointvcs/client": "link:../core/client"
     "@checkpointvcs/common": "link:../core/common"
     "@checkpointvcs/daemon": "link:../core/daemon"
     "@trpc/client": "npm:^11.8.1"

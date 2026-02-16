@@ -1,12 +1,12 @@
-import { publicProcedure, router } from "../trpc";
-import { AuthenticateDevice } from "@checkpointvcs/client";
+import { publicProcedure, router } from "../trpc.js";
 import {
   CreateApiClientAuth,
   CreateApiClientAuthManual,
   GetAllAuthConfigUsers,
 } from "@checkpointvcs/common";
 import { z } from "zod";
-import type { User } from "daemon/src/types";
+import { User } from "../../types/index.js";
+import { AuthenticateDevice } from "../../util/index.js";
 
 export const authRouter = router({
   login: publicProcedure

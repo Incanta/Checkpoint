@@ -1,10 +1,10 @@
-import { router } from "./trpc";
-import { authRouter } from "./routers/auth";
+import { router } from "./trpc.js";
+import { authRouter } from "./routers/auth.js";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
-import { GetDaemonListenPort } from "..";
-import { workspaceRouter } from "./routers/workspace";
-import { orgRouter } from "./routers/org";
-import { repoRouter } from "./routers/repo";
+import { GetDaemonListenPort } from "../index.js";
+import { workspaceRouter } from "./routers/workspace.js";
+import { orgRouter } from "./routers/org.js";
+import { repoRouter } from "./routers/repo.js";
 
 const appRouter = router({
   auth: authRouter,

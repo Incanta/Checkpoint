@@ -1,16 +1,16 @@
 import path from "path";
-import { DaemonConfig } from "./daemon-config";
-import { InitLogger, Logger } from "./logging";
+import { DaemonConfig } from "./daemon-config.js";
+import { InitLogger, Logger } from "./logging.js";
 import {
   FileStatus,
   FileType,
   type File,
   type Workspace,
   type WorkspacePendingChanges,
-} from "./types";
+} from "./types/index.js";
 import { watch, type FSWatcher, promises as fs, existsSync } from "fs";
 import { CreateApiClientAuth, hashFile } from "@checkpointvcs/common";
-import { getWorkspaceState, type WorkspaceState } from "@checkpointvcs/client";
+import { getWorkspaceState, type WorkspaceState } from "./util/index.js";
 
 export class DaemonManager {
   private static instance: DaemonManager | null = null;
@@ -185,6 +185,7 @@ export class DaemonManager {
               : FileStatus.ChangedNotCheckedOut,
           id: baselineFile?.fileId ?? null,
           changelist: baselineFile?.changelist ?? null,
+          checkouts: [],
         };
 
         result.files[relativePath] = pendingFile;
@@ -209,6 +210,7 @@ export class DaemonManager {
           status: FileStatus.Deleted,
           id: baselineFile.fileId,
           changelist: baselineFile.changelist,
+          checkouts: [],
         };
 
         result.files[relativePath] = pendingFile;
@@ -244,6 +246,7 @@ export class DaemonManager {
               status: FileStatus.NotChangedCheckedOut,
               id: checkout.fileId,
               changelist: baselineFile.changelist,
+              checkouts: [],
             };
 
             result.files[relativePath] = pendingFile;

@@ -1,4 +1,4 @@
-import { publicProcedure, router } from "../trpc";
+import { publicProcedure, router } from "../trpc.js";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
 

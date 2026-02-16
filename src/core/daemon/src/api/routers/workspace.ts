@@ -1,18 +1,14 @@
-import { publicProcedure, router } from "../trpc";
+import { publicProcedure, router } from "../trpc.js";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
-import { DaemonManager } from "daemon/src/daemon-manager";
-import { DaemonConfig } from "daemon/src/daemon-config";
 import fs from "fs/promises";
 import path from "path";
-import { pull, submit, readFileFromChangelist } from "@checkpointvcs/client";
-import {
-  FileStatus,
-  FileType,
-  type File,
-  type Workspace,
-} from "daemon/src/types";
-import { getFileStatuses } from "daemon/src/file-status";
+import { DaemonManager } from "../../daemon-manager.js";
+import { File, FileStatus, FileType, Workspace } from "../../types/index.js";
+import { DaemonConfig } from "../../daemon-config.js";
+import { getFileStatuses } from "../../file-status.js";
+import { pull, readFileFromChangelist, submit } from "../../util/index.js";
+import { TRPCError } from "@trpc/server";
 
 export const workspaceRouter = router({
   list: {
@@ -164,6 +160,48 @@ export const workspaceRouter = router({
         pendingChangesMap,
       );
 
+      // Fetch active checkouts for files in this directory
+      const client = await CreateApiClientAuth(input.daemonId);
+      const filePaths = fileInfos
+        .filter((fi) => !fi.isDirectory)
+        .map((fi) => fi.relativePath);
+
+      const checkoutsMap: Record<
+        string,
+        Array<{
+          id: string;
+          locked: boolean;
+          workspaceId: string;
+          userId: string;
+          user: {
+            id: string;
+            email: string;
+            name: string | null;
+            username: string | null;
+          };
+        }>
+      > = {};
+
+      if (filePaths.length > 0) {
+        const checkouts = await client.file.getActiveCheckoutsForFiles.query({
+          repoId: workspace.repoId,
+          filePaths,
+        });
+
+        for (const checkout of checkouts) {
+          if (!checkoutsMap[checkout.filePath]) {
+            checkoutsMap[checkout.filePath] = [];
+          }
+          checkoutsMap[checkout.filePath].push({
+            id: checkout.id,
+            locked: checkout.locked,
+            workspaceId: checkout.workspaceId,
+            userId: checkout.userId,
+            user: checkout.user,
+          });
+        }
+      }
+
       // Build children with stats
       const children = await Promise.all(
         fileInfos.map(async ({ relativePath, entry }) => {
@@ -183,6 +221,7 @@ export const workspaceRouter = router({
             status: statusResult?.status ?? 0,
             id: statusResult?.fileId ?? null,
             changelist: statusResult?.changelist ?? null,
+            checkouts: checkoutsMap[relativePath] ?? [],
           };
 
           return f;
@@ -383,9 +422,10 @@ export const workspaceRouter = router({
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
-        throw new Error(
-          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
-        );
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        });
       }
 
       const workspace = workspaces.find((w) => w.id === input.workspaceId);
@@ -399,28 +439,36 @@ export const workspaceRouter = router({
       const repo = await client.repo.getRepo.query({ id: workspace.repoId });
 
       if (!repo) {
-        throw new Error(
-          `Could not find repo for workspace ID ${input.workspaceId}`,
-        );
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Could not find repo for workspace ID ${input.workspaceId}`,
+        });
       }
 
-      await submit(
-        {
-          repoId: workspace.repoId,
-          branchName: workspace.branchName,
-          workspaceName: workspace.name,
-          localPath: workspace.localPath,
-          daemonId: workspace.daemonId,
-        },
-        repo.orgId,
-        input.message,
-        input.modifications,
-        workspace.id,
-        input.keepCheckedOut ?? false,
-      );
+      try {
+        await submit(
+          {
+            repoId: workspace.repoId,
+            branchName: workspace.branchName,
+            workspaceName: workspace.name,
+            localPath: workspace.localPath,
+            daemonId: workspace.daemonId,
+          },
+          repo.orgId,
+          input.message,
+          input.modifications,
+          workspace.id,
+          input.keepCheckedOut ?? false,
+        );
 
-      // Reload workspace state from the updated state.json
-      await manager.reloadWorkspaceState(workspace);
+        // Reload workspace state from the updated state.json
+        await manager.reloadWorkspaceState(workspace);
+      } catch (e: any) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: e.message ?? JSON.stringify(e),
+        });
+      }
     }),
 
   history: publicProcedure
@@ -490,6 +538,170 @@ export const workspaceRouter = router({
       return changelists;
     }),
 
+  createLabel: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        name: z.string().min(1),
+        changelistNumber: z.number().int().min(0),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      return client.label.createLabel.mutate({
+        repoId: workspace.repoId,
+        name: input.name,
+        number: input.changelistNumber,
+      });
+    }),
+
+  getLabels: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      return client.label.getLabels.query({
+        repoId: workspace.repoId,
+      });
+    }),
+
+  deleteLabel: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        labelId: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      return client.label.deleteLabel.mutate({
+        id: input.labelId,
+        repoId: workspace.repoId,
+      });
+    }),
+
+  renameLabel: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        labelId: z.string(),
+        name: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      return client.label.renameLabel.mutate({
+        id: input.labelId,
+        repoId: workspace.repoId,
+        name: input.name,
+      });
+    }),
+
+  changeLabelChangelist: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        labelId: z.string(),
+        number: z.number().int().min(0),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      return client.label.changeChangelist.mutate({
+        id: input.labelId,
+        repoId: workspace.repoId,
+        number: input.number,
+      });
+    }),
+
   fileHistory: publicProcedure
     .input(
       z.object({
@@ -529,6 +741,152 @@ export const workspaceRouter = router({
       });
 
       return fileHistory;
+    }),
+
+  changelistFiles: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        changelistNumber: z.number(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      const files = await client.changelist.getChangelistFiles.query({
+        repoId: workspace.repoId,
+        changelistNumber: input.changelistNumber,
+      });
+
+      return files;
+    }),
+
+  checkout: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        path: z.string(),
+        locked: z.boolean().default(false),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      const normalizedPath = input.path
+        .replace(/^[/\\]/, "")
+        .replace(/\\/g, "/");
+
+      return client.file.checkout.mutate({
+        repoId: workspace.repoId,
+        workspaceId: workspace.id,
+        filePath: normalizedPath,
+        locked: input.locked,
+      });
+    }),
+
+  undoCheckout: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        path: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      const normalizedPath = input.path
+        .replace(/^[/\\]/, "")
+        .replace(/\\/g, "/");
+
+      return client.file.undoCheckout.mutate({
+        repoId: workspace.repoId,
+        workspaceId: workspace.id,
+        filePath: normalizedPath,
+      });
+    }),
+
+  getActiveCheckoutsForFiles: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        filePaths: z.array(z.string()),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      const normalizedPaths = input.filePaths.map((p) =>
+        p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+      );
+
+      return client.file.getActiveCheckoutsForFiles.query({
+        repoId: workspace.repoId,
+        filePaths: normalizedPaths,
+      });
     }),
 
   fileHistoryDiff: publicProcedure

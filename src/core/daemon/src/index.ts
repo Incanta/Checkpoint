@@ -3,11 +3,11 @@ import superjson from "superjson";
 import { existsSync, promises as fs } from "fs";
 import { homedir } from "os";
 import path from "path";
-import type { AppRouter } from "./api";
+import type { AppRouter } from "./api/index.js";
 
-export type { AppRouter } from "./api";
+export type { AppRouter } from "./api/index.js";
 
-export * from "./types";
+export * from "./types/index.js";
 
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export async function CreateDaemonClient() {

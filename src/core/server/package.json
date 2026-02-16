@@ -2,12 +2,23 @@
   "name": "@checkpointvcs/server",
   "version": "1.0.0",
   "description": "",
-  "main": "src/index.ts",
+  "main": "lib/index.js",
   "license": "(Elastic-2.0 OR AGPL-3.0)",
   "private": true,
   "type": "module",
-  "scripts": {},
+  "scripts": {
+    "build": "cd ../common && yarn build && cd ../server && tsgo -p .",
+    "start": "yarn build && NODE_CONFIG_ENV=dev node --inspect=0.0.0.0:9230 lib/index.js"
+  },
   "dependencies": {
-    "@checkpointvcs/common": "workspace:*"
+    "@checkpointvcs/common": "portal:../common",
+    "@checkpointvcs/longtail-addon": "portal:../../longtail/addon",
+    "express": "^5.2.1",
+    "multer": "^2.0.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.0.0",
+    "@typescript/native-preview": "^7.0.0-dev.20260212.1"
   }
 }

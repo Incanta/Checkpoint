@@ -7,7 +7,7 @@ FOR %%a IN ("%SOURCEFOLDER:~0,-1%") DO SET BASE_DIR=%%~dpa
 call !BASE_DIR!arch_helper.bat
 
 set CXXFLAGS=-std=gnu99 -g -m64 -maes -mssse3 -msse4.1 -pthread  -DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00
-set TARGET=longtail_static
+set TARGET=longtail
 
 call !BASE_DIR!all_sources.bat
 

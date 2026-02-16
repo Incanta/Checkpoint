@@ -22,22 +22,32 @@ file(COPY Makefile DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 file(GLOB SOURCES "src/*/*.cpp")
 
-add_library(LongtailWrapper SHARED ${SOURCES})
+add_library(LongtailWrapper STATIC ${SOURCES})
 
 target_include_directories(LongtailWrapper PRIVATE
   longtail/include/src
   longtail/include/lib
 )
 
+# Link the static longtail library
+# Look in release/ first (MSVC builds produce longtail.lib there),
+# then debug/ (MinGW builds produce liblongtail.a there)
 find_library(LongtailLibrary
-  longtail
-  PATHS ${CMAKE_CURRENT_SOURCE_DIR}/longtail/debug/)
+  NAMES longtail liblongtail
+  PATHS
+    ${CMAKE_CURRENT_SOURCE_DIR}/longtail/release/
+    ${CMAKE_CURRENT_SOURCE_DIR}/longtail/debug/
+  NO_DEFAULT_PATH)
 
+# For a static library, we record dependencies so consumers can link them
 target_link_libraries(
   LongtailWrapper
   ${LongtailLibrary}
   libcurl
 )
+
+# Ensure position-independent code for potential use in shared libraries (e.g., Node addon)
+set_target_properties(LongtailWrapper PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(LongtailWrapper PRIVATE ${curl_SOURCE_DIR}/include ${curl_BINARY_DIR}/include/curl)
 
@@ -59,12 +69,11 @@ endif()
 #   ARCHIVE DESTINATION lib
 # )
 
-# Install the longtail library files to core/libraries/
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/longtail/debug/
-        DESTINATION ${CMAKE_INSTALL_PREFIX}
-        FILES_MATCHING PATTERN "longtail.*")
-
-# Install build outputs to core/libraries/
-install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/Debug/
-        DESTINATION ${CMAKE_INSTALL_PREFIX}
-        FILES_MATCHING PATTERN "*.*")
+# Install static library and header to core/libraries/
+install(TARGETS LongtailWrapper
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}
+)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/exposed/exposed.h
+  DESTINATION ${CMAKE_INSTALL_PREFIX}
+  RENAME checkpoint.h
+)

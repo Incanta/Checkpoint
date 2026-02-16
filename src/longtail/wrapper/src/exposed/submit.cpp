@@ -441,59 +441,57 @@ int32_t SubmitSync(
   std::stringstream version_file_stream;
   void* missing_store_index_buffer = 0;
   size_t missing_store_index_size;
-  if (seaweed_actual_api->m_NumAddedBlocks > 0) {
-    version_file_stream << std::string("0x") << std::hex << source_version_index->m_Version << std::string(".lvi");
+  version_file_stream << std::string("0x") << std::hex << source_version_index->m_Version << std::string(".lvi");
 
-    std::stringstream version_index_stream;
-    version_index_stream << std::string(RemoteBasePath) << std::string("/versions/") << version_file_stream.str();
-    std::string target_version_index_path = version_index_stream.str().c_str();
+  std::stringstream version_index_stream;
+  version_index_stream << std::string(RemoteBasePath) << std::string("/versions/") << version_file_stream.str();
+  std::string target_version_index_path = version_index_stream.str().c_str();
 
-    SetHandleStep(handle, "Writing version index");
+  SetHandleStep(handle, "Writing version index");
 
-    err = Longtail_WriteVersionIndex(
-        seaweed_storage_api,
-        source_version_index,
-        target_version_index_path.c_str());
+  err = Longtail_WriteVersionIndex(
+      seaweed_storage_api,
+      source_version_index,
+      target_version_index_path.c_str());
 
-    if (err) {
-      SetHandleStep(handle, "Failed to write version index");
-      handle->error = err;
-      handle->completed = 1;
-      Longtail_Free(remote_missing_store_index);
-      Longtail_Free(existing_remote_store_index);
-      Longtail_Free(source_version_index);
-      SAFE_DISPOSE_API(chunker_api);
-      SAFE_DISPOSE_API(store_block_store_api);
-      SAFE_DISPOSE_API(store_block_fsstore_api);
-      SAFE_DISPOSE_API(file_storage_api);
-      SAFE_DISPOSE_API(seaweed_storage_api);
-      SAFE_DISPOSE_API(compression_registry);
-      SAFE_DISPOSE_API(hash_registry);
-      SAFE_DISPOSE_API(job_api);
-      return err;
-    }
+  if (err) {
+    SetHandleStep(handle, "Failed to write version index");
+    handle->error = err;
+    handle->completed = 1;
+    Longtail_Free(remote_missing_store_index);
+    Longtail_Free(existing_remote_store_index);
+    Longtail_Free(source_version_index);
+    SAFE_DISPOSE_API(chunker_api);
+    SAFE_DISPOSE_API(store_block_store_api);
+    SAFE_DISPOSE_API(store_block_fsstore_api);
+    SAFE_DISPOSE_API(file_storage_api);
+    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(compression_registry);
+    SAFE_DISPOSE_API(hash_registry);
+    SAFE_DISPOSE_API(job_api);
+    return err;
+  }
 
-    SetHandleStep(handle, "Writing missing store index to buffer");
+  SetHandleStep(handle, "Writing missing store index to buffer");
 
-    err = Longtail_WriteStoreIndexToBuffer(remote_missing_store_index, &missing_store_index_buffer, &missing_store_index_size);
+  err = Longtail_WriteStoreIndexToBuffer(remote_missing_store_index, &missing_store_index_buffer, &missing_store_index_size);
 
-    if (err) {
-      SetHandleStep(handle, "Failed to write missing store index to buffer");
-      handle->error = err;
-      handle->completed = 1;
-      Longtail_Free(remote_missing_store_index);
-      Longtail_Free(existing_remote_store_index);
-      Longtail_Free(source_version_index);
-      SAFE_DISPOSE_API(chunker_api);
-      SAFE_DISPOSE_API(store_block_store_api);
-      SAFE_DISPOSE_API(store_block_fsstore_api);
-      SAFE_DISPOSE_API(file_storage_api);
-      SAFE_DISPOSE_API(seaweed_storage_api);
-      SAFE_DISPOSE_API(compression_registry);
-      SAFE_DISPOSE_API(hash_registry);
-      SAFE_DISPOSE_API(job_api);
-      return err;
-    }
+  if (err) {
+    SetHandleStep(handle, "Failed to write missing store index to buffer");
+    handle->error = err;
+    handle->completed = 1;
+    Longtail_Free(remote_missing_store_index);
+    Longtail_Free(existing_remote_store_index);
+    Longtail_Free(source_version_index);
+    SAFE_DISPOSE_API(chunker_api);
+    SAFE_DISPOSE_API(store_block_store_api);
+    SAFE_DISPOSE_API(store_block_fsstore_api);
+    SAFE_DISPOSE_API(file_storage_api);
+    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(compression_registry);
+    SAFE_DISPOSE_API(hash_registry);
+    SAFE_DISPOSE_API(job_api);
+    return err;
   }
 
   json payload = {
@@ -560,6 +558,7 @@ int32_t SubmitSync(
 
   // Add storeIndex part if available
   if (missing_store_index_buffer != 0) {
+    SetHandleStep(handle, "Adding storeIndex file to multipart upload");
     curl_mimepart* store_part = curl_mime_addpart(mime);
     curl_mime_name(store_part, "storeIndex");
     curl_mime_data(store_part, static_cast<const char*>(missing_store_index_buffer), missing_store_index_size);
@@ -587,7 +586,8 @@ int32_t SubmitSync(
   curl_easy_cleanup(curl);
 
   if (res != CURLE_OK || http_status_code != 200) {
-    SetHandleStep(handle, "Failed to submit to backend");
+    std::string errorMessage = "Failed to submit to backend: " + response_body;
+    SetHandleStep(handle, errorMessage.c_str());
     handle->error = http_status_code > 0 ? (int)http_status_code : EIO;
     handle->completed = 1;
     Longtail_Free(remote_missing_store_index);

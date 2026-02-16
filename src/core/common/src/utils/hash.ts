@@ -1,20 +1,17 @@
+import { createHash } from "crypto";
 import { promises as fs } from "fs";
 
 /**
- * Computes a hash of a file's contents using Bun's built-in hash function.
- * Uses xxHash64 which is very fast for large files.
+ * Computes a SHA-256 hash of a file's contents.
  */
 export async function hashFile(filePath: string): Promise<string> {
   const content = await fs.readFile(filePath);
-  // Bun.hash returns a number, convert to hex string for storage
-  const hash = Bun.hash(content);
-  return hash.toString(16);
+  return createHash("sha256").update(content).digest("hex");
 }
 
 /**
- * Computes a hash of a buffer using Bun's built-in hash function.
+ * Computes a SHA-256 hash of a buffer.
  */
 export function hashBuffer(buffer: Buffer | Uint8Array): string {
-  const hash = Bun.hash(buffer);
-  return hash.toString(16);
+  return createHash("sha256").update(buffer).digest("hex");
 }

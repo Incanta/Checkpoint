@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@checkpointvcs/app": "link:../app",
-    "@checkpointvcs/client": "link:../core/client",
     "@checkpointvcs/common": "link:../core/common",
     "@checkpointvcs/daemon": "link:../core/daemon",
     "@trpc/client": "^11.8.1",

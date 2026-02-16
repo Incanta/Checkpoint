@@ -1,7 +1,7 @@
 import { existsSync, promises as fs } from "fs";
 import path from "path";
 import { homedir } from "os";
-import type { Workspace } from "./types";
+import type { Workspace } from "./types/index.js";
 
 export interface DaemonConfigType {
   workspaces: Workspace[];

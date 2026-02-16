@@ -9,14 +9,8 @@ mkdir dist
 mkdir dist\debug
 mkdir dist\release
 
-copy build\!PLATFORM!\longtail\debug\longtail.dll dist\debug\longtail.dll
-copy build\!PLATFORM!\longtail\debug\longtail.pdb dist\debug\longtail.pdb
-copy build\!PLATFORM!\longtail\debug\longtail.lib dist\debug\longtail.lib
-copy build\!PLATFORM!\longtail\debug\longtail.exp dist\debug\longtail.exp
-copy build\!PLATFORM!\longtail\release\longtail.dll dist\release\longtail.dll
-copy build\!PLATFORM!\longtail\release\longtail.pdb dist\release\longtail.pdb
-copy build\!PLATFORM!\longtail\release\longtail.lib dist\release\longtail.lib
-copy build\!PLATFORM!\longtail\release\longtail.exp dist\release\longtail.exp
+copy build\!PLATFORM!\longtail\debug\liblongtail.a dist\debug\liblongtail.a
+copy build\!PLATFORM!\longtail\release\liblongtail.a dist\release\liblongtail.a
 
 mkdir dist\include
 mkdir dist\include\src

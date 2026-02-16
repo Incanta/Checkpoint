@@ -1,4 +1,0 @@
-auth0:
-  url: "https://checkpointvcs-dev.us.auth0.com"
-  client-id: "tG9b7e0p6Ta6akQWONh4XpprYUwRmYy3"
-  audience-api: "https://checkpointvcs-dev.us.auth0.com/api/v2/"

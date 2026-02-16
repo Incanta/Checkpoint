@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { format } from "date-fns";
 import pretty from "pino-pretty"; // this ensures pkg will bundle it
-import { DaemonConfig } from "./daemon-config";
+import { DaemonConfig } from "./daemon-config.js";
 
 // To add custom levels, you need to define this type with each of the names
 // and specify the order levels in CustomLevels. This will enable a typed

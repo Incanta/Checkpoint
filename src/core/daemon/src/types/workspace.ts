@@ -1,4 +1,4 @@
-import type { ApiTypes } from "./api-types";
+import type { ApiTypes } from "./api-types.js";
 import type { Modification as CommonModification } from "@checkpointvcs/common";
 
 export interface Workspace extends ApiTypes.Workspace {
@@ -66,6 +66,19 @@ export enum FileStatus {
   Artifact = 14,
 }
 
+export interface FileCheckoutInfo {
+  id: string;
+  locked: boolean;
+  workspaceId: string;
+  userId: string;
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+    username: string | null;
+  };
+}
+
 export interface File {
   path: string;
   type: FileType;
@@ -76,7 +89,7 @@ export interface File {
   id: string | null;
   changelist: number | null;
 
-  // locked by info
+  checkouts: FileCheckoutInfo[];
 }
 
 export interface Directory {

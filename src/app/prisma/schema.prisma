@@ -97,11 +97,12 @@ model Repo {
 
   additionalRoles RepoRole[]
 
-  files       File[]
-  changelists Changelist[]
-  branches    Branch[]        @relation("RepoBranch")
-  tags        ChangelistTag[]
-  workspaces  Workspace[]
+  files         File[]
+  changelists   Changelist[]
+  branches      Branch[]          @relation("RepoBranch")
+  labels        ChangelistLabel[]
+  workspaces    Workspace[]
+  fileCheckouts FileCheckout[]
 
   @@unique([orgId, name])
 }
@@ -155,12 +156,12 @@ model Changelist {
   parentNumber Int? // NOTE: Merges are handled via forced squashing
 
   fileChanges FileChange[]
-  tags        ChangelistTag[]
+  labels      ChangelistLabel[]
 
   @@unique([repoId, number])
 }
 
-model ChangelistTag {
+model ChangelistLabel {
   id String @id @default(cuid())
 
   name String
@@ -216,6 +217,9 @@ model FileCheckout {
 
   fileId String
   file   File   @relation(fields: [fileId], references: [id])
+
+  repoId String
+  repo   Repo   @relation(fields: [repoId], references: [id])
 
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id])

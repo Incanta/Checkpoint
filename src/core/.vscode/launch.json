@@ -1,16 +1,42 @@
 {
   "configurations": [
     {
+      "name": "Attach Server",
+      "port": 9230,
+      "request": "attach",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "type": "node",
+      "localRoot": "${workspaceFolder}/server"
+    },
+    {
+      "name": "Attach Daemon",
+      "port": 9231,
+      "request": "attach",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "type": "node",
+      "localRoot": "${workspaceFolder}/daemon"
+    },
+    {
       "type": "lldb",
       "request": "launch",
       "name": "Debug C++ for Daemon",
-      "program": "c:/Users/seese/.bun/bin/bun",
+      "program": "c:/Program Files/nodejs/node.exe",
       "args": [
-        "daemon/src/bin.ts"
+        "--inspect=0.0.0.0:9231",
+        "lib/bin.js"
       ],
-      "cwd": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}/daemon",
       "env": {
         "NODE_CONFIG_DIR": "${workspaceFolder}/daemon/config"
+      },
+      "presentation": {
+        "hidden": false,
+        "group": "",
+        "order": 1
       }
     },
     {
@@ -25,13 +51,16 @@
       "env": {
         "NODE_CONFIG_DIR": "${workspaceFolder:Core}/server/config"
       }
-    },
+    }
+  ],
+  "compounds": [
     {
-      "name": "Daemon",
-      "type": "bun",
-      "request": "launch",
-      "program": "src/bin.ts",
-      "cwd": "${workspaceFolder:Core}/daemon",
+      "name": "Attach Core",
+      "configurations": [
+        "Attach Daemon",
+        "Attach Server"
+      ],
+      "stopAll": true,
       "presentation": {
         "hidden": false,
         "group": "",

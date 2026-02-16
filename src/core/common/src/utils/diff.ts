@@ -1,4 +1,4 @@
-import type { WorkspaceStateFile } from "@checkpointvcs/client";
+import type { WorkspaceStateFile } from "../types/workspace-state-file.js";
 
 export interface StateDiff {
   timestamp: Date;

@@ -1,8 +1,8 @@
 import ignore, { type Ignore } from "ignore";
 import path from "path";
 import { promises as fs, existsSync, constants } from "fs";
-import { FileStatus } from "./types";
-import type { WorkspaceState } from "@checkpointvcs/client";
+import { FileStatus } from "./types/index.js";
+import type { WorkspaceState } from "./util/index.js";
 
 const IGNORE_FILE = ".chkignore";
 const HIDDEN_FILE = ".chkhidden";

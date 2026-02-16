@@ -81,13 +81,13 @@ CREATE TABLE "Changelist" (
 );
 
 -- CreateTable
-CREATE TABLE "ChangelistTag" (
+CREATE TABLE "ChangelistLabel" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
     "repoId" TEXT NOT NULL,
     "number" INTEGER NOT NULL,
-    CONSTRAINT "ChangelistTag_repoId_number_fkey" FOREIGN KEY ("repoId", "number") REFERENCES "Changelist" ("repoId", "number") ON DELETE RESTRICT ON UPDATE CASCADE,
-    CONSTRAINT "ChangelistTag_repoId_fkey" FOREIGN KEY ("repoId") REFERENCES "Repo" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+    CONSTRAINT "ChangelistLabel_repoId_number_fkey" FOREIGN KEY ("repoId", "number") REFERENCES "Changelist" ("repoId", "number") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "ChangelistLabel_repoId_fkey" FOREIGN KEY ("repoId") REFERENCES "Repo" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -226,7 +226,7 @@ CREATE UNIQUE INDEX "Branch_repoId_name_key" ON "Branch"("repoId", "name");
 CREATE UNIQUE INDEX "Changelist_repoId_number_key" ON "Changelist"("repoId", "number");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "ChangelistTag_repoId_name_key" ON "ChangelistTag"("repoId", "name");
+CREATE UNIQUE INDEX "ChangelistLabel_repoId_name_key" ON "ChangelistLabel"("repoId", "name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ApiToken_token_key" ON "ApiToken"("token");

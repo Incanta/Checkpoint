@@ -10,6 +10,7 @@ import { apiTokenRouter } from "./routers/api-token";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 import { workspaceRouter } from "./routers/workspace";
 import { versionRouter } from "./routers/version";
+import { labelRouter } from "./routers/label";
 
 /**
  * This is the primary router for your server.
@@ -28,6 +29,7 @@ export const appRouter = createTRPCRouter({
   apiToken: apiTokenRouter,
   workspace: workspaceRouter,
   version: versionRouter,
+  label: labelRouter,
 });
 
 // export type definition of API

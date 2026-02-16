@@ -221,6 +221,63 @@ export const changelistRouter = createTRPCRouter({
       return changelists;
     }),
 
+  getChangelistFiles: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        changelistNumber: z.number(),
+      }),
+    )
+    .output(
+      z.array(
+        z.object({
+          fileId: z.string(),
+          path: z.string(),
+          changeType: z.enum(["ADD", "DELETE", "MODIFY"]),
+          oldPath: z.string().nullable(),
+        }),
+      ),
+    )
+    .query(async ({ ctx, input }) => {
+      const checkpointUser = await ctx.db.user.findUnique({
+        where: { id: ctx.session.user.id },
+      });
+
+      if (!checkpointUser) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Checkpoint user not found for this authenticated user",
+        });
+      }
+
+      const fileChanges = await ctx.db.fileChange.findMany({
+        where: {
+          repoId: input.repoId,
+          changelistNumber: input.changelistNumber,
+        },
+        include: {
+          file: {
+            select: {
+              id: true,
+              path: true,
+            },
+          },
+        },
+        orderBy: {
+          file: {
+            path: "asc",
+          },
+        },
+      });
+
+      return fileChanges.map((fc) => ({
+        fileId: fc.file.id,
+        path: fc.file.path,
+        changeType: fc.type,
+        oldPath: fc.oldPath,
+      }));
+    }),
+
   createChangelist: protectedProcedure
     .input(
       z.object({
@@ -254,6 +311,49 @@ export const changelistRouter = createTRPCRouter({
 
       // Check write permissions to repo
       // ... permission check logic ...
+
+      // Check for locked files by other users
+      const normalizedPaths = input.modifications.map((mod) =>
+        mod.path.replaceAll("\\", "/"),
+      );
+
+      const lockedCheckouts = await ctx.db.fileCheckout.findMany({
+        where: {
+          repoId: input.repoId,
+          removedAt: null,
+          locked: true,
+          file: {
+            path: { in: normalizedPaths },
+          },
+          workspace: {
+            userId: { not: checkpointUser.id },
+          },
+        },
+        include: {
+          file: true,
+          workspace: {
+            include: {
+              user: {
+                select: { email: true, name: true, username: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (lockedCheckouts.length > 0) {
+        const lockedFiles = lockedCheckouts.map((c) => {
+          const displayName =
+            c.workspace.user.name ||
+            c.workspace.user.username ||
+            c.workspace.user.email;
+          return `${c.file.path} (locked by ${displayName})`;
+        });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: `Cannot submit: the following files are locked by other users:\n${lockedFiles.join("\n")}`,
+        });
+      }
 
       // Get the next changelist number
       const lastChangelist = await ctx.db.changelist.findFirst({

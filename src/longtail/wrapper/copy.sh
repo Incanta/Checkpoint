@@ -25,37 +25,38 @@ else
 fi
 
 output_dirs=(
-  "../../../core/libraries"
-  "../../../unreal/Source/ThirdParty/CheckpointLibrary"
+  "../../addon/libraries"
 )
 
+# Static library extensions per platform
 if [[ "$OS_NAME" == "windows" ]]; then
-  EXT_NAME=".dll"
+  STATIC_EXT=".lib"
 else
-  EXT_NAME=".so"
+  STATIC_EXT=".a"
 fi
 
-if [[ "$OS_NAME" == "windows" ]]; then
-  for dir in "${output_dirs[@]}"; do
-    OUTPUT_DIR="$dir/$OS_NAME"
-    rm -rf $OUTPUT_DIR
-    mkdir -p $OUTPUT_DIR
-    cp -f ../longtail/${LIB_FOLDER_LOWERCASE}/longtail.* $OUTPUT_DIR
-    cp -f ./${LIB_FOLDER_PASCALCASE}/* $OUTPUT_DIR
+for dir in "${output_dirs[@]}"; do
+  OUTPUT_DIR="$dir/$OS_NAME"
+  rm -rf $OUTPUT_DIR
+  mkdir -p $OUTPUT_DIR
 
-    cp -f ../src/exposed/exposed.h $dir/checkpoint.h
-  done
-else
-  for dir in "${output_dirs[@]}"; do
-    OUTPUT_DIR="$dir/$OS_NAME"
-    rm -rf $OUTPUT_DIR
-    mkdir -p $OUTPUT_DIR
-    cp -f ../longtail/${LIB_FOLDER_LOWERCASE}/*longtail.* $OUTPUT_DIR
-    cp -f ./libLongtailWrapper* $OUTPUT_DIR
+  # Copy the static longtail C library
+  cp -f ../longtail/${LIB_FOLDER_LOWERCASE}/liblongtail.a $OUTPUT_DIR/ 2>/dev/null || \
+  cp -f ../longtail/${LIB_FOLDER_LOWERCASE}/longtail${STATIC_EXT} $OUTPUT_DIR/ 2>/dev/null || true
 
-    cp -f ./_deps/cpr-build/cpr/libcpr${EXT_NAME}* $OUTPUT_DIR
-    cp -f ./_deps/curl-build/lib//libcurl-d${EXT_NAME}* $OUTPUT_DIR
-    cp -f ./_deps/zlib-build/libz${EXT_NAME}* $OUTPUT_DIR
-    cp -f ../src/exposed/exposed.h $dir/checkpoint.h
-  done
-fi
+  # Copy the static LongtailWrapper library
+  if [[ "$OS_NAME" == "windows" ]]; then
+    cp -f ./${LIB_FOLDER_PASCALCASE}/LongtailWrapper${STATIC_EXT} $OUTPUT_DIR/ 2>/dev/null || \
+    cp -f ./LongtailWrapper${STATIC_EXT} $OUTPUT_DIR/ 2>/dev/null || true
+  else
+    cp -f ./libLongtailWrapper${STATIC_EXT} $OUTPUT_DIR/
+  fi
+
+  # Copy the static curl library
+  cp -f ./_deps/curl-build/lib/${LIB_FOLDER_PASCALCASE}/libcurl-d${STATIC_EXT} $OUTPUT_DIR/ 2>/dev/null || \
+  cp -f ./_deps/curl-build/lib/libcurl-d${STATIC_EXT} $OUTPUT_DIR/ 2>/dev/null || \
+  cp -f ./_deps/curl-build/lib/libcurl${STATIC_EXT} $OUTPUT_DIR/ 2>/dev/null || true
+
+  # Copy the header
+  cp -f ../src/exposed/exposed.h $dir/checkpoint.h
+done

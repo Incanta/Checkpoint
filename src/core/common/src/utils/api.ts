@@ -1,14 +1,17 @@
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import { createTRPCClient, httpBatchLink, TRPCClient } from "@trpc/client";
 import type { AppRouter as ApiAppRouter } from "@checkpointvcs/app";
 import superjson from "superjson";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
-import type { AuthConfig, AuthConfigUser } from "../types/auth-config";
+import type { AuthConfig, AuthConfigUser } from "../types/auth-config.js";
 import { existsSync } from "fs";
 
-// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
-export async function CreateApiClientUnauth(endpoint: string) {
+export type ApiClient = TRPCClient<ApiAppRouter>;
+
+export async function CreateApiClientUnauth(
+  endpoint: string,
+): Promise<ApiClient> {
   const client = createTRPCClient<ApiAppRouter>({
     links: [
       httpBatchLink({
@@ -21,11 +24,10 @@ export async function CreateApiClientUnauth(endpoint: string) {
   return client;
 }
 
-// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export async function CreateApiClientAuthManual(
   endpoint: string,
   token: string,
-) {
+): Promise<ApiClient> {
   const client = createTRPCClient<ApiAppRouter>({
     links: [
       httpBatchLink({
@@ -43,8 +45,9 @@ export async function CreateApiClientAuthManual(
   return client;
 }
 
-// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
-export async function CreateApiClientAuth(daemonId: string) {
+export async function CreateApiClientAuth(
+  daemonId: string,
+): Promise<ApiClient> {
   let user: AuthConfigUser | null = null;
   try {
     user = await GetAuthConfigUser(daemonId);

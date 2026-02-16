@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "license": "(Elastic-2.0 OR AGPL-3.0)",
   "private": true,
+  "packageManager": "yarn@4.12.0",
   "workspaces": [
     "client",
     "daemon",
@@ -10,15 +11,15 @@
     "common"
   ],
   "scripts": {
-    "compile": "tsc -p .",
+    "build": "cd server && yarn build && cd ../daemon && yarn build",
     "lint": "eslint **/*.{js,ts,tsx}",
     "cli": "NODE_CONFIG_DIR=client/config bun run client/src/bin.ts",
     "package": "bun package.ts",
-    "server": "NODE_CONFIG_DIR=server/config NODE_CONFIG_ENV=dev bun run server/src/index.ts",
-    "daemon": "NODE_CONFIG_DIR=daemon/config bun run daemon/src/bin.ts"
+    "server": "cd server && yarn start",
+    "daemon": "cd daemon && yarn start"
   },
   "dependencies": {
-    "@checkpointvcs/app": "link:@checkpointvcs/app",
+    "@checkpointvcs/app": "portal:../app",
     "@incanta/config": "^2.1.4",
     "@trpc/client": "^11.8.1",
     "async-sema": "^3.1.1",
@@ -35,6 +36,7 @@
     "@eslint/compat": "^1.3.2",
     "@types/bun": "^1.2.19",
     "@types/lodash.merge": "^4.6.9",
+    "@types/node": "^25.2.3",
     "@typescript-eslint/eslint-plugin": "^8.41.0",
     "@typescript-eslint/parser": "^8.41.0",
     "cross-env": "^7.0.3",
@@ -44,8 +46,6 @@
     "eslint-plugin-prefer-arrow": "^1.2.3",
     "eslint-plugin-prettier": "^5.5.4",
     "prettier": "^3.6.2",
-    "tmp-promise": "^3.0.3",
-    "typescript": "^5.7.3"
-  },
-  "packageManager": "yarn@1.22.22"
+    "tmp-promise": "^3.0.3"
+  }
 }

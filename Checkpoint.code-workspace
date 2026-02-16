@@ -9,12 +9,8 @@
       "path": "src/core"
     },
     {
-      "name": "Wrapper",
-      "path": "src/longtail/wrapper"
-    },
-    {
-      "name": "Library",
-      "path": "src/longtail/library"
+      "name": "Longtail",
+      "path": "src/longtail"
     },
     {
       "name": "Seaweed",
@@ -75,7 +71,10 @@
     },
     "git.autoRepositoryDetection": "openEditors",
     "C_Cpp.intelliSenseEngine": "default",
-    "cSpell.words": ["koffi", "longtail"],
+    "cSpell.words": [
+      "koffi",
+      "longtail"
+    ],
     "yaml.schemas": {
       "https://www.artillery.io/schema.json": []
     },

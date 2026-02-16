@@ -2,19 +2,28 @@
   "name": "@checkpointvcs/daemon",
   "version": "1.0.0",
   "description": "",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
   "license": "(Elastic-2.0 OR AGPL-3.0)",
   "type": "module",
-  "scripts": {
-    "build": "tsc --project tsconfig.json",
-    "build:lib": "tsc --project tsconfig.lib.json",
-    "start": "bun --inspect run src/bin.ts"
+  "exports": {
+    ".": {
+      "import": "./lib/index.js",
+      "types": "./lib/index.d.ts"
+    },
+    "./types": {
+      "import": "./lib/types/index.js",
+      "types": "./lib/types/index.d.ts"
+    }
   },
-  "devDependencies": {},
+  "scripts": {
+    "build": "tsgo --project tsconfig.json",
+    "build:lib": "tsc --project tsconfig.lib.json",
+    "start": "yarn build && node --inspect=0.0.0.0:9231 lib/bin.js"
+  },
   "dependencies": {
-    "@checkpointvcs/client": "workspace:*",
-    "@checkpointvcs/common": "workspace:*",
+    "@checkpointvcs/common": "portal:../common",
+    "@checkpointvcs/longtail-addon": "portal:../../longtail/addon",
     "@trpc/server": "^11.8.1",
     "commander": "^12.0.0",
     "date-fns": "^4.1.0",
@@ -23,5 +32,8 @@
     "pino-pretty": "^13.1.2",
     "superjson": "^2.2.2",
     "zod": "^4.1.1"
+  },
+  "devDependencies": {
+    "@typescript/native-preview": "^7.0.0-dev.20260212.1"
   }
 }

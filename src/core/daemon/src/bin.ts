@@ -1,6 +1,8 @@
-import { InitApi } from "./api";
-import { DaemonManager } from "./daemon-manager";
+import { InitApi } from "./api/index.js";
+import { DaemonManager } from "./daemon-manager.js";
 
-const manager = DaemonManager.Get();
-await manager.init();
-await InitApi();
+(async (): Promise<void> => {
+  const manager = DaemonManager.Get();
+  await manager.init();
+  await InitApi();
+})();
