@@ -1,0 +1,48 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "compounds": [
+    {
+      "name": "Desktop App",
+      "configurations": [
+        "Electron Main"
+      ],
+      "presentation": {
+        "hidden": false,
+        "group": "",
+        "order": 1
+      },
+      "stopAll": true
+    }
+  ],
+  "configurations": [
+    {
+      "name": "Electron Main",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": [
+        "dev"
+      ],
+      "env": {
+        "USE_MOCK_DATA": "false",
+        "REMOTE_DEBUGGING_PORT": "19229"
+      }
+    },
+    {
+      "name": "Electron Renderer",
+      "port": 19229,
+      "request": "attach",
+      "type": "chrome",
+      "timeout": 60000,
+      "skipFiles": [
+        "<node_internals>/**",
+        "${workspaceRoot}/node_modules/**",
+        "${workspaceRoot}/dist/main/**",
+      ],
+      "restart": true
+    },
+  ]
+}

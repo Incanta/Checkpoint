@@ -1,0 +1,382 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+#root {
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden;
+}
+
+#root > div {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: dark;
+
+  --color-app-bg: #272727;
+  --color-panel: #2c2c2c;
+  --color-panel-strong: #383838;
+  --color-surface: #1e1e1e;
+  --color-border: #1a1a1a;
+  --color-border-light: #444444;
+  --color-border-lighter: #888888;
+  --color-text-primary: #e3e3e3;
+  --color-text-secondary: #dddddd;
+  --color-files: #ffca3b;
+  --color-pending: #d43935;
+  --color-history: #3dc3f5;
+  --color-branches: #21bd43;
+  --color-labels: #8b21bd;
+
+  --color-app-bg: #252526;
+  --color-panel: #333333;
+  --color-panel-strong: #2f243d;
+  --color-surface: #242424;
+  --color-border: #1b1b1b;
+  --color-border-light: #444444;
+  --color-border-lighter: #888888;
+  --color-text-primary: #e3e3e3;
+  --color-text-secondary: #dddddd;
+  --color-files: #ffca3b;
+  --color-pending: #d43935;
+  --color-history: #3dc3f5;
+  --color-branches: #21bd43;
+  --color-labels: #8b21bd;
+
+  color: var(--color-text-primary);
+  background-color: var(--color-app-bg);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  width: 100vw;
+  height: 100vh;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button {
+  border-radius: 0.3rem;
+  border: 1px solid var(--color-border);
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85em;
+  font-family: inherit;
+  background-color: #404040;
+  color: var(--color-text-secondary);
+}
+button:hover {
+  background-color: #555555;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+button.p-treetable-toggler {
+  border: none;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}
+
+button.treetable-toggler:hover {
+  border-color: transparent;
+}
+button.treetable-toggler:focus,
+button.treetable-toggler:focus-visible {
+  outline: 0;
+}
+
+.p-treetable-toggler + .p-checkbox {
+  display: inline-block;
+}
+
+.p-treetable-resizable .p-treetable-thead > tr > th,
+.p-treetable-resizable .p-treetable-tfoot > tr > td,
+.p-treetable-resizable .p-treetable-tbody > tr > td {
+  text-wrap: nowrap;
+}
+
+.p-checkbox {
+  position: relative;
+  margin-right: 0.3rem;
+}
+
+.p-checkbox-input {
+  appearance: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  opacity: 0;
+  z-index: 1;
+  outline: 0 none;
+  cursor: pointer;
+
+  border: 2px solid #424b57;
+  border-radius: 6px;
+}
+
+.p-checkbox-box {
+  border: 1px solid #101013;
+  background: #2e2e2e;
+  width: 1.2rem;
+  height: 1.2rem;
+  color: rgba(255, 255, 255, 0.87);
+  border-radius: 0.25rem;
+  transition:
+    background-color 0.2s,
+    color 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s;
+  outline-color: transparent;
+}
+
+.p-checkbox-box > .p-icon {
+  display: inline-block;
+  pointer-events: auto;
+  position: absolute;
+  top: 0.18rem;
+  left: 0.18rem;
+}
+
+.p-splitter-gutter {
+  transition: background-color 0.2s;
+}
+
+.pending-changes-splitter-gutter:nth-last-child(4) {
+  border-bottom: 1px solid black;
+  height: calc(4px + 0.4rem) !important;
+  padding: 0.15rem 0 !important;
+  background-color: var(--color-panel);
+}
+
+.pending-changes-splitter-gutter:nth-last-child(2) {
+  border-top: 1px solid black;
+  border-bottom: 1px solid black;
+  height: calc(4px + 0.4rem) !important;
+  padding: 0.15rem 0 !important;
+  background-color: var(--color-panel);
+}
+
+.file-history-splitter-gutter:nth-last-child(4) {
+  border-right: 1px solid black;
+  width: calc(4px + 0.4rem) !important;
+  padding: 0 0.15rem !important;
+  background-color: var(--color-panel);
+}
+
+.file-history-splitter-gutter:nth-last-child(2) {
+  border-left: 1px solid black;
+  border-right: 1px solid black;
+  width: calc(4px + 0.4rem) !important;
+  padding: 0 0.15rem !important;
+  background-color: var(--color-panel);
+}
+
+.p-splitter-gutter-handle {
+  background-color: #ffffff33;
+  border-radius: 0.5rem;
+}
+
+.p-splitter-gutter:hover {
+  background-color: #646cff;
+  transition: background-color 0.2s 0.5s;
+}
+
+.p-splitter-gutter-resizing {
+  background-color: #646cff;
+}
+
+.workspace-menu-item:hover {
+  background-color: #ffffff22 !important;
+}
+
+.p-dropdown-panel {
+  background-color: #00000088;
+  backdrop-filter: blur(10px);
+  padding: 0.5rem;
+  border-radius: 0.3rem;
+}
+
+.p-dropdown-items li {
+  padding: 0.5rem;
+  border-radius: 0.3rem;
+}
+
+.p-dropdown-items li:hover {
+  background-color: #ffffff22 !important;
+}
+
+.p-dialog-mask {
+  background-color: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(0.05rem);
+}
+
+/* TreeTable sort icon customization */
+.p-treetable .p-sortable-column .p-sortable-column-icon {
+  display: none;
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.p-treetable .p-sortable-column.p-highlight .p-sortable-column-icon {
+  display: inline-flex;
+}
+
+.p-treetable .p-sortable-column .p-column-header-content {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+/* Override default sort icons with chevrons */
+.p-treetable .p-sortable-column-icon.pi-sort-amount-up-alt::before {
+  content: "\e93e"; /* pi-chevron-up */
+}
+
+.p-treetable .p-sortable-column-icon.pi-sort-amount-down-alt::before {
+  content: "\e93f"; /* pi-chevron-down */
+}
+
+.p-treetable .p-sortable-column-icon.pi-sort-alt::before {
+  content: "\e93e"; /* pi-chevron-up as default when visible */
+}
+
+/* TreeTable row styling */
+.p-treetable .p-treetable-tbody > tr {
+  user-select: none;
+  cursor: initial;
+  transition: background-color 0.15s ease;
+}
+
+.category-row:hover {
+  background-color: transparent !important;
+}
+
+.p-treetable .p-treetable-tbody > tr:hover:not(.category-row:hover) {
+  background-color: #3a3a3a !important;
+}
+
+.p-treetable .p-treetable-tbody > tr.p-highlight,
+.p-treetable .p-treetable-tbody > tr.p-row-selected {
+  background-color: #3b5998 !important;
+}
+
+.p-treetable .p-treetable-tbody > tr.p-highlight:hover,
+.p-treetable .p-treetable-tbody > tr.p-row-selected:hover {
+  background-color: #4a68a8 !important;
+}
+
+/* Row highlighted for diff preview (separate from checkbox selection) */
+.p-treetable .p-treetable-tbody > tr.row-highlighted {
+  background-color: #4a4a4a !important;
+}
+
+.p-treetable
+  .p-treetable-tbody
+  > tr.row-highlighted:hover:not(.category-row:hover) {
+  background-color: #5a5a5a !important;
+}
+
+/* Remove blue selection highlight for pending changes component */
+.pending-changes-tree.p-treetable .p-treetable-tbody > tr.p-highlight,
+.pending-changes-tree.p-treetable .p-treetable-tbody > tr.p-row-selected {
+  background-color: transparent !important;
+}
+
+.pending-changes-tree.p-treetable
+  .p-treetable-tbody
+  > tr.p-highlight:hover:not(.category-row:hover),
+.pending-changes-tree.p-treetable
+  .p-treetable-tbody
+  > tr.p-row-selected:hover:not(.category-row:hover) {
+  background-color: #3a3a3a !important;
+}
+
+/* Row highlighted for diff preview takes priority over selection */
+.pending-changes-tree.p-treetable
+  .p-treetable-tbody
+  > tr.row-highlighted.p-highlight,
+.pending-changes-tree.p-treetable
+  .p-treetable-tbody
+  > tr.row-highlighted.p-row-selected,
+.pending-changes-tree.p-treetable .p-treetable-tbody > tr.row-highlighted {
+  background-color: #2b3e72 !important;
+}
+
+.pending-changes-tree.p-treetable
+  .p-treetable-tbody
+  > tr.row-highlighted.p-highlight:hover,
+.pending-changes-tree.p-treetable
+  .p-treetable-tbody
+  > tr.row-highlighted.p-row-selected:hover,
+.pending-changes-tree.p-treetable
+  .p-treetable-tbody
+  > tr.row-highlighted:hover {
+  background-color: #405caa !important;
+}
+
+.p-contextmenu {
+  z-index: 100000;
+}
+
+/* Context menu separator styling (PrimeReact has no base CSS imported) */
+.p-menuitem-separator {
+  border: none;
+  border-top: 1px solid #444;
+  margin: 0.25rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Context menu disabled item styling */
+.p-menuitem.p-disabled > .p-menuitem-content {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: default;
+}
+
+.p-menuitem-link.p-disabled {
+  cursor: default;
+  color: #888888 !important;
+}
