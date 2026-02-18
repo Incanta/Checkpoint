@@ -94,7 +94,9 @@ async function loadIgnorePatterns(
  * Gets or creates the ignore cache for a workspace.
  * Cache is refreshed if older than 5 seconds.
  */
-async function getIgnoreCache(workspacePath: string): Promise<IgnoreCache> {
+export async function getIgnoreCache(
+  workspacePath: string,
+): Promise<IgnoreCache> {
   const cached = ignoreCaches.get(workspacePath);
   const now = Date.now();
 
@@ -292,17 +294,6 @@ export async function getFileStatuses(
       continue;
     }
 
-    // Check pending changes first
-    if (pendingChanges && pendingChanges[relativePath]) {
-      const pending = pendingChanges[relativePath];
-      results.set(relativePath, {
-        status: pending.status,
-        fileId: pending.id,
-        changelist: pending.changelist,
-      });
-      continue;
-    }
-
     // Check if ignored
     if (cache.ignore.ignores(relativePath)) {
       results.set(relativePath, {
@@ -320,6 +311,17 @@ export async function getFileStatuses(
         status: FileStatus.HiddenChanges,
         fileId: stateFile?.fileId ?? null,
         changelist: stateFile?.changelist ?? null,
+      });
+      continue;
+    }
+
+    // Check pending changes first
+    if (pendingChanges && pendingChanges[relativePath]) {
+      const pending = pendingChanges[relativePath];
+      results.set(relativePath, {
+        status: pending.status,
+        fileId: pending.id,
+        changelist: pending.changelist,
       });
       continue;
     }

@@ -19,4 +19,23 @@ export const repoRouter = router({
 
       return { repos };
     }),
+
+  create: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        orgId: z.string(),
+        name: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      const repo = await client.repo.createRepo.mutate({
+        orgId: input.orgId,
+        name: input.name,
+      });
+
+      return { repo };
+    }),
 });

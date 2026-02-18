@@ -8,9 +8,14 @@ import {
   type Workspace,
   type WorkspacePendingChanges,
 } from "./types/index.js";
-import { watch, type FSWatcher, promises as fs, existsSync } from "fs";
+import { watch, type FSWatcher, promises as fs, existsSync, Dirent } from "fs";
 import { CreateApiClientAuth, hashFile } from "@checkpointvcs/common";
-import { getWorkspaceState, type WorkspaceState } from "./util/index.js";
+import {
+  getWorkspaceState,
+  saveWorkspaceState,
+  type WorkspaceState,
+} from "./util/index.js";
+import { getFileStatus, getIgnoreCache } from "./file-status.js";
 
 export class DaemonManager {
   private static instance: DaemonManager | null = null;
@@ -111,11 +116,39 @@ export class DaemonManager {
       baselineState = this.workspaceStates.get(workspace.id)!;
     }
 
-    // Get all files in workspace (excluding .checkpoint directory)
-    const diskFiles = await fs.readdir(workspace.localPath, {
-      recursive: true,
-      withFileTypes: true,
-    });
+    const ignoreCache = await getIgnoreCache(workspace.localPath);
+
+    // walk recursively and gather files, skipping ignored and hidden paths
+    const walk = async (dir: string): Promise<Dirent[]> => {
+      const results: Dirent[] = [];
+
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+
+      const promises = entries.map(async (entry) => {
+        const fullPath = path.join(dir, entry.name);
+        const relativePath = this.getRelativePath(workspace, fullPath);
+
+        if (
+          ignoreCache.ignore.ignores(relativePath) ||
+          ignoreCache.hidden.ignores(relativePath)
+        ) {
+          return;
+        }
+
+        if (entry.isDirectory()) {
+          const subResults = await walk(fullPath);
+          results.push(...subResults);
+        } else {
+          results.push(entry);
+        }
+      });
+
+      await Promise.all(promises);
+
+      return results;
+    };
+
+    const diskFiles = await walk(workspace.localPath);
 
     // Get checkouts from API for checked-out file status
     const client = await CreateApiClientAuth(workspace.daemonId);
@@ -125,6 +158,9 @@ export class DaemonManager {
 
     // Track which baseline files we've seen (to detect deletions)
     const seenBaselineFiles = new Set<string>();
+
+    // Get the set of files marked for add
+    const markedForAdd = this.getMarkedForAdd(workspace.id);
 
     // Process all files on disk
     const promises = diskFiles.map(async (f) => {
@@ -148,11 +184,29 @@ export class DaemonManager {
         seenBaselineFiles.add(relativePath);
       }
 
+      const fileStatus = await getFileStatus({
+        workspacePath: workspace.localPath,
+        relativePath,
+        workspaceState: baselineState,
+        existsOnDisk: true,
+        isDirectory: stat.isDirectory(),
+      });
+
       // Determine if file has changed
       let hasChanged = false;
       let needsHashCheck = false;
 
-      if (!baselineFile) {
+      if (
+        [
+          FileStatus.Unknown,
+          FileStatus.NotInWorkspaceRoot,
+          FileStatus.Ignored,
+          FileStatus.HiddenChanges,
+          FileStatus.Artifact,
+        ].includes(fileStatus.status)
+      ) {
+        hasChanged = false;
+      } else if (!baselineFile) {
         // File doesn't exist in baseline - it's a new/added file
         hasChanged = true;
       } else if (stat.size !== baselineFile.size) {
@@ -179,7 +233,9 @@ export class DaemonManager {
           size: stat.size,
           modifiedAt: stat.mtimeMs,
           status: !baselineFile
-            ? FileStatus.Local // TODO: check if marked for add (and how marked for add is stored)
+            ? markedForAdd.has(relativePath)
+              ? FileStatus.Added
+              : FileStatus.Local
             : isCheckedOut
               ? FileStatus.ChangedCheckedOut
               : FileStatus.ChangedNotCheckedOut,
@@ -321,5 +377,65 @@ export class DaemonManager {
   public hasDirtyFiles(workspaceId: string): boolean {
     const dirty = this.dirtyFiles.get(workspaceId);
     return dirty ? dirty.size > 0 : false;
+  }
+
+  /**
+   * Returns the set of relative paths currently marked for add in a workspace.
+   */
+  public getMarkedForAdd(workspaceId: string): Set<string> {
+    const state = this.workspaceStates.get(workspaceId);
+    return new Set(state?.markedForAdd ?? []);
+  }
+
+  /**
+   * Mark one or more files for add. Persists to state.json.
+   */
+  public async markForAdd(
+    workspace: Workspace,
+    relativePaths: string[],
+  ): Promise<void> {
+    const state = this.workspaceStates.get(workspace.id);
+    if (!state) return;
+
+    const existing = new Set(state.markedForAdd ?? []);
+    for (const p of relativePaths) {
+      existing.add(p);
+    }
+    state.markedForAdd = [...existing];
+    await this.persistState(workspace, state);
+
+    // Invalidate pending changes so next refresh picks up the new status
+    this.workspacePendingChanges.delete(workspace.id);
+  }
+
+  /**
+   * Remove one or more files from the marked-for-add list. Persists to state.json.
+   */
+  public async unmarkForAdd(
+    workspace: Workspace,
+    relativePaths: string[],
+  ): Promise<void> {
+    const state = this.workspaceStates.get(workspace.id);
+    if (!state) return;
+
+    const existing = new Set(state.markedForAdd ?? []);
+    for (const p of relativePaths) {
+      existing.delete(p);
+    }
+    state.markedForAdd = [...existing];
+    await this.persistState(workspace, state);
+
+    // Invalidate pending changes so next refresh picks up the new status
+    this.workspacePendingChanges.delete(workspace.id);
+  }
+
+  /**
+   * Persist the in-memory workspace state back to state.json (and workspace.json).
+   */
+  private async persistState(
+    workspace: Workspace,
+    state: WorkspaceState,
+  ): Promise<void> {
+    await saveWorkspaceState(workspace as any, state);
   }
 }

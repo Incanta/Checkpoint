@@ -7,7 +7,12 @@ import { DaemonManager } from "../../daemon-manager.js";
 import { File, FileStatus, FileType, Workspace } from "../../types/index.js";
 import { DaemonConfig } from "../../daemon-config.js";
 import { getFileStatuses } from "../../file-status.js";
-import { pull, readFileFromChangelist, submit } from "../../util/index.js";
+import {
+  isBinaryFile,
+  pull,
+  readFileFromChangelist,
+  submit,
+} from "../../util/index.js";
 import { TRPCError } from "@trpc/server";
 
 export const workspaceRouter = router({
@@ -294,6 +299,13 @@ export const workspaceRouter = router({
       let leftContent: string;
       let rightContent: string;
 
+      if (isBinaryFile(normalizedPath)) {
+        return {
+          left: "[Binary file]",
+          right: "[Binary file]",
+        };
+      }
+
       if (!headFileInfo) {
         // File is new/added (not in head) - left is empty, right is current
         leftContent = "";
@@ -311,7 +323,7 @@ export const workspaceRouter = router({
             filePath: normalizedPath,
             changelistNumber: headFileInfo.changelist,
           });
-          leftContent = headResult.content;
+          leftContent = await fs.readFile(headResult.cachePath, "utf-8");
         } catch (err) {
           console.error("Failed to read head version:", err);
           leftContent = `[Error reading file from changelist ${headFileInfo.changelist}]\n${err instanceof Error ? err.message : String(err)}`;
@@ -330,7 +342,7 @@ export const workspaceRouter = router({
             filePath: normalizedPath,
             changelistNumber: headFileInfo.changelist,
           });
-          leftContent = headResult.content;
+          leftContent = await fs.readFile(headResult.cachePath, "utf-8");
         } catch (err) {
           console.error("Failed to read head version:", err);
           leftContent = `[Error reading file from changelist ${headFileInfo.changelist}]\n${err instanceof Error ? err.message : String(err)}`;
@@ -381,6 +393,7 @@ export const workspaceRouter = router({
 
       await pull(
         {
+          id: workspace.id,
           repoId: workspace.repoId,
           branchName: workspace.branchName,
           workspaceName: workspace.name,
@@ -448,6 +461,7 @@ export const workspaceRouter = router({
       try {
         await submit(
           {
+            id: workspace.id,
             repoId: workspace.repoId,
             branchName: workspace.branchName,
             workspaceName: workspace.name,
@@ -463,6 +477,14 @@ export const workspaceRouter = router({
 
         // Reload workspace state from the updated state.json
         await manager.reloadWorkspaceState(workspace);
+
+        // Clear submitted files from marked-for-add list
+        const submittedPaths = input.modifications.map((m) =>
+          m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+        );
+        if (submittedPaths.length > 0) {
+          await manager.unmarkForAdd(workspace, submittedPaths);
+        }
       } catch (e: any) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -853,6 +875,72 @@ export const workspaceRouter = router({
       });
     }),
 
+  markForAdd: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        paths: z.array(z.string()).min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const normalizedPaths = input.paths.map((p) =>
+        p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+      );
+
+      await manager.markForAdd(workspace, normalizedPaths);
+
+      return { success: true, paths: normalizedPaths };
+    }),
+
+  unmarkForAdd: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        paths: z.array(z.string()).min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const normalizedPaths = input.paths.map((p) =>
+        p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+      );
+
+      await manager.unmarkForAdd(workspace, normalizedPaths);
+
+      return { success: true, paths: normalizedPaths };
+    }),
+
   getActiveCheckoutsForFiles: publicProcedure
     .input(
       z.object({
@@ -919,10 +1007,10 @@ export const workspaceRouter = router({
         .replace(/^[/\\]/, "")
         .replace(/\\/g, "/");
 
-      let leftContent = "";
-      let rightContent = "";
+      let leftResult: { cachePath: string; isBinary: boolean } | null = null;
+      let rightResult: { cachePath: string; isBinary: boolean } | null = null;
 
-      // Get the file content at the selected changelist
+      // Get the file at the selected changelist
       try {
         const result = await readFileFromChangelist({
           workspace: {
@@ -933,13 +1021,15 @@ export const workspaceRouter = router({
           filePath: normalizedPath,
           changelistNumber: input.changelistNumber,
         });
-        rightContent = result.content;
+        rightResult = {
+          cachePath: result.cachePath,
+          isBinary: result.isBinary,
+        };
       } catch (err) {
         console.error("Failed to read file at changelist:", err);
-        rightContent = `[Error reading file from changelist ${input.changelistNumber}]\n${err instanceof Error ? err.message : String(err)}`;
       }
 
-      // Get the file content at the previous changelist (if exists)
+      // Get the file at the previous changelist (if exists)
       if (input.previousChangelistNumber !== null) {
         try {
           const result = await readFileFromChangelist({
@@ -951,16 +1041,170 @@ export const workspaceRouter = router({
             filePath: normalizedPath,
             changelistNumber: input.previousChangelistNumber,
           });
-          leftContent = result.content;
+          leftResult = {
+            cachePath: result.cachePath,
+            isBinary: result.isBinary,
+          };
         } catch {
           // File might not exist at the previous changelist (was added in this changelist)
-          leftContent = "";
         }
       }
 
       return {
-        left: leftContent,
-        right: rightContent,
+        left: leftResult,
+        right: rightResult,
+      };
+    }),
+
+  revertFiles: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        filePaths: z.array(z.string()),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+      const workspaceState = manager.getWorkspaceState(workspace.id);
+
+      const results: {
+        filePath: string;
+        success: boolean;
+        error?: string;
+      }[] = [];
+
+      for (const rawPath of input.filePaths) {
+        const normalizedPath = rawPath
+          .replace(/^[/\\]/, "")
+          .replace(/\\/g, "/");
+
+        try {
+          // Look up the head changelist for this file from workspace state
+          const headFileInfo = workspaceState?.files[normalizedPath];
+
+          if (headFileInfo && headFileInfo.changelist) {
+            // File exists in head — download head version and overwrite local
+            const result = await readFileFromChangelist({
+              workspace: {
+                daemonId: input.daemonId,
+                repoId: workspace.repoId,
+                localPath: workspace.localPath,
+              },
+              filePath: normalizedPath,
+              changelistNumber: headFileInfo.changelist,
+            });
+
+            // Copy cached head version over the working copy
+            const localFilePath = path.join(
+              workspace.localPath,
+              normalizedPath,
+            );
+            await fs.copyFile(result.cachePath, localFilePath);
+          } else {
+            // File is not in any head version (locally added file).
+            // Delete it from disk so it reverts to "not existing".
+            const localFilePath = path.join(
+              workspace.localPath,
+              normalizedPath,
+            );
+            try {
+              await fs.unlink(localFilePath);
+            } catch {
+              // File may already be gone
+            }
+          }
+
+          // Undo checkout if the file was checked out
+          try {
+            await client.file.undoCheckout.mutate({
+              repoId: workspace.repoId,
+              workspaceId: workspace.id,
+              filePath: normalizedPath,
+            });
+          } catch {
+            // Not checked out — that's fine
+          }
+
+          results.push({ filePath: normalizedPath, success: true });
+        } catch (error: any) {
+          results.push({
+            filePath: normalizedPath,
+            success: false,
+            error: error?.message || "Unknown error",
+          });
+        }
+      }
+
+      // Remove any reverted files from the marked-for-add list
+      const revertedPaths = results
+        .filter((r) => r.success)
+        .map((r) => r.filePath);
+      if (revertedPaths.length > 0) {
+        await manager.unmarkForAdd(workspace, revertedPaths);
+      }
+
+      return { results };
+    }),
+
+  readFileAtChangelist: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        filePath: z.string(),
+        changelistNumber: z.number(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const manager = DaemonManager.Get();
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const normalizedPath = input.filePath
+        .replace(/^[/\\]/, "")
+        .replace(/\\/g, "/");
+
+      const result = await readFileFromChangelist({
+        workspace: {
+          daemonId: input.daemonId,
+          repoId: workspace.repoId,
+          localPath: workspace.localPath,
+        },
+        filePath: normalizedPath,
+        changelistNumber: input.changelistNumber,
+      });
+
+      return {
+        cachePath: result.cachePath,
+        isBinary: result.isBinary,
+        size: result.size,
       };
     }),
 });

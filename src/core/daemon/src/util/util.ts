@@ -60,9 +60,12 @@ export async function exec(
 export interface WorkspaceState {
   changelistNumber: number;
   files: Record<string, WorkspaceStateFile>; // path -> file info
+  /** Relative paths of files explicitly marked for add */
+  markedForAdd?: string[];
 }
 
 export interface WorkspaceConfig {
+  id: string;
   repoId: string;
   branchName: string;
   workspaceName: string;
@@ -122,6 +125,7 @@ export async function getWorkspaceState(
     return {
       changelistNumber: 0,
       files: {},
+      markedForAdd: [],
     };
   }
 }
@@ -137,6 +141,11 @@ export async function saveWorkspaceState(
     await fs.writeFile(
       path.join(workspaceConfigDir, "state.json"),
       JSON.stringify(state, null, 2),
+    );
+
+    await fs.writeFile(
+      path.join(workspaceConfigDir, "workspace.json"),
+      JSON.stringify(workspace, null, 2),
     );
   } catch (e) {
     throw new Error(

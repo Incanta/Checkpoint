@@ -49,14 +49,14 @@ const services = [
     cwd: path.join(__dirname, "src/app"),
     healthPattern: /\[healthy\]|Ready in/i,
   },
-  // {
-  //   name: "daemon",
-  //   color: colors.green,
-  //   command: process.platform === "win32" ? "yarn.cmd" : "yarn",
-  //   args: ["daemon"],
-  //   cwd: path.join(__dirname, "src/core"),
-  //   healthPattern: /\[healthy\]/i,
-  // },
+  {
+    name: "daemon",
+    color: colors.green,
+    command: process.platform === "win32" ? "yarn.cmd" : "yarn",
+    args: ["daemon"],
+    cwd: path.join(__dirname, "src/core"),
+    healthPattern: /\[healthy\]/i,
+  },
   {
     name: "server",
     color: colors.yellow,

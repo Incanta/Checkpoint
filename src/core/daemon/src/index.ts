@@ -25,7 +25,7 @@ export async function CreateDaemonClient() {
 
 export async function GetDaemonListenPort(): Promise<number> {
   let listenPort = 3010;
-  const configFilePath = path.join(homedir(), ".checkpoint", "config.json");
+  const configFilePath = path.join(homedir(), ".checkpoint", "daemon.json");
 
   if (existsSync(configFilePath)) {
     try {

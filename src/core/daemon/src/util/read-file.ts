@@ -10,6 +10,62 @@ import {
   type LongtailLogLevel,
 } from "@checkpointvcs/longtail-addon";
 
+/** File extensions considered binary (not diffable as text). */
+const BINARY_EXTENSIONS = new Set([
+  ".uasset",
+  ".umap",
+  ".ubulk",
+  ".utxt",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".bmp",
+  ".tga",
+  ".exr",
+  ".hdr",
+  ".dds",
+  ".psd",
+  ".tif",
+  ".tiff",
+  ".gif",
+  ".ico",
+  ".svg",
+  ".mp3",
+  ".wav",
+  ".ogg",
+  ".mp4",
+  ".avi",
+  ".mov",
+  ".wmv",
+  ".fbx",
+  ".obj",
+  ".abc",
+  ".gltf",
+  ".glb",
+  ".blend",
+  ".3ds",
+  ".bnk",
+  ".wem",
+  ".zip",
+  ".rar",
+  ".7z",
+  ".tar",
+  ".gz",
+  ".dll",
+  ".so",
+  ".dylib",
+  ".exe",
+  ".bin",
+  ".dat",
+  ".db",
+  ".pdf",
+]);
+
+export function isBinaryFile(filePath: string): boolean {
+  const ext = path.extname(filePath).toLowerCase();
+  return BINARY_EXTENSIONS.has(ext);
+}
+
 export interface ReadFileWorkspace {
   daemonId: string;
   repoId: string;
@@ -30,23 +86,25 @@ export interface ReadFileFromChangelistOptions {
   logLevel?: LongtailLogLevel;
 }
 
-export interface ReadFileFromVersionResult {
-  content: string;
+export interface ReadFileResult {
+  cachePath: string;
+  isBinary: boolean;
   size: number;
 }
 
 /**
- * Reads a single file from a historical version stored in Longtail.
- * This allows retrieving the content of a file at a specific changelist
- * without downloading the entire version.
+ * Reads a single file from a historical version stored in Longtail
+ * and writes it to the provided cachePath on disk.
+ * Returns the cache path, binary flag, and size.
  */
 export async function readFileFromVersion(
-  options: ReadFileFromVersionOptions,
-): Promise<ReadFileFromVersionResult> {
+  options: ReadFileFromVersionOptions & { cachePath: string },
+): Promise<ReadFileResult> {
   const {
     workspace,
     filePath,
     versionIndexName,
+    cachePath,
     logLevel = config.get<LongtailLogLevel>("longtail.log-level"),
   } = options;
 
@@ -102,42 +160,55 @@ export async function readFileFromVersion(
 
   const { data, size } = await pollReadFileHandle(handle);
 
-  const content = data && size > 0 ? data.toString("utf-8") : "";
-
   freeReadFileHandle(handle);
 
+  // Write the raw buffer to disk
+  await fs.mkdir(path.dirname(cachePath), { recursive: true });
+  if (data && size > 0) {
+    await fs.writeFile(cachePath, data);
+  } else {
+    await fs.writeFile(cachePath, Buffer.alloc(0));
+  }
+
   return {
-    content,
-    size,
+    cachePath,
+    isBinary: isBinaryFile(filePath),
+    size: size ?? 0,
   };
 }
 
 /**
- * Reads a single file from a historical changelist.
+ * Reads a single file from a historical changelist and caches it on disk.
+ * Returns the cache path, binary flag, and size.
  * This is a convenience wrapper that looks up the version index from the changelist.
  */
 export async function readFileFromChangelist(
   options: ReadFileFromChangelistOptions,
-): Promise<ReadFileFromVersionResult> {
+): Promise<ReadFileResult> {
   const { workspace, filePath, changelistNumber, logLevel } = options;
 
-  // Check cache if workspace.localPath is provided
-  if (workspace.localPath) {
-    const cachePath = path.join(
-      workspace.localPath,
-      ".checkpoint",
-      "cache",
-      String(changelistNumber),
-      filePath,
+  if (!workspace.localPath) {
+    throw new Error(
+      "workspace.localPath is required to cache file contents on disk",
     );
+  }
 
-    if (existsSync(cachePath)) {
-      const content = await fs.readFile(cachePath, "utf-8");
-      return {
-        content,
-        size: Buffer.byteLength(content, "utf-8"),
-      };
-    }
+  const cachePath = path.join(
+    workspace.localPath,
+    ".checkpoint",
+    "cache",
+    String(changelistNumber),
+    filePath,
+  );
+
+  // Return cached file if it already exists
+  if (existsSync(cachePath)) {
+    const stat = await fs.stat(cachePath);
+    return {
+      cachePath,
+      isBinary: isBinaryFile(filePath),
+      size: stat.size,
+    };
   }
 
   const client = await CreateApiClientAuth(workspace.daemonId);
@@ -156,26 +227,11 @@ export async function readFileFromChangelist(
     throw new Error(`Changelist ${changelistNumber} has no version index`);
   }
 
-  const result = await readFileFromVersion({
+  return readFileFromVersion({
     workspace,
     filePath,
     versionIndexName: changelist.versionIndex,
+    cachePath,
     logLevel,
   });
-
-  // Write to cache if workspace.localPath is provided
-  if (workspace.localPath) {
-    const cachePath = path.join(
-      workspace.localPath,
-      ".checkpoint",
-      "cache",
-      String(changelistNumber),
-      filePath,
-    );
-
-    await fs.mkdir(path.dirname(cachePath), { recursive: true });
-    await fs.writeFile(cachePath, result.content, "utf-8");
-  }
-
-  return result;
 }
