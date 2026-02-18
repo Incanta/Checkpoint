@@ -1,0 +1,21 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1",
+	"FriendlyName": "Checkpoint SCM",
+	"Description": "Checkpoint source control management",
+	"Category": "Source Control",
+	"CreatedBy": "Incanta Games",
+	"CreatedByURL": "https://incanta.dev",
+	"EnabledByDefault": true,
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "CheckpointSourceControl",
+			"Type": "UncookedOnly",
+			"LoadingPhase": "Default"
+		}
+	]
+}
