@@ -69,6 +69,19 @@ export interface WorkspaceConfig {
   repoId: string;
   branchName: string;
   workspaceName: string;
+  /**
+   * Controls whether the "mark as resolved" confirmation dialog is suppressed.
+   * - undefined/null: always show the confirmation
+   * - ISO date string: suppressed until end of that day ("today" option)
+   * - "workspace": suppressed permanently for this workspace
+   */
+  suppressResolveConfirmUntil?: string | null;
+  /**
+   * The remote branch head CL number that was last checked during sync status.
+   * Used to guard resolveConflicts against stale conflict data — if the remote
+   * head has moved since this value was recorded, resolve is rejected.
+   */
+  lastSyncStatusRemoteHead?: number | null;
 }
 
 export interface Workspace extends WorkspaceConfig {
@@ -76,40 +89,32 @@ export interface Workspace extends WorkspaceConfig {
   daemonId: string;
 }
 
-export async function getWorkspaceDetails(): Promise<Workspace> {
-  const workspace = await getWorkspaceRoot(process.cwd());
-  const workspaceConfigDir = path.join(workspace, ".checkpoint");
-
-  const configPath = path.join(workspaceConfigDir, "config.json");
+/**
+ * Read workspace.json from disk.
+ */
+export async function getWorkspaceConfig(
+  localPath: string,
+): Promise<Workspace | null> {
+  const workspaceConfigDir = path.join(localPath, ".checkpoint");
+  const configPath = path.join(workspaceConfigDir, "workspace.json");
   try {
-    const config = await fs.readFile(configPath, "utf-8");
-    const details: Workspace = JSON.parse(config);
-    details.localPath = workspace;
-    return details;
-  } catch (e) {
-    throw new Error(
-      "Could not read workspace configuration, did you initialize this workspace properly?",
-    );
+    const raw = await fs.readFile(configPath, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
 }
 
-export async function saveWorkspaceDetails(
-  workspace: WorkspaceConfig,
-): Promise<void> {
-  const workspaceRoot = await getWorkspaceRoot(process.cwd());
-  const workspaceConfigDir = path.join(workspaceRoot, ".checkpoint");
-
-  try {
-    await fs.mkdir(workspaceConfigDir, { recursive: true });
-    await fs.writeFile(
-      path.join(workspaceConfigDir, "config.json"),
-      JSON.stringify(workspace, null, 2),
-    );
-  } catch (e) {
-    throw new Error(
-      "Could not write workspace configuration, did you initialize this workspace properly?",
-    );
-  }
+/**
+ * Write workspace.json to disk (without touching state.json).
+ */
+export async function saveWorkspaceConfig(workspace: Workspace): Promise<void> {
+  const workspaceConfigDir = path.join(workspace.localPath, ".checkpoint");
+  await fs.mkdir(workspaceConfigDir, { recursive: true });
+  await fs.writeFile(
+    path.join(workspaceConfigDir, "workspace.json"),
+    JSON.stringify(workspace, null, 2),
+  );
 }
 
 export async function getWorkspaceState(
@@ -143,10 +148,7 @@ export async function saveWorkspaceState(
       JSON.stringify(state, null, 2),
     );
 
-    await fs.writeFile(
-      path.join(workspaceConfigDir, "workspace.json"),
-      JSON.stringify(workspace, null, 2),
-    );
+    await saveWorkspaceConfig(workspace);
   } catch (e) {
     throw new Error(
       "Could not write workspace state, did you initialize this workspace properly?",

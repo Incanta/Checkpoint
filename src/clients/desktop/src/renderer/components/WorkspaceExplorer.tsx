@@ -55,6 +55,14 @@ export default function WorkspaceExplorer() {
     lockedWarningPath,
     lockedWarningUser,
     confirmLockedCheckout,
+    resolveDialogVisible,
+    setResolveDialogVisible,
+    resolveDialogPath,
+    resolveDontAsk,
+    setResolveDontAsk,
+    resolveDontAskDuration,
+    setResolveDontAskDuration,
+    confirmResolve,
   } = useFileContextMenu();
   const [menuItems, setMenuItems] = useState<any[]>([]);
 
@@ -331,6 +339,14 @@ export default function WorkspaceExplorer() {
         lockedWarningUser={lockedWarningUser}
         lockedWarningPath={lockedWarningPath}
         confirmLockedCheckout={confirmLockedCheckout}
+        resolveDialogVisible={resolveDialogVisible}
+        setResolveDialogVisible={setResolveDialogVisible}
+        resolveDialogPath={resolveDialogPath}
+        resolveDontAsk={resolveDontAsk}
+        setResolveDontAsk={setResolveDontAsk}
+        resolveDontAskDuration={resolveDontAskDuration}
+        setResolveDontAskDuration={setResolveDontAskDuration}
+        confirmResolve={confirmResolve}
       />
 
       {/* Show file history view when active, otherwise show explorer */}

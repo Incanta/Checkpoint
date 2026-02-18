@@ -115,6 +115,32 @@ export type Channels = {
 
   "dashboard:refresh": { daemonId: string | null; orgId: string | null };
   "dashboard:select-workspace-folder": null;
+
+  // Sync status & preview
+  "workspace:sync-status": null;
+  "workspace:sync-status:refresh": null;
+  "workspace:sync-preview": null;
+  "workspace:sync-preview:select-file": { filePath: string };
+  "workspace:sync-preview:close": null;
+  "workspace:check-conflicts": null;
+  "workspace:pull:conflict-error": { message: string; conflictPaths: string[] };
+  "workspace:pull:merge-result": {
+    cleanMerges: string[];
+    conflictMerges: string[];
+  };
+  "workspace:submit:conflict-error": {
+    message: string;
+    conflictPaths: string[];
+  };
+
+  // Resolve conflicts
+  "file:resolve-conflict": { paths: string[] };
+  "file:resolve-conflict:success": { resolvedPaths: string[] };
+  "file:resolve-conflict:error": { message: string };
+  "workspace:resolve-confirm-suppressed": null;
+  "workspace:set-resolve-confirm-suppressed": {
+    duration: "today" | "workspace";
+  };
 };
 
 export type InvokeChannels = {

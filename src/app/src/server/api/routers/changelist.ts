@@ -489,4 +489,71 @@ export const changelistRouter = createTRPCRouter({
         number: changelist.number,
       };
     }),
+
+  getFilePathsChangedBetween: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        /** The older CL number (exclusive — changes IN this CL are NOT included). */
+        fromNumber: z.number(),
+        /** The newer CL number (inclusive — we start here and walk back). */
+        toNumber: z.number(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const checkpointUser = await ctx.db.user.findUnique({
+        where: { id: ctx.session.user.id },
+      });
+
+      if (!checkpointUser) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Checkpoint user not found for this authenticated user",
+        });
+      }
+
+      // Walk the parent chain from toNumber back to (but not including) fromNumber
+      // and collect all distinct file paths that were changed.
+      const clNumbers: number[] = [];
+      let currentNumber: number | null = input.toNumber;
+
+      while (currentNumber !== null && currentNumber !== input.fromNumber) {
+        clNumbers.push(currentNumber);
+
+        const cl = await ctx.db.changelist.findUnique({
+          where: {
+            repoId_number: {
+              repoId: input.repoId,
+              number: currentNumber,
+            },
+          },
+          select: { parentNumber: true },
+        });
+
+        if (!cl) break;
+        currentNumber = cl.parentNumber;
+      }
+
+      if (clNumbers.length === 0) {
+        return { paths: [] };
+      }
+
+      // Single query to get all file changes across the collected CLs
+      const fileChanges = await ctx.db.fileChange.findMany({
+        where: {
+          repoId: input.repoId,
+          changelistNumber: { in: clNumbers },
+        },
+        include: {
+          file: {
+            select: { path: true },
+          },
+        },
+      });
+
+      // De-duplicate paths
+      const paths = [...new Set(fileChanges.map((fc) => fc.file.path))];
+
+      return { paths };
+    }),
 });

@@ -5,7 +5,10 @@ import { Dialog } from "primereact/dialog";
 import { useAtom, useAtomValue } from "jotai";
 import { ipc } from "../pages/ipc";
 import { userSettingsAtom } from "../../common/state/settings";
-import { currentWorkspaceAtom } from "../../common/state/workspace";
+import {
+  currentWorkspaceAtom,
+  resolveConfirmSuppressedAtom,
+} from "../../common/state/workspace";
 
 export interface FileContextMenuProps {
   contextMenuRef: React.RefObject<ContextMenu | null>;
@@ -59,6 +62,7 @@ const FileStatusValues = {
   NotChangedCheckedOut: 12,
   Conflicted: 13,
   Artifact: 14,
+  MergeConflict: 15,
 } as const;
 
 type FileStatusType = (typeof FileStatusValues)[keyof typeof FileStatusValues];
@@ -81,6 +85,7 @@ function getFileStatusFromString(status: string): FileStatusType {
     NotChangedCheckedOut: FileStatusValues.NotChangedCheckedOut,
     Conflicted: FileStatusValues.Conflicted,
     Artifact: FileStatusValues.Artifact,
+    MergeConflict: FileStatusValues.MergeConflict,
   };
   return statusMap[status] ?? FileStatusValues.Unknown;
 }
@@ -105,12 +110,21 @@ export function useFileContextMenu() {
   const currentFileRef = useRef<FileContextInfo | null>(null);
   const [userSettings, setUserSettings] = useAtom(userSettingsAtom);
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
+  const resolveConfirmSuppressed = useAtomValue(resolveConfirmSuppressedAtom);
 
   // Locked warning dialog state
   const [lockedWarningVisible, setLockedWarningVisible] = useState(false);
   const [lockedWarningPath, setLockedWarningPath] = useState("");
   const [lockedWarningUser, setLockedWarningUser] = useState("");
   const pendingLockedCheckout = useRef<boolean>(false);
+
+  // Resolve confirmation dialog state
+  const [resolveDialogVisible, setResolveDialogVisible] = useState(false);
+  const [resolveDialogPath, setResolveDialogPath] = useState("");
+  const [resolveDontAsk, setResolveDontAsk] = useState(false);
+  const [resolveDontAskDuration, setResolveDontAskDuration] = useState<
+    "today" | "workspace"
+  >("today");
 
   useEffect(() => {
     const unsubscribe = ipc.on("file:checkout:locked-warning", (data) => {
@@ -244,7 +258,8 @@ export function useFileContextMenu() {
       status === FileStatusValues.Added ||
       status === FileStatusValues.Renamed ||
       status === FileStatusValues.Deleted ||
-      status === FileStatusValues.Conflicted;
+      status === FileStatusValues.Conflicted ||
+      status === FileStatusValues.MergeConflict;
     items.push({
       label: "Revert",
       disabled: !canRevert,
@@ -257,6 +272,29 @@ export function useFileContextMenu() {
           ipc.sendMessage("workspace:revert", {
             filePaths: [file.relativePath],
           });
+        }
+      },
+    });
+
+    // Mark as Resolved (only for Conflicted files)
+    const isConflicted =
+      status === FileStatusValues.Conflicted ||
+      status === FileStatusValues.MergeConflict;
+    items.push({
+      label: "Mark as Resolved",
+      disabled: !isConflicted,
+      command: () => {
+        if (resolveConfirmSuppressed?.suppressed) {
+          // Suppressed — resolve immediately
+          ipc.sendMessage("file:resolve-conflict", {
+            paths: [file.relativePath],
+          });
+        } else {
+          // Show confirmation dialog
+          setResolveDialogPath(file.relativePath);
+          setResolveDontAsk(false);
+          setResolveDontAskDuration("today");
+          setResolveDialogVisible(true);
         }
       },
     });
@@ -485,6 +523,27 @@ export function useFileContextMenu() {
         path: lockedWarningPath,
       });
     },
+    // Resolve confirmation dialog
+    resolveDialogVisible,
+    setResolveDialogVisible,
+    resolveDialogPath,
+    resolveDontAsk,
+    setResolveDontAsk,
+    resolveDontAskDuration,
+    setResolveDontAskDuration,
+    confirmResolve: () => {
+      setResolveDialogVisible(false);
+      // If "don't ask me again" is checked, save the preference
+      if (resolveDontAsk) {
+        ipc.sendMessage("workspace:set-resolve-confirm-suppressed", {
+          duration: resolveDontAskDuration,
+        });
+      }
+      // Resolve the conflict
+      ipc.sendMessage("file:resolve-conflict", {
+        paths: [resolveDialogPath],
+      });
+    },
   };
 }
 
@@ -496,6 +555,14 @@ export default function FileContextMenu({
   lockedWarningUser,
   lockedWarningPath,
   confirmLockedCheckout,
+  resolveDialogVisible,
+  setResolveDialogVisible,
+  resolveDialogPath,
+  resolveDontAsk,
+  setResolveDontAsk,
+  resolveDontAskDuration,
+  setResolveDontAskDuration,
+  confirmResolve,
 }: {
   contextMenuRef: React.RefObject<ContextMenu | null>;
   menuItems: MenuItem[];
@@ -504,6 +571,14 @@ export default function FileContextMenu({
   lockedWarningUser?: string;
   lockedWarningPath?: string;
   confirmLockedCheckout?: () => void;
+  resolveDialogVisible?: boolean;
+  setResolveDialogVisible?: (visible: boolean) => void;
+  resolveDialogPath?: string;
+  resolveDontAsk?: boolean;
+  setResolveDontAsk?: (value: boolean) => void;
+  resolveDontAskDuration?: "today" | "workspace";
+  setResolveDontAskDuration?: (value: "today" | "workspace") => void;
+  confirmResolve?: () => void;
 }) {
   return (
     <>
@@ -627,6 +702,117 @@ export default function FileContextMenu({
             You can still check out the file, but you will not be able to submit
             changes while it remains locked by another user.
           </p>
+        </Dialog>
+      )}
+
+      {resolveDialogVisible && setResolveDialogVisible && (
+        <Dialog
+          header="Mark as Resolved"
+          visible={resolveDialogVisible}
+          style={{ width: "32rem" }}
+          onHide={() => setResolveDialogVisible(false)}
+          footer={
+            <div className="flex justify-end gap-2">
+              <button
+                className="p-[0.5rem] px-[1rem] text-[0.9em] rounded"
+                style={{
+                  backgroundColor: "var(--color-app-bg)",
+                  border: "1px solid var(--color-border)",
+                  color: "var(--color-text-secondary)",
+                }}
+                onClick={() => setResolveDialogVisible(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="p-[0.5rem] px-[1rem] text-[0.9em] rounded"
+                style={{
+                  backgroundColor: "#646cff",
+                  border: "1px solid #646cff",
+                  color: "#fff",
+                }}
+                onClick={confirmResolve}
+              >
+                Mark as Resolved
+              </button>
+            </div>
+          }
+          pt={{
+            root: {
+              style: {
+                backgroundColor: "var(--color-panel)",
+                border: "1px solid var(--color-border)",
+              },
+            },
+            header: {
+              style: {
+                backgroundColor: "var(--color-panel)",
+                color: "var(--color-text-secondary)",
+                borderBottom: "1px solid var(--color-border)",
+              },
+            },
+            content: {
+              style: {
+                backgroundColor: "var(--color-panel)",
+                color: "var(--color-text-secondary)",
+                padding: "1.5rem",
+              },
+            },
+            footer: {
+              style: {
+                backgroundColor: "var(--color-panel)",
+                borderTop: "1px solid var(--color-border)",
+                padding: "0.75rem",
+              },
+            },
+          }}
+        >
+          <p>
+            Are you sure you want to mark this file as resolved? This tells
+            Checkpoint that your local version is correct despite newer changes
+            on the remote.
+          </p>
+          <p
+            className="mt-2 text-sm"
+            style={{ color: "var(--color-text-tertiary)" }}
+          >
+            {resolveDialogPath}
+          </p>
+          <div className="mt-4 flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="resolve-dont-ask"
+              checked={resolveDontAsk}
+              onChange={(e) => setResolveDontAsk?.(e.target.checked)}
+              style={{ accentColor: "#646cff" }}
+            />
+            <label
+              htmlFor="resolve-dont-ask"
+              className="text-sm"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              Don&apos;t ask me again
+            </label>
+            {resolveDontAsk && (
+              <select
+                value={resolveDontAskDuration}
+                onChange={(e) =>
+                  setResolveDontAskDuration?.(
+                    e.target.value as "today" | "workspace",
+                  )
+                }
+                className="ml-2 text-sm rounded px-2 py-1"
+                style={{
+                  backgroundColor: "var(--color-app-bg)",
+                  border: "1px solid var(--color-border)",
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                <option value="today">Today</option>
+                <option value="workspace">For this workspace</option>
+              </select>
+            )}
+          </div>
         </Dialog>
       )}
     </>

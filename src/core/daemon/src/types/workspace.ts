@@ -64,6 +64,12 @@ export enum FileStatus {
    * team from recompiling. They are hidden from the pending changes.
    */
   Artifact = 14,
+  /**
+   * This file has been auto-merged during a pull but contains unresolved
+   * git-style conflict markers (<<<<<<< / ======= / >>>>>>>).
+   * The user must manually resolve the conflicts.
+   */
+  MergeConflict = 15,
 }
 
 export interface FileCheckoutInfo {

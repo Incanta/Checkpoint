@@ -13,9 +13,14 @@ import { CreateApiClientAuth, hashFile } from "@checkpointvcs/common";
 import {
   getWorkspaceState,
   saveWorkspaceState,
+  getWorkspaceConfig,
+  saveWorkspaceConfig,
   type WorkspaceState,
 } from "./util/index.js";
 import { getFileStatus, getIgnoreCache } from "./file-status.js";
+import { checkSyncStatus, type SyncStatus } from "./util/sync-status.js";
+import { hasConflictMarkers } from "./util/auto-merge.js";
+import { isBinaryFile } from "./util/read-file.js";
 
 export class DaemonManager {
   private static instance: DaemonManager | null = null;
@@ -34,6 +39,15 @@ export class DaemonManager {
     new Map();
 
   private watchers: Map<string, FSWatcher> = new Map();
+
+  /** Cached sync status per workspace, keyed by workspace.id */
+  private syncStatuses: Map<string, SyncStatus> = new Map();
+
+  /** Interval handle for sync polling */
+  private syncPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  /** Sync poll interval in milliseconds (5 minutes) */
+  private static readonly SYNC_POLL_INTERVAL_MS = 5 * 60 * 1000;
 
   private constructor() {
     //
@@ -62,9 +76,13 @@ export class DaemonManager {
     }
 
     await InitLogger();
+
+    // Start sync polling for all workspaces
+    this.startSyncPolling();
   }
 
   public async shutdown(): Promise<void> {
+    this.stopSyncPolling();
     this.watchers.forEach((watcher) => watcher.close());
     this.watchers.clear();
   }
@@ -227,18 +245,40 @@ export class DaemonManager {
           ? checkouts.some((c) => c.fileId === baselineFile.fileId)
           : false;
 
+        // Check if this is a text file with conflict markers from auto-merge
+        let status: FileStatus;
+        if (!baselineFile) {
+          status = markedForAdd.has(relativePath)
+            ? FileStatus.Added
+            : FileStatus.Local;
+        } else if (!isBinaryFile(relativePath)) {
+          // For text files, check if they contain conflict markers
+          try {
+            const content = await fs.readFile(fullPath, "utf-8");
+            if (hasConflictMarkers(content)) {
+              status = FileStatus.MergeConflict;
+            } else {
+              status = isCheckedOut
+                ? FileStatus.ChangedCheckedOut
+                : FileStatus.ChangedNotCheckedOut;
+            }
+          } catch {
+            status = isCheckedOut
+              ? FileStatus.ChangedCheckedOut
+              : FileStatus.ChangedNotCheckedOut;
+          }
+        } else {
+          status = isCheckedOut
+            ? FileStatus.ChangedCheckedOut
+            : FileStatus.ChangedNotCheckedOut;
+        }
+
         const pendingFile: File = {
           path: relativePath,
           type: stat.isSymbolicLink() ? FileType.Symlink : FileType.Binary,
           size: stat.size,
           modifiedAt: stat.mtimeMs,
-          status: !baselineFile
-            ? markedForAdd.has(relativePath)
-              ? FileStatus.Added
-              : FileStatus.Local
-            : isCheckedOut
-              ? FileStatus.ChangedCheckedOut
-              : FileStatus.ChangedNotCheckedOut,
+          status,
           id: baselineFile?.fileId ?? null,
           changelist: baselineFile?.changelist ?? null,
           checkouts: [],
@@ -437,5 +477,97 @@ export class DaemonManager {
     state: WorkspaceState,
   ): Promise<void> {
     await saveWorkspaceState(workspace as any, state);
+  }
+
+  // ─── Sync Status Polling ───────────────────────────────────────────
+
+  /**
+   * Starts the periodic sync status polling for all workspaces.
+   */
+  private startSyncPolling(): void {
+    if (this.syncPollInterval) {
+      return;
+    }
+
+    // Do an initial poll shortly after startup
+    setTimeout(() => {
+      this.pollAllWorkspaces();
+    }, 10_000);
+
+    this.syncPollInterval = setInterval(() => {
+      this.pollAllWorkspaces();
+    }, DaemonManager.SYNC_POLL_INTERVAL_MS);
+  }
+
+  /**
+   * Stops sync status polling.
+   */
+  private stopSyncPolling(): void {
+    if (this.syncPollInterval) {
+      clearInterval(this.syncPollInterval);
+      this.syncPollInterval = null;
+    }
+  }
+
+  /**
+   * Polls sync status for every configured workspace.
+   */
+  private async pollAllWorkspaces(): Promise<void> {
+    for (const [, workspaceList] of this.workspaces) {
+      for (const workspace of workspaceList) {
+        try {
+          await this.refreshSyncStatus(workspace);
+        } catch (err) {
+          Logger.warn(
+            `[DaemonManager] Failed to poll sync status for workspace ${workspace.name}: ${err}`,
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Refreshes the sync status for a single workspace by querying the remote.
+   */
+  public async refreshSyncStatus(workspace: Workspace): Promise<SyncStatus> {
+    const status = await checkSyncStatus({
+      id: workspace.id,
+      repoId: workspace.repoId,
+      branchName: workspace.branchName,
+      workspaceName: workspace.name,
+      localPath: workspace.localPath,
+      daemonId: workspace.daemonId,
+    });
+    this.syncStatuses.set(workspace.id, status);
+
+    // Persist the remote head we checked against so resolveConflicts can
+    // detect if the remote moved since the user last saw conflict data.
+    try {
+      const config = await getWorkspaceConfig(workspace.localPath);
+      if (config) {
+        config.lastSyncStatusRemoteHead = status.remoteHeadNumber;
+        await saveWorkspaceConfig(config);
+      }
+    } catch (err) {
+      Logger.warn(
+        `[DaemonManager] Failed to persist lastSyncStatusRemoteHead for ${workspace.name}: ${err}`,
+      );
+    }
+
+    return status;
+  }
+
+  /**
+   * Gets the cached sync status for a workspace.
+   */
+  public getSyncStatus(workspaceId: string): SyncStatus | null {
+    return this.syncStatuses.get(workspaceId) ?? null;
+  }
+
+  /**
+   * Clears the cached sync status for a workspace (e.g. after a pull).
+   */
+  public clearSyncStatus(workspaceId: string): void {
+    this.syncStatuses.delete(workspaceId);
   }
 }

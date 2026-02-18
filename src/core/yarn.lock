@@ -859,6 +859,7 @@ __metadata:
     commander: "npm:^12.0.0"
     date-fns: "npm:^4.1.0"
     ignore: "npm:^7.0.5"
+    node-diff3: "npm:^3.2.0"
     pino: "npm:^10.1.0"
     pino-pretty: "npm:^13.1.2"
     superjson: "npm:^2.2.2"
@@ -5604,6 +5605,13 @@ __metadata:
   dependencies:
     node-gyp: "npm:latest"
   checksum: 10c0/e4de0b4e70998fed7ef41933946f60565fc3a17cb83b7d626a0c0bb1f734cf7852e0e596f12681e7c8ed424163ee3cdbb4f0abaa9cc269d03f48834c263ba162
+  languageName: node
+  linkType: hard
+
+"node-diff3@npm:^3.2.0":
+  version: 3.2.0
+  resolution: "node-diff3@npm:3.2.0"
+  checksum: 10c0/5dc9b8cefd2699890f4de062c8eb325ab0844c3bad6eb71eb7adf0a7e8c0b8a6d4bdf89cd91cc92ec844899a078266aa899256481769ebc7fd0c34dc902c0012
   languageName: node
   linkType: hard
 

@@ -18,6 +18,10 @@ import {
   workspaceLabelsAtom,
   workspacePendingChangesAtom,
   workspacesAtom,
+  workspaceSyncStatusAtom,
+  workspaceSyncPreviewAtom,
+  workspaceConflictsAtom,
+  resolveConfirmSuppressedAtom,
 } from "../common/state/workspace";
 import { promises as fs, existsSync } from "fs";
 import path from "path";
@@ -203,6 +207,59 @@ export default class DaemonHandler {
             store.set(dashboardNewWorkspaceFolderAtom, results.filePaths[0]);
           }
         }
+      },
+    );
+
+    // Sync status & preview handlers
+    ipcOn(this.ipcMain, "workspace:sync-status", async (event, data) => {
+      this.workspaceSyncStatus(false);
+    });
+
+    ipcOn(
+      this.ipcMain,
+      "workspace:sync-status:refresh",
+      async (event, data) => {
+        this.workspaceSyncStatus(true);
+      },
+    );
+
+    ipcOn(this.ipcMain, "workspace:sync-preview", async (event, data) => {
+      this.workspaceSyncPreview();
+    });
+
+    ipcOn(
+      this.ipcMain,
+      "workspace:sync-preview:select-file",
+      async (event, data) => {
+        this.workspaceSyncPreviewSelectFile(data);
+      },
+    );
+
+    ipcOn(this.ipcMain, "workspace:sync-preview:close", async (event, data) => {
+      store.set(workspaceSyncPreviewAtom, null);
+    });
+
+    ipcOn(this.ipcMain, "workspace:check-conflicts", async (event, data) => {
+      this.workspaceCheckConflicts();
+    });
+
+    ipcOn(this.ipcMain, "file:resolve-conflict", async (event, data) => {
+      this.resolveConflicts(data);
+    });
+
+    ipcOn(
+      this.ipcMain,
+      "workspace:resolve-confirm-suppressed",
+      async (event, data) => {
+        this.getResolveConfirmSuppressed();
+      },
+    );
+
+    ipcOn(
+      this.ipcMain,
+      "workspace:set-resolve-confirm-suppressed",
+      async (event, data) => {
+        this.setResolveConfirmSuppressed(data);
       },
     );
 
@@ -398,7 +455,17 @@ export default class DaemonHandler {
       },
     });
 
+    // Clear previous sync state
+    store.set(workspaceSyncStatusAtom, null);
+    store.set(workspaceSyncPreviewAtom, null);
+    store.set(workspaceConflictsAtom, null);
+    store.set(resolveConfirmSuppressedAtom, null);
+
     this.workspaceRefresh();
+
+    // Fetch sync status and resolve confirm suppression in background
+    this.workspaceSyncStatus(true);
+    this.getResolveConfirmSuppressed();
 
     if (this.webContents) {
       ipcSend(this.webContents, "set-renderer-url", {
@@ -631,12 +698,46 @@ export default class DaemonHandler {
       );
     }
 
-    const client = await CreateDaemonClient();
-    const pullResponse = await client.workspaces.pull.query({
-      daemonId: currentUser.daemonId,
-      workspaceId: currentWorkspace.id,
-      ...data,
-    });
+    try {
+      const client = await CreateDaemonClient();
+      const mergeResult = await client.workspaces.pull.query({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        ...data,
+      });
+
+      // Refresh sync status after successful pull
+      this.workspaceSyncStatus(true);
+
+      // Notify renderer of merge results (clean + conflict merges)
+      if (
+        this.webContents &&
+        mergeResult &&
+        (mergeResult.cleanMerges.length > 0 ||
+          mergeResult.conflictMerges.length > 0)
+      ) {
+        ipcSend(this.webContents, "workspace:pull:merge-result", {
+          cleanMerges: mergeResult.cleanMerges,
+          conflictMerges: mergeResult.conflictMerges,
+        });
+      }
+    } catch (error: any) {
+      const message = error?.message || "An unknown error occurred during pull";
+      if (message.includes("conflicting file")) {
+        // Extract conflict paths from error message
+        const pathsMatch = message.match(/: ([^]+)$/);
+        const conflictPaths = pathsMatch
+          ? pathsMatch[1].split(", ").map((p: string) => p.trim())
+          : [];
+        if (this.webContents) {
+          ipcSend(this.webContents, "workspace:pull:conflict-error", {
+            message,
+            conflictPaths,
+          });
+        }
+      }
+      throw error;
+    }
   }
 
   private async workspaceSubmit(
@@ -679,9 +780,21 @@ export default class DaemonHandler {
         ipcSend(this.webContents, "workspace:submit:success", null);
       }
     } catch (error: any) {
+      const message =
+        error?.message || "An unknown error occurred during submit";
       if (this.webContents) {
+        if (message.includes("conflicting file")) {
+          const pathsMatch = message.match(/: ([^]+)$/);
+          const conflictPaths = pathsMatch
+            ? pathsMatch[1].split(", ").map((p: string) => p.trim())
+            : [];
+          ipcSend(this.webContents, "workspace:submit:conflict-error", {
+            message,
+            conflictPaths,
+          });
+        }
         ipcSend(this.webContents, "workspace:submit:error", {
-          message: error?.message || "An unknown error occurred during submit",
+          message,
         });
       }
     }
@@ -984,6 +1097,240 @@ export default class DaemonHandler {
       });
 
       store.set(workspaceDiffAtom, diffResponse);
+    }
+  }
+
+  // ─── Sync Status & Preview ───────────────────────────────────────
+
+  private async workspaceSyncStatus(forceRefresh: boolean): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace || this.isMocked) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      const syncStatus = await client.workspaces.getSyncStatus.query({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        forceRefresh,
+      });
+
+      store.set(workspaceSyncStatusAtom, {
+        ...syncStatus,
+        checkedAt: new Date(syncStatus.checkedAt),
+      });
+    } catch (error) {
+      console.error("Failed to fetch sync status:", error);
+    }
+  }
+
+  private async workspaceSyncPreview(): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace || this.isMocked) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      const preview = await client.workspaces.getSyncPreview.query({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+      });
+
+      store.set(workspaceSyncPreviewAtom, {
+        syncStatus: {
+          ...preview.syncStatus,
+          checkedAt: new Date(preview.syncStatus.checkedAt),
+        },
+        changelists: preview.allFileChanges,
+        allFileChanges: preview.allFileChanges,
+        selectedFilePath: null,
+        diffContent: null,
+      });
+
+      // Also update the sync status atom
+      store.set(workspaceSyncStatusAtom, {
+        ...preview.syncStatus,
+        checkedAt: new Date(preview.syncStatus.checkedAt),
+      });
+    } catch (error) {
+      console.error("Failed to fetch sync preview:", error);
+    }
+  }
+
+  private async workspaceSyncPreviewSelectFile(
+    data: Channels["workspace:sync-preview:select-file"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    const currentPreview = store.get(workspaceSyncPreviewAtom);
+    if (!currentWorkspace || !currentPreview || this.isMocked) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) return;
+
+    try {
+      const client = await CreateDaemonClient();
+
+      // Find the latest changelist that modified this file
+      let latestCl: number | null = null;
+      let previousCl: number | null = null;
+
+      for (const cl of currentPreview.allFileChanges) {
+        const fileChange = cl.files.find((f) => f.path === data.filePath);
+        if (fileChange) {
+          if (latestCl === null || cl.changelistNumber > latestCl) {
+            previousCl = latestCl;
+            latestCl = cl.changelistNumber;
+          }
+        }
+      }
+
+      // If we didn't find a previous CL from the incoming changes,
+      // use the local workspace's CL for this file
+      if (previousCl === null && latestCl !== null) {
+        const syncStatus = currentPreview.syncStatus;
+        previousCl =
+          syncStatus.localChangelistNumber > 0
+            ? syncStatus.localChangelistNumber
+            : null;
+
+        // Check if the file has a specific local CL from outdated files
+        const outdated = syncStatus.outdatedFiles?.find(
+          (f) => f.path === data.filePath,
+        );
+        if (outdated) {
+          previousCl = outdated.localChangelist;
+        }
+      }
+
+      if (latestCl === null) {
+        return;
+      }
+
+      const rawResult = await client.workspaces.fileHistoryDiff.query({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        filePath: data.filePath,
+        changelistNumber: latestCl,
+        previousChangelistNumber: previousCl,
+      });
+
+      const diffContent = await readDiffFromPaths(rawResult);
+
+      store.set(workspaceSyncPreviewAtom, {
+        ...currentPreview,
+        selectedFilePath: data.filePath,
+        diffContent,
+      });
+    } catch (error) {
+      console.error("Failed to get sync preview file diff:", error);
+    }
+  }
+
+  private async workspaceCheckConflicts(): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace || this.isMocked) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      const conflicts = await client.workspaces.checkConflicts.query({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+      });
+
+      store.set(workspaceConflictsAtom, conflicts);
+    } catch (error) {
+      console.error("Failed to check conflicts:", error);
+    }
+  }
+
+  private async resolveConflicts(
+    data: Channels["file:resolve-conflict"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace || this.isMocked) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      const result = await client.workspaces.resolveConflicts.mutate({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        filePaths: data.paths,
+      });
+
+      // Notify renderer of success
+      if (this.webContents) {
+        ipcSend(this.webContents, "file:resolve-conflict:success", {
+          resolvedPaths: result.resolvedPaths,
+        });
+      }
+
+      // Refresh sync status and conflicts
+      this.workspaceSyncStatus(true);
+      this.workspaceCheckConflicts();
+
+      // Refresh pending changes since file statuses may have changed
+      this.workspaceRefresh();
+    } catch (error: any) {
+      console.error("Failed to resolve conflicts:", error);
+      if (this.webContents) {
+        ipcSend(this.webContents, "file:resolve-conflict:error", {
+          message: error?.message || "Failed to resolve conflicts",
+        });
+      }
+    }
+  }
+
+  private async getResolveConfirmSuppressed(): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace || this.isMocked) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      const result = await client.workspaces.getResolveConfirmSuppressed.query({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+      });
+
+      store.set(resolveConfirmSuppressedAtom, result);
+    } catch (error) {
+      console.error("Failed to get resolve confirm suppressed:", error);
+    }
+  }
+
+  private async setResolveConfirmSuppressed(
+    data: Channels["workspace:set-resolve-confirm-suppressed"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace || this.isMocked) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      await client.workspaces.setResolveConfirmSuppressed.mutate({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        duration: data.duration,
+      });
+
+      // Refresh the suppressed state
+      store.set(resolveConfirmSuppressedAtom, { suppressed: true });
+    } catch (error) {
+      console.error("Failed to set resolve confirm suppressed:", error);
     }
   }
 

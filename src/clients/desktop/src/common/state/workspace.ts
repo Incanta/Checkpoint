@@ -96,3 +96,81 @@ export interface LabelEntry {
 
 export const workspaceLabelsAtom = atom<LabelEntry[] | null>(null);
 syncAtom(workspaceLabelsAtom, "workspaceLabels");
+
+// Sync status types (incoming remote changes)
+export interface SyncStatusOutdatedFile {
+  fileId: string;
+  path: string;
+  localChangelist: number;
+  remoteChangelist: number;
+}
+
+export interface SyncStatusState {
+  upToDate: boolean;
+  localChangelistNumber: number;
+  remoteHeadNumber: number;
+  changelistsBehind: number;
+  changelistsToPull: number[];
+  outdatedFiles: SyncStatusOutdatedFile[];
+  deletedOnRemote: string[];
+  newOnRemote: string[];
+  checkedAt: Date;
+}
+
+export const workspaceSyncStatusAtom = atom<SyncStatusState | null>(null);
+syncAtom(workspaceSyncStatusAtom, "workspaceSyncStatus");
+
+// Sync preview types (detailed view of incoming changes)
+export interface SyncPreviewFileChange {
+  fileId: string;
+  path: string;
+  changeType: "ADD" | "DELETE" | "MODIFY";
+  oldPath: string | null;
+}
+
+export interface SyncPreviewChangelist {
+  changelistNumber: number;
+  message: string;
+  user: string;
+  date: string;
+  files: SyncPreviewFileChange[];
+}
+
+export interface SyncPreviewState {
+  syncStatus: SyncStatusState;
+  changelists: SyncPreviewChangelist[];
+  /** Aggregated file changes across all incoming CLs */
+  allFileChanges: SyncPreviewChangelist[];
+  /** Currently selected file for diff view */
+  selectedFilePath: string | null;
+  /** Diff content for the selected file */
+  diffContent: { left: string; right: string } | null;
+}
+
+export const workspaceSyncPreviewAtom = atom<SyncPreviewState | null>(null);
+syncAtom(workspaceSyncPreviewAtom, "workspaceSyncPreview");
+
+// Conflict types
+export interface ConflictedFile {
+  fileId: string;
+  path: string;
+  localChangelist: number;
+  remoteChangelist: number;
+}
+
+export interface ConflictCheckState {
+  hasConflicts: boolean;
+  conflicts: ConflictedFile[];
+}
+
+export const workspaceConflictsAtom = atom<ConflictCheckState | null>(null);
+syncAtom(workspaceConflictsAtom, "workspaceConflicts");
+
+// Resolve confirmation suppression
+export interface ResolveConfirmSuppressedState {
+  suppressed: boolean;
+}
+
+export const resolveConfirmSuppressedAtom =
+  atom<ResolveConfirmSuppressedState | null>(null);
+syncAtom(resolveConfirmSuppressedAtom, "resolveConfirmSuppressed");

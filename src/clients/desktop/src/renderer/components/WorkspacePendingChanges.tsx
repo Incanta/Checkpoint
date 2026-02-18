@@ -71,6 +71,14 @@ export default function WorkspacePendingChanges() {
     lockedWarningPath,
     lockedWarningUser,
     confirmLockedCheckout,
+    resolveDialogVisible,
+    setResolveDialogVisible,
+    resolveDialogPath,
+    resolveDontAsk,
+    setResolveDontAsk,
+    resolveDontAskDuration,
+    setResolveDontAskDuration,
+    confirmResolve,
   } = useFileContextMenu();
   const [menuItems, setMenuItems] = useState<any[]>([]);
 
@@ -79,13 +87,14 @@ export default function WorkspacePendingChanges() {
     (event: React.MouseEvent, node: TreeNode) => {
       if (!currentWorkspace) return;
 
-      // Skip category nodes (changed, moved, deleted, added)
+      // Skip category nodes (changed, moved, deleted, added, conflicted)
       const key = node.key as string;
-      if (["changed", "moved", "deleted", "added"].includes(key)) return;
+      if (["changed", "moved", "deleted", "added", "conflicted"].includes(key))
+        return;
 
       // Strip the category prefix from the key to get the relative path
       const relativePath = key
-        .replace(/^(changed|moved|deleted|added)\//, "")
+        .replace(/^(changed|moved|deleted|added|conflicted)\//, "")
         .replace(/^\//, "");
 
       const workspaceLocalPath = currentWorkspace.localPath
@@ -257,6 +266,21 @@ export default function WorkspacePendingChanges() {
       children: [],
     };
 
+    const conflictedNode: TreeNode = {
+      id: "conflicted",
+      key: "conflicted",
+      data: {
+        name: "Conflicted Files",
+        status: "",
+        size: "",
+        modified: "",
+        type: "",
+        changelist: "",
+      },
+      leaf: false,
+      children: [],
+    };
+
     const newNodes: TreeNode[] = [
       changedNode,
       movedNode,
@@ -277,10 +301,12 @@ export default function WorkspacePendingChanges() {
         const filename = pathParts.pop();
         if (!filename) continue;
 
-        // TODO MIKE HERE: how to handle conflicted status?
-
         let parentNode: TreeNode | null = null;
         switch (file.status) {
+          case FileStatus.Conflicted:
+          case FileStatus.MergeConflict:
+            parentNode = conflictedNode;
+            break;
           case FileStatus.ChangedCheckedOut:
           case FileStatus.ChangedNotCheckedOut:
             parentNode = changedNode;
@@ -353,6 +379,11 @@ export default function WorkspacePendingChanges() {
           leaf: file.type !== FileType.Directory,
         });
       }
+    }
+
+    // Only show the Conflicted Files category if it has children
+    if (conflictedNode.children && conflictedNode.children.length > 0) {
+      newNodes.push(conflictedNode);
     }
 
     setNodes(newNodes);
@@ -428,7 +459,7 @@ export default function WorkspacePendingChanges() {
 
               // Strip category prefix and leading slash to get relative path
               const relativePath = key
-                .replace(/^(changed|moved|deleted|added)\//, "")
+                .replace(/^(changed|moved|deleted|added|conflicted)\//, "")
                 .replace(/^\//, "");
 
               const pendingChange =
@@ -720,6 +751,14 @@ export default function WorkspacePendingChanges() {
         lockedWarningUser={lockedWarningUser}
         lockedWarningPath={lockedWarningPath}
         confirmLockedCheckout={confirmLockedCheckout}
+        resolveDialogVisible={resolveDialogVisible}
+        setResolveDialogVisible={setResolveDialogVisible}
+        resolveDialogPath={resolveDialogPath}
+        resolveDontAsk={resolveDontAsk}
+        setResolveDontAsk={setResolveDontAsk}
+        resolveDontAskDuration={resolveDontAskDuration}
+        setResolveDontAskDuration={setResolveDontAskDuration}
+        confirmResolve={confirmResolve}
       />
     </div>
   );
