@@ -28,6 +28,8 @@ import FileContextMenu, {
   useFileContextMenu,
   FileContextInfo,
 } from "./FileContextMenu";
+import prettyBytes from "pretty-bytes";
+import { FileIcon } from "./FileIcon";
 
 export default function WorkspacePendingChanges() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
@@ -314,7 +316,7 @@ export default function WorkspacePendingChanges() {
                 status: "",
                 size: "",
                 modified: "",
-                type: "Directory",
+                type: " ",
                 changelist: "",
               },
               leaf: false,
@@ -338,8 +340,9 @@ export default function WorkspacePendingChanges() {
           data: {
             path: file.path,
             name: filename,
+            ext: filename.split(".").pop() || "",
             status: FileStatus[file.status],
-            size: file.size.toString() + " B",
+            size: prettyBytes(file.size),
             modified: new Date(file.modifiedAt).toLocaleDateString(),
             type: FileType[file.type],
             changelist: file.changelist ? file.changelist.toString() : "",
@@ -588,6 +591,16 @@ export default function WorkspacePendingChanges() {
                 expander
                 resizeable
                 sortable
+                body={(rowData: any) => {
+                  return (
+                    <div style={{ display: "inline" }}>
+                      <FileIcon extension={rowData.data.ext} />
+                      <span style={{ marginLeft: ".5em" }}>
+                        {rowData.data.name}
+                      </span>
+                    </div>
+                  );
+                }}
                 pt={columnPt}
                 style={{ width: "40%" }}
               ></Column>

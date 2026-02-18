@@ -3671,6 +3671,11 @@ file-entry-cache@^8.0.0:
   dependencies:
     flat-cache "^4.0.0"
 
+file-icon-vectors@^1.0.0:
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/file-icon-vectors/-/file-icon-vectors-1.0.0.tgz#eccdc849d8d3a815dd8b653b2e68eacc6f4b07c3"
+  integrity sha512-me+C0t1IU+ggE31CpZNImXID8HV8/eD4eO8go4RwLLZdMaIFr25x23m1xmzYBZH3r/FxyMbbQkD0SNGnRC4meg==
+
 filelist@^1.0.4:
   version "1.0.4"
   resolved "https://registry.yarnpkg.com/filelist/-/filelist-1.0.4.tgz#f78978a1e944775ff9e62e744424f215e58352b5"

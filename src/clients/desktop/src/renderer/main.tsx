@@ -5,6 +5,7 @@ import { Provider } from "jotai";
 import { store } from "../common/state/store";
 import "./index.css";
 import "tailwindcss";
+import "file-icon-vectors/dist/file-icon-square-o.min.css";
 import Loading from "./pages/Loading/Loading";
 import Welcome from "./pages/Welcome/Welcome";
 import Login from "./pages/Login/Login";

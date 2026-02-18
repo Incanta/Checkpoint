@@ -24,6 +24,7 @@ import FileContextMenu, {
   FileContextInfo,
 } from "./FileContextMenu";
 import FileHistory from "./FileHistory";
+import { FileIcon } from "./FileIcon";
 
 export default function WorkspaceExplorer() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
@@ -113,7 +114,7 @@ export default function WorkspaceExplorer() {
               status: "",
               size: "",
               modified: "",
-              type: "Directory",
+              type: " ",
               changelist: "",
             },
             leaf: false,
@@ -139,7 +140,7 @@ export default function WorkspaceExplorer() {
                 status: "",
                 size: "",
                 modified: "",
-                type: "Directory",
+                type: " ",
                 changelist: "",
               },
               leaf: false,
@@ -167,11 +168,13 @@ export default function WorkspaceExplorer() {
             key: currentNode.key + "/" + file.path.split("/").pop(),
             data: {
               name: file.path.split("/").pop() || "",
+              ext: file.path.split(".").pop() || "",
               status,
               size:
                 file.type === FileType.Directory ? "" : prettyBytes(file.size),
               modified: new Date(file.modifiedAt).toLocaleDateString(),
-              type: FileType[file.type],
+              type:
+                file.type === FileType.Directory ? " " : FileType[file.type],
               changelist: file.changelist ? file.changelist.toString() : "",
             },
             leaf: file.type !== FileType.Directory,
@@ -222,13 +225,17 @@ export default function WorkspaceExplorer() {
                 key: relativePath,
                 data: {
                   name: file.path.split("/").pop() || "",
+                  ext: file.path.split(".").pop() || "",
                   status,
                   size:
                     file.type === FileType.Directory
                       ? ""
                       : prettyBytes(file.size),
                   modified: new Date(file.modifiedAt).toLocaleDateString(),
-                  type: FileType[file.type],
+                  type:
+                    file.type === FileType.Directory
+                      ? " "
+                      : FileType[file.type],
                   changelist: file.changelist ? file.changelist.toString() : "",
                 },
                 leaf: file.type !== FileType.Directory,
@@ -418,12 +425,16 @@ export default function WorkspaceExplorer() {
                           key: relativePath,
                           data: {
                             name: file.path.split("/").pop() || "",
+                            ext: file.path.split(".").pop() || "",
                             status,
                             size: prettyBytes(file.size),
                             modified: new Date(
                               file.modifiedAt,
                             ).toLocaleDateString(),
-                            type: FileType[file.type],
+                            type:
+                              file.type === FileType.Directory
+                                ? " "
+                                : FileType[file.type],
                             changelist: file.changelist
                               ? file.changelist.toString()
                               : "",
@@ -476,6 +487,16 @@ export default function WorkspaceExplorer() {
                 expander
                 resizeable
                 sortable
+                body={(rowData: any) => {
+                  return (
+                    <div style={{ display: "inline" }}>
+                      <FileIcon extension={rowData.data.ext} />
+                      <span style={{ marginLeft: ".5em" }}>
+                        {rowData.data.name}
+                      </span>
+                    </div>
+                  );
+                }}
                 pt={columnPt}
                 style={{ width: "40%" }}
               ></Column>
