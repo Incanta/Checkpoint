@@ -15,7 +15,7 @@
   },
   "scripts": {
     "build": "next build",
-    "build:lib": "tsc --project tsconfig.lib.json",
+    "build:lib": "tsc --project tsconfig.lib.json && node scripts/resolve-prisma-enums.mjs",
     "check": "next lint && tsc --noEmit",
     "db:types": "prisma generate",
     "db:migrate:dev": "config-env --env=dev prisma migrate dev",

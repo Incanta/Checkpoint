@@ -213,6 +213,7 @@ export async function pull(
     // Handle deletions
     const filesResponse = await client.file.getFiles.query({
       ids: diff.deletions,
+      repoId: workspace.repoId,
     });
 
     for (const file of filesResponse) {
@@ -277,6 +278,7 @@ export async function pull(
     // Get all file info from server
     const allFilesResponse = await client.file.getFiles.query({
       ids: allFileIds,
+      repoId: workspace.repoId,
     });
 
     // Build the new state format: Record<path, WorkspaceStateFile>

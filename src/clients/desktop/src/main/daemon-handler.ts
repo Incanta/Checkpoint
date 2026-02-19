@@ -429,7 +429,7 @@ export default class DaemonHandler {
       });
       store.set(dashboardReposAtom, reposResponse.repos);
 
-      const workspacesResponse = await client.workspaces.list.local.query({
+      const workspacesResponse = await client.workspaces.ops.list.local.query({
         daemonId: data.daemonId,
       });
 
@@ -459,7 +459,7 @@ export default class DaemonHandler {
 
       const client = await CreateDaemonClient();
 
-      const workspaceResponse = await client.workspaces.create.mutate({
+      const workspaceResponse = await client.workspaces.ops.create.mutate({
         daemonId: currentUser.daemonId,
         ...data,
       });
@@ -513,7 +513,7 @@ export default class DaemonHandler {
 
     const client = await CreateDaemonClient();
 
-    const changelists = await client.workspaces.history.query({
+    const changelists = await client.workspaces.history.get.query({
       daemonId: currentWorkspace.daemonId,
       workspaceId: currentWorkspace.id,
     });
@@ -546,7 +546,7 @@ export default class DaemonHandler {
     try {
       const client = await CreateDaemonClient();
 
-      const files = await client.workspaces.changelistFiles.query({
+      const files = await client.workspaces.history.changelistFiles.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         changelistNumber: data.changelistNumber,
@@ -601,7 +601,7 @@ export default class DaemonHandler {
       );
       const previousChangelistNumber = changelist?.parentNumber ?? null;
 
-      const rawResult = await client.workspaces.fileHistoryDiff.query({
+      const rawResult = await client.workspaces.history.fileDiff.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         filePath: data.filePath,
@@ -647,7 +647,7 @@ export default class DaemonHandler {
     try {
       const client = await CreateDaemonClient();
 
-      const fileHistoryEntries = await client.workspaces.fileHistory.query({
+      const fileHistoryEntries = await client.workspaces.history.file.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         filePath: data.path,
@@ -692,7 +692,7 @@ export default class DaemonHandler {
     }
 
     const client = await CreateDaemonClient();
-    const pendingChanges = await client.workspaces.refresh.query({
+    const pendingChanges = await client.workspaces.pending.refresh.query({
       daemonId: currentWorkspace.daemonId,
       workspaceId: currentWorkspace.id,
     });
@@ -730,7 +730,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const mergeResult = await client.workspaces.pull.query({
+      const mergeResult = await client.workspaces.sync.pull.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         ...data,
@@ -800,7 +800,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      await client.workspaces.submit.query({
+      await client.workspaces.pending.submit.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         ...data,
@@ -849,7 +849,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      await client.workspaces.createLabel.mutate({
+      await client.workspaces.labels.create.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         name: data.name,
@@ -886,7 +886,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const labels = await client.workspaces.getLabels.query({
+      const labels = await client.workspaces.labels.list.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
       });
@@ -927,7 +927,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      await client.workspaces.deleteLabel.mutate({
+      await client.workspaces.labels.delete.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         labelId: data.labelId,
@@ -965,7 +965,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      await client.workspaces.renameLabel.mutate({
+      await client.workspaces.labels.rename.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         labelId: data.labelId,
@@ -1004,7 +1004,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      await client.workspaces.changeLabelChangelist.mutate({
+      await client.workspaces.labels.changeChangelist.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         labelId: data.labelId,
@@ -1040,7 +1040,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const result = await client.workspaces.listBranches.query({
+      const result = await client.workspaces.branches.list.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         includeArchived: true,
@@ -1075,7 +1075,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      await client.workspaces.createBranch.mutate({
+      await client.workspaces.branches.create.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         name: data.name,
@@ -1116,7 +1116,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const result = await client.workspaces.switchBranch.mutate({
+      const result = await client.workspaces.branches.switch.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         branchName: data.name,
@@ -1171,7 +1171,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      await client.workspaces.archiveBranch.mutate({
+      await client.workspaces.branches.archive.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         branchName: data.branchName,
@@ -1201,7 +1201,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      await client.workspaces.unarchiveBranch.mutate({
+      await client.workspaces.branches.unarchive.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         branchName: data.branchName,
@@ -1240,7 +1240,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      await client.workspaces.deleteBranch.mutate({
+      await client.workspaces.branches.delete.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         branchName: data.branchName,
@@ -1278,7 +1278,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const result = await client.workspaces.mergeBranch.mutate({
+      const result = await client.workspaces.branches.merge.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         incomingBranchName: data.incomingBranchName,
@@ -1354,11 +1354,12 @@ export default class DaemonHandler {
       }
 
       const client = await CreateDaemonClient();
-      const directoryResponse = await client.workspaces.getDirectory.query({
-        daemonId: currentUser.daemonId,
-        workspaceId: currentWorkspace.id,
-        path: data.path,
-      });
+      const directoryResponse =
+        await client.workspaces.pending.getDirectory.query({
+          daemonId: currentUser.daemonId,
+          workspaceId: currentWorkspace.id,
+          path: data.path,
+        });
 
       // Send the directory contents back to the renderer process
       ipcSend(this.webContents, "workspace:directory-contents", {
@@ -1390,7 +1391,7 @@ export default class DaemonHandler {
 
       const client = await CreateDaemonClient();
 
-      const diffResponse = await client.workspaces.diffFile.query({
+      const diffResponse = await client.workspaces.pending.diffFile.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         path: data.path,
@@ -1411,7 +1412,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const syncStatus = await client.workspaces.getSyncStatus.query({
+      const syncStatus = await client.workspaces.sync.getSyncStatus.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         forceRefresh,
@@ -1435,7 +1436,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const preview = await client.workspaces.getSyncPreview.query({
+      const preview = await client.workspaces.sync.getSyncPreview.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
       });
@@ -1510,7 +1511,7 @@ export default class DaemonHandler {
         return;
       }
 
-      const rawResult = await client.workspaces.fileHistoryDiff.query({
+      const rawResult = await client.workspaces.history.fileDiff.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         filePath: data.filePath,
@@ -1539,7 +1540,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const conflicts = await client.workspaces.checkConflicts.query({
+      const conflicts = await client.workspaces.conflicts.check.query({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
       });
@@ -1561,7 +1562,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const result = await client.workspaces.resolveConflicts.mutate({
+      const result = await client.workspaces.conflicts.resolve.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         filePaths: data.paths,
@@ -1599,10 +1600,11 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const result = await client.workspaces.getResolveConfirmSuppressed.query({
-        daemonId: currentUser.daemonId,
-        workspaceId: currentWorkspace.id,
-      });
+      const result =
+        await client.workspaces.conflicts.getResolveConfirmSuppressed.query({
+          daemonId: currentUser.daemonId,
+          workspaceId: currentWorkspace.id,
+        });
 
       store.set(resolveConfirmSuppressedAtom, result);
     } catch (error) {
@@ -1621,7 +1623,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      await client.workspaces.setResolveConfirmSuppressed.mutate({
+      await client.workspaces.conflicts.setResolveConfirmSuppressed.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         duration: data.duration,
@@ -1713,7 +1715,7 @@ export default class DaemonHandler {
               ? entries[selectedIndex + 1]
               : null;
 
-          const rawResult = await client.workspaces.fileHistoryDiff.query({
+          const rawResult = await client.workspaces.history.fileDiff.query({
             daemonId: currentUser.daemonId,
             workspaceId: currentWorkspace.id,
             filePath: currentFileHistory.filePath,
@@ -1754,7 +1756,7 @@ export default class DaemonHandler {
       try {
         const client = await CreateDaemonClient();
 
-        const rawResult = await client.workspaces.fileHistoryDiff.query({
+        const rawResult = await client.workspaces.history.fileDiff.query({
           daemonId: currentUser.daemonId,
           workspaceId: currentWorkspace.id,
           filePath: data.filePath,
@@ -1779,7 +1781,7 @@ export default class DaemonHandler {
 
       try {
         const client = await CreateDaemonClient();
-        await client.workspaces.markForAdd.mutate({
+        await client.workspaces.pending.markForAdd.mutate({
           daemonId: currentUser.daemonId,
           workspaceId: currentWorkspace.id,
           paths: [data.path],
@@ -1824,7 +1826,7 @@ export default class DaemonHandler {
 
           if (filePaths.length > 0) {
             const client = await CreateDaemonClient();
-            await client.workspaces.markForAdd.mutate({
+            await client.workspaces.pending.markForAdd.mutate({
               daemonId: currentUser.daemonId,
               workspaceId: currentWorkspace.id,
               paths: filePaths,
@@ -1852,7 +1854,7 @@ export default class DaemonHandler {
         // Check if the file is locked by another user
         if (data.checkForLock) {
           const checkouts =
-            await client.workspaces.getActiveCheckoutsForFiles.query({
+            await client.workspaces.pending.getActiveCheckoutsForFiles.query({
               daemonId: currentUser.daemonId,
               workspaceId: currentWorkspace.id,
               filePaths: [data.path],
@@ -1877,7 +1879,7 @@ export default class DaemonHandler {
           }
         }
 
-        await client.workspaces.checkout.mutate({
+        await client.workspaces.pending.checkout.mutate({
           daemonId: currentUser.daemonId,
           workspaceId: currentWorkspace.id,
           path: data.path,
@@ -1904,7 +1906,7 @@ export default class DaemonHandler {
 
       try {
         const client = await CreateDaemonClient();
-        await client.workspaces.undoCheckout.mutate({
+        await client.workspaces.pending.undoCheckout.mutate({
           daemonId: currentUser.daemonId,
           workspaceId: currentWorkspace.id,
           path: data.path,
@@ -1930,7 +1932,7 @@ export default class DaemonHandler {
 
       try {
         const client = await CreateDaemonClient();
-        await client.workspaces.revertFiles.mutate({
+        await client.workspaces.pending.revertFiles.mutate({
           daemonId: currentUser.daemonId,
           workspaceId: currentWorkspace.id,
           filePaths: data.filePaths,

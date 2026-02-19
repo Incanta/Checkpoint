@@ -172,6 +172,7 @@ export class DaemonManager {
     const client = await CreateApiClientAuth(workspace.daemonId);
     const checkouts = await client.file.getCheckouts.query({
       workspaceId: workspace.id,
+      repoId: workspace.repoId,
     });
 
     // Track which baseline files we've seen (to detect deletions)

@@ -2,7 +2,7 @@ import { router } from "./trpc.js";
 import { authRouter } from "./routers/auth.js";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import { GetDaemonListenPort } from "../index.js";
-import { workspaceRouter } from "./routers/workspace.js";
+import { workspacesRouter } from "./routers/workspace/index.js";
 import { orgRouter } from "./routers/org.js";
 import { repoRouter } from "./routers/repo.js";
 import path from "path";
@@ -11,7 +11,7 @@ import { promises as fs } from "fs";
 
 const appRouter = router({
   auth: authRouter,
-  workspaces: workspaceRouter,
+  workspaces: workspacesRouter,
   orgs: orgRouter,
   repos: repoRouter,
 });

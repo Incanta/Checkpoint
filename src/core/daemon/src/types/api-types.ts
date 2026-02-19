@@ -15,4 +15,7 @@ export namespace ApiTypes {
 
   export type Changelist =
     AppRouter["changelist"]["getChangelists"]["_def"]["$types"]["output"][number];
+
+  export type FileChangeType =
+    AppRouter["file"]["getFileHistory"]["_def"]["$types"]["output"][number]["changeType"];
 }

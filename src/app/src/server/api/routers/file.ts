@@ -281,30 +281,6 @@ export const fileRouter = createTRPCRouter({
         count: z.number().min(1).max(100).default(50),
       }),
     )
-    .output(
-      z.array(
-        z.object({
-          changelistNumber: z.number(),
-          changeType: z.enum(["ADD", "DELETE", "MODIFY"]),
-          oldPath: z.string().nullable(),
-          changelist: z.object({
-            id: z.string(),
-            number: z.number(),
-            message: z.string().nullable(),
-            createdAt: z.date(),
-            updatedAt: z.date(),
-            userId: z.string().nullable(),
-            user: z
-              .object({
-                email: z.string().nullable(),
-                name: z.string().nullable(),
-                username: z.string().nullable(),
-              })
-              .nullable(),
-          }),
-        }),
-      ),
-    )
     .query(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 

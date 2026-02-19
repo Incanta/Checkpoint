@@ -193,16 +193,6 @@ export const changelistRouter = createTRPCRouter({
         changelistNumber: z.number(),
       }),
     )
-    .output(
-      z.array(
-        z.object({
-          fileId: z.string(),
-          path: z.string(),
-          changeType: z.enum(["ADD", "DELETE", "MODIFY"]),
-          oldPath: z.string().nullable(),
-        }),
-      ),
-    )
     .query(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 

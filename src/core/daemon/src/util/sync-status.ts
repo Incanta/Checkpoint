@@ -166,6 +166,7 @@ export async function checkSyncStatus(
     try {
       const filesResponse = await client.file.getFiles.query({
         ids: newOnRemote,
+        repoId: workspace.repoId,
       });
       for (const file of filesResponse) {
         if (file.path) {

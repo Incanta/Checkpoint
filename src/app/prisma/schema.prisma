@@ -31,7 +31,7 @@ model User {
   changelists       Changelist[]
   workspaces        Workspace[]
   apiTokens         ApiToken[]
-  createdBranches   Branch[]    @relation("BranchCreator")
+  createdBranches   Branch[]     @relation("BranchCreator")
 
   // NextAuth
   accounts      Account[]
@@ -143,9 +143,9 @@ model Branch {
   archivedAt DateTime?
 
   // Parent branch relationship (feature→mainline/release, release→mainline)
-  parentBranch   Branch?  @relation("BranchParent", fields: [repoId, parentBranchName], references: [repoId, name])
+  parentBranch     Branch?  @relation("BranchParent", fields: [repoId, parentBranchName], references: [repoId, name])
   parentBranchName String?
-  childBranches  Branch[] @relation("BranchParent")
+  childBranches    Branch[] @relation("BranchParent")
 
   // Creator tracking for permission checks
   createdBy   User?   @relation("BranchCreator", fields: [createdById], references: [id])
