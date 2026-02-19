@@ -2,30 +2,22 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { type Prisma } from "@prisma/client";
+import { RepoAccess, type Prisma } from "@prisma/client";
+import {
+  assertWorkspaceOwnership,
+  getUserAndRepoWithAccess,
+} from "../auth-utils";
 
 export const fileRouter = createTRPCRouter({
   getFiles: protectedProcedure
     .input(
       z.object({
         ids: z.array(z.string()),
+        repoId: z.string(),
       }),
     )
     .query(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check repo access (similar to other routers)
-      // ... access check logic ...
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       return ctx.db.file.findMany({
         where: {
@@ -44,20 +36,7 @@ export const fileRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check repo access (similar to other routers)
-      // ... access check logic ...
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       const files = await ctx.db.file.findMany({
         where: {
@@ -78,23 +57,12 @@ export const fileRouter = createTRPCRouter({
     .input(
       z.object({
         workspaceId: z.string(),
+        repoId: z.string(),
       }),
     )
     .query(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check repo access (similar to other routers)
-      // ... access check logic ...
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
+      await assertWorkspaceOwnership(ctx, input.workspaceId);
 
       return ctx.db.fileCheckout.findMany({
         where: {
@@ -115,16 +83,7 @@ export const fileRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       const normalizedPaths = input.filePaths.map((p) =>
         p.replaceAll("\\", "/"),
@@ -195,16 +154,8 @@ export const fileRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      await assertWorkspaceOwnership(ctx, input.workspaceId);
 
       const normalizedPath = input.filePath.replaceAll("\\", "/");
 
@@ -280,16 +231,8 @@ export const fileRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      await assertWorkspaceOwnership(ctx, input.workspaceId);
 
       const normalizedPath = input.filePath.replaceAll("\\", "/");
 
@@ -363,17 +306,7 @@ export const fileRouter = createTRPCRouter({
       ),
     )
     .query(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       // Normalize the file path
       const normalizedPath = input.filePath.replaceAll("\\", "/");

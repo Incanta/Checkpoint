@@ -2,6 +2,8 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import { getUserAndRepoWithAccess } from "../auth-utils";
+import { RepoAccess } from "@prisma/client";
 
 export const labelRouter = createTRPCRouter({
   getLabels: protectedProcedure
@@ -11,55 +13,7 @@ export const labelRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check repo access
-      const repo = await ctx.db.repo.findUnique({
-        where: { id: input.repoId },
-        include: { org: true },
-      });
-
-      if (!repo) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Repository not found",
-        });
-      }
-
-      if (!repo.public) {
-        const orgUser = await ctx.db.orgUser.findFirst({
-          where: { orgId: repo.orgId, userId: checkpointUser.id },
-        });
-
-        if (!orgUser) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "You do not have access to this repository",
-          });
-        }
-
-        if (repo.org.defaultRepoAccess === "NONE") {
-          const repoRole = await ctx.db.repoRole.findFirst({
-            where: { repoId: repo.id, userId: checkpointUser.id },
-          });
-
-          if (!repoRole || repoRole.access === "NONE") {
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "You do not have access to this repository",
-            });
-          }
-        }
-      }
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       return ctx.db.changelistLabel.findMany({
         where: { repoId: input.repoId },
@@ -87,55 +41,7 @@ export const labelRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check repo access
-      const repo = await ctx.db.repo.findUnique({
-        where: { id: input.repoId },
-        include: { org: true },
-      });
-
-      if (!repo) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Repository not found",
-        });
-      }
-
-      if (!repo.public) {
-        const orgUser = await ctx.db.orgUser.findFirst({
-          where: { orgId: repo.orgId, userId: checkpointUser.id },
-        });
-
-        if (!orgUser) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "You do not have access to this repository",
-          });
-        }
-
-        if (repo.org.defaultRepoAccess === "NONE") {
-          const repoRole = await ctx.db.repoRole.findFirst({
-            where: { repoId: repo.id, userId: checkpointUser.id },
-          });
-
-          if (!repoRole || repoRole.access === "NONE") {
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "You do not have access to this repository",
-            });
-          }
-        }
-      }
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
 
       const label = await ctx.db.changelistLabel.findUnique({
         where: { id: input.id },
@@ -162,55 +68,7 @@ export const labelRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check repo access
-      const repo = await ctx.db.repo.findUnique({
-        where: { id: input.repoId },
-        include: { org: true },
-      });
-
-      if (!repo) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Repository not found",
-        });
-      }
-
-      if (!repo.public) {
-        const orgUser = await ctx.db.orgUser.findFirst({
-          where: { orgId: repo.orgId, userId: checkpointUser.id },
-        });
-
-        if (!orgUser) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "You do not have access to this repository",
-          });
-        }
-
-        if (repo.org.defaultRepoAccess === "NONE") {
-          const repoRole = await ctx.db.repoRole.findFirst({
-            where: { repoId: repo.id, userId: checkpointUser.id },
-          });
-
-          if (!repoRole || repoRole.access === "NONE") {
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "You do not have access to this repository",
-            });
-          }
-        }
-      }
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
 
       const label = await ctx.db.changelistLabel.findUnique({
         where: { id: input.id },
@@ -255,55 +113,7 @@ export const labelRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check repo access
-      const repo = await ctx.db.repo.findUnique({
-        where: { id: input.repoId },
-        include: { org: true },
-      });
-
-      if (!repo) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Repository not found",
-        });
-      }
-
-      if (!repo.public) {
-        const orgUser = await ctx.db.orgUser.findFirst({
-          where: { orgId: repo.orgId, userId: checkpointUser.id },
-        });
-
-        if (!orgUser) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "You do not have access to this repository",
-          });
-        }
-
-        if (repo.org.defaultRepoAccess === "NONE") {
-          const repoRole = await ctx.db.repoRole.findFirst({
-            where: { repoId: repo.id, userId: checkpointUser.id },
-          });
-
-          if (!repoRole || repoRole.access === "NONE") {
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "You do not have access to this repository",
-            });
-          }
-        }
-      }
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
 
       const label = await ctx.db.changelistLabel.findUnique({
         where: { id: input.id },
@@ -348,55 +158,7 @@ export const labelRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check repo access
-      const repo = await ctx.db.repo.findUnique({
-        where: { id: input.repoId },
-        include: { org: true },
-      });
-
-      if (!repo) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Repository not found",
-        });
-      }
-
-      if (!repo.public) {
-        const orgUser = await ctx.db.orgUser.findFirst({
-          where: { orgId: repo.orgId, userId: checkpointUser.id },
-        });
-
-        if (!orgUser) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "You do not have access to this repository",
-          });
-        }
-
-        if (repo.org.defaultRepoAccess === "NONE") {
-          const repoRole = await ctx.db.repoRole.findFirst({
-            where: { repoId: repo.id, userId: checkpointUser.id },
-          });
-
-          if (!repoRole || repoRole.access === "NONE") {
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "You do not have access to this repository",
-            });
-          }
-        }
-      }
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
 
       // Verify the target changelist exists
       const changelist = await ctx.db.changelist.findUnique({

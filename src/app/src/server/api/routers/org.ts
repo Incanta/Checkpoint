@@ -6,24 +6,12 @@ import { createOrgDirectory } from "~/server/storage-service";
 
 export const orgRouter = createTRPCRouter({
   myOrgs: protectedProcedure.query(async ({ ctx }) => {
-    // Find the Checkpoint user associated with this NextAuth user
-    const checkpointUser = await ctx.db.user.findUnique({
-      where: { id: ctx.session.user.id },
-    });
-
-    if (!checkpointUser) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "Checkpoint user not found for this authenticated user",
-      });
-    }
-
     return ctx.db.org.findMany({
       where: {
         deletedAt: null,
         users: {
           some: {
-            userId: checkpointUser.id,
+            userId: ctx.session.user.id,
           },
         },
       },
@@ -50,18 +38,6 @@ export const orgRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
       const org = await ctx.db.org.findFirst({
         where: input.idIsName ? { name: input.id } : { id: input.id },
         include: {
@@ -81,7 +57,7 @@ export const orgRouter = createTRPCRouter({
       const orgUser = await ctx.db.orgUser.findFirst({
         where: {
           orgId: org.id,
-          userId: checkpointUser.id,
+          userId: ctx.session.user.id,
         },
       });
 
@@ -119,18 +95,6 @@ export const orgRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
       const org = await ctx.db.org.create({
         data: {
           name: input.name,
@@ -141,7 +105,7 @@ export const orgRouter = createTRPCRouter({
       await ctx.db.orgUser.create({
         data: {
           orgId: org.id,
-          userId: checkpointUser.id,
+          userId: ctx.session.user.id,
           role: "ADMIN",
         },
       });
@@ -170,24 +134,12 @@ export const orgRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
       const { id, ...updateData } = input;
 
       const orgUser = await ctx.db.orgUser.findFirst({
         where: {
           orgId: id,
-          userId: checkpointUser.id,
+          userId: ctx.session.user.id,
         },
       });
 
@@ -211,22 +163,10 @@ export const orgRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
       const orgUser = await ctx.db.orgUser.findFirst({
         where: {
           orgId: input.id,
-          userId: checkpointUser.id,
+          userId: ctx.session.user.id,
         },
       });
 
@@ -241,7 +181,7 @@ export const orgRouter = createTRPCRouter({
         where: { id: input.id },
         data: {
           deletedAt: new Date(),
-          deletedBy: checkpointUser.id,
+          deletedBy: ctx.session.user.id,
         },
       });
     }),
@@ -255,23 +195,11 @@ export const orgRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
       // Check if the current user is an admin of the org
       const orgUser = await ctx.db.orgUser.findFirst({
         where: {
           orgId: input.orgId,
-          userId: checkpointUser.id,
+          userId: ctx.session.user.id,
         },
       });
 

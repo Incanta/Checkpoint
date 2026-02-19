@@ -38,25 +38,27 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
         token: apiToken,
         OR: [
           {
-            expiresAt: null
+            expiresAt: null,
           },
           {
             expiresAt: {
-              gte: new Date()
-            }
-          }
-        ]
+              gte: new Date(),
+            },
+          },
+        ],
       },
       include: {
-        user: true
-      }
+        user: true,
+      },
     });
 
     if (apiTokenData) {
       // TODO MIKE HERE: not sure about the default expires here?
       session = {
         user: apiTokenData.user,
-        expires: apiTokenData.expiresAt?.toISOString() ?? new Date(Date.now() + 3600 * 24 * 7 * 1000).toISOString(),
+        expires:
+          apiTokenData.expiresAt?.toISOString() ??
+          new Date(Date.now() + 3600 * 24 * 7 * 1000).toISOString(),
       };
     }
   } else {
@@ -165,3 +167,8 @@ export const protectedProcedure = t.procedure
       },
     });
   });
+
+export type TRPCContextPublic = Awaited<ReturnType<typeof createTRPCContext>>;
+export type TRPCContextPrivate = TRPCContextPublic & {
+  session: NonNullable<TRPCContextPublic["session"]>;
+};

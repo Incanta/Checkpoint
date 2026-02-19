@@ -2,7 +2,11 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { FileChangeType, type Changelist } from "@prisma/client";
+import { FileChangeType, RepoAccess, type Changelist } from "@prisma/client";
+import {
+  assertWorkspaceOwnership,
+  getUserAndRepoWithAccess,
+} from "../auth-utils";
 
 export const changelistRouter = createTRPCRouter({
   getChangelist: protectedProcedure
@@ -13,20 +17,7 @@ export const changelistRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check repo access (similar to other routers)
-      // ... access check logic ...
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       return ctx.db.changelist.findUnique({
         where: {
@@ -46,20 +37,7 @@ export const changelistRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check repo access (similar to other routers)
-      // ... access check logic ...
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       return await ctx.db.changelist.findMany({
         where: {
@@ -84,20 +62,7 @@ export const changelistRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check repo access (similar to other routers)
-      // ... access check logic ...
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       let startNumber: number | Date | null = null;
 
@@ -239,16 +204,7 @@ export const changelistRouter = createTRPCRouter({
       ),
     )
     .query(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       const fileChanges = await ctx.db.fileChange.findMany({
         where: {
@@ -297,20 +253,8 @@ export const changelistRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      // Check write permissions to repo
-      // ... permission check logic ...
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      await assertWorkspaceOwnership(ctx, input.workspaceId);
 
       // Check for locked files by other users
       const normalizedPaths = input.modifications.map((mod) =>
@@ -326,7 +270,7 @@ export const changelistRouter = createTRPCRouter({
             path: { in: normalizedPaths },
           },
           workspace: {
-            userId: { not: checkpointUser.id },
+            userId: { not: ctx.session.user.id },
           },
         },
         include: {
@@ -377,6 +321,13 @@ export const changelistRouter = createTRPCRouter({
         });
       }
 
+      if (branch.archivedAt) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Branch ${input.branchName} is archived and read-only`,
+        });
+      }
+
       const parentChangelist = await ctx.db.changelist.findUnique({
         where: {
           repoId_number: {
@@ -393,10 +344,10 @@ export const changelistRouter = createTRPCRouter({
         });
       }
 
-      /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any */
+      /* eslint-disable @typescript-eslint/no-unsafe-assignment */
       const stateTree: Record<string, number> =
         parentChangelist.stateTree as any;
-      /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any */
+      /* eslint-enable @typescript-eslint/no-unsafe-assignment */
 
       // Apply modifications to state tree
       const modifiedFiles = await ctx.db.file.findMany({
@@ -445,7 +396,7 @@ export const changelistRouter = createTRPCRouter({
           parentNumber: branch.headNumber,
           stateTree: stateTree,
           repoId: input.repoId,
-          userId: checkpointUser.id,
+          userId: ctx.session.user.id,
         },
       });
 
@@ -501,16 +452,7 @@ export const changelistRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       // Walk the parent chain from toNumber back to (but not including) fromNumber
       // and collect all distinct file paths that were changed.
@@ -520,15 +462,16 @@ export const changelistRouter = createTRPCRouter({
       while (currentNumber !== null && currentNumber !== input.fromNumber) {
         clNumbers.push(currentNumber);
 
-        const cl = await ctx.db.changelist.findUnique({
-          where: {
-            repoId_number: {
-              repoId: input.repoId,
-              number: currentNumber,
+        const cl: { parentNumber: number | null } | null =
+          await ctx.db.changelist.findUnique({
+            where: {
+              repoId_number: {
+                repoId: input.repoId,
+                number: currentNumber,
+              },
             },
-          },
-          select: { parentNumber: true },
-        });
+            select: { parentNumber: true },
+          });
 
         if (!cl) break;
         currentNumber = cl.parentNumber;

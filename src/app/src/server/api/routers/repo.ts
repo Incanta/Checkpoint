@@ -3,6 +3,8 @@ import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { createRepoDirectory } from "~/server/storage-service";
+import { RepoAccess } from "@prisma/client";
+import { getUserAndRepoWithAccess } from "../auth-utils";
 
 export const repoRouter = createTRPCRouter({
   getRepo: protectedProcedure
@@ -12,58 +14,11 @@ export const repoRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      const repo = await ctx.db.repo.findUnique({
-        where: { id: input.id },
-        include: {
-          org: true,
-        },
-      });
-
-      if (!repo) {
-        return null;
-      }
-
-      if (repo.public) {
-        return repo;
-      }
-
-      const orgUser = await ctx.db.orgUser.findFirst({
-        where: {
-          orgId: repo.orgId,
-          userId: checkpointUser.id,
-        },
-      });
-
-      if (!orgUser) {
-        return null;
-      }
-
-      if (repo.org.defaultRepoAccess !== "NONE") {
-        return repo;
-      }
-
-      const repoRole = await ctx.db.repoRole.findFirst({
-        where: {
-          repoId: repo.id,
-          userId: checkpointUser.id,
-        },
-      });
-
-      if (!repoRole || repoRole.access === "NONE") {
-        return null;
-      }
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.id,
+        RepoAccess.READ,
+      );
 
       return repo;
     }),
@@ -76,22 +31,10 @@ export const repoRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
       const orgUser = await ctx.db.orgUser.findFirst({
         where: {
           orgId: input.orgId,
-          userId: checkpointUser.id,
+          userId: ctx.session.user.id,
         },
         include: {
           org: true,
@@ -124,7 +67,7 @@ export const repoRouter = createTRPCRouter({
           versionIndex: "",
           stateTree: {},
           repoId: repo.id,
-          userId: checkpointUser.id,
+          userId: ctx.session.user.id,
         },
       });
 
@@ -135,6 +78,8 @@ export const repoRouter = createTRPCRouter({
           repoId: repo.id,
           headNumber: 0,
           isDefault: true,
+          type: "MAINLINE",
+          createdById: ctx.session.user.id,
         },
       });
 
@@ -144,7 +89,7 @@ export const repoRouter = createTRPCRouter({
           data: {
             access: "ADMIN",
             repoId: repo.id,
-            userId: checkpointUser.id,
+            userId: ctx.session.user.id,
           },
         });
       }
@@ -170,55 +115,9 @@ export const repoRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
+      await getUserAndRepoWithAccess(ctx, input.id, RepoAccess.ADMIN);
 
       const { id, ...updateData } = input;
-
-      const repo = await ctx.db.repo.findUnique({
-        where: { id },
-        include: {
-          org: true,
-          additionalRoles: true,
-        },
-      });
-
-      if (!repo) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Repo not found",
-        });
-      }
-
-      const orgUser = await ctx.db.orgUser.findFirst({
-        where: {
-          orgId: repo.orgId,
-          userId: checkpointUser.id,
-        },
-      });
-
-      const hasAdminAccess =
-        orgUser?.role === "ADMIN" ||
-        repo.additionalRoles.some(
-          (role) =>
-            role.userId === checkpointUser.id && role.access === "ADMIN",
-        );
-
-      if (!hasAdminAccess) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "User does not have permission to update the repo",
-        });
-      }
 
       return ctx.db.repo.update({
         where: { id },
@@ -233,59 +132,13 @@ export const repoRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
-      const repo = await ctx.db.repo.findUnique({
-        where: { id: input.id },
-        include: {
-          org: true,
-          additionalRoles: true,
-        },
-      });
-
-      if (!repo) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Repo not found",
-        });
-      }
-
-      const orgUser = await ctx.db.orgUser.findFirst({
-        where: {
-          orgId: repo.orgId,
-          userId: checkpointUser.id,
-        },
-      });
-
-      const hasAdminAccess =
-        orgUser?.role === "ADMIN" ||
-        repo.additionalRoles.some(
-          (role) =>
-            role.userId === checkpointUser.id && role.access === "ADMIN",
-        );
-
-      if (!hasAdminAccess) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "User does not have permission to delete the repo",
-        });
-      }
+      await getUserAndRepoWithAccess(ctx, input.id, RepoAccess.ADMIN);
 
       return ctx.db.repo.update({
         where: { id: input.id },
         data: {
           deletedAt: new Date(),
-          deletedBy: checkpointUser.id,
+          deletedBy: ctx.session.user.id,
         },
       });
     }),
@@ -297,22 +150,10 @@ export const repoRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Checkpoint user not found for this authenticated user",
-        });
-      }
-
       const orgUser = await ctx.db.orgUser.findFirst({
         where: {
           orgId: input.orgId,
-          userId: checkpointUser.id,
+          userId: ctx.session.user.id,
         },
       });
 
@@ -345,7 +186,7 @@ export const repoRouter = createTRPCRouter({
         return ctx.db.repoRole.findFirst({
           where: {
             repoId: repo.id,
-            userId: checkpointUser.id,
+            userId: ctx.session.user.id,
             access: { not: "NONE" },
           },
         });

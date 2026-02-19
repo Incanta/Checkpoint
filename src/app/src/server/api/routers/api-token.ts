@@ -10,8 +10,6 @@ import {
 
 export const apiTokenRouter = createTRPCRouter({
   getCode: publicProcedure.query(async ({ ctx }) => {
-    // TODO MIKE HERE: need to add some sort of DDoS prevention
-
     const codeLength = 6;
     const codeDict = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -93,17 +91,6 @@ export const apiTokenRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "User not found",
-        });
-      }
-
       const token = crypto.randomBytes(32).toString("hex");
 
       await ctx.db.apiToken.create({
@@ -112,26 +99,15 @@ export const apiTokenRouter = createTRPCRouter({
           name: input.name,
           token,
           deviceCode: input.deviceCode,
-          userId: checkpointUser.id,
+          userId: ctx.session.user.id,
         },
       });
     }),
 
   getActiveDevices: protectedProcedure.query(async ({ ctx }) => {
-    const checkpointUser = await ctx.db.user.findUnique({
-      where: { id: ctx.session.user.id },
-    });
-
-    if (!checkpointUser) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "User not found",
-      });
-    }
-
     const activeDevices = await ctx.db.apiToken.findMany({
       where: {
-        userId: checkpointUser.id,
+        userId: ctx.session.user.id,
         OR: [
           {
             expiresAt: null,
@@ -163,20 +139,9 @@ export const apiTokenRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const checkpointUser = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-      });
-
-      if (!checkpointUser) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "User not found",
-        });
-      }
-
       await ctx.db.apiToken.update({
         where: {
-          userId: checkpointUser.id,
+          userId: ctx.session.user.id,
           id: input.deviceId,
         },
         data: {

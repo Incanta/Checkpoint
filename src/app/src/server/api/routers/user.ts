@@ -1,21 +1,11 @@
 import { z } from "zod";
-import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import { getCheckpointUser } from "../auth-utils";
 
 export const userRouter = createTRPCRouter({
   me: protectedProcedure.query(async ({ ctx }) => {
-    // Find the Checkpoint user associated with this NextAuth user
-    const checkpointUser = await ctx.db.user.findUnique({
-      where: { id: ctx.session.user.id },
-    });
-
-    if (!checkpointUser) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "Checkpoint user not found for this authenticated user",
-      });
-    }
+    const checkpointUser = await getCheckpointUser(ctx);
 
     return checkpointUser;
   }),
