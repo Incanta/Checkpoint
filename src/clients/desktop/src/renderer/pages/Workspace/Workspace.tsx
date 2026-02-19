@@ -13,8 +13,12 @@ import {
 import { ipc } from "../ipc";
 import WorkspaceHistory from "../../components/WorkspaceHistory";
 import WorkspaceLabels from "../../components/WorkspaceLabels";
+import WorkspaceBranches from "../../components/WorkspaceBranches";
 import SyncPreview from "../../components/SyncPreview";
 import SyncStatusBadge from "../../components/SyncStatusBadge";
+
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faCodeBranch } from "@fortawesome/free-solid-svg-icons/faCodeBranch";
 
 export default function Workspace(): React.ReactElement {
   const workspaces = useAtomValue(workspacesAtom);
@@ -62,6 +66,18 @@ export default function Workspace(): React.ReactElement {
             },
           }}
         />
+        {currentWorkspace && (
+          <span
+            className="ml-4 flex items-center"
+            style={{ color: "var(--color-text-secondary)", fontSize: "0.85em" }}
+          >
+            <FontAwesomeIcon
+              icon={faCodeBranch}
+              style={{ color: "var(--color-branches)", marginRight: "0.3rem" }}
+            />
+            {currentWorkspace.branchName}
+          </span>
+        )}
       </div>
       <div className="row-span-1 flex">
         {syncPreview ? (
@@ -104,6 +120,14 @@ export default function Workspace(): React.ReactElement {
                 }}
               >
                 <WorkspaceHistory />
+              </div>
+              <div
+                style={{
+                  display: activeTabIndex === 3 ? "initial" : "none",
+                  width: "100%",
+                }}
+              >
+                <WorkspaceBranches />
               </div>
               <div
                 style={{

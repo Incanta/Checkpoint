@@ -31,6 +31,7 @@ model User {
   changelists       Changelist[]
   workspaces        Workspace[]
   apiTokens         ApiToken[]
+  createdBranches   Branch[]    @relation("BranchCreator")
 
   // NextAuth
   accounts      Account[]
@@ -121,6 +122,12 @@ model RepoRole {
   @@unique([repoId, userId])
 }
 
+enum BranchType {
+  MAINLINE
+  RELEASE
+  FEATURE
+}
+
 model Branch {
   id String @id @default(cuid())
 
@@ -131,6 +138,18 @@ model Branch {
   headNumber Int
 
   isDefault Boolean @default(false)
+
+  type       BranchType @default(MAINLINE)
+  archivedAt DateTime?
+
+  // Parent branch relationship (feature→mainline/release, release→mainline)
+  parentBranch   Branch?  @relation("BranchParent", fields: [repoId, parentBranchName], references: [repoId, name])
+  parentBranchName String?
+  childBranches  Branch[] @relation("BranchParent")
+
+  // Creator tracking for permission checks
+  createdBy   User?   @relation("BranchCreator", fields: [createdById], references: [id])
+  createdById String?
 
   @@unique([repoId, name])
 }

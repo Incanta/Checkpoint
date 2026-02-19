@@ -174,3 +174,31 @@ export interface ResolveConfirmSuppressedState {
 export const resolveConfirmSuppressedAtom =
   atom<ResolveConfirmSuppressedState | null>(null);
 syncAtom(resolveConfirmSuppressedAtom, "resolveConfirmSuppressed");
+
+// Branch types
+export type BranchType = "MAINLINE" | "RELEASE" | "FEATURE";
+
+export interface BranchEntry {
+  id: string;
+  name: string;
+  headNumber: number;
+  isDefault: boolean;
+  type: BranchType;
+  archivedAt: string | null;
+  parentBranchName: string | null;
+  createdById: string | null;
+  createdBy: {
+    id: string;
+    email: string;
+    name: string | null;
+    username: string | null;
+  } | null;
+}
+
+export interface BranchesState {
+  branches: BranchEntry[];
+  currentBranchName: string;
+}
+
+export const workspaceBranchesAtom = atom<BranchesState | null>(null);
+syncAtom(workspaceBranchesAtom, "workspaceBranches");

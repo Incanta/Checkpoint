@@ -3,6 +3,7 @@ import {
   currentWorkspaceAtom,
   workspaceHistoryAtom,
   changelistChangesAtom,
+  workspaceBranchesAtom,
 } from "../../common/state/workspace";
 import Button from "./Button";
 import { ipc } from "../pages/ipc";
@@ -14,10 +15,12 @@ import { ContextMenu } from "primereact/contextmenu";
 import { MenuItem } from "primereact/menuitem";
 import ChangelistChanges from "./ChangelistChanges";
 import CreateLabelDialog from "./CreateLabelDialog";
+import CreateBranchDialog from "./CreateBranchDialog";
 
 export default function WorkspaceHistory() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const workspaceHistory = useAtomValue(workspaceHistoryAtom);
+  const branchesState = useAtomValue(workspaceBranchesAtom);
   const changelistChanges = useAtomValue(changelistChangesAtom);
 
   const treeTableRef = useRef<TreeTable>(null);
@@ -28,6 +31,8 @@ export default function WorkspaceHistory() {
   const contextChangelistRef = useRef<number | null>(null);
   const [createLabelVisible, setCreateLabelVisible] = useState(false);
   const [createLabelCl, setCreateLabelCl] = useState<number>(0);
+  const [createBranchVisible, setCreateBranchVisible] = useState(false);
+  const [createBranchCl, setCreateBranchCl] = useState<number>(0);
 
   useEffect(() => {
     if (!currentWorkspace) {
@@ -83,7 +88,12 @@ export default function WorkspaceHistory() {
         { separator: true },
         {
           label: "Create branch here...",
-          disabled: true,
+          command: () => {
+            if (contextChangelistRef.current !== null) {
+              setCreateBranchCl(contextChangelistRef.current);
+              setCreateBranchVisible(true);
+            }
+          },
         },
         {
           label: "Create label...",
@@ -325,6 +335,19 @@ export default function WorkspaceHistory() {
         visible={createLabelVisible}
         changelistNumber={createLabelCl}
         onHide={() => setCreateLabelVisible(false)}
+      />
+
+      <CreateBranchDialog
+        visible={createBranchVisible}
+        onHide={() => setCreateBranchVisible(false)}
+        defaultParentBranchName={
+          branchesState?.currentBranchName &&
+          branchesState.branches.find((b) => b.name === branchesState.currentBranchName)?.type === "FEATURE"
+            ? branchesState.branches.find((b) => b.name === branchesState.currentBranchName)?.parentBranchName ?? branchesState.currentBranchName
+            : branchesState?.currentBranchName ?? null
+        }
+        defaultHeadNumber={createBranchCl}
+        defaultType="FEATURE"
       />
     </>
   );

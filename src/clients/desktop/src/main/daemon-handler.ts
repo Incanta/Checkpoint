@@ -22,6 +22,7 @@ import {
   workspaceSyncPreviewAtom,
   workspaceConflictsAtom,
   resolveConfirmSuppressedAtom,
+  workspaceBranchesAtom,
 } from "../common/state/workspace";
 import { promises as fs, existsSync } from "fs";
 import path from "path";
@@ -189,6 +190,35 @@ export default class DaemonHandler {
         this.workspaceChangeLabelChangelist(data);
       },
     );
+
+    // Branch handlers
+    ipcOn(this.ipcMain, "workspace:branches", async (event, data) => {
+      this.workspaceGetBranches();
+    });
+
+    ipcOn(this.ipcMain, "workspace:create-branch", async (event, data) => {
+      this.workspaceCreateBranch(data);
+    });
+
+    ipcOn(this.ipcMain, "workspace:select-branch", async (event, data) => {
+      this.workspaceSwitchBranch(data);
+    });
+
+    ipcOn(this.ipcMain, "workspace:archive-branch", async (event, data) => {
+      this.workspaceArchiveBranch(data);
+    });
+
+    ipcOn(this.ipcMain, "workspace:unarchive-branch", async (event, data) => {
+      this.workspaceUnarchiveBranch(data);
+    });
+
+    ipcOn(this.ipcMain, "workspace:delete-branch", async (event, data) => {
+      this.workspaceDeleteBranch(data);
+    });
+
+    ipcOn(this.ipcMain, "workspace:merge-branch", async (event, data) => {
+      this.workspaceMergeBranch(data);
+    });
 
     ipcOn(this.ipcMain, "dashboard:refresh", async (event, data) => {
       this.refreshDashboard(data);
@@ -994,6 +1024,276 @@ export default class DaemonHandler {
           message:
             error?.message ||
             "An unknown error occurred changing the label changelist",
+        });
+      }
+    }
+  }
+
+  // ─── Branch Handlers ──────────────────────────────────────────
+
+  private async workspaceGetBranches(): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      const result = await client.workspaces.listBranches.query({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        includeArchived: true,
+      });
+
+      store.set(workspaceBranchesAtom, result as any);
+
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:branches:data", null);
+      }
+    } catch (error: any) {
+      console.error("Failed to get branches:", error);
+    }
+  }
+
+  private async workspaceCreateBranch(
+    data: Channels["workspace:create-branch"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:create-branch:error", {
+          message:
+            "Could not find local user account; please try restarting the app",
+        });
+      }
+      return;
+    }
+
+    try {
+      const client = await CreateDaemonClient();
+      await client.workspaces.createBranch.mutate({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        name: data.name,
+        headNumber: data.headNumber,
+        type: data.type,
+        parentBranchName: data.parentBranchName,
+      });
+
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:create-branch:success", null);
+      }
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:create-branch:error", {
+          message:
+            error?.message || "An unknown error occurred creating the branch",
+        });
+      }
+    }
+  }
+
+  private async workspaceSwitchBranch(
+    data: Channels["workspace:select-branch"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:select-branch:error", {
+          message:
+            "Could not find local user account; please try restarting the app",
+        });
+      }
+      return;
+    }
+
+    try {
+      const client = await CreateDaemonClient();
+      const result = await client.workspaces.switchBranch.mutate({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        branchName: data.name,
+      });
+
+      // Update the current workspace's branch name in the store
+      const updatedWorkspace = {
+        ...currentWorkspace,
+        branchName: result.branchName,
+      };
+      store.set(currentWorkspaceAtom, updatedWorkspace);
+
+      // Also update in the workspaces list
+      const workspaces = store.get(workspacesAtom);
+      if (workspaces) {
+        store.set(
+          workspacesAtom,
+          workspaces.map((w) =>
+            w.id === currentWorkspace.id ? updatedWorkspace : w,
+          ),
+        );
+      }
+
+      // Clear stale state for the new branch
+      store.set(workspaceHistoryAtom, null);
+      store.set(workspaceSyncStatusAtom, null);
+      store.set(workspaceSyncPreviewAtom, null);
+
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:select-branch:success", {
+          branchName: result.branchName,
+        });
+      }
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:select-branch:error", {
+          message:
+            error?.message || "An unknown error occurred switching branches",
+        });
+      }
+    }
+  }
+
+  private async workspaceArchiveBranch(
+    data: Channels["workspace:archive-branch"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      await client.workspaces.archiveBranch.mutate({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        branchName: data.branchName,
+      });
+
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:archive-branch:success", null);
+      }
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:archive-branch:error", {
+          message:
+            error?.message || "An unknown error occurred archiving the branch",
+        });
+      }
+    }
+  }
+
+  private async workspaceUnarchiveBranch(
+    data: Channels["workspace:unarchive-branch"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      await client.workspaces.unarchiveBranch.mutate({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        branchName: data.branchName,
+      });
+
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:unarchive-branch:success", null);
+      }
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:unarchive-branch:error", {
+          message:
+            error?.message ||
+            "An unknown error occurred unarchiving the branch",
+        });
+      }
+    }
+  }
+
+  private async workspaceDeleteBranch(
+    data: Channels["workspace:delete-branch"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:delete-branch:error", {
+          message:
+            "Could not find local user account; please try restarting the app",
+        });
+      }
+      return;
+    }
+
+    try {
+      const client = await CreateDaemonClient();
+      await client.workspaces.deleteBranch.mutate({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        branchName: data.branchName,
+      });
+
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:delete-branch:success", null);
+      }
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:delete-branch:error", {
+          message:
+            error?.message || "An unknown error occurred deleting the branch",
+        });
+      }
+    }
+  }
+
+  private async workspaceMergeBranch(
+    data: Channels["workspace:merge-branch"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) return;
+
+    const currentUser = store.get(currentUserAtom);
+    if (!currentUser) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:merge-branch:error", {
+          message:
+            "Could not find local user account; please try restarting the app",
+        });
+      }
+      return;
+    }
+
+    try {
+      const client = await CreateDaemonClient();
+      const result = await client.workspaces.mergeBranch.mutate({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        incomingBranchName: data.incomingBranchName,
+      });
+
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:merge-branch:success", {
+          message: `Merged ${data.incomingBranchName} into ${currentWorkspace.branchName} (CL #${result.mergeChangelist.number})`,
+        });
+      }
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:merge-branch:error", {
+          message:
+            error?.message || "An unknown error occurred merging the branch",
         });
       }
     }
