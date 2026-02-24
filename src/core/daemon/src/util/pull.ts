@@ -322,3 +322,179 @@ export async function pull(
   // Should not reach here — errored throws above, and !errored returns above
   return { cleanMerges: [], conflictMerges: [] };
 }
+
+/**
+ * Pull only outdated text files for a pre-submit merge check.
+ *
+ * Unlike a full `pull()`, this does NOT use Longtail and does NOT advance the
+ * workspace head CL.  It downloads individual file versions from the remote,
+ * performs 3-way auto-merge, writes the result back to disk, and patches only
+ * the affected entries in state.json. The workspace still appears "out of date"
+ * for any remaining files.
+ *
+ * @param workspace  - The workspace to operate on
+ * @param orgId      - Organisation ID (unused here but kept for API consistency)
+ * @param submitPaths - Normalised relative paths the user is about to submit
+ * @returns Merge result — if `conflictMerges` is non-empty the caller should
+ *          block the submit.
+ */
+export async function pullTextFilesForSubmit(
+  workspace: Workspace,
+  orgId: string,
+  submitPaths: string[],
+): Promise<PullMergeResult> {
+  const client = await CreateApiClientAuth(workspace.daemonId);
+  const workspaceState = await getWorkspaceState(workspace.localPath);
+
+  // Get the remote branch head
+  const branchResponse = await client.branch.getBranch.query({
+    repoId: workspace.repoId,
+    name: workspace.branchName,
+  });
+
+  if (!branchResponse) {
+    throw new Error("Could not get branch information");
+  }
+
+  const remoteHeadNumber = branchResponse.headNumber;
+
+  // Already at head — nothing to do
+  if (workspaceState.changelistNumber === remoteHeadNumber) {
+    return { cleanMerges: [], conflictMerges: [] };
+  }
+
+  // Get the head changelist's state tree
+  const changelistResponse = await client.changelist.getChangelist.query({
+    repoId: workspace.repoId,
+    changelistNumber: remoteHeadNumber,
+  });
+
+  if (!changelistResponse) {
+    throw new Error("Could not get changelist information");
+  }
+
+  const serverStateTree = changelistResponse.stateTree as Record<
+    string,
+    number
+  >;
+
+  // Build quick lookups
+  const submitSet = new Set(
+    submitPaths.map((p) => p.replace(/^[/\\]/, "").replace(/\\/g, "/")),
+  );
+  const localFileIdToPath = new Map<string, string>();
+  for (const [filePath, file] of Object.entries(workspaceState.files)) {
+    localFileIdToPath.set(file.fileId, filePath);
+  }
+
+  // Find text files in the submit set that are outdated on the server
+  interface TextMergeCandidate {
+    relativePath: string;
+    fileId: string;
+    baseCl: number;
+    remoteCl: number;
+    currentContent: string;
+  }
+
+  const candidates: TextMergeCandidate[] = [];
+
+  for (const [fileId, remoteCl] of Object.entries(serverStateTree)) {
+    const localPath = localFileIdToPath.get(fileId);
+    if (!localPath) continue; // New on server, not our problem
+    if (!submitSet.has(localPath)) continue; // Not being submitted
+
+    const localFile = workspaceState.files[localPath];
+    if (!localFile || localFile.changelist === remoteCl) continue; // Up to date
+
+    // Only text files
+    if (isBinaryFile(localPath)) continue;
+
+    const fullPath = path.join(workspace.localPath, localPath);
+    if (!existsSync(fullPath)) continue; // Deleted locally
+
+    try {
+      const currentContent = await fs.readFile(fullPath, "utf-8");
+      candidates.push({
+        relativePath: localPath,
+        fileId,
+        baseCl: localFile.changelist,
+        remoteCl,
+        currentContent,
+      });
+    } catch {
+      // Can't read — skip
+    }
+  }
+
+  if (candidates.length === 0) {
+    return { cleanMerges: [], conflictMerges: [] };
+  }
+
+  // Perform 3-way merge for each candidate
+  const mergeResult: PullMergeResult = {
+    cleanMerges: [],
+    conflictMerges: [],
+  };
+
+  for (const candidate of candidates) {
+    try {
+      // Read base version (the version our local state was based on)
+      const baseResult = await readFileFromChangelist({
+        workspace,
+        filePath: candidate.relativePath,
+        changelistNumber: candidate.baseCl,
+      });
+      const baseContent = await fs.readFile(baseResult.cachePath, "utf-8");
+
+      // Read incoming version (remote head)
+      const incomingResult = await readFileFromChangelist({
+        workspace,
+        filePath: candidate.relativePath,
+        changelistNumber: candidate.remoteCl,
+      });
+      const incomingContent = await fs.readFile(
+        incomingResult.cachePath,
+        "utf-8",
+      );
+
+      // 3-way merge
+      const merged = autoMergeText(
+        baseContent,
+        candidate.currentContent,
+        incomingContent,
+      );
+
+      // Write merged content back to disk
+      const fullPath = path.join(workspace.localPath, candidate.relativePath);
+      await fs.writeFile(fullPath, merged.content, "utf-8");
+
+      if (merged.clean) {
+        mergeResult.cleanMerges.push(candidate.relativePath);
+      } else {
+        mergeResult.conflictMerges.push(candidate.relativePath);
+      }
+
+      // Patch just this file's entry in workspace state (advance its CL, update hash)
+      const stat = await fs.stat(fullPath);
+      const hash = await hashFile(fullPath);
+
+      workspaceState.files[candidate.relativePath] = {
+        fileId: candidate.fileId,
+        changelist: candidate.remoteCl,
+        hash,
+        size: stat.size,
+        mtime: stat.mtimeMs,
+      };
+    } catch (err) {
+      console.error(
+        `Pre-submit auto-merge failed for ${candidate.relativePath}:`,
+        err,
+      );
+    }
+  }
+
+  // Save workspace state with patched file entries — head CL is NOT changed
+  await saveWorkspaceState(workspace, workspaceState);
+
+  return mergeResult;
+}

@@ -813,7 +813,10 @@ export default class DaemonHandler {
       const message =
         error?.message || "An unknown error occurred during submit";
       if (this.webContents) {
-        if (message.includes("conflicting file")) {
+        if (
+          message.includes("conflicting file") ||
+          message.includes("merge conflicts")
+        ) {
           const pathsMatch = message.match(/: ([^]+)$/);
           const conflictPaths = pathsMatch
             ? pathsMatch[1].split(", ").map((p: string) => p.trim())

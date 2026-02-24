@@ -11,6 +11,7 @@ import {
   readFileFromChangelist,
   submit,
   checkConflicts,
+  pullTextFilesForSubmit,
 } from "../../../util/index.js";
 import { TRPCError } from "@trpc/server";
 
@@ -363,6 +364,31 @@ export const pendingRouter = router({
           throw new TRPCError({
             code: "CONFLICT",
             message: `Cannot submit: ${conflictResult.conflicts.length} conflicting file(s) detected. These files have been modified locally and also changed on the remote. Please pull first to resolve: ${conflictPaths}`,
+          });
+        }
+
+        // Auto-merge outdated text files before submitting.
+        // This pulls only the individual text files that are behind,
+        // performs 3-way merge, and patches their state entries without
+        // advancing the workspace head CL.
+        const mergeResult = await pullTextFilesForSubmit(
+          {
+            id: workspace.id,
+            repoId: workspace.repoId,
+            branchName: workspace.branchName,
+            workspaceName: workspace.name,
+            localPath: workspace.localPath,
+            daemonId: workspace.daemonId,
+          },
+          repo.orgId,
+          modificationPaths,
+        );
+
+        if (mergeResult.conflictMerges.length > 0) {
+          const conflictPaths = mergeResult.conflictMerges.join(", ");
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `Cannot submit: ${mergeResult.conflictMerges.length} text file(s) have merge conflicts after auto-merge. Please resolve the conflict markers and try again: ${conflictPaths}`,
           });
         }
 

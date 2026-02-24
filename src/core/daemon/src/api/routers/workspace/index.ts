@@ -1,11 +1,11 @@
-import { router } from "../../trpc";
-import { branchesRouter } from "./branches";
-import { conflictsRouter } from "./conflicts";
-import { historyRouter } from "./history";
-import { labelsRouter } from "./labels";
-import { opsRouter } from "./ops";
-import { pendingRouter } from "./pending";
-import { syncRouter } from "./sync";
+import { router } from "../../trpc.js";
+import { branchesRouter } from "./branches.js";
+import { conflictsRouter } from "./conflicts.js";
+import { historyRouter } from "./history.js";
+import { labelsRouter } from "./labels.js";
+import { opsRouter } from "./ops.js";
+import { pendingRouter } from "./pending.js";
+import { syncRouter } from "./sync.js";
 
 export const workspacesRouter = router({
   branches: branchesRouter,
