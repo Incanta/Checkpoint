@@ -8,10 +8,23 @@ export function CheckpointHome() {
   const [newRepoNames, setNewRepoNames] = useState<Record<string, string>>({});
 
   // Get user data
-  const { data: user, isLoading: userLoading, error: userError } = api.user.me.useQuery();
+  const {
+    data: user,
+    isLoading: userLoading,
+    error: userError,
+  } = api.user.me.useQuery();
 
   // Get user's organizations
-  const { data: orgs, isLoading: orgsLoading, error: orgsError } = api.org.myOrgs.useQuery();
+  const {
+    data: orgs,
+    isLoading: orgsLoading,
+    error: orgsError,
+  } = api.org.myOrgs.useQuery();
+
+  // Filer token query (disabled until triggered)
+  const filerTokenQuery = api.storage.getFilerToken.useQuery(undefined, {
+    enabled: false,
+  });
 
   // Mutations
   const createOrgMutation = api.org.createOrg.useMutation({
@@ -31,6 +44,16 @@ export function CheckpointHome() {
   });
 
   const utils = api.useUtils();
+
+  const handleOpenFiler = async () => {
+    const result = await filerTokenQuery.refetch();
+    if (result.data) {
+      const { token, filerUrl } = result.data;
+      const domain = new URL(filerUrl).hostname;
+      document.cookie = `AT=${token}; domain=${domain}; path=/; max-age=${30 * 24 * 60 * 60}`;
+      window.open(filerUrl, "_blank");
+    }
+  };
 
   if (userLoading || orgsLoading) {
     return <div className="text-white">Loading...</div>;
@@ -54,17 +77,17 @@ export function CheckpointHome() {
   const handleCreateRepo = (orgId: string) => {
     const repoName = newRepoNames[orgId];
     if (repoName?.trim()) {
-      createRepoMutation.mutate({ 
-        name: repoName.trim(), 
-        orgId 
+      createRepoMutation.mutate({
+        name: repoName.trim(),
+        orgId,
       });
     }
   };
 
   const updateRepoName = (orgId: string, name: string) => {
-    setNewRepoNames(prev => ({
+    setNewRepoNames((prev) => ({
       ...prev,
-      [orgId]: name
+      [orgId]: name,
     }));
   };
 
@@ -77,6 +100,18 @@ export function CheckpointHome() {
         </p>
       </div>
 
+      {/* Dev: Open Filer */}
+      <div className="rounded-lg bg-white/10 p-6">
+        <button
+          type="button"
+          onClick={() => void handleOpenFiler()}
+          disabled={filerTokenQuery.isFetching}
+          className="rounded-full bg-[hsl(200,100%,50%)] px-6 py-2 font-semibold text-white transition hover:bg-[hsl(200,100%,40%)] disabled:opacity-50"
+        >
+          {filerTokenQuery.isFetching ? "Loading..." : "Open Filer"}
+        </button>
+      </div>
+
       {/* Create Organization Form */}
       <div className="rounded-lg bg-white/10 p-6">
         <h2 className="mb-4 text-xl font-semibold">Create Organization</h2>
@@ -86,7 +121,7 @@ export function CheckpointHome() {
             value={newOrgName}
             onChange={(e) => setNewOrgName(e.target.value)}
             placeholder="New organization name"
-            className="flex-1 rounded-full bg-white/10 px-4 py-2 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/20"
+            className="flex-1 rounded-full bg-white/10 px-4 py-2 text-white placeholder-white/50 focus:ring-2 focus:ring-white/20 focus:outline-none"
           />
           <button
             type="submit"
@@ -107,13 +142,18 @@ export function CheckpointHome() {
               <div key={org.id} className="rounded-lg bg-white/10 p-6">
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="text-xl font-semibold">
-                    {org.name} <span className="text-sm font-normal text-white/70">({org.id})</span>
+                    {org.name}{" "}
+                    <span className="text-sm font-normal text-white/70">
+                      ({org.id})
+                    </span>
                   </h3>
                 </div>
 
                 {/* Create Repository Form */}
                 <div className="mb-4">
-                  <h4 className="mb-2 text-lg font-medium">Create Repository</h4>
+                  <h4 className="mb-2 text-lg font-medium">
+                    Create Repository
+                  </h4>
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -126,14 +166,19 @@ export function CheckpointHome() {
                       value={newRepoNames[org.id] || ""}
                       onChange={(e) => updateRepoName(org.id, e.target.value)}
                       placeholder="New repository name"
-                      className="flex-1 rounded-full bg-white/10 px-4 py-2 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/20"
+                      className="flex-1 rounded-full bg-white/10 px-4 py-2 text-white placeholder-white/50 focus:ring-2 focus:ring-white/20 focus:outline-none"
                     />
                     <button
                       type="submit"
-                      disabled={createRepoMutation.isPending || !newRepoNames[org.id]?.trim()}
+                      disabled={
+                        createRepoMutation.isPending ||
+                        !newRepoNames[org.id]?.trim()
+                      }
                       className="rounded-full bg-[hsl(280,100%,70%)] px-6 py-2 font-semibold text-white transition hover:bg-[hsl(280,100%,60%)] disabled:opacity-50"
                     >
-                      {createRepoMutation.isPending ? "Creating..." : "Create Repo"}
+                      {createRepoMutation.isPending
+                        ? "Creating..."
+                        : "Create Repo"}
                     </button>
                   </form>
                 </div>
@@ -144,9 +189,14 @@ export function CheckpointHome() {
                   {org.repos && org.repos.length > 0 ? (
                     <ul className="space-y-2">
                       {org.repos.map((repo) => (
-                        <li key={repo.id} className="rounded bg-white/5 px-4 py-2">
+                        <li
+                          key={repo.id}
+                          className="rounded bg-white/5 px-4 py-2"
+                        >
                           <span className="font-medium">{repo.name}</span>
-                          <span className="ml-2 text-sm text-white/70">({repo.id})</span>
+                          <span className="ml-2 text-sm text-white/70">
+                            ({repo.id})
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -159,8 +209,12 @@ export function CheckpointHome() {
           </div>
         ) : (
           <div className="rounded-lg bg-white/10 p-6 text-center">
-            <p className="text-white/70">You are not a member of any organizations yet.</p>
-            <p className="text-white/70">Create your first organization above to get started.</p>
+            <p className="text-white/70">
+              You are not a member of any organizations yet.
+            </p>
+            <p className="text-white/70">
+              Create your first organization above to get started.
+            </p>
           </div>
         )}
       </div>

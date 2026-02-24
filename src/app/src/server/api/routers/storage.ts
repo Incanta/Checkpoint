@@ -1,9 +1,12 @@
 import config from "@incanta/config";
 import { z } from "zod";
 import njwt from "njwt";
+import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { getUserAndRepoWithAccess } from "../auth-utils";
+
+const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const storageRouter = createTRPCRouter({
   getToken: protectedProcedure
@@ -48,4 +51,31 @@ export const storageRouter = createTRPCRouter({
         backendUrl: config.get<string>("storage.backend-url"),
       };
     }),
+
+  getFilerToken: protectedProcedure.query(({ ctx }) => {
+    if (!config.get<boolean>("storage.filer-ui-enabled")) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Filer UI is not enabled",
+      });
+    }
+
+    const token = njwt.create(
+      {
+        iss: "checkpoint-vcs",
+        sub: ctx.session.user.id,
+        userId: ctx.session.user.id,
+        mode: "read",
+        basePath: "/",
+      },
+      config.get<string>("storage.signing-keys.read"),
+    );
+
+    token.setExpiration(Date.now() + ONE_MONTH_MS);
+
+    return {
+      token: token.compact(),
+      filerUrl: config.get<string>("storage.filer-url"),
+    };
+  }),
 });

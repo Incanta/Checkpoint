@@ -119,6 +119,7 @@ if (config.get<boolean>("auth.discord.enabled")) {
  * @see https://next-auth.js.org/configuration/options
  */
 export const authConfig: NextAuthConfig = {
+  trustHost: true,
   secret: config.get<string>("auth.jwt.secret"),
   providers,
   adapter: PrismaAdapter(db),
