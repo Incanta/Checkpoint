@@ -1,7 +1,22 @@
 "use client";
 
 import { useState } from "react";
+import prettyBytes from "pretty-bytes";
 import { api } from "~/trpc/react";
+
+function RepoSize({ repoId }: { repoId: string }) {
+  const { data, isLoading } = api.storage.getRepoSize.useQuery({ repoId });
+
+  if (isLoading) {
+    return <span className="text-sm text-white/50">...</span>;
+  }
+
+  return (
+    <span className="text-sm text-white/50">
+      {prettyBytes(data?.size ?? 0)}
+    </span>
+  );
+}
 
 export function CheckpointHome() {
   const [newOrgName, setNewOrgName] = useState("");
@@ -191,12 +206,15 @@ export function CheckpointHome() {
                       {org.repos.map((repo) => (
                         <li
                           key={repo.id}
-                          className="rounded bg-white/5 px-4 py-2"
+                          className="flex items-center justify-between rounded bg-white/5 px-4 py-2"
                         >
-                          <span className="font-medium">{repo.name}</span>
-                          <span className="ml-2 text-sm text-white/70">
-                            ({repo.id})
-                          </span>
+                          <div>
+                            <span className="font-medium">{repo.name}</span>
+                            <span className="ml-2 text-sm text-white/70">
+                              ({repo.id})
+                            </span>
+                          </div>
+                          <RepoSize repoId={repo.id} />
                         </li>
                       ))}
                     </ul>

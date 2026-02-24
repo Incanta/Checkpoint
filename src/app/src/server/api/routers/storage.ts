@@ -78,4 +78,55 @@ export const storageRouter = createTRPCRouter({
       filerUrl: config.get<string>("storage.filer-url"),
     };
   }),
+
+  getRepoSize: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        "READ",
+      );
+
+      const token = njwt.create(
+        {
+          iss: "checkpoint-vcs",
+          sub: ctx.session.user.id,
+          userId: ctx.session.user.id,
+          orgId: repo.orgId,
+          repoId: repo.id,
+          mode: "read",
+          basePath: `/${repo.orgId}/${repo.id}`,
+        },
+        config.get<string>("storage.signing-keys.read"),
+      );
+
+      token.setExpiration(
+        Date.now() +
+          config.get<number>("storage.token-expiration-seconds") * 1000,
+      );
+
+      const backendUrl = config.get<string>("storage.backend-url");
+
+      const response = await fetch(`${backendUrl}/repo-size`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token.compact()}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to fetch repo size",
+        });
+      }
+
+      const data = (await response.json()) as { size: number };
+      return { size: data.size };
+    }),
 });
