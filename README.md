@@ -1,5 +1,9 @@
 # Checkpoint VCS
 
+⚠️ **This is not quite ready for development; we're getting close to a v0.1.0** ⚠️
+
+You can watch for Releases under **Watch > Custom** at the top of this page.
+
 ## License
 
 Checkpoint is dual-licensed under the [Elastic License 2.0](./LICENSE.elastic) or [AGPLv3](./LICENSE.agpl). This means you can choose which license you want to operate under.
