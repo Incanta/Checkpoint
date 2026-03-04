@@ -1,3 +1,7 @@
+stub:
+  enabled: true
+  storage-path: "./data/filer"
+
 connection:
   master:
     host: "master"

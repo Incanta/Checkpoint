@@ -18,6 +18,7 @@ import {
 } from "@checkpointvcs/longtail-addon";
 import { Router } from "express";
 import multer from "multer";
+import { getFilerUrl } from "../utils/filer.js";
 
 interface JWTClaims {
   iss: string;
@@ -210,11 +211,7 @@ export function routeSubmit(): Router {
 
     const claims: JWTClaims = verifiedToken.body.toJSON() as any;
 
-    const filerUrl = `http${
-      config.get<boolean>("seaweedfs.connection.filer.tls") ? "s" : ""
-    }://${config.get<string>(
-      "seaweedfs.connection.filer.host",
-    )}:${config.get<string>("seaweedfs.connection.filer.port")}`;
+    const filerUrl = getFilerUrl();
 
     const basePath = `/${claims.orgId}/${claims.repoId}`;
 

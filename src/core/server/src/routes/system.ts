@@ -1,6 +1,8 @@
 import { Router } from "express";
 import config from "@incanta/config";
 import njwt from "njwt";
+import { promises as fs } from "fs";
+import { getFilerUrl } from "../utils/filer.js";
 
 interface SystemJWTClaims {
   iss: string;
@@ -81,12 +83,26 @@ export function routeSystem(): Router {
       return;
     }
 
-    // Create directory in SeaweedFS filer
-    const filerUrl = `http${
-      config.get<boolean>("seaweedfs.connection.filer.tls") ? "s" : ""
-    }://${config.get<string>(
-      "seaweedfs.connection.filer.host",
-    )}:${config.get<string>("seaweedfs.connection.filer.port")}`;
+    if (config.get<boolean>("seaweedfs.stub.enabled")) {
+      // we can just make the directory locally without going through the filer API
+      const localPath = `${config.get<string>(
+        "seaweedfs.stub.storage-path",
+      )}${path}`;
+
+      try {
+        await fs.mkdir(localPath, { recursive: true });
+        console.log(`Created local directory: ${localPath}`);
+        res.status(201).json({ success: true, path });
+      } catch (error) {
+        console.error("Error creating local directory:", error);
+        res.status(500).send(`Internal server error: ${error}`);
+      }
+
+      return;
+    }
+
+    // Create directory in filer (SeaweedFS or local stub)
+    const filerUrl = getFilerUrl();
 
     const filerToken = njwt.create(
       {
