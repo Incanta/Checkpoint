@@ -183,6 +183,7 @@
     "[typescript]": {
       "editor.defaultFormatter": "esbenp.prettier-vscode"
     },
-    "prisma.pinToPrisma6": true
+    "prisma.pinToPrisma6": true,
+    "dotnet.defaultSolution": "disable"
   }
 }

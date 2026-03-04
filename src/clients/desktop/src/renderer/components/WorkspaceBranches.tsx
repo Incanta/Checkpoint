@@ -8,7 +8,7 @@ import { currentUserAtom } from "../../common/state/auth";
 import Button from "./Button";
 import { ipc } from "../pages/ipc";
 import { TreeTable } from "primereact/treetable";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TreeNode } from "primereact/treenode";
 import { Column, ColumnPassThroughOptions } from "primereact/column";
 import { ContextMenu } from "primereact/contextmenu";
@@ -358,97 +358,146 @@ export default function WorkspaceBranches() {
     return <span style={{ color: colors[type] || "#ccc" }}>{type}</span>;
   }, []);
 
-  const columnPt: ColumnPassThroughOptions = {
-    headerCell: {
-      style: {
-        borderColor: "var(--color-border)",
-        borderWidth: "0 1px 0 0",
-        borderStyle: "solid",
-        paddingLeft: "0.5rem",
+  const columnPt = useMemo<ColumnPassThroughOptions>(
+    () => ({
+      headerCell: {
+        style: {
+          borderColor: "var(--color-border)",
+          borderWidth: "0 1px 0 0",
+          borderStyle: "solid",
+          paddingLeft: "0.5rem",
+        },
       },
-    },
-    bodyCell: {
-      style: {
-        paddingLeft: "0.5rem",
+      bodyCell: {
+        style: {
+          paddingLeft: "0.5rem",
+        },
       },
-    },
-    rowToggler: {
-      className: "treetable-toggler",
-      style: {
-        backgroundColor: "transparent",
-        padding: "0.4rem",
+      rowToggler: {
+        className: "treetable-toggler",
+        style: {
+          backgroundColor: "transparent",
+          padding: "0.4rem",
+        },
       },
-    },
-  };
+    }),
+    [],
+  );
 
-  const contextMenuPt = {
-    root: {
-      style: {
-        marginTop: "2rem",
-        backgroundColor: "var(--color-panel)",
-        border: "1px solid var(--color-border-light)",
-        borderRadius: "4px",
-        minWidth: "200px",
+  const contextMenuPt = useMemo(
+    () => ({
+      root: {
+        style: {
+          marginTop: "2rem",
+          backgroundColor: "var(--color-panel)",
+          border: "1px solid var(--color-border-light)",
+          borderRadius: "4px",
+          minWidth: "200px",
+        },
       },
-    },
-    menu: {
-      style: {
-        backgroundColor: "var(--color-panel)",
+      menu: {
+        style: {
+          backgroundColor: "var(--color-panel)",
+        },
       },
-    },
-    menuitem: {
-      style: {
-        margin: 0,
+      menuitem: {
+        style: {
+          margin: 0,
+        },
       },
-    },
-    action: {
-      style: {
-        color: "#e0e0e0",
-        padding: "0.5rem 1rem",
-        fontSize: "0.875rem",
+      action: {
+        style: {
+          color: "#e0e0e0",
+          padding: "0.5rem 1rem",
+          fontSize: "0.875rem",
+        },
       },
-    },
-    separator: {
-      style: {
-        borderColor: "var(--color-border-light)",
+      separator: {
+        style: {
+          borderColor: "var(--color-border-light)",
+        },
       },
-    },
-    submenuIcon: {
-      style: {
-        color: "#e0e0e0",
+      submenuIcon: {
+        style: {
+          color: "#e0e0e0",
+        },
       },
-    },
-  };
+    }),
+    [],
+  );
 
-  const dialogPt = {
-    root: {
-      style: {
-        backgroundColor: "var(--color-panel)",
-        border: "1px solid var(--color-border)",
+  const dialogPt = useMemo(
+    () => ({
+      root: {
+        style: {
+          backgroundColor: "var(--color-panel)",
+          border: "1px solid var(--color-border)",
+        },
       },
-    },
-    header: {
-      style: {
-        backgroundColor: "var(--color-panel)",
-        color: "var(--color-text-secondary)",
-        borderBottom: "1px solid var(--color-border)",
+      header: {
+        style: {
+          backgroundColor: "var(--color-panel)",
+          color: "var(--color-text-secondary)",
+          borderBottom: "1px solid var(--color-border)",
+        },
       },
-    },
-    content: {
-      style: {
-        backgroundColor: "var(--color-panel)",
-        color: "var(--color-text-secondary)",
-        padding: "1.5rem",
+      content: {
+        style: {
+          backgroundColor: "var(--color-panel)",
+          color: "var(--color-text-secondary)",
+          padding: "1.5rem",
+        },
       },
-    },
-    footer: {
-      style: {
-        backgroundColor: "var(--color-panel)",
-        borderTop: "1px solid var(--color-border)",
-        padding: "0.75rem",
+      footer: {
+        style: {
+          backgroundColor: "var(--color-panel)",
+          borderTop: "1px solid var(--color-border)",
+          padding: "0.75rem",
+        },
       },
-    },
-  };
+    }),
+    [],
+  );
+
+  const treeTablePt = useMemo(
+    () => ({
+      thead: {
+        style: {
+          borderColor: "var(--color-border)",
+          borderWidth: "0 0 1px 0",
+          borderStyle: "solid",
+          paddingLeft: "0.5rem",
+        },
+      },
+      scrollableWrapper: {
+        style: {
+          height: "100%",
+        },
+      },
+      scrollable: {
+        style: {
+          height: "100%",
+        },
+      },
+      scrollableBody: {
+        style: {
+          maxHeight: "initial",
+        },
+      },
+      resizeHelper: {
+        style: {
+          width: "0.1rem",
+          backgroundColor: "var(--color-border-lighter)",
+        },
+      },
+      tbody: {
+        style: {
+          cursor: "pointer",
+        },
+      },
+    }),
+    [],
+  );
 
   return (
     <>
@@ -523,42 +572,7 @@ export default function WorkspaceBranches() {
             onContextMenu={(e) => {
               handleRowContextMenu(e.originalEvent as React.MouseEvent, e.node);
             }}
-            pt={{
-              thead: {
-                style: {
-                  borderColor: "var(--color-border)",
-                  borderWidth: "0 0 1px 0",
-                  borderStyle: "solid",
-                  paddingLeft: "0.5rem",
-                },
-              },
-              scrollableWrapper: {
-                style: {
-                  height: "100%",
-                },
-              },
-              scrollable: {
-                style: {
-                  height: "100%",
-                },
-              },
-              scrollableBody: {
-                style: {
-                  maxHeight: "initial",
-                },
-              },
-              resizeHelper: {
-                style: {
-                  width: "0.1rem",
-                  backgroundColor: "var(--color-border-lighter)",
-                },
-              },
-              tbody: {
-                style: {
-                  cursor: "pointer",
-                },
-              },
-            }}
+            pt={treeTablePt}
             style={{ height: "100%" }}
           >
             <Column

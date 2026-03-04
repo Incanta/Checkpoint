@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 import {
   TreeTable,
   TreeTableExpandedKeysType,
@@ -17,6 +23,7 @@ import {
 } from "../../common/state/workspace";
 import { ipc } from "../pages/ipc";
 import Button from "./Button";
+import DropdownButton from "./DropdownButton";
 import prettyBytes from "pretty-bytes";
 import { FileStatus, FileType } from "@checkpointvcs/daemon/types";
 import FileContextMenu, {
@@ -176,7 +183,10 @@ export default function WorkspaceExplorer() {
             key: currentNode.key + "/" + file.path.split("/").pop(),
             data: {
               name: file.path.split("/").pop() || "",
-              ext: file.path.split(".").pop() || "",
+              ext:
+                file.type === FileType.Directory
+                  ? " "
+                  : file.path.split(".").pop() || "",
               status,
               size:
                 file.type === FileType.Directory ? "" : prettyBytes(file.size),
@@ -233,7 +243,10 @@ export default function WorkspaceExplorer() {
                 key: relativePath,
                 data: {
                   name: file.path.split("/").pop() || "",
-                  ext: file.path.split(".").pop() || "",
+                  ext:
+                    file.type === FileType.Directory
+                      ? " "
+                      : file.path.split(".").pop() || "",
                   status,
                   size:
                     file.type === FileType.Directory
@@ -293,40 +306,82 @@ export default function WorkspaceExplorer() {
     // Note: If you are using server-side sorting, you would make an API call here
   };
 
-  const columnPt: ColumnPassThroughOptions = {
-    headerCell: {
-      style: {
-        borderColor: "var(--color-border)",
-        borderWidth: "0 1px 1px 0",
-        borderStyle: "solid",
-        paddingLeft: "0.5rem",
-        fontSize: "0.75em",
-        position: "sticky",
-        top: 0,
-        backgroundColor: "var(--color-app-bg)",
-        zIndex: 1,
+  const columnPt = useMemo<ColumnPassThroughOptions>(
+    () => ({
+      headerCell: {
+        style: {
+          borderColor: "var(--color-border)",
+          borderWidth: "0 1px 1px 0",
+          borderStyle: "solid",
+          paddingLeft: "0.5rem",
+          fontSize: "0.75em",
+          position: "sticky",
+          top: 0,
+          backgroundColor: "var(--color-app-bg)",
+          zIndex: 1,
+        },
       },
-    },
-    bodyCell: {
-      style: {
-        fontSize: "0.9em",
-        paddingTop: 0,
-        paddingBottom: 0,
-        paddingLeft: "0.2rem",
-        paddingRight: "0.5rem",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
+      bodyCell: {
+        style: {
+          fontSize: "0.9em",
+          paddingTop: 0,
+          paddingBottom: 0,
+          paddingLeft: "0.2rem",
+          paddingRight: "0.5rem",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        },
       },
-    },
-    rowToggler: {
-      className: "treetable-toggler",
-      style: {
-        backgroundColor: "transparent",
-        padding: "0.4rem",
+      rowToggler: {
+        className: "treetable-toggler",
+        style: {
+          backgroundColor: "transparent",
+          padding: "0.4rem",
+        },
       },
-    },
-  };
+    }),
+    [],
+  );
+
+  const treeTablePt = useMemo(
+    () => ({
+      resizeHelper: {
+        style: {
+          width: "0.1rem",
+          backgroundColor: "var(--color-border-lighter)",
+        },
+      },
+      tbody: {
+        style: {
+          maxHeight: "initial",
+          overflowY: "auto" as const,
+        },
+      },
+      wrapper: {
+        style: {
+          height: "100%",
+        },
+      },
+      table: {
+        style: {
+          maxHeight: "100%",
+          borderCollapse: "separate" as const,
+          borderSpacing: 0,
+        },
+      },
+    }),
+    [],
+  );
+
+  const itemBodyTemplate = useCallback((rowData: any) => {
+    return (
+      <div style={{ display: "inline" }}>
+        <FileIcon extension={rowData.data.ext} />
+        <span style={{ marginLeft: ".5em" }}>{rowData.data.name}</span>
+      </div>
+    );
+  }, []);
 
   return (
     <>
@@ -364,12 +419,20 @@ export default function WorkspaceExplorer() {
               padding: "0.3rem",
             }}
           >
-            <Button
+            <DropdownButton
               className="p-[0.3rem] text-[0.8em]"
               label="Refresh"
               onClick={() => {
                 ipc.sendMessage("workspace:refresh", null);
               }}
+              items={[
+                {
+                  label: "Refresh (Reload Ignore/Hidden)",
+                  onClick: () => {
+                    ipc.sendMessage("workspace:refresh-ignores", null);
+                  },
+                },
+              ]}
             />
             <Button
               className="p-[0.3rem] text-[0.8em]"
@@ -441,9 +504,15 @@ export default function WorkspaceExplorer() {
                           key: relativePath,
                           data: {
                             name: file.path.split("/").pop() || "",
-                            ext: file.path.split(".").pop() || "",
+                            ext:
+                              file.type === FileType.Directory
+                                ? " "
+                                : file.path.split(".").pop() || "",
                             status,
-                            size: prettyBytes(file.size),
+                            size:
+                              file.type === FileType.Directory
+                                ? ""
+                                : prettyBytes(file.size),
                             modified: new Date(
                               file.modifiedAt,
                             ).toLocaleDateString(),
@@ -469,32 +538,7 @@ export default function WorkspaceExplorer() {
                   });
                 }
               }}
-              pt={{
-                resizeHelper: {
-                  style: {
-                    width: "0.1rem",
-                    backgroundColor: "var(--color-border-lighter)",
-                  },
-                },
-                tbody: {
-                  style: {
-                    maxHeight: "initial",
-                    overflowY: "auto",
-                  },
-                },
-                wrapper: {
-                  style: {
-                    height: "100%",
-                  },
-                },
-                table: {
-                  style: {
-                    maxHeight: "100%",
-                    borderCollapse: "separate",
-                    borderSpacing: 0,
-                  },
-                },
-              }}
+              pt={treeTablePt}
               style={{ height: "100%" }}
             >
               <Column
@@ -503,16 +547,7 @@ export default function WorkspaceExplorer() {
                 expander
                 resizeable
                 sortable
-                body={(rowData: any) => {
-                  return (
-                    <div style={{ display: "inline" }}>
-                      <FileIcon extension={rowData.data.ext} />
-                      <span style={{ marginLeft: ".5em" }}>
-                        {rowData.data.name}
-                      </span>
-                    </div>
-                  );
-                }}
+                body={itemBodyTemplate}
                 pt={columnPt}
                 style={{ width: "40%" }}
               ></Column>

@@ -1,15 +1,25 @@
-export function FileIcon({ extension }: { extension: string }) {
-  const overrides: any = {
-    blend: "/blender.svg",
-    uproject: "/unreal.svg",
-    umap: "/unreal.svg",
-    uasset: "/unreal.svg",
-  };
+import React from "react";
 
-  const aliases: Record<string, string> = {
-    chkignore: "gitignore",
-    chkhidden: "gitignore",
-  };
+const overrides: Record<string, string> = {
+  blend: "/blender.svg",
+  uproject: "/unreal.svg",
+  umap: "/unreal.svg",
+  uasset: "/unreal.svg",
+};
+
+const aliases: Record<string, string> = {
+  chkignore: "gitignore",
+  chkhidden: "gitignore",
+};
+
+export const FileIcon = React.memo(function FileIcon({
+  extension,
+}: {
+  extension: string;
+}) {
+  if (extension === "none") {
+    return <span />;
+  }
 
   const ext =
     extension === " " ? "folder" : aliases[extension] || extension || "blank";
@@ -24,4 +34,4 @@ export function FileIcon({ extension }: { extension: string }) {
       )}
     </>
   );
-}
+});

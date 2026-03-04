@@ -1,4 +1,5 @@
 import { router } from "./trpc.js";
+import type { TRPCContext } from "./trpc.js";
 import { authRouter } from "./routers/auth.js";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import { GetDaemonListenPort } from "../index.js";
@@ -8,6 +9,7 @@ import { repoRouter } from "./routers/repo.js";
 import path from "path";
 import { homedir } from "os";
 import { promises as fs } from "fs";
+import { DaemonManager } from "../daemon-manager.js";
 
 const appRouter = router({
   auth: authRouter,
@@ -23,6 +25,9 @@ export type AppRouter = typeof appRouter;
 export async function InitApi(): Promise<void> {
   const server = createHTTPServer({
     router: appRouter,
+    createContext: (): TRPCContext => ({
+      manager: DaemonManager.Get(),
+    }),
   });
 
   const listenPort = await GetDaemonListenPort();

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
 import { Splitter, SplitterPanel } from "primereact/splitter";
 // @ts-ignore
@@ -11,6 +11,15 @@ import {
   SyncPreviewFileChange,
 } from "../../common/state/workspace";
 import { ipc } from "../pages/ipc";
+import FileTreeItem, {
+  changeTypeColors,
+  changeTypeLabels,
+} from "./FileTreeItem";
+import type { FileTreeNode } from "./FileTreeItem";
+import {
+  buildFileTree as buildFileTreeGeneric,
+  collectDirPaths,
+} from "./build-file-tree";
 
 interface FileTreeNode {
   name: string;
@@ -55,173 +64,6 @@ function aggregateFileChanges(
   return Array.from(fileMap.values());
 }
 
-function buildFileTree(files: SyncPreviewFileChange[]): FileTreeNode[] {
-  const root: FileTreeNode[] = [];
-
-  for (const file of files) {
-    const parts = file.path.split("/");
-    let currentLevel = root;
-
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
-      const isLast = i === parts.length - 1;
-      const existingNode = currentLevel.find((n) => n.name === part);
-
-      if (existingNode) {
-        if (isLast) {
-          existingNode.changeType = file.changeType;
-        }
-        currentLevel = existingNode.children;
-      } else {
-        const newNode: FileTreeNode = {
-          name: part,
-          path: isLast ? file.path : parts.slice(0, i + 1).join("/"),
-          isDirectory: !isLast,
-          changeType: isLast ? file.changeType : undefined,
-          children: [],
-          expanded: true,
-        };
-        currentLevel.push(newNode);
-        currentLevel = newNode.children;
-      }
-    }
-  }
-
-  return root;
-}
-
-const changeTypeColors: Record<string, string> = {
-  ADD: "#4CAF50",
-  DELETE: "#F44336",
-  MODIFY: "#2196F3",
-};
-
-const changeTypeLabels: Record<string, string> = {
-  ADD: "A",
-  DELETE: "D",
-  MODIFY: "M",
-};
-
-interface FileTreeItemProps {
-  node: FileTreeNode;
-  depth: number;
-  selectedPath: string | null;
-  onSelect: (path: string) => void;
-  expandedPaths: Set<string>;
-  onToggleExpand: (path: string) => void;
-}
-
-function FileTreeItem({
-  node,
-  depth,
-  selectedPath,
-  onSelect,
-  expandedPaths,
-  onToggleExpand,
-}: FileTreeItemProps) {
-  const isSelected = node.path === selectedPath && !node.isDirectory;
-  const isExpanded = expandedPaths.has(node.path);
-
-  return (
-    <>
-      <div
-        onClick={() => {
-          if (node.isDirectory) {
-            onToggleExpand(node.path);
-          } else {
-            onSelect(node.path);
-          }
-        }}
-        style={{
-          padding: "0.25rem 0.5rem",
-          paddingLeft: `${depth + 0.5}rem`,
-          cursor: "pointer",
-          backgroundColor: isSelected ? "#3A3A3A" : "transparent",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          fontSize: "0.85rem",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-        onMouseEnter={(e) => {
-          if (!isSelected) {
-            (e.currentTarget as HTMLDivElement).style.backgroundColor =
-              "#374151";
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isSelected) {
-            (e.currentTarget as HTMLDivElement).style.backgroundColor =
-              "transparent";
-          }
-        }}
-      >
-        <span
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.35rem",
-            overflow: "hidden",
-          }}
-        >
-          {node.isDirectory ? (
-            <span
-              style={{
-                fontSize: "0.75rem",
-                color: "#9CA3AF",
-                width: "1rem",
-                textAlign: "center",
-              }}
-            >
-              {isExpanded ? "▼" : "▶"}
-            </span>
-          ) : (
-            <span style={{ width: "1rem" }} />
-          )}
-          <span
-            style={{
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {node.name}
-          </span>
-        </span>
-        {node.changeType && (
-          <span
-            style={{
-              fontSize: "0.7rem",
-              fontWeight: "bold",
-              color:
-                changeTypeColors[node.changeType] ||
-                "var(--color-text-secondary)",
-              marginLeft: "0.5rem",
-              flexShrink: 0,
-            }}
-          >
-            {changeTypeLabels[node.changeType]}
-          </span>
-        )}
-      </div>
-      {node.isDirectory &&
-        isExpanded &&
-        node.children.map((child) => (
-          <FileTreeItem
-            key={child.path}
-            node={child}
-            depth={depth + 1}
-            selectedPath={selectedPath}
-            onSelect={onSelect}
-            expandedPaths={expandedPaths}
-            onToggleExpand={onToggleExpand}
-          />
-        ))}
-    </>
-  );
-}
-
 export default function SyncPreview() {
   const syncPreview = useAtomValue(workspaceSyncPreviewAtom);
   const syncStatus = useAtomValue(workspaceSyncStatusAtom);
@@ -236,15 +78,15 @@ export default function SyncPreview() {
   >([]);
   const [viewMode, setViewMode] = useState<"files" | "changelists">("files");
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     ipc.sendMessage("workspace:sync-preview:close", null);
-  };
+  }, []);
 
-  const handleSelectFile = (filePath: string) => {
+  const handleSelectFile = useCallback((filePath: string) => {
     ipc.sendMessage("workspace:sync-preview:select-file", { filePath });
-  };
+  }, []);
 
-  const handleToggleExpand = (path: string) => {
+  const handleToggleExpand = useCallback((path: string) => {
     setExpandedPaths((prev) => {
       const next = new Set(prev);
       if (next.has(path)) {
@@ -254,28 +96,18 @@ export default function SyncPreview() {
       }
       return next;
     });
-  };
+  }, []);
 
   // Aggregate files when preview data changes
   useEffect(() => {
     if (syncPreview?.allFileChanges) {
       const files = aggregateFileChanges(syncPreview.allFileChanges);
       setAggregatedFiles(files);
-      const tree = buildFileTree(files);
+      const tree = buildFileTreeGeneric(files);
       setTreeNodes(tree);
 
       // Auto-expand all directories
-      const allDirPaths = new Set<string>();
-      const collectDirPaths = (nodes: FileTreeNode[]) => {
-        for (const node of nodes) {
-          if (node.isDirectory) {
-            allDirPaths.add(node.path);
-            collectDirPaths(node.children);
-          }
-        }
-      };
-      collectDirPaths(tree);
-      setExpandedPaths(allDirPaths);
+      setExpandedPaths(collectDirPaths(tree));
     }
   }, [syncPreview?.allFileChanges]);
 
@@ -358,16 +190,23 @@ export default function SyncPreview() {
     (f) => f.path === syncPreview.selectedFilePath,
   );
 
-  const totalFiles = aggregatedFiles.length;
-  const addedCount = aggregatedFiles.filter(
-    (f) => f.changeType === "ADD",
-  ).length;
-  const modifiedCount = aggregatedFiles.filter(
-    (f) => f.changeType === "MODIFY",
-  ).length;
-  const deletedCount = aggregatedFiles.filter(
-    (f) => f.changeType === "DELETE",
-  ).length;
+  const { totalFiles, addedCount, modifiedCount, deletedCount } =
+    useMemo(() => {
+      let added = 0;
+      let modified = 0;
+      let deleted = 0;
+      for (const f of aggregatedFiles) {
+        if (f.changeType === "ADD") added++;
+        else if (f.changeType === "MODIFY") modified++;
+        else if (f.changeType === "DELETE") deleted++;
+      }
+      return {
+        totalFiles: aggregatedFiles.length,
+        addedCount: added,
+        modifiedCount: modified,
+        deletedCount: deleted,
+      };
+    }, [aggregatedFiles]);
 
   return (
     <div className="grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4">

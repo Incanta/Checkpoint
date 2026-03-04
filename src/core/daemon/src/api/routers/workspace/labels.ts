@@ -1,8 +1,6 @@
 import { publicProcedure, router } from "../../trpc.js";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
-import { DaemonManager } from "../../../daemon-manager.js";
-
 export const labelsRouter = router({
   create: publicProcedure
     .input(
@@ -14,7 +12,7 @@ export const labelsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -46,7 +44,7 @@ export const labelsRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -77,7 +75,7 @@ export const labelsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -110,7 +108,7 @@ export const labelsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -144,7 +142,7 @@ export const labelsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {

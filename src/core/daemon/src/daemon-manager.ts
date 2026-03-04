@@ -8,8 +8,19 @@ import {
   type Workspace,
   type WorkspacePendingChanges,
 } from "./types/index.js";
-import { watch, type FSWatcher, promises as fs, existsSync, Dirent } from "fs";
-import { CreateApiClientAuth, hashFile } from "@checkpointvcs/common";
+import {
+  watch,
+  type FSWatcher,
+  type Stats,
+  promises as fs,
+  existsSync,
+  Dirent,
+} from "fs";
+import {
+  CreateApiClientAuth,
+  hashFile,
+  type WorkspaceStateFile,
+} from "@checkpointvcs/common";
 import {
   getWorkspaceState,
   saveWorkspaceState,
@@ -17,7 +28,17 @@ import {
   saveWorkspaceConfig,
   type WorkspaceState,
 } from "./util/index.js";
-import { getFileStatus, getIgnoreCache } from "./file-status.js";
+import {
+  parseIgnoreFile,
+  buildIgnoreCacheFromPatterns,
+  getFileStatuses as computeFileStatuses,
+  IGNORE_FILE,
+  HIDDEN_FILE,
+  type WorkspaceIgnorePatterns,
+  type IgnoreFileEntry,
+  type IgnoreCache,
+  type FileStatusResult,
+} from "./file-status.js";
 import { checkSyncStatus, type SyncStatus } from "./util/sync-status.js";
 import { hasConflictMarkers } from "./util/auto-merge.js";
 import { isBinaryFile } from "./util/read-file.js";
@@ -43,11 +64,23 @@ export class DaemonManager {
   /** Cached sync status per workspace, keyed by workspace.id */
   private syncStatuses: Map<string, SyncStatus> = new Map();
 
+  /** Cached set of directories containing tracked files, keyed by workspace.id */
+  private trackedDirSets: Map<string, Set<string>> = new Map();
+
+  /** Pre-loaded ignore/hidden patterns per workspace, keyed by workspace.id */
+  private ignorePatterns: Map<string, WorkspaceIgnorePatterns> = new Map();
+
+  /** Pre-built IgnoreCache per workspace, keyed by workspace.id */
+  private ignoreCaches: Map<string, IgnoreCache> = new Map();
+
   /** Interval handle for sync polling */
   private syncPollInterval: ReturnType<typeof setInterval> | null = null;
 
   /** Sync poll interval in milliseconds (5 minutes) */
   private static readonly SYNC_POLL_INTERVAL_MS = 5 * 60 * 1000;
+
+  /** Max dirty files before falling back to full refresh */
+  private static readonly INCREMENTAL_DIRTY_THRESHOLD = 5000;
 
   private constructor() {
     //
@@ -72,6 +105,9 @@ export class DaemonManager {
       // Load state.json baseline for each workspace
       await this.loadWorkspaceState(workspace);
 
+      // One-time scan for ignore/hidden files
+      await this.scanIgnoreFiles(workspace);
+
       this.watchWorkspace(workspace);
     }
 
@@ -94,6 +130,499 @@ export class DaemonManager {
     const state = await getWorkspaceState(workspace.localPath);
     this.workspaceStates.set(workspace.id, state);
     this.dirtyFiles.set(workspace.id, new Set());
+    this.trackedDirSets.delete(workspace.id);
+  }
+
+  // ─── Ignore / Hidden File Management ────────────────────────────────
+
+  /**
+   * Performs a one-time scan for all `.chkignore` and `.chkhidden` files in
+   * the workspace and caches the results. Only walks directories in the
+   * tracked-directory set. Subsequent updates are handled incrementally by
+   * {@link watchWorkspace}.
+   */
+  public async scanIgnoreFiles(workspace: Workspace): Promise<void> {
+    if (!existsSync(workspace.localPath)) return;
+
+    const trackedDirs = this.getTrackedDirSet(workspace.id);
+
+    const scanForFile = async (
+      fileName: string,
+    ): Promise<IgnoreFileEntry[]> => {
+      const entries: IgnoreFileEntry[] = [];
+
+      for (const dir of trackedDirs) {
+        const fullDir = dir
+          ? path.join(workspace.localPath, dir)
+          : workspace.localPath;
+        const ignoreFilePath = path.join(fullDir, fileName);
+        try {
+          if (existsSync(ignoreFilePath)) {
+            const relativeDir = dir;
+            const patterns = await parseIgnoreFile(
+              workspace.localPath,
+              ignoreFilePath,
+            );
+            entries.push({
+              absolutePath: ignoreFilePath.replace(/\\/g, "/"),
+              relativeDir,
+              patterns,
+            });
+          }
+        } catch {
+          // File may not be readable
+        }
+      }
+
+      return entries;
+    };
+
+    const [ignoreEntries, hiddenEntries] = await Promise.all([
+      scanForFile(IGNORE_FILE),
+      scanForFile(HIDDEN_FILE),
+    ]);
+
+    const patterns: WorkspaceIgnorePatterns = {
+      ignore: ignoreEntries,
+      hidden: hiddenEntries,
+    };
+
+    this.ignorePatterns.set(workspace.id, patterns);
+
+    // Pre-build the IgnoreCache so the first refresh is instant
+    this.ignoreCaches.set(workspace.id, buildIgnoreCacheFromPatterns(patterns));
+  }
+
+  /**
+   * Returns the pre-loaded ignore patterns for a workspace, or `undefined`
+   * if they haven't been scanned yet.
+   */
+  public getIgnorePatterns(
+    workspaceId: string,
+  ): WorkspaceIgnorePatterns | undefined {
+    return this.ignorePatterns.get(workspaceId);
+  }
+
+  /**
+   * Handles a change to an ignore/hidden file detected by the watcher.
+   * Re-parses only the affected file and rebuilds the IgnoreCache.
+   */
+  private async handleIgnoreFileChange(
+    workspace: Workspace,
+    relativePath: string,
+  ): Promise<void> {
+    const fileName = path.basename(relativePath);
+    const isIgnore = fileName === IGNORE_FILE;
+    const isHidden = fileName === HIDDEN_FILE;
+    if (!isIgnore && !isHidden) return;
+
+    const patterns = this.ignorePatterns.get(workspace.id);
+    if (!patterns) return;
+
+    const list = isIgnore ? patterns.ignore : patterns.hidden;
+    const absolutePath = path
+      .join(workspace.localPath, relativePath)
+      .replace(/\\/g, "/");
+    const relativeDir = relativePath.includes("/")
+      ? relativePath.substring(0, relativePath.lastIndexOf("/"))
+      : "";
+
+    // Remove old entry for this file (if any)
+    const idx = list.findIndex((e) => e.absolutePath === absolutePath);
+    if (idx !== -1) {
+      list.splice(idx, 1);
+    }
+
+    // Re-parse if the file still exists
+    if (existsSync(path.join(workspace.localPath, relativePath))) {
+      const newPatterns = await parseIgnoreFile(
+        workspace.localPath,
+        path.join(workspace.localPath, relativePath),
+      );
+      list.push({
+        absolutePath,
+        relativeDir,
+        patterns: newPatterns,
+      });
+    }
+
+    // Rebuild the IgnoreCache from updated patterns
+    this.ignoreCaches.set(workspace.id, buildIgnoreCacheFromPatterns(patterns));
+
+    Logger.debug(
+      `[DaemonManager] Rebuilt ignore cache for workspace ${workspace.name} (${fileName} changed at ${relativeDir || "root"})`,
+    );
+  }
+
+  /**
+   * Returns the cached {@link IgnoreCache} for a workspace. Always available
+   * after {@link init} has run.
+   */
+  public getIgnoreCache(workspaceId: string): IgnoreCache {
+    const cached = this.ignoreCaches.get(workspaceId);
+    if (cached) return cached;
+
+    // Fallback: build an empty cache (shouldn't normally happen)
+    const empty: WorkspaceIgnorePatterns = { ignore: [], hidden: [] };
+    const cache = buildIgnoreCacheFromPatterns(empty);
+    this.ignoreCaches.set(workspaceId, cache);
+    return cache;
+  }
+
+  // ─── File Status Helpers ───────────────────────────────────────────
+
+  /**
+   * Computes file statuses for a batch of files using the cached ignore
+   * patterns. This is the single entry point that tRPC routes should use
+   * instead of calling `getFileStatuses` from `file-status.ts` directly.
+   */
+  public async getFileStatuses(
+    workspaceId: string,
+    workspacePath: string,
+    files: Array<{
+      relativePath: string;
+      existsOnDisk: boolean;
+      isDirectory: boolean;
+    }>,
+    workspaceState: WorkspaceState | null,
+    pendingChanges?: Record<
+      string,
+      { status: FileStatus; id: string | null; changelist: number | null }
+    >,
+  ): Promise<Map<string, FileStatusResult>> {
+    const ignoreCache = this.getIgnoreCache(workspaceId);
+    return computeFileStatuses(
+      workspacePath,
+      files,
+      workspaceState,
+      ignoreCache,
+      pendingChanges,
+    );
+  }
+
+  // ─── Directory Pending Helpers ─────────────────────────────────────
+
+  /**
+   * Recursively checks whether a directory (or any subdirectory beneath it)
+   * contains at least one non-ignored, non-hidden **file**. The walk stops
+   * as soon as the first qualifying file is found, so the cost is bounded
+   * by the depth to the nearest file rather than the full subtree size.
+   */
+  private async hasNonIgnoredFiles(
+    workspace: Workspace,
+    relativeDir: string,
+    ignoreCache: IgnoreCache,
+  ): Promise<boolean> {
+    const fullDir = path.join(workspace.localPath, relativeDir);
+    try {
+      const entries = await fs.readdir(fullDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const childRelative = relativeDir
+          ? `${relativeDir}/${entry.name}`
+          : entry.name;
+        if (
+          ignoreCache.ignore.ignores(childRelative) ||
+          ignoreCache.hidden.ignores(childRelative)
+        ) {
+          continue;
+        }
+
+        if (entry.isFile() || entry.isSymbolicLink()) {
+          return true;
+        }
+
+        if (entry.isDirectory()) {
+          if (
+            await this.hasNonIgnoredFiles(workspace, childRelative, ignoreCache)
+          ) {
+            return true;
+          }
+        }
+      }
+    } catch {
+      // Directory not readable or doesn't exist
+    }
+    return false;
+  }
+
+  /**
+   * For a given file path, finds the topmost ancestor directory that is NOT
+   * in the tracked-directory set (walking from root downward). Returns the
+   * relative directory path, or `null` if all ancestors are tracked.
+   */
+  private findTopmostUntrackedDir(
+    relativePath: string,
+    trackedDirs: Set<string>,
+  ): string | null {
+    const parts = relativePath.split("/");
+    let current = "";
+
+    for (let i = 0; i < parts.length - 1; i++) {
+      current = current ? `${current}/${parts[i]}` : parts[i];
+      if (!trackedDirs.has(current)) {
+        return current;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Returns the pending children of a directory (one level deep).
+   *
+   * - Files: included only if they have a pending status (Local, Added,
+   *   Changed*, Deleted, etc.)
+   * - Directories: included if they are untracked with non-ignored children
+   *   (status = Local) OR if they contain pending changes (status = Unknown).
+   */
+  public async getDirectoryPending(
+    workspaceId: string,
+    workspace: Workspace,
+    directoryPath: string,
+  ): Promise<{ children: File[]; containsChanges: boolean }> {
+    const ignoreCache = this.getIgnoreCache(workspaceId);
+    const workspaceState = this.getWorkspaceState(workspaceId);
+    const trackedDirs = this.getTrackedDirSet(workspaceId);
+    const pendingChanges = this.workspacePendingChanges.get(workspaceId);
+
+    const dirPrefix = directoryPath ? directoryPath + "/" : "";
+    const childrenMap = new Map<string, File>();
+
+    // 1. Read directory contents from disk
+    const fullDir = path.join(workspace.localPath, directoryPath);
+    let diskEntries: Dirent[] = [];
+    try {
+      diskEntries = await fs.readdir(fullDir, { withFileTypes: true });
+    } catch {
+      // Directory may not exist on disk (entirely deleted)
+    }
+
+    for (const entry of diskEntries) {
+      const relativePath = dirPrefix + entry.name;
+
+      // Skip .checkpoint directory
+      if (relativePath.startsWith(".checkpoint")) continue;
+
+      // Skip ignored/hidden
+      if (
+        ignoreCache.ignore.ignores(relativePath) ||
+        ignoreCache.hidden.ignores(relativePath)
+      ) {
+        continue;
+      }
+
+      if (entry.isDirectory()) {
+        const isTracked = trackedDirs.has(relativePath);
+        if (!isTracked) {
+          // Untracked dir: include as Local if it contains non-ignored files
+          if (
+            await this.hasNonIgnoredFiles(workspace, relativePath, ignoreCache)
+          ) {
+            childrenMap.set(entry.name, {
+              path: entry.name,
+              type: FileType.Directory,
+              size: 0,
+              modifiedAt: 0,
+              status: FileStatus.Local,
+              id: null,
+              changelist: null,
+              checkouts: [],
+            });
+          }
+        } else {
+          // Tracked dir: include if pending changes exist beneath it
+          const subPrefix = relativePath + "/";
+          const hasPending = pendingChanges
+            ? Object.keys(pendingChanges.files).some((p) =>
+                p.startsWith(subPrefix),
+              )
+            : false;
+
+          if (hasPending) {
+            childrenMap.set(entry.name, {
+              path: entry.name,
+              type: FileType.Directory,
+              size: 0,
+              modifiedAt: 0,
+              status: FileStatus.Unknown,
+              id: null,
+              changelist: null,
+              checkouts: [],
+            });
+          }
+        }
+      } else {
+        // File: check if it has a pending status
+        const pendingFile = pendingChanges?.files[relativePath];
+        if (pendingFile) {
+          // Use the cached pending change result
+          childrenMap.set(entry.name, {
+            ...pendingFile,
+            path: entry.name,
+          });
+        } else {
+          // Check if the file is untracked (Local)
+          const stateFile = workspaceState?.files[relativePath];
+          if (!stateFile) {
+            const stat = await fs.stat(path.join(fullDir, entry.name));
+            childrenMap.set(entry.name, {
+              path: entry.name,
+              type: FileType.Text,
+              size: stat.size,
+              modifiedAt: stat.mtimeMs,
+              status: FileStatus.Local,
+              id: null,
+              changelist: null,
+              checkouts: [],
+            });
+          }
+          // Tracked & not pending → skip (not a pending change)
+        }
+      }
+    }
+
+    // 2. Add items from cached pending changes not on disk (deleted files,
+    //    deleted directories containing pending changes)
+    if (pendingChanges) {
+      const pendingSubdirs = new Set<string>();
+
+      for (const [filePath, file] of Object.entries(pendingChanges.files)) {
+        if (!filePath.startsWith(dirPrefix)) continue;
+        const remainingPath = filePath.substring(dirPrefix.length);
+
+        if (remainingPath.includes("/")) {
+          // File is in a subdirectory
+          const subdirName = remainingPath.split("/")[0];
+          pendingSubdirs.add(subdirName);
+        } else {
+          // Direct child — add if not already present
+          if (!childrenMap.has(remainingPath)) {
+            childrenMap.set(remainingPath, {
+              ...file,
+              path: remainingPath,
+            });
+          }
+        }
+      }
+
+      // Add subdirectories with pending changes not already in the map
+      for (const subdirName of pendingSubdirs) {
+        if (!childrenMap.has(subdirName)) {
+          childrenMap.set(subdirName, {
+            path: subdirName,
+            type: FileType.Directory,
+            size: 0,
+            modifiedAt: 0,
+            status: FileStatus.Unknown,
+            id: null,
+            changelist: null,
+            checkouts: [],
+          });
+        }
+      }
+    }
+
+    const children = Array.from(childrenMap.values());
+    const pendingStatuses = [
+      FileStatus.Added,
+      FileStatus.Renamed,
+      FileStatus.Deleted,
+      FileStatus.ChangedCheckedOut,
+      FileStatus.ChangedNotCheckedOut,
+      FileStatus.NotChangedCheckedOut,
+      FileStatus.MergeConflict,
+      FileStatus.Conflicted,
+      FileStatus.Local,
+    ];
+    const containsChanges = children.some((c) =>
+      pendingStatuses.includes(c.status),
+    );
+
+    return { children, containsChanges };
+  }
+
+  /**
+   * Expands directory paths in the modifications list into individual file
+   * entries. Used during submit so that a user can submit a whole directory
+   * and the daemon will enumerate the files, applying ignore rules.
+   */
+  public async expandDirectoriesForSubmit(
+    workspace: Workspace,
+    modifications: Array<{
+      delete: boolean;
+      path: string;
+      oldPath?: string;
+    }>,
+  ): Promise<Array<{ delete: boolean; path: string; oldPath?: string }>> {
+    const ignoreCache = this.getIgnoreCache(workspace.id);
+    const workspaceState = this.getWorkspaceState(workspace.id);
+    const result: Array<{
+      delete: boolean;
+      path: string;
+      oldPath?: string;
+    }> = [];
+
+    for (const mod of modifications) {
+      const normalizedPath = mod.path.replace(/^[/\\]/, "").replace(/\\/g, "/");
+      const fullPath = path.join(workspace.localPath, normalizedPath);
+
+      // Check if path is a directory
+      let isDir = false;
+      try {
+        const stat = await fs.stat(fullPath);
+        isDir = stat.isDirectory();
+      } catch {
+        // Path doesn't exist on disk — could be a deleted file, pass through
+        result.push(mod);
+        continue;
+      }
+
+      if (!isDir) {
+        result.push(mod);
+        continue;
+      }
+
+      // Recursively walk the directory, collecting non-ignored files
+      const walkDir = async (dir: string): Promise<void> => {
+        const dirFull = path.join(workspace.localPath, dir);
+        let entries: Dirent[];
+        try {
+          entries = await fs.readdir(dirFull, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const entry of entries) {
+          const childRelative = dir ? `${dir}/${entry.name}` : entry.name;
+          if (childRelative.startsWith(".checkpoint")) continue;
+          if (ignoreCache.ignore.ignores(childRelative)) continue;
+          if (ignoreCache.hidden.ignores(childRelative)) continue;
+
+          if (entry.isDirectory()) {
+            await walkDir(childRelative);
+          } else {
+            result.push({ delete: false, path: childRelative });
+          }
+        }
+      };
+
+      await walkDir(normalizedPath);
+
+      // Also check for deleted files (in state.json but not on disk)
+      if (workspaceState) {
+        const statePrefix = normalizedPath + "/";
+        for (const filePath of Object.keys(workspaceState.files)) {
+          const normalized = filePath.replace(/^\//, "");
+          if (normalized.startsWith(statePrefix)) {
+            const fileFull = path.join(workspace.localPath, normalized);
+            if (!existsSync(fileFull)) {
+              result.push({ delete: true, path: normalized });
+            }
+          }
+        }
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -119,13 +648,197 @@ export class DaemonManager {
     return path.relative(workspace.localPath, fullPath).replace(/\\/g, "/");
   }
 
+  // ─── Tracked Directory Helpers ──────────────────────────────────────
+
+  /**
+   * Builds a set of directory paths (relative, forward-slash) that contain
+   * tracked files or their ancestors. The workspace root ("") is always
+   * included. Useful for pruning untracked subtrees during a full walk.
+   */
+  private buildTrackedDirSet(
+    state: WorkspaceState,
+    markedForAdd?: string[],
+  ): Set<string> {
+    const dirs = new Set<string>();
+    dirs.add("");
+
+    const addAncestorDirs = (filePath: string) => {
+      const parts = filePath.replace(/^\//, "").split("/");
+      parts.pop(); // remove filename
+      let current = "";
+      for (const part of parts) {
+        current = current ? `${current}/${part}` : part;
+        dirs.add(current);
+      }
+    };
+
+    for (const filePath of Object.keys(state.files)) {
+      addAncestorDirs(filePath);
+    }
+
+    if (markedForAdd) {
+      for (const filePath of markedForAdd) {
+        addAncestorDirs(filePath);
+      }
+    }
+
+    return dirs;
+  }
+
+  /**
+   * Returns the cached tracked-directory set for a workspace, building it
+   * lazily on first access (invalidated when baseline state changes).
+   */
+  private getTrackedDirSet(workspaceId: string): Set<string> {
+    let cached = this.trackedDirSets.get(workspaceId);
+    if (!cached) {
+      const state = this.workspaceStates.get(workspaceId);
+      if (state) {
+        cached = this.buildTrackedDirSet(state, state.markedForAdd);
+        this.trackedDirSets.set(workspaceId, cached);
+      } else {
+        cached = new Set([""]);
+      }
+    }
+    return cached;
+  }
+
+  // ─── Change Detection Helper ───────────────────────────────────────
+
+  /**
+   * Checks whether a single file has changed relative to the baseline and
+   * returns the pending {@link File} entry, or `null` when unchanged / skipped.
+   * Shared by both full and incremental refresh paths.
+   */
+  private async detectFileChange(
+    workspace: Workspace,
+    relativePath: string,
+    stat: Stats,
+    baselineFile: WorkspaceStateFile | undefined,
+    checkouts: Array<{ fileId: string }>,
+    markedForAdd: Set<string>,
+  ): Promise<File | null> {
+    let hasChanged = false;
+    let needsHashCheck = false;
+
+    if (!baselineFile) {
+      // File doesn't exist in baseline – it's new / added
+      hasChanged = true;
+    } else if (stat.size !== baselineFile.size) {
+      // Size changed – definitely modified
+      hasChanged = true;
+    } else if (baselineFile.mtime && stat.mtimeMs !== baselineFile.mtime) {
+      // Mtime changed but size identical – verify with hash
+      needsHashCheck = true;
+    }
+
+    if (needsHashCheck && baselineFile) {
+      const fullPath = path
+        .join(workspace.localPath, relativePath)
+        .replace(/\\/g, "/");
+      const currentHash = await hashFile(fullPath);
+      hasChanged = currentHash !== baselineFile.hash;
+    }
+
+    if (!hasChanged) return null;
+
+    const isCheckedOut = baselineFile
+      ? checkouts.some((c) => c.fileId === baselineFile.fileId)
+      : false;
+
+    let status: FileStatus;
+    if (!baselineFile) {
+      status = markedForAdd.has(relativePath)
+        ? FileStatus.Added
+        : FileStatus.Local;
+    } else if (!isBinaryFile(relativePath)) {
+      const fullPath = path.join(workspace.localPath, relativePath);
+      try {
+        const content = await fs.readFile(fullPath, "utf-8");
+        if (hasConflictMarkers(content)) {
+          status = FileStatus.MergeConflict;
+        } else {
+          status = isCheckedOut
+            ? FileStatus.ChangedCheckedOut
+            : FileStatus.ChangedNotCheckedOut;
+        }
+      } catch {
+        status = isCheckedOut
+          ? FileStatus.ChangedCheckedOut
+          : FileStatus.ChangedNotCheckedOut;
+      }
+    } else {
+      status = isCheckedOut
+        ? FileStatus.ChangedCheckedOut
+        : FileStatus.ChangedNotCheckedOut;
+    }
+
+    return {
+      path: relativePath,
+      type: stat.isSymbolicLink() ? FileType.Symlink : FileType.Binary,
+      size: stat.size,
+      modifiedAt: stat.mtimeMs,
+      status,
+      id: baselineFile?.fileId ?? null,
+      changelist: baselineFile?.changelist ?? null,
+      checkouts: [],
+    };
+  }
+
+  // ─── Checkout-Only Helpers ─────────────────────────────────────────
+
+  /**
+   * Adds unchanged-but-checked-out files to the result set.
+   * Shared by both full and incremental refresh paths.
+   */
+  private async addCheckoutOnlyFiles(
+    workspace: Workspace,
+    baselineState: WorkspaceState,
+    result: WorkspacePendingChanges,
+    checkouts: Array<{ fileId: string }>,
+  ): Promise<void> {
+    const changedFileIds = new Set(
+      Object.values(result.files)
+        .map((f) => f.id)
+        .filter(Boolean),
+    );
+
+    for (const checkout of checkouts) {
+      if (!changedFileIds.has(checkout.fileId)) {
+        const baselineEntry = Object.entries(baselineState.files).find(
+          ([, file]) => file.fileId === checkout.fileId,
+        );
+
+        if (baselineEntry) {
+          const [relativePath, baselineFile] = baselineEntry;
+          const fullPath = path.join(workspace.localPath, relativePath);
+
+          if (existsSync(fullPath)) {
+            const stat = await fs.lstat(fullPath);
+            result.files[relativePath] = {
+              path: relativePath,
+              type: stat.isSymbolicLink() ? FileType.Symlink : FileType.Binary,
+              size: stat.size,
+              modifiedAt: stat.mtimeMs,
+              status: FileStatus.NotChangedCheckedOut,
+              id: checkout.fileId,
+              changelist: baselineFile.changelist,
+              checkouts: [],
+            };
+            result.numChanges++;
+          }
+        }
+      }
+    }
+  }
+
+  // ─── Refresh Dispatcher ────────────────────────────────────────────
+
   public async refreshWorkspaceContents(
     workspace: Workspace,
+    options?: { forceFullRefresh?: boolean },
   ): Promise<WorkspacePendingChanges> {
-    const result: WorkspacePendingChanges = {
-      numChanges: 0,
-      files: {},
-    };
+    const forceFullRefresh = options?.forceFullRefresh ?? false;
 
     // Get baseline state from state.json
     let baselineState = this.workspaceStates.get(workspace.id);
@@ -134,9 +847,62 @@ export class DaemonManager {
       baselineState = this.workspaceStates.get(workspace.id)!;
     }
 
-    const ignoreCache = await getIgnoreCache(workspace.localPath);
+    const cached = this.workspacePendingChanges.get(workspace.id);
+    const dirty = this.dirtyFiles.get(workspace.id);
 
-    // walk recursively and gather files, skipping ignored and hidden paths
+    // Fast path: nothing changed since last refresh – return cached result
+    if (!forceFullRefresh && cached && dirty && dirty.size === 0) {
+      Logger.debug(
+        `[DaemonManager] No dirty files for workspace ${workspace.name}, returning cached result`,
+      );
+      return cached;
+    }
+
+    // Incremental path: small number of dirty files with an existing cache
+    if (
+      !forceFullRefresh &&
+      cached &&
+      dirty &&
+      dirty.size > 0 &&
+      dirty.size <= DaemonManager.INCREMENTAL_DIRTY_THRESHOLD
+    ) {
+      Logger.debug(
+        `[DaemonManager] Incremental refresh for workspace ${workspace.name} (${dirty.size} dirty files)`,
+      );
+      return this.incrementalRefresh(workspace, baselineState, cached, dirty);
+    }
+
+    // Full refresh with tracked-directory optimisation
+    Logger.debug(
+      `[DaemonManager] Full refresh for workspace ${workspace.name}` +
+        (dirty ? ` (${dirty.size} dirty files)` : ""),
+    );
+    return this.fullRefresh(workspace, baselineState);
+  }
+
+  // ─── Full Refresh ──────────────────────────────────────────────────
+
+  /**
+   * Performs a complete filesystem walk of the workspace. Directories that
+   * contain no tracked files (and no marked-for-add files) are represented
+   * as directory-level entries with {@link FileStatus.Local} rather than
+   * walking their contents – the subtree is only enumerated at submit time
+   * or when the user expands the directory in the pending-changes UI.
+   */
+  private async fullRefresh(
+    workspace: Workspace,
+    baselineState: WorkspaceState,
+  ): Promise<WorkspacePendingChanges> {
+    const result: WorkspacePendingChanges = {
+      numChanges: 0,
+      files: {},
+    };
+
+    const trackedDirs = this.getTrackedDirSet(workspace.id);
+    const ignoreCache = this.getIgnoreCache(workspace.id);
+
+    // Walk recursively, skipping ignored/hidden paths.
+    // Untracked directories get a single directory entry instead of recursion.
     const walk = async (dir: string): Promise<Dirent[]> => {
       const results: Dirent[] = [];
 
@@ -154,6 +920,30 @@ export class DaemonManager {
         }
 
         if (entry.isDirectory()) {
+          if (!trackedDirs.has(relativePath)) {
+            // Untracked directory: add as a single Local entry if it
+            // contains at least one non-ignored file (don't recurse into it).
+            if (
+              await this.hasNonIgnoredFiles(
+                workspace,
+                relativePath,
+                ignoreCache,
+              )
+            ) {
+              result.files[relativePath] = {
+                path: relativePath,
+                type: FileType.Directory,
+                size: 0,
+                modifiedAt: 0,
+                status: FileStatus.Local,
+                id: null,
+                changelist: null,
+                checkouts: [],
+              };
+              result.numChanges++;
+            }
+            return;
+          }
           const subResults = await walk(fullPath);
           results.push(...subResults);
         } else {
@@ -181,11 +971,9 @@ export class DaemonManager {
     // Get the set of files marked for add
     const markedForAdd = this.getMarkedForAdd(workspace.id);
 
-    // Process all files on disk
+    // Process all files found on disk
     const promises = diskFiles.map(async (f) => {
-      if (f.isDirectory()) {
-        return;
-      }
+      if (f.isDirectory()) return;
 
       const fullPath = path.join(f.parentPath, f.name).replace(/\\/g, "/");
       const relativePath = this.getRelativePath(workspace, fullPath);
@@ -196,95 +984,22 @@ export class DaemonManager {
       }
 
       const stat = await fs.lstat(fullPath);
-      // Look up with and without leading slash for backward compatibility
       const baselineFile = baselineState.files[relativePath];
 
       if (baselineFile) {
         seenBaselineFiles.add(relativePath);
       }
 
-      const fileStatus = await getFileStatus({
-        workspacePath: workspace.localPath,
+      const pendingFile = await this.detectFileChange(
+        workspace,
         relativePath,
-        workspaceState: baselineState,
-        existsOnDisk: true,
-        isDirectory: stat.isDirectory(),
-      });
+        stat,
+        baselineFile,
+        checkouts,
+        markedForAdd,
+      );
 
-      // Determine if file has changed
-      let hasChanged = false;
-      let needsHashCheck = false;
-
-      if (
-        [
-          FileStatus.Unknown,
-          FileStatus.NotInWorkspaceRoot,
-          FileStatus.Ignored,
-          FileStatus.HiddenChanges,
-          FileStatus.Artifact,
-        ].includes(fileStatus.status)
-      ) {
-        hasChanged = false;
-      } else if (!baselineFile) {
-        // File doesn't exist in baseline - it's a new/added file
-        hasChanged = true;
-      } else if (stat.size !== baselineFile.size) {
-        // Size changed - definitely modified
-        hasChanged = true;
-      } else if (baselineFile.mtime && stat.mtimeMs !== baselineFile.mtime) {
-        // Mtime changed but size same - need to verify with hash
-        needsHashCheck = true;
-      }
-
-      if (needsHashCheck && baselineFile) {
-        const currentHash = await hashFile(fullPath);
-        hasChanged = currentHash !== baselineFile.hash;
-      }
-
-      if (hasChanged) {
-        const isCheckedOut = baselineFile
-          ? checkouts.some((c) => c.fileId === baselineFile.fileId)
-          : false;
-
-        // Check if this is a text file with conflict markers from auto-merge
-        let status: FileStatus;
-        if (!baselineFile) {
-          status = markedForAdd.has(relativePath)
-            ? FileStatus.Added
-            : FileStatus.Local;
-        } else if (!isBinaryFile(relativePath)) {
-          // For text files, check if they contain conflict markers
-          try {
-            const content = await fs.readFile(fullPath, "utf-8");
-            if (hasConflictMarkers(content)) {
-              status = FileStatus.MergeConflict;
-            } else {
-              status = isCheckedOut
-                ? FileStatus.ChangedCheckedOut
-                : FileStatus.ChangedNotCheckedOut;
-            }
-          } catch {
-            status = isCheckedOut
-              ? FileStatus.ChangedCheckedOut
-              : FileStatus.ChangedNotCheckedOut;
-          }
-        } else {
-          status = isCheckedOut
-            ? FileStatus.ChangedCheckedOut
-            : FileStatus.ChangedNotCheckedOut;
-        }
-
-        const pendingFile: File = {
-          path: relativePath,
-          type: stat.isSymbolicLink() ? FileType.Symlink : FileType.Binary,
-          size: stat.size,
-          modifiedAt: stat.mtimeMs,
-          status,
-          id: baselineFile?.fileId ?? null,
-          changelist: baselineFile?.changelist ?? null,
-          checkouts: [],
-        };
-
+      if (pendingFile) {
         result.files[relativePath] = pendingFile;
         result.numChanges++;
       }
@@ -299,7 +1014,7 @@ export class DaemonManager {
       // Normalize key (strip leading slash for compatibility)
       const relativePath = stateKey.replace(/^\//, "");
       if (!seenBaselineFiles.has(relativePath)) {
-        const pendingFile: File = {
+        result.files[relativePath] = {
           path: relativePath,
           type: FileType.Unknown,
           size: 0,
@@ -309,53 +1024,219 @@ export class DaemonManager {
           changelist: baselineFile.changelist,
           checkouts: [],
         };
-
-        result.files[relativePath] = pendingFile;
         result.numChanges++;
       }
     }
 
     // Add unchanged but checked-out files
-    const changedFileIds = new Set(
-      Object.values(result.files)
-        .map((f) => f.id)
-        .filter(Boolean),
+    await this.addCheckoutOnlyFiles(
+      workspace,
+      baselineState,
+      result,
+      checkouts,
     );
-
-    for (const checkout of checkouts) {
-      if (!changedFileIds.has(checkout.fileId)) {
-        // Find the path for this fileId in baseline
-        const baselineEntry = Object.entries(baselineState.files).find(
-          ([, file]) => file.fileId === checkout.fileId,
-        );
-
-        if (baselineEntry) {
-          const [relativePath, baselineFile] = baselineEntry;
-          const fullPath = path.join(workspace.localPath, relativePath);
-
-          if (existsSync(fullPath)) {
-            const stat = await fs.lstat(fullPath);
-            const pendingFile: File = {
-              path: relativePath,
-              type: stat.isSymbolicLink() ? FileType.Symlink : FileType.Binary,
-              size: stat.size,
-              modifiedAt: stat.mtimeMs,
-              status: FileStatus.NotChangedCheckedOut,
-              id: checkout.fileId,
-              changelist: baselineFile.changelist,
-              checkouts: [],
-            };
-
-            result.files[relativePath] = pendingFile;
-            result.numChanges++;
-          }
-        }
-      }
-    }
 
     this.workspacePendingChanges.set(workspace.id, result);
 
     // Clear dirty files since we just did a full refresh
+    this.dirtyFiles.set(workspace.id, new Set());
+
+    return result;
+  }
+
+  // ─── Incremental Refresh ───────────────────────────────────────────
+
+  /**
+   * Updates the cached pending-changes result by processing only the files
+   * that the filesystem watcher reported as changed since the last refresh.
+   * Falls back to full refresh behaviour for checkout-only bookkeeping.
+   */
+  private async incrementalRefresh(
+    workspace: Workspace,
+    baselineState: WorkspaceState,
+    cached: WorkspacePendingChanges,
+    dirtyPaths: Set<string>,
+  ): Promise<WorkspacePendingChanges> {
+    const result: WorkspacePendingChanges = {
+      numChanges: cached.numChanges,
+      files: { ...cached.files },
+    };
+
+    const ignoreCache = this.getIgnoreCache(workspace.id);
+    const markedForAdd = this.getMarkedForAdd(workspace.id);
+    const trackedDirs = this.getTrackedDirSet(workspace.id);
+
+    // Fetch checkouts from API
+    const client = await CreateApiClientAuth(workspace.daemonId);
+    const checkouts = await client.file.getCheckouts.query({
+      workspaceId: workspace.id,
+      repoId: workspace.repoId,
+    });
+
+    // Expand directory-level dirty paths: when a whole directory is
+    // reported as changed, include every baseline / cached file beneath it.
+    const expandedDirty = new Set(dirtyPaths);
+    for (const dirtyPath of dirtyPaths) {
+      const prefix = dirtyPath.endsWith("/") ? dirtyPath : dirtyPath + "/";
+      for (const filePath of Object.keys(baselineState.files)) {
+        const normalized = filePath.replace(/^\//, "");
+        if (normalized.startsWith(prefix)) {
+          expandedDirty.add(normalized);
+        }
+      }
+      for (const filePath of Object.keys(cached.files)) {
+        if (filePath.startsWith(prefix)) {
+          expandedDirty.add(filePath);
+        }
+      }
+    }
+
+    for (const relativePath of expandedDirty) {
+      if (relativePath.startsWith(".checkpoint")) continue;
+
+      // Skip ignored / hidden files
+      if (
+        ignoreCache.ignore.ignores(relativePath) ||
+        ignoreCache.hidden.ignores(relativePath)
+      ) {
+        if (result.files[relativePath]) {
+          delete result.files[relativePath];
+          result.numChanges--;
+        }
+        continue;
+      }
+
+      const fullPath = path
+        .join(workspace.localPath, relativePath)
+        .replace(/\\/g, "/");
+      const baselineFile = baselineState.files[relativePath];
+
+      // Remove any previous pending-change entry for this file
+      if (result.files[relativePath]) {
+        delete result.files[relativePath];
+        result.numChanges--;
+      }
+
+      // Stat the file
+      let stat: Stats | null = null;
+      try {
+        stat = await fs.lstat(fullPath);
+        // Directories are handled as directory-level entries, not files
+        if (stat.isDirectory()) {
+          // If this directory is untracked and has non-ignored children,
+          // ensure it appears as a Local directory entry.
+          if (!trackedDirs.has(relativePath)) {
+            if (!result.files[relativePath]) {
+              if (
+                await this.hasNonIgnoredFiles(
+                  workspace,
+                  relativePath,
+                  ignoreCache,
+                )
+              ) {
+                result.files[relativePath] = {
+                  path: relativePath,
+                  type: FileType.Directory,
+                  size: 0,
+                  modifiedAt: 0,
+                  status: FileStatus.Local,
+                  id: null,
+                  changelist: null,
+                  checkouts: [],
+                };
+                result.numChanges++;
+              }
+            }
+          }
+          continue;
+        }
+      } catch {
+        // File does not exist
+      }
+
+      if (!stat) {
+        // File deleted (or is a directory)
+        if (baselineFile) {
+          result.files[relativePath] = {
+            path: relativePath,
+            type: FileType.Unknown,
+            size: 0,
+            modifiedAt: 0,
+            status: FileStatus.Deleted,
+            id: baselineFile.fileId,
+            changelist: baselineFile.changelist,
+            checkouts: [],
+          };
+          result.numChanges++;
+        }
+        continue;
+      }
+
+      // For untracked files in untracked directories, ensure the topmost
+      // untracked ancestor directory appears as a Local directory entry
+      // instead of adding the individual file.
+      if (!baselineFile && !markedForAdd.has(relativePath)) {
+        const topmostDir = this.findTopmostUntrackedDir(
+          relativePath,
+          trackedDirs,
+        );
+        if (topmostDir) {
+          // Add the topmost untracked ancestor (if not already present)
+          if (!result.files[topmostDir]) {
+            if (
+              await this.hasNonIgnoredFiles(workspace, topmostDir, ignoreCache)
+            ) {
+              result.files[topmostDir] = {
+                path: topmostDir,
+                type: FileType.Directory,
+                size: 0,
+                modifiedAt: 0,
+                status: FileStatus.Local,
+                id: null,
+                changelist: null,
+                checkouts: [],
+              };
+              result.numChanges++;
+            }
+          }
+          continue; // Don't add the individual file
+        }
+      }
+
+      const pendingFile = await this.detectFileChange(
+        workspace,
+        relativePath,
+        stat,
+        baselineFile,
+        checkouts,
+        markedForAdd,
+      );
+
+      if (pendingFile) {
+        result.files[relativePath] = pendingFile;
+        result.numChanges++;
+      }
+    }
+
+    // Refresh checkout-only entries: remove stale ones
+    for (const [filePath, file] of Object.entries(result.files)) {
+      if (file.status === FileStatus.NotChangedCheckedOut) {
+        if (!checkouts.some((c) => c.fileId === file.id)) {
+          delete result.files[filePath];
+          result.numChanges--;
+        }
+      }
+    }
+
+    // Add new checkout-only files
+    await this.addCheckoutOnlyFiles(
+      workspace,
+      baselineState,
+      result,
+      checkouts,
+    );
+
+    this.workspacePendingChanges.set(workspace.id, result);
     this.dirtyFiles.set(workspace.id, new Set());
 
     return result;
@@ -392,6 +1273,14 @@ export class DaemonManager {
         Logger.debug(
           `[DaemonManager] Detected change in workspace ${workspace.name} (${eventType} on ${relativePath})`,
         );
+
+        // If an ignore/hidden file changed, rebuild the cached patterns
+        // and force a full refresh so new ignore rules take effect.
+        const baseName = path.basename(relativePath);
+        if (baseName === IGNORE_FILE || baseName === HIDDEN_FILE) {
+          await this.handleIgnoreFileChange(workspace, relativePath);
+          this.workspacePendingChanges.delete(workspace.id);
+        }
 
         // Mark file as dirty for incremental refresh
         const dirty = this.dirtyFiles.get(workspace.id);
@@ -445,8 +1334,9 @@ export class DaemonManager {
     state.markedForAdd = [...existing];
     await this.persistState(workspace, state);
 
-    // Invalidate pending changes so next refresh picks up the new status
+    // Invalidate caches so next refresh picks up the new status
     this.workspacePendingChanges.delete(workspace.id);
+    this.trackedDirSets.delete(workspace.id);
   }
 
   /**
@@ -466,8 +1356,9 @@ export class DaemonManager {
     state.markedForAdd = [...existing];
     await this.persistState(workspace, state);
 
-    // Invalidate pending changes so next refresh picks up the new status
+    // Invalidate caches so next refresh picks up the new status
     this.workspacePendingChanges.delete(workspace.id);
+    this.trackedDirSets.delete(workspace.id);
   }
 
   /**

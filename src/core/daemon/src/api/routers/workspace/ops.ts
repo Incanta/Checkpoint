@@ -1,7 +1,7 @@
 import { publicProcedure, router } from "../../trpc.js";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
-import { DaemonManager } from "../../../daemon-manager.js";
+
 import { Workspace } from "../../../types/index.js";
 import { DaemonConfig } from "../../../daemon-config.js";
 
@@ -14,7 +14,7 @@ export const opsRouter = router({
         }),
       )
       .query(async ({ ctx, input }) => {
-        const manager = DaemonManager.Get();
+        const manager = ctx.manager;
 
         return { workspaces: manager.workspaces.get(input.daemonId) || [] };
       }),
@@ -62,7 +62,7 @@ export const opsRouter = router({
       DaemonConfig.Ensure().vars.workspaces.push(newWorkspace);
       await DaemonConfig.Save();
 
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const existingWorkspaces = manager.workspaces.get(input.daemonId) || [];
       existingWorkspaces.push(newWorkspace);
       manager.workspaces.set(input.daemonId, existingWorkspaces);

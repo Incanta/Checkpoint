@@ -3,9 +3,7 @@ import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
 import fs from "fs/promises";
 import path from "path";
-import { DaemonManager } from "../../../daemon-manager.js";
 import { File, FileStatus, FileType } from "../../../types/index.js";
-import { getFileStatuses } from "../../../file-status.js";
 import {
   isBinaryFile,
   readFileFromChangelist,
@@ -24,11 +22,33 @@ export const pendingRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const workspaces = DaemonManager.Get().workspaces.get(input.daemonId);
+      const workspaces = ctx.manager.workspaces.get(input.daemonId);
       if (workspaces) {
         const workspace = workspaces.find((w) => w.id === input.workspaceId);
         if (workspace) {
-          return await DaemonManager.Get().refreshWorkspaceContents(workspace);
+          return await ctx.manager.refreshWorkspaceContents(workspace);
+        }
+
+        return null;
+      }
+    }),
+
+  rescanIgnoreFiles: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const workspaces = ctx.manager.workspaces.get(input.daemonId);
+      if (workspaces) {
+        const workspace = workspaces.find((w) => w.id === input.workspaceId);
+        if (workspace) {
+          await ctx.manager.scanIgnoreFiles(workspace);
+          return await ctx.manager.refreshWorkspaceContents(workspace, {
+            forceFullRefresh: true,
+          });
         }
 
         return null;
@@ -44,7 +64,7 @@ export const pendingRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -148,7 +168,7 @@ export const pendingRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -170,7 +190,6 @@ export const pendingRouter = router({
         path.join(workspace.localPath, input.path),
         { withFileTypes: true },
       );
-
       // Build file info for batch status lookup
       const fileInfos = dirEntries.map((entry) => {
         const relativePath = path
@@ -197,7 +216,8 @@ export const pendingRouter = router({
         : undefined;
 
       // Get statuses for all files in batch
-      const statuses = await getFileStatuses(
+      const statuses = await manager.getFileStatuses(
+        workspace.id,
         workspace.localPath,
         fileInfos,
         workspaceState,
@@ -245,7 +265,6 @@ export const pendingRouter = router({
           });
         }
       }
-
       // Build children with stats
       const children = await Promise.all(
         fileInfos.map(async ({ relativePath, entry }) => {
@@ -271,7 +290,6 @@ export const pendingRouter = router({
           return f;
         }),
       );
-
       // Check if any children have changes (pending change statuses)
       const pendingStatuses = [
         FileStatus.Added,
@@ -289,6 +307,37 @@ export const pendingRouter = router({
         children,
         containsChanges,
       };
+    }),
+
+  getDirectoryPending: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        path: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const manager = ctx.manager;
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        });
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Could not find workspace ID ${input.workspaceId}`,
+        });
+      }
+
+      return manager.getDirectoryPending(workspace.id, workspace, input.path);
     }),
 
   submit: publicProcedure
@@ -309,11 +358,7 @@ export const pendingRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      console.log(
-        "[daemon.submit] Called with workspaceId:",
-        input.workspaceId,
-      );
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -341,8 +386,14 @@ export const pendingRouter = router({
       }
 
       try {
+        // Expand any directory paths into individual file modifications
+        const expandedModifications = await manager.expandDirectoriesForSubmit(
+          workspace,
+          input.modifications,
+        );
+
         // Check for conflicts before submitting
-        const modificationPaths = input.modifications.map((m) =>
+        const modificationPaths = expandedModifications.map((m) =>
           m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
         );
         const conflictResult = await checkConflicts(
@@ -403,7 +454,7 @@ export const pendingRouter = router({
           },
           repo.orgId,
           input.message,
-          input.modifications,
+          expandedModifications,
           workspace.id,
           input.keepCheckedOut ?? false,
         );
@@ -412,7 +463,7 @@ export const pendingRouter = router({
         await manager.reloadWorkspaceState(workspace);
 
         // Clear submitted files from marked-for-add list
-        const submittedPaths = input.modifications.map((m) =>
+        const submittedPaths = expandedModifications.map((m) =>
           m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
         );
         if (submittedPaths.length > 0) {
@@ -436,7 +487,7 @@ export const pendingRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -474,7 +525,7 @@ export const pendingRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -511,7 +562,7 @@ export const pendingRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -544,7 +595,7 @@ export const pendingRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -577,7 +628,7 @@ export const pendingRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -613,7 +664,7 @@ export const pendingRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {

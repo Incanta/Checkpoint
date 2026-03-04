@@ -1,7 +1,7 @@
 import { publicProcedure, router } from "../../trpc.js";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
-import { DaemonManager } from "../../../daemon-manager.js";
+
 import { readFileFromChangelist } from "../../../util/index.js";
 
 export const historyRouter = router({
@@ -13,7 +13,7 @@ export const historyRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -61,7 +61,7 @@ export const historyRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -103,7 +103,7 @@ export const historyRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -181,7 +181,7 @@ export const historyRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -226,7 +226,7 @@ export const historyRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {

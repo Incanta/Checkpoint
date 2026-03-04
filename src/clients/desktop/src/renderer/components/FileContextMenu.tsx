@@ -325,10 +325,10 @@ export function useFileContextMenu() {
               },
             },
             {
-              label: file.relativePath.replace(/^\//, ""),
+              label: file.relativePath,
               command: () => {
                 ipc.sendMessage("file:remove-from-ignored", {
-                  pattern: file.relativePath.replace(/^\//, ""),
+                  pattern: file.relativePath,
                 });
               },
             },
@@ -351,10 +351,10 @@ export function useFileContextMenu() {
               },
             },
             {
-              label: file.relativePath.replace(/^\//, ""),
+              label: file.relativePath,
               command: () => {
                 ipc.sendMessage("file:add-to-ignored", {
-                  pattern: file.relativePath.replace(/^\//, ""),
+                  pattern: file.relativePath,
                 });
               },
             },

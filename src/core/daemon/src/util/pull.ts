@@ -327,7 +327,7 @@ export async function pull(
  * Pull only outdated text files for a pre-submit merge check.
  *
  * Unlike a full `pull()`, this does NOT use Longtail and does NOT advance the
- * workspace head CL.  It downloads individual file versions from the remote,
+ * workspace head CL. It downloads individual file versions from the remote,
  * performs 3-way auto-merge, writes the result back to disk, and patches only
  * the affected entries in state.json. The workspace still appears "out of date"
  * for any remaining files.

@@ -1,131 +1,108 @@
 import ignore, { type Ignore } from "ignore";
 import path from "path";
-import { promises as fs, existsSync, constants } from "fs";
+import { promises as fs, constants } from "fs";
 import { FileStatus } from "./types/index.js";
 import type { WorkspaceState } from "./util/index.js";
 
-const IGNORE_FILE = ".chkignore";
-const HIDDEN_FILE = ".chkhidden";
+export const IGNORE_FILE = ".chkignore";
+export const HIDDEN_FILE = ".chkhidden";
 
-interface IgnoreCache {
+export interface IgnoreCache {
   ignore: Ignore;
   hidden: Ignore;
   lastUpdated: number;
 }
 
 /**
- * Cache of ignore/cloak patterns per workspace, keyed by workspace localPath
+ * Represents a single ignore/hidden file discovered on disk, together with
+ * the patterns it contributes (already prefixed with its relative directory).
  */
-const ignoreCaches = new Map<string, IgnoreCache>();
+export interface IgnoreFileEntry {
+  /** Absolute path to the ignore/hidden file on disk */
+  absolutePath: string;
+  /** Relative directory from workspace root (e.g. "" for root, "foo/bar") */
+  relativeDir: string;
+  /** Parsed pattern lines (already prefixed with relativeDir when non-root) */
+  patterns: string[];
+}
 
 /**
- * Loads ignore patterns from a file, searching from the file's directory up to workspace root.
- * Patterns are accumulated from all ancestor directories.
+ * Pre-loaded patterns for a workspace, keyed by file type.
+ * Built once during workspace init and kept up-to-date by the watcher.
  */
-async function loadIgnorePatterns(
+export interface WorkspaceIgnorePatterns {
+  ignore: IgnoreFileEntry[];
+  hidden: IgnoreFileEntry[];
+}
+
+// ─── Pattern Parsing Helpers ─────────────────────────────────────────
+
+/**
+ * Reads a single ignore/hidden file and returns the parsed pattern lines,
+ * already prefixed with the file's relative directory.
+ */
+export async function parseIgnoreFile(
   workspacePath: string,
-  fileName: string,
+  filePath: string,
 ): Promise<string[]> {
   const patterns: string[] = [];
+  try {
+    const content = await fs.readFile(filePath, "utf-8");
+    const relativeDirFromWorkspace = path
+      .relative(workspacePath, path.dirname(filePath))
+      .replace(/\\/g, "/");
 
-  // Always ignore .checkpoint directory
-  if (fileName === IGNORE_FILE) {
+    const lines = content
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"));
+
+    for (const line of lines) {
+      if (relativeDirFromWorkspace) {
+        patterns.push(`${relativeDirFromWorkspace}/${line}`);
+      } else {
+        patterns.push(line);
+      }
+    }
+  } catch {
+    // File may not be readable
+  }
+  return patterns;
+}
+
+// ─── Cache Construction ──────────────────────────────────────────────
+
+/**
+ * Flattens pre-loaded ignore file entries into a single pattern list for
+ * building an {@link Ignore} instance.
+ */
+function flattenPatterns(
+  entries: IgnoreFileEntry[],
+  addCheckpointDir: boolean,
+): string[] {
+  const patterns: string[] = [];
+  if (addCheckpointDir) {
     patterns.push(".checkpoint/");
     patterns.push(".checkpoint/**");
   }
-
-  // Walk from workspace root to find all ignore files
-  const dirsToCheck: string[] = [];
-
-  // Collect all directories from root
-  dirsToCheck.push(workspacePath);
-
-  // Also check subdirectories by walking the workspace
-  async function walkDir(dir: string): Promise<void> {
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory() && entry.name !== ".checkpoint") {
-          const subDir = path.join(dir, entry.name);
-          dirsToCheck.push(subDir);
-          await walkDir(subDir);
-        }
-      }
-    } catch {
-      // Directory may not be readable
-    }
+  for (const entry of entries) {
+    patterns.push(...entry.patterns);
   }
-
-  await walkDir(workspacePath);
-
-  // Load patterns from each directory's ignore file
-  for (const dir of dirsToCheck) {
-    const ignoreFilePath = path.join(dir, fileName);
-    try {
-      if (existsSync(ignoreFilePath)) {
-        const content = await fs.readFile(ignoreFilePath, "utf-8");
-        const relativeDirFromWorkspace = path
-          .relative(workspacePath, dir)
-          .replace(/\\/g, "/");
-
-        const lines = content
-          .split("\n")
-          .map((line) => line.trim())
-          .filter((line) => line && !line.startsWith("#"));
-
-        for (const line of lines) {
-          // If the pattern is from a subdirectory, prefix it with the relative path
-          if (relativeDirFromWorkspace) {
-            patterns.push(`${relativeDirFromWorkspace}/${line}`);
-          } else {
-            patterns.push(line);
-          }
-        }
-      }
-    } catch {
-      // File may not be readable
-    }
-  }
-
   return patterns;
 }
 
 /**
- * Gets or creates the ignore cache for a workspace.
- * Cache is refreshed if older than 5 seconds.
+ * Builds an {@link IgnoreCache} directly from pre-loaded
+ * {@link WorkspaceIgnorePatterns}. No filesystem access is needed.
  */
-export async function getIgnoreCache(
-  workspacePath: string,
-): Promise<IgnoreCache> {
-  const cached = ignoreCaches.get(workspacePath);
-  const now = Date.now();
-
-  // Use cached version if less than 5 seconds old
-  if (cached && now - cached.lastUpdated < 5000) {
-    return cached;
-  }
-
-  const [ignorePatterns, hiddenPatterns] = await Promise.all([
-    loadIgnorePatterns(workspacePath, IGNORE_FILE),
-    loadIgnorePatterns(workspacePath, HIDDEN_FILE),
-  ]);
-
-  const cache: IgnoreCache = {
-    ignore: ignore().add(ignorePatterns),
-    hidden: ignore().add(hiddenPatterns),
-    lastUpdated: now,
+export function buildIgnoreCacheFromPatterns(
+  preloaded: WorkspaceIgnorePatterns,
+): IgnoreCache {
+  return {
+    ignore: ignore().add(flattenPatterns(preloaded.ignore, true)),
+    hidden: ignore().add(flattenPatterns(preloaded.hidden, false)),
+    lastUpdated: Date.now(),
   };
-
-  ignoreCaches.set(workspacePath, cache);
-  return cache;
-}
-
-/**
- * Clears the ignore cache for a workspace.
- * Call this when ignore/cloak files are modified.
- */
-export function clearIgnoreCache(workspacePath: string): void {
-  ignoreCaches.delete(workspacePath);
 }
 
 /**
@@ -153,6 +130,8 @@ export interface GetFileStatusOptions {
   relativePath: string;
   /** The workspace state from state.json */
   workspaceState: WorkspaceState | null;
+  /** Pre-built ignore cache (from DaemonManager) */
+  ignoreCache: IgnoreCache;
   /** Pending changes for this workspace (if already computed) */
   pendingChanges?: Record<
     string,
@@ -183,6 +162,7 @@ export async function getFileStatus(
     workspacePath,
     relativePath,
     workspaceState,
+    ignoreCache,
     pendingChanges,
     existsOnDisk,
     isDirectory,
@@ -203,16 +183,13 @@ export async function getFileStatus(
     };
   }
 
-  // 2. Load ignore cache and check patterns
-  const cache = await getIgnoreCache(workspacePath);
-
-  // Check if ignored
-  if (cache.ignore.ignores(relativePath)) {
+  // 2. Check ignore patterns
+  if (ignoreCache.ignore.ignores(relativePath)) {
     return { status: FileStatus.Ignored, fileId: null, changelist: null };
   }
 
   // 3. Check if hidden changes
-  if (cache.hidden.ignores(relativePath)) {
+  if (ignoreCache.hidden.ignores(relativePath)) {
     const stateFile = workspaceState?.files[relativePath];
     return {
       status: FileStatus.HiddenChanges,
@@ -261,7 +238,6 @@ export async function getFileStatus(
 
 /**
  * Batch version of getFileStatus for efficiency when checking multiple files.
- * Loads ignore cache once for all files.
  */
 export async function getFileStatuses(
   workspacePath: string,
@@ -271,15 +247,13 @@ export async function getFileStatuses(
     isDirectory: boolean;
   }>,
   workspaceState: WorkspaceState | null,
+  ignoreCache: IgnoreCache,
   pendingChanges?: Record<
     string,
     { status: FileStatus; id: string | null; changelist: number | null }
   >,
 ): Promise<Map<string, FileStatusResult>> {
   const results = new Map<string, FileStatusResult>();
-
-  // Pre-load ignore cache
-  const cache = await getIgnoreCache(workspacePath);
 
   for (const file of files) {
     const { relativePath, existsOnDisk, isDirectory } = file;
@@ -295,7 +269,7 @@ export async function getFileStatuses(
     }
 
     // Check if ignored
-    if (cache.ignore.ignores(relativePath)) {
+    if (ignoreCache.ignore.ignores(relativePath)) {
       results.set(relativePath, {
         status: FileStatus.Ignored,
         fileId: null,
@@ -305,7 +279,7 @@ export async function getFileStatuses(
     }
 
     // Check if hidden changes
-    if (cache.hidden.ignores(relativePath)) {
+    if (ignoreCache.hidden.ignores(relativePath)) {
       const stateFile = workspaceState?.files[relativePath];
       results.set(relativePath, {
         status: FileStatus.HiddenChanges,

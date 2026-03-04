@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   TreeTable,
   TreeTableExpandedKeysType,
@@ -16,6 +22,7 @@ import {
 import { ipc } from "../pages/ipc";
 import { Splitter, SplitterPanel } from "primereact/splitter";
 import Button from "./Button";
+import DropdownButton from "./DropdownButton";
 import styles from "./Editor.module.css";
 // @ts-ignore
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
@@ -31,6 +38,130 @@ import FileContextMenu, {
 import prettyBytes from "pretty-bytes";
 import { FileIcon } from "./FileIcon";
 
+// ─── Hoisted constants (never recreated) ────────────────────────────
+const itemBodyStyle: React.CSSProperties = {
+  display: "inline",
+  verticalAlign: "middle",
+};
+
+const itemBodyNameStyle: React.CSSProperties = {
+  marginLeft: ".5em",
+};
+
+const treeTableRootStyle: React.CSSProperties = { height: "100%" };
+
+const columnNameStyle: React.CSSProperties = { width: "40%" };
+
+const columnSizeStyle: React.CSSProperties = { width: "5rem" };
+
+// ─── Memoized TreeTable wrapper ─────────────────────────────────────
+interface PendingChangesTreeProps {
+  treeTableRef: React.RefObject<TreeTable>;
+  nodes: TreeNode[];
+  selectedNodeKeys: TreeTableSelectionKeysType | null;
+  onSelectionChange: (e: any) => void;
+  expandedKeys: TreeTableExpandedKeysType;
+  onToggle: (e: any) => void;
+  onExpand: (e: any) => void;
+  highlightedRowKey: string | null;
+  onRowClick: (e: any) => void;
+  onContextMenu: (e: any) => void;
+  treeTablePt: any;
+  columnPt: ColumnPassThroughOptions;
+  itemBodyTemplate: (rowData: any) => React.ReactNode;
+}
+
+const PendingChangesTree = React.memo(function PendingChangesTree({
+  treeTableRef,
+  nodes,
+  selectedNodeKeys,
+  onSelectionChange,
+  expandedKeys,
+  onToggle,
+  onExpand,
+  highlightedRowKey,
+  onRowClick,
+  onContextMenu,
+  treeTablePt,
+  columnPt,
+  itemBodyTemplate,
+}: PendingChangesTreeProps) {
+  const rowClassName = useCallback(
+    (node: TreeNode) => {
+      const classes: Record<string, boolean> = {};
+      if (node.key === highlightedRowKey) {
+        classes["row-highlighted"] = true;
+      }
+      return classes;
+    },
+    [highlightedRowKey],
+  );
+
+  return (
+    <TreeTable
+      ref={treeTableRef}
+      className="pending-changes-tree"
+      value={nodes}
+      columnResizeMode="expand"
+      resizableColumns
+      showGridlines
+      selectionMode="checkbox"
+      selectionKeys={selectedNodeKeys}
+      onSelectionChange={onSelectionChange}
+      expandedKeys={expandedKeys}
+      onToggle={onToggle}
+      onExpand={onExpand}
+      rowClassName={rowClassName}
+      onRowClick={onRowClick}
+      onContextMenu={onContextMenu}
+      pt={treeTablePt}
+      style={treeTableRootStyle}
+    >
+      <Column
+        field="name"
+        header="Item"
+        expander
+        resizeable
+        sortable
+        body={itemBodyTemplate}
+        pt={columnPt}
+        style={columnNameStyle}
+      />
+      <Column
+        field="status"
+        header="Status"
+        resizeable
+        sortable
+        pt={columnPt}
+      />
+      <Column
+        field="size"
+        header="Size"
+        resizeable
+        sortable
+        pt={columnPt}
+        style={columnSizeStyle}
+      />
+      <Column
+        field="modified"
+        header="Date Modified"
+        resizeable
+        sortable
+        pt={columnPt}
+      />
+      <Column field="type" header="Type" resizeable sortable pt={columnPt} />
+      <Column
+        field="changelist"
+        header="Changelist"
+        resizeable
+        sortable
+        pt={columnPt}
+      />
+    </TreeTable>
+  );
+});
+
+// ─── Main component ─────────────────────────────────────────────────
 export default function WorkspacePendingChanges() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const workspacePendingChanges = useAtomValue(workspacePendingChangesAtom);
@@ -40,12 +171,11 @@ export default function WorkspacePendingChanges() {
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [selectedNodeKeys, setSelectedNodeKeys] =
     useState<TreeTableSelectionKeysType | null>(null);
-  const [expandedKeys, setExpandedKeys] = useState<TreeTableExpandedKeysType>({
-    changed: true,
-    moved: true,
-    deleted: true,
-    added: true,
-  });
+  const selectedNodeKeysRef = useRef(selectedNodeKeys);
+  selectedNodeKeysRef.current = selectedNodeKeys;
+  const [expandedKeys, setExpandedKeys] = useState<TreeTableExpandedKeysType>(
+    {},
+  );
 
   const [commitMessage, setCommitMessage] = useState<string>("");
   const [highlightedRowKey, setHighlightedRowKey] = useState<string | null>(
@@ -59,6 +189,10 @@ export default function WorkspacePendingChanges() {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorModalVisible, setErrorModalVisible] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
+
+  /** Tracks which directory node keys have been checked by the user so
+   * that lazily-loaded children can be auto-checked. */
+  const checkedDirsRef = useRef<Set<string>>(new Set());
 
   // Context menu hook
   const {
@@ -87,15 +221,8 @@ export default function WorkspacePendingChanges() {
     (event: React.MouseEvent, node: TreeNode) => {
       if (!currentWorkspace) return;
 
-      // Skip category nodes (changed, moved, deleted, added, conflicted)
       const key = node.key as string;
-      if (["changed", "moved", "deleted", "added", "conflicted"].includes(key))
-        return;
-
-      // Strip the category prefix from the key to get the relative path
-      const relativePath = key
-        .replace(/^(changed|moved|deleted|added|conflicted)\//, "")
-        .replace(/^\//, "");
+      const relativePath = key.replace(/^\//, "");
 
       const workspaceLocalPath = currentWorkspace.localPath
         .split(/[/\\]/)
@@ -121,21 +248,19 @@ export default function WorkspacePendingChanges() {
     [currentWorkspace, showContextMenu, buildMenuItems],
   );
 
-  // Check if any files are selected (not just category nodes)
-  const hasSelectedFiles =
-    selectedNodeKeys &&
-    Object.entries(selectedNodeKeys).some(([key, value]) => {
-      const selection = value as {
-        checked?: boolean;
-        partialChecked?: boolean;
-      };
-      // Must be fully checked (not just partial) and not a category node
-      return (
-        selection.checked &&
-        !selection.partialChecked &&
-        !["changed", "moved", "deleted", "added"].includes(key)
-      );
-    });
+  // Check if any files/directories are selected
+  const hasSelectedFiles = useMemo(
+    () =>
+      selectedNodeKeys &&
+      Object.entries(selectedNodeKeys).some(([, value]) => {
+        const selection = value as {
+          checked?: boolean;
+          partialChecked?: boolean;
+        };
+        return selection.checked && !selection.partialChecked;
+      }),
+    [selectedNodeKeys],
+  );
 
   // Listen for submit success/error responses
   useEffect(() => {
@@ -201,168 +326,84 @@ export default function WorkspacePendingChanges() {
   }, [monacoEl.current, workspaceDiff]);
 
   useEffect(() => {
-    if (!currentWorkspace) {
+    if (!currentWorkspace || !workspacePendingChanges) {
       setNodes([]);
       return;
     }
 
-    const changedNode: TreeNode = {
-      id: "changed",
-      key: "changed",
-      data: {
-        name: "Changed Files",
-        status: "",
-        size: "",
-        modified: "",
-        type: "",
-        changelist: "",
-      },
-      leaf: false,
-      children: [],
+    // Build a nested directory tree from the flat pending changes record.
+    // Keys in files are relative paths; FileType.Directory entries are
+    // lazy-loadable (children fetched via getDirectoryPending on expand).
+    const rootChildren: TreeNode[] = [];
+
+    // Helper: find-or-create intermediate directory nodes along a path.
+    const ensureDirNode = (
+      parts: string[],
+      siblings: TreeNode[],
+      parentKey: string,
+    ): TreeNode => {
+      const name = parts[0];
+      const key = parentKey ? `${parentKey}/${name}` : name;
+
+      let node = siblings.find((n) => n.key === key);
+      if (!node) {
+        node = {
+          id: key,
+          key,
+          data: {
+            name,
+            ext: " ",
+            status: "",
+            size: "",
+            modified: "",
+            type: " ",
+            changelist: "",
+          },
+          leaf: false,
+          children: [],
+        };
+        siblings.push(node);
+      }
+
+      if (parts.length > 1) {
+        if (!node.children) node.children = [];
+        return ensureDirNode(parts.slice(1), node.children, key);
+      }
+
+      return node;
     };
 
-    const movedNode: TreeNode = {
-      id: "moved",
-      key: "moved",
-      data: {
-        name: "Moved Files",
-        status: "",
-        size: "",
-        modified: "",
-        type: "",
-        changelist: "",
-      },
-      leaf: false,
-      children: [],
-    };
+    for (const [filePath, file] of Object.entries(
+      workspacePendingChanges.files,
+    )) {
+      const parts = filePath.split("/").filter((p) => p.length > 0);
+      if (parts.length === 0) continue;
 
-    const deletedNode: TreeNode = {
-      id: "deleted",
-      key: "deleted",
-      data: {
-        name: "Deleted Files",
-        status: "",
-        size: "",
-        modified: "",
-        type: "",
-        changelist: "",
-      },
-      leaf: false,
-      children: [],
-    };
+      const filename = parts[parts.length - 1];
 
-    const addedNode: TreeNode = {
-      id: "added",
-      key: "added",
-      data: {
-        name: "Added Files",
-        status: "",
-        size: "",
-        modified: "",
-        type: "",
-        changelist: "",
-      },
-      leaf: false,
-      children: [],
-    };
-
-    const conflictedNode: TreeNode = {
-      id: "conflicted",
-      key: "conflicted",
-      data: {
-        name: "Conflicted Files",
-        status: "",
-        size: "",
-        modified: "",
-        type: "",
-        changelist: "",
-      },
-      leaf: false,
-      children: [],
-    };
-
-    const newNodes: TreeNode[] = [
-      changedNode,
-      movedNode,
-      deletedNode,
-      addedNode,
-    ];
-
-    if (workspacePendingChanges) {
-      for (const filePath in workspacePendingChanges.files) {
-        const file = workspacePendingChanges.files[filePath];
-        const relativePath = file.path
-          .replace(currentWorkspace.localPath, "")
-          .replace(/^[\/\\]/, "");
-        const pathParts = relativePath
-          .split(/[\/\\]/)
-          .filter((part) => part.length > 0);
-
-        const filename = pathParts.pop();
-        if (!filename) continue;
-
-        let parentNode: TreeNode | null = null;
-        switch (file.status) {
-          case FileStatus.Conflicted:
-          case FileStatus.MergeConflict:
-            parentNode = conflictedNode;
-            break;
-          case FileStatus.ChangedCheckedOut:
-          case FileStatus.ChangedNotCheckedOut:
-            parentNode = changedNode;
-            break;
-          case FileStatus.Renamed:
-            parentNode = movedNode;
-            break;
-          case FileStatus.Deleted:
-            parentNode = deletedNode;
-            break;
-          case FileStatus.Added:
-          case FileStatus.Local:
-            parentNode = addedNode;
-            break;
-          default:
-            continue;
+      if (file.type === FileType.Directory) {
+        // Explicit directory entry – create / update the node.
+        const node = ensureDirNode(parts, rootChildren, "");
+        node.data = {
+          name: filename,
+          ext: " ",
+          status: "",
+          size: "",
+          modified: "",
+          type: "Directory",
+          changelist: file.changelist ? file.changelist.toString() : "",
+        };
+        node.leaf = false;
+        // Mark as lazy-loadable: empty children array means we'll fetch
+        // contents from the daemon when the user expands this node.
+        if (!node.children || node.children.length === 0) {
+          node.children = [];
         }
-
-        let currentNode: TreeNode = parentNode;
-        for (const part of pathParts) {
-          const childNode = currentNode.children?.find(
-            (child) => (child.key as string).split("/").pop() === part,
-          );
-
-          if (childNode) {
-            currentNode = childNode;
-          } else {
-            const newChildNode: TreeNode = {
-              id: currentNode.id + "/" + part,
-              key: currentNode.key + "/" + part,
-              data: {
-                name: part,
-                status: "",
-                size: "",
-                modified: "",
-                type: " ",
-                changelist: "",
-              },
-              leaf: false,
-              children: [],
-            };
-
-            if (!currentNode.children) {
-              currentNode.children = [];
-            }
-            currentNode.children.push(newChildNode);
-            currentNode = newChildNode;
-          }
-        }
-
-        if (!currentNode.children) {
-          currentNode.children = [];
-        }
-        currentNode.children.push({
-          id: currentNode.id + "/" + filename,
-          key: currentNode.key + "/" + filename,
+      } else {
+        // File entry
+        const fileNode: TreeNode = {
+          id: filePath,
+          key: filePath,
           data: {
             path: file.path,
             name: filename,
@@ -372,53 +413,240 @@ export default function WorkspacePendingChanges() {
             modified: new Date(file.modifiedAt).toLocaleDateString(),
             type: FileType[file.type],
             changelist: file.changelist ? file.changelist.toString() : "",
-            onclick: () => {
-              console.log("Clicked file:", file.path);
-            },
           },
-          leaf: file.type !== FileType.Directory,
-        });
+          leaf: true,
+        };
+
+        if (parts.length === 1) {
+          rootChildren.push(fileNode);
+        } else {
+          // Nested file: ensure intermediate directory nodes exist.
+          const parentNode = ensureDirNode(
+            parts.slice(0, -1),
+            rootChildren,
+            "",
+          );
+          if (!parentNode.children) parentNode.children = [];
+          parentNode.children.push(fileNode);
+        }
       }
     }
 
-    // Only show the Conflicted Files category if it has children
-    if (conflictedNode.children && conflictedNode.children.length > 0) {
-      newNodes.push(conflictedNode);
-    }
-
-    setNodes(newNodes);
+    setNodes(rootChildren);
   }, [currentWorkspace, workspacePendingChanges]);
 
-  const columnPt: ColumnPassThroughOptions = {
-    headerCell: {
-      style: {
-        borderColor: "var(--color-border)",
-        borderWidth: "0 1px 1px 0",
-        borderStyle: "solid",
-        paddingLeft: "0.5rem",
-        fontSize: "0.75em",
-        position: "sticky",
-        top: 0,
-        backgroundColor: "var(--color-app-bg)",
-        zIndex: 1,
-      },
+  // ─── Handle lazy-loading when a directory node is expanded ─────────
+  const handleExpand = useCallback(
+    (event: { node: TreeNode }) => {
+      const node = event.node;
+      if (!node || !currentWorkspace) return;
+
+      // Only fetch when the node has no children yet (lazy placeholder).
+      if (node.children && node.children.length > 0) return;
+
+      const dirPath = node.key as string;
+
+      ipc.once("workspace:directory-pending-contents", (data) => {
+        if (data.path !== dirPath) return;
+
+        const directory = data.directory;
+        node.children = directory.children.map((file) => {
+          const childKey = dirPath ? `${dirPath}/${file.path}` : file.path;
+          const isDir = file.type === FileType.Directory;
+
+          const childNode: TreeNode = {
+            id: childKey,
+            key: childKey,
+            data: {
+              path: isDir ? undefined : childKey,
+              name: file.path,
+              ext: isDir ? " " : file.path.split(".").pop() || "",
+              status: FileStatus[file.status],
+              size: isDir ? "" : prettyBytes(file.size),
+              modified: isDir
+                ? ""
+                : new Date(file.modifiedAt).toLocaleDateString(),
+              type: isDir ? "Directory" : FileType[file.type],
+              changelist: file.changelist ? file.changelist.toString() : "",
+            },
+            leaf: !isDir,
+            children: isDir ? [] : undefined,
+          };
+
+          return childNode;
+        });
+
+        // Auto-check children if the parent directory was checked.
+        if (
+          checkedDirsRef.current.has(dirPath) &&
+          selectedNodeKeysRef.current
+        ) {
+          const updated = { ...selectedNodeKeysRef.current };
+          for (const child of node.children ?? []) {
+            const ck = child.key as string;
+            updated[ck] = { checked: true, partialChecked: false };
+            if (!child.leaf) {
+              checkedDirsRef.current.add(ck);
+            }
+          }
+          setSelectedNodeKeys(updated);
+        }
+
+        // Trigger a re-render by cloning the nodes array.
+        setNodes((prev) => [...prev]);
+      });
+
+      ipc.sendMessage("workspace:get-directory-pending", { path: dirPath });
     },
-    bodyCell: {
-      style: {
-        fontSize: "0.9em",
-        paddingTop: 0,
-        paddingBottom: 0,
-        paddingLeft: "0.2rem",
-      },
+    [currentWorkspace],
+  );
+
+  // ─── Track checked directories for auto-check on lazy load ────────
+  const handleSelectionChange = useCallback(
+    (e: { value: TreeTableSelectionKeysType | string }) => {
+      const newKeys = e.value;
+
+      if (typeof newKeys === "string") {
+        // This case happens when selectionMode is "single", but we use "checkbox" mode, so it shouldn't occur.
+        setSelectedNodeKeys({
+          [newKeys]: { checked: true, partialChecked: false },
+        });
+        return;
+      }
+
+      setSelectedNodeKeys(newKeys);
+
+      // Rebuild the set of checked directory keys.
+      const dirs = new Set<string>();
+      for (const [key, value] of Object.entries(newKeys)) {
+        const sel = value as {
+          checked?: boolean;
+          partialChecked?: boolean;
+        };
+        if (sel.checked && !sel.partialChecked) {
+          dirs.add(key);
+        }
+      }
+      checkedDirsRef.current = dirs;
     },
-    rowToggler: {
-      className: "treetable-toggler",
-      style: {
-        backgroundColor: "transparent",
-        padding: "0.4rem",
+    [],
+  );
+
+  const columnPt = useMemo<ColumnPassThroughOptions>(
+    () => ({
+      headerCell: {
+        style: {
+          borderColor: "var(--color-border)",
+          borderWidth: "0 1px 1px 0",
+          borderStyle: "solid",
+          paddingLeft: "0.5rem",
+          fontSize: "0.75em",
+          position: "sticky",
+          top: 0,
+          backgroundColor: "var(--color-app-bg)",
+          zIndex: 1,
+        },
       },
+      bodyCell: {
+        style: {
+          fontSize: "0.9em",
+          paddingTop: 0,
+          paddingBottom: 0,
+          paddingLeft: "0.2rem",
+        },
+      },
+      rowToggler: {
+        className: "treetable-toggler",
+        style: {
+          backgroundColor: "transparent",
+          padding: "0.4rem",
+        },
+      },
+    }),
+    [],
+  );
+
+  const treeTablePt = useMemo(
+    () => ({
+      resizeHelper: {
+        style: {
+          width: "0.1rem",
+          backgroundColor: "var(--color-border-lighter)",
+        },
+      },
+      tbody: {
+        style: {
+          maxHeight: "initial",
+          overflowY: "auto" as const,
+        },
+      },
+      wrapper: {
+        style: {
+          height: "100%",
+          width: "100%",
+        },
+      },
+      table: {
+        style: {
+          maxHeight: "100%",
+          width: "100%",
+          borderCollapse: "separate" as const,
+          borderSpacing: 0,
+          minWidth: "50rem",
+          opacity: isSubmitting ? 0.5 : 1,
+          pointerEvents: isSubmitting ? ("none" as const) : ("auto" as const),
+        },
+      },
+    }),
+    [isSubmitting],
+  );
+
+  const itemBodyTemplate = useCallback((rowData: any) => {
+    return (
+      <div style={itemBodyStyle}>
+        <FileIcon extension={rowData.data.ext} />
+        <span style={itemBodyNameStyle}>{rowData.data.name}</span>
+      </div>
+    );
+  }, []);
+
+  const handleToggle = useCallback(
+    (e: { value: TreeTableExpandedKeysType }) => setExpandedKeys(e.value),
+    [],
+  );
+
+  const rowClassName = useCallback(
+    (node: TreeNode) => {
+      const classes: Record<string, boolean> = {};
+      if (node.key === highlightedRowKey) {
+        classes["row-highlighted"] = true;
+      }
+      return classes;
     },
-  };
+    [highlightedRowKey],
+  );
+
+  const handleRowClick = useCallback(
+    (event: any) => {
+      if (isSubmitting) return;
+      const target = event.originalEvent.target as HTMLElement;
+      if (target && target.tagName === "INPUT") return;
+      if (event.node.data?.path) {
+        setHighlightedRowKey(event.node.key as string);
+        ipc.sendMessage("workspace:diff:file", {
+          path: event.node.data.path,
+        });
+      }
+    },
+    [isSubmitting],
+  );
+
+  const handleContextMenu = useCallback(
+    (event: any) => {
+      handleRowContextMenu(event.originalEvent as React.MouseEvent, event.node);
+    },
+    [handleRowContextMenu],
+  );
 
   return (
     <div className="grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4">
@@ -432,13 +660,21 @@ export default function WorkspacePendingChanges() {
           padding: "0.3rem",
         }}
       >
-        <Button
+        <DropdownButton
           className="p-[0.3rem] text-[0.8em]"
           label="Refresh"
           disabled={isSubmitting}
           onClick={() => {
             ipc.sendMessage("workspace:refresh", null);
           }}
+          items={[
+            {
+              label: "Refresh (Reload Ignore/Hidden)",
+              onClick: () => {
+                ipc.sendMessage("workspace:refresh-ignores", null);
+              },
+            },
+          ]}
         />
         <Button
           className="p-[0.3rem] text-[0.8em]"
@@ -457,19 +693,27 @@ export default function WorkspacePendingChanges() {
                 continue;
               }
 
-              // Strip category prefix and leading slash to get relative path
-              const relativePath = key
-                .replace(/^(changed|moved|deleted|added|conflicted)\//, "")
-                .replace(/^\//, "");
+              // Key is the relative path directly (no category prefix).
+              const relativePath = key.replace(/^\//, "");
+              if (!relativePath) continue;
 
               const pendingChange =
                 workspacePendingChanges!.files[relativePath];
 
-              if (relativePath && pendingChange) {
-                // todo implement renamed/moved
+              if (pendingChange) {
+                // For directories the daemon will expand into individual
+                // files during submit; for files send delete flag as needed.
                 modifications.push({
                   path: relativePath,
                   delete: pendingChange.status === FileStatus.Deleted,
+                });
+              } else {
+                // Key might belong to a lazily-loaded child that isn't in
+                // the top-level pending map. Send it as a non-delete mod;
+                // the daemon will figure out the correct status.
+                modifications.push({
+                  path: relativePath,
+                  delete: false,
                 });
               }
             }
@@ -535,143 +779,21 @@ export default function WorkspacePendingChanges() {
             size={60}
             style={{ overflow: "hidden" }}
           >
-            <TreeTable
-              ref={treeTableRef}
-              className="pending-changes-tree"
-              value={nodes}
-              columnResizeMode="expand"
-              resizableColumns
-              showGridlines
-              selectionMode="checkbox"
-              selectionKeys={selectedNodeKeys}
-              onSelectionChange={(e) =>
-                setSelectedNodeKeys(e.value as TreeTableSelectionKeysType)
-              }
+            <PendingChangesTree
+              treeTableRef={treeTableRef}
+              nodes={nodes}
+              selectedNodeKeys={selectedNodeKeys}
+              onSelectionChange={handleSelectionChange}
               expandedKeys={expandedKeys}
-              onToggle={(e) => setExpandedKeys(e.value)}
-              rowClassName={(node) => {
-                const classes: Record<string, boolean> = {};
-                if (node.key === highlightedRowKey) {
-                  classes["row-highlighted"] = true;
-                }
-                if (
-                  ["changed", "moved", "deleted", "added"].includes(
-                    node.key as string,
-                  )
-                ) {
-                  classes["category-row"] = true;
-                  classes[`category-${node.key}`] = true;
-                }
-                return classes;
-              }}
-              onRowClick={(event) => {
-                if (isSubmitting) return;
-                const target = event.originalEvent.target as HTMLElement;
-                if (target && target.tagName === "INPUT") {
-                  return;
-                }
-                if (event.node.data?.path) {
-                  setHighlightedRowKey(event.node.key as string);
-                  ipc.sendMessage("workspace:diff:file", {
-                    path: event.node.data.path,
-                  });
-                }
-              }}
-              onContextMenu={(event) => {
-                handleRowContextMenu(
-                  event.originalEvent as React.MouseEvent,
-                  event.node,
-                );
-              }}
-              pt={{
-                resizeHelper: {
-                  style: {
-                    width: "0.1rem",
-                    backgroundColor: "var(--color-border-lighter)",
-                  },
-                },
-                tbody: {
-                  style: {
-                    maxHeight: "initial",
-                    overflowY: "auto",
-                  },
-                },
-                wrapper: {
-                  style: {
-                    height: "100%",
-                    width: "100%",
-                  },
-                },
-                table: {
-                  style: {
-                    maxHeight: "100%",
-                    width: "100%",
-                    borderCollapse: "separate",
-                    borderSpacing: 0,
-                    minWidth: "50rem",
-                    opacity: isSubmitting ? 0.5 : 1,
-                    pointerEvents: isSubmitting ? "none" : "auto",
-                  },
-                },
-              }}
-              style={{ height: "100%" }}
-            >
-              <Column
-                field="name"
-                header="Item"
-                expander
-                resizeable
-                sortable
-                body={(rowData: any) => {
-                  return (
-                    <div style={{ display: "inline" }}>
-                      <FileIcon extension={rowData.data.ext} />
-                      <span style={{ marginLeft: ".5em" }}>
-                        {rowData.data.name}
-                      </span>
-                    </div>
-                  );
-                }}
-                pt={columnPt}
-                style={{ width: "40%" }}
-              ></Column>
-              <Column
-                field="status"
-                header="Status"
-                resizeable
-                sortable
-                pt={columnPt}
-              ></Column>
-              <Column
-                field="size"
-                header="Size"
-                resizeable
-                sortable
-                pt={columnPt}
-                style={{ width: "5rem" }}
-              ></Column>
-              <Column
-                field="modified"
-                header="Date Modified"
-                resizeable
-                sortable
-                pt={columnPt}
-              ></Column>
-              <Column
-                field="type"
-                header="Type"
-                resizeable
-                sortable
-                pt={columnPt}
-              ></Column>
-              <Column
-                field="changelist"
-                header="Changelist"
-                resizeable
-                sortable
-                pt={columnPt}
-              ></Column>
-            </TreeTable>
+              onToggle={handleToggle}
+              onExpand={handleExpand}
+              highlightedRowKey={highlightedRowKey}
+              onRowClick={handleRowClick}
+              onContextMenu={handleContextMenu}
+              treeTablePt={treeTablePt}
+              columnPt={columnPt}
+              itemBodyTemplate={itemBodyTemplate}
+            />
           </SplitterPanel>
           <SplitterPanel
             className="flex"

@@ -18,7 +18,6 @@
   },
   "scripts": {
     "build": "tsgo --project tsconfig.json",
-    "build:lib": "tsc --project tsconfig.lib.json",
     "start": "yarn build && node --inspect=0.0.0.0:9231 lib/bin.js"
   },
   "dependencies": {

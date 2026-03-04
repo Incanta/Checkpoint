@@ -1,7 +1,7 @@
 import { publicProcedure, router } from "../../trpc.js";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
-import { DaemonManager } from "../../../daemon-manager.js";
+
 import { FileStatus } from "../../../types/index.js";
 import { DaemonConfig } from "../../../daemon-config.js";
 import {
@@ -23,7 +23,7 @@ export const branchesRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
       if (!workspaces) {
         throw new TRPCError({
@@ -61,7 +61,7 @@ export const branchesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
       if (!workspaces) {
         throw new TRPCError({
@@ -99,7 +99,7 @@ export const branchesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
       if (!workspaces) {
         throw new TRPCError({
@@ -258,7 +258,7 @@ export const branchesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
       if (!workspaces) {
         throw new TRPCError({
@@ -292,7 +292,7 @@ export const branchesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
       if (!workspaces) {
         throw new TRPCError({
@@ -326,7 +326,7 @@ export const branchesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
       if (!workspaces) {
         throw new TRPCError({
@@ -360,7 +360,7 @@ export const branchesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
       if (!workspaces) {
         throw new TRPCError({

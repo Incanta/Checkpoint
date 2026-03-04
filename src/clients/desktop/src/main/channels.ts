@@ -64,8 +64,14 @@ export type Channels = {
   "workspace:merge-branch:error": { message: string };
   "workspace:get-directory": { path: string };
   "workspace:directory-contents": { path: string; directory: Directory };
+  "workspace:get-directory-pending": { path: string };
+  "workspace:directory-pending-contents": {
+    path: string;
+    directory: Directory;
+  };
   "workspace:configure": null;
   "workspace:refresh": null;
+  "workspace:refresh-ignores": null;
   "workspace:history": null;
   "workspace:history:view-changes": { changelistNumber: number };
   "workspace:history:select-file": { filePath: string };

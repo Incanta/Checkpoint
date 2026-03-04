@@ -8,7 +8,7 @@ import {
 import Button from "./Button";
 import { ipc } from "../pages/ipc";
 import { TreeTable } from "primereact/treetable";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TreeNode } from "primereact/treenode";
 import { Column, ColumnPassThroughOptions } from "primereact/column";
 import { ContextMenu } from "primereact/contextmenu";
@@ -152,28 +152,71 @@ export default function WorkspaceHistory() {
     return () => wrapper.removeEventListener("dblclick", handleDblClick);
   }, [handleViewChanges]);
 
-  const columnPt: ColumnPassThroughOptions = {
-    headerCell: {
-      style: {
-        borderColor: "var(--color-border)",
-        borderWidth: "0 1px 0 0",
-        borderStyle: "solid",
-        paddingLeft: "0.5rem",
+  const columnPt = useMemo<ColumnPassThroughOptions>(
+    () => ({
+      headerCell: {
+        style: {
+          borderColor: "var(--color-border)",
+          borderWidth: "0 1px 0 0",
+          borderStyle: "solid",
+          paddingLeft: "0.5rem",
+        },
       },
-    },
-    bodyCell: {
-      style: {
-        paddingLeft: "0.5rem",
+      bodyCell: {
+        style: {
+          paddingLeft: "0.5rem",
+        },
       },
-    },
-    rowToggler: {
-      className: "treetable-toggler",
-      style: {
-        backgroundColor: "transparent",
-        padding: "0.4rem",
+      rowToggler: {
+        className: "treetable-toggler",
+        style: {
+          backgroundColor: "transparent",
+          padding: "0.4rem",
+        },
       },
-    },
-  };
+    }),
+    [],
+  );
+
+  const treeTablePt = useMemo(
+    () => ({
+      thead: {
+        style: {
+          borderColor: "var(--color-border)",
+          borderWidth: "0 0 1px 0",
+          borderStyle: "solid",
+          paddingLeft: "0.5rem",
+        },
+      },
+      scrollableWrapper: {
+        style: {
+          height: "100%",
+        },
+      },
+      scrollable: {
+        style: {
+          height: "100%",
+        },
+      },
+      scrollableBody: {
+        style: {
+          maxHeight: "initial",
+        },
+      },
+      resizeHelper: {
+        style: {
+          width: "0.1rem",
+          backgroundColor: "var(--color-border-lighter)",
+        },
+      },
+      tbody: {
+        style: {
+          cursor: "pointer",
+        },
+      },
+    }),
+    [],
+  );
 
   // Show changelist changes view when active
   if (changelistChanges) {
@@ -257,45 +300,11 @@ export default function WorkspaceHistory() {
             resizableColumns
             showGridlines
             scrollable
+            scrollHeight="flex"
             onContextMenu={(e) => {
               handleRowContextMenu(e.originalEvent as React.MouseEvent, e.node);
             }}
-            pt={{
-              thead: {
-                style: {
-                  borderColor: "var(--color-border)",
-                  borderWidth: "0 0 1px 0",
-                  borderStyle: "solid",
-                  paddingLeft: "0.5rem",
-                },
-              },
-              scrollableWrapper: {
-                style: {
-                  height: "100%",
-                },
-              },
-              scrollable: {
-                style: {
-                  height: "100%",
-                },
-              },
-              scrollableBody: {
-                style: {
-                  maxHeight: "initial",
-                },
-              },
-              resizeHelper: {
-                style: {
-                  width: "0.1rem",
-                  backgroundColor: "var(--color-border-lighter)",
-                },
-              },
-              tbody: {
-                style: {
-                  cursor: "pointer",
-                },
-              },
-            }}
+            pt={treeTablePt}
             style={{ height: "100%" }}
           >
             <Column
@@ -342,9 +351,13 @@ export default function WorkspaceHistory() {
         onHide={() => setCreateBranchVisible(false)}
         defaultParentBranchName={
           branchesState?.currentBranchName &&
-          branchesState.branches.find((b) => b.name === branchesState.currentBranchName)?.type === "FEATURE"
-            ? branchesState.branches.find((b) => b.name === branchesState.currentBranchName)?.parentBranchName ?? branchesState.currentBranchName
-            : branchesState?.currentBranchName ?? null
+          branchesState.branches.find(
+            (b) => b.name === branchesState.currentBranchName,
+          )?.type === "FEATURE"
+            ? (branchesState.branches.find(
+                (b) => b.name === branchesState.currentBranchName,
+              )?.parentBranchName ?? branchesState.currentBranchName)
+            : (branchesState?.currentBranchName ?? null)
         }
         defaultHeadNumber={createBranchCl}
         defaultType="FEATURE"

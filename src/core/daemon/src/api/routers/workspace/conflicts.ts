@@ -1,7 +1,7 @@
 import { publicProcedure, router } from "../../trpc.js";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
-import { DaemonManager } from "../../../daemon-manager.js";
+
 import {
   checkConflicts,
   getWorkspaceState,
@@ -21,7 +21,7 @@ export const conflictsRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -64,7 +64,7 @@ export const conflictsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -193,7 +193,7 @@ export const conflictsRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
       if (!workspaces) return { suppressed: false };
 
@@ -237,7 +237,7 @@ export const conflictsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {

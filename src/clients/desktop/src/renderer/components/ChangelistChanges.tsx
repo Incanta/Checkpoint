@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
 import { Splitter, SplitterPanel } from "primereact/splitter";
 // @ts-ignore
@@ -11,182 +11,9 @@ import {
 } from "../../common/state/workspace";
 import { store } from "../../common/state/store";
 import { ipc } from "../pages/ipc";
-
-interface FileTreeNode {
-  name: string;
-  path: string;
-  isDirectory: boolean;
-  changeType?: "ADD" | "DELETE" | "MODIFY";
-  children: FileTreeNode[];
-  expanded?: boolean;
-}
-
-function buildFileTree(files: ChangelistFileChange[]): FileTreeNode[] {
-  const root: FileTreeNode[] = [];
-
-  for (const file of files) {
-    const parts = file.path.split("/");
-    let currentLevel = root;
-
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
-      const isLast = i === parts.length - 1;
-      const existingNode = currentLevel.find((n) => n.name === part);
-
-      if (existingNode) {
-        if (isLast) {
-          existingNode.changeType = file.changeType;
-        }
-        currentLevel = existingNode.children;
-      } else {
-        const newNode: FileTreeNode = {
-          name: part,
-          path: isLast ? file.path : parts.slice(0, i + 1).join("/"),
-          isDirectory: !isLast,
-          changeType: isLast ? file.changeType : undefined,
-          children: [],
-          expanded: true,
-        };
-        currentLevel.push(newNode);
-        currentLevel = newNode.children;
-      }
-    }
-  }
-
-  return root;
-}
-
-const changeTypeColors: Record<string, string> = {
-  ADD: "#4CAF50",
-  DELETE: "#F44336",
-  MODIFY: "#2196F3",
-};
-
-const changeTypeLabels: Record<string, string> = {
-  ADD: "A",
-  DELETE: "D",
-  MODIFY: "M",
-};
-
-interface FileTreeItemProps {
-  node: FileTreeNode;
-  depth: number;
-  selectedPath: string | null;
-  onSelect: (path: string) => void;
-  expandedPaths: Set<string>;
-  onToggleExpand: (path: string) => void;
-}
-
-function FileTreeItem({
-  node,
-  depth,
-  selectedPath,
-  onSelect,
-  expandedPaths,
-  onToggleExpand,
-}: FileTreeItemProps) {
-  const isSelected = node.path === selectedPath && !node.isDirectory;
-  const isExpanded = expandedPaths.has(node.path);
-
-  return (
-    <>
-      <div
-        onClick={() => {
-          if (node.isDirectory) {
-            onToggleExpand(node.path);
-          } else {
-            onSelect(node.path);
-          }
-        }}
-        style={{
-          padding: "0.25rem 0.5rem",
-          paddingLeft: `${depth + 0.5}rem`,
-          cursor: "pointer",
-          backgroundColor: isSelected ? "#3A3A3A" : "transparent",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          fontSize: "0.85rem",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-        onMouseEnter={(e) => {
-          if (!isSelected) {
-            (e.currentTarget as HTMLDivElement).style.backgroundColor =
-              "#374151";
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isSelected) {
-            (e.currentTarget as HTMLDivElement).style.backgroundColor =
-              "transparent";
-          }
-        }}
-      >
-        <span
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.35rem",
-            overflow: "hidden",
-          }}
-        >
-          {node.isDirectory ? (
-            <span
-              style={{
-                fontSize: "0.75rem",
-                color: "#9CA3AF",
-                width: "1rem",
-                textAlign: "center",
-              }}
-            >
-              {isExpanded ? "▼" : "▶"}
-            </span>
-          ) : (
-            <span style={{ width: "1rem" }} />
-          )}
-          <span
-            style={{
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {node.name}
-          </span>
-        </span>
-        {node.changeType && (
-          <span
-            style={{
-              fontSize: "0.7rem",
-              fontWeight: "bold",
-              color:
-                changeTypeColors[node.changeType] ||
-                "var(--color-text-secondary)",
-              marginLeft: "0.5rem",
-              flexShrink: 0,
-            }}
-          >
-            {changeTypeLabels[node.changeType]}
-          </span>
-        )}
-      </div>
-      {node.isDirectory &&
-        isExpanded &&
-        node.children.map((child) => (
-          <FileTreeItem
-            key={child.path}
-            node={child}
-            depth={depth + 1}
-            selectedPath={selectedPath}
-            onSelect={onSelect}
-            expandedPaths={expandedPaths}
-            onToggleExpand={onToggleExpand}
-          />
-        ))}
-    </>
-  );
-}
+import FileTreeItem, { changeTypeColors } from "./FileTreeItem";
+import type { FileTreeNode } from "./FileTreeItem";
+import { buildFileTree, collectDirPaths } from "./build-file-tree";
 
 interface ChangelistChangesProps {
   isPopout?: boolean;
@@ -228,38 +55,41 @@ export default function ChangelistChanges({
     ipc.sendMessage("workspace:history:open-window", null);
   };
 
-  const handleSelectFile = async (filePath: string) => {
-    if (isPopout && localState) {
-      // Popout: compute previousChangelistNumber from workspace history, invoke for diff
-      const history = store.get(workspaceHistoryAtom);
-      const changelist = history?.find(
-        (cl) => cl.number === localState.changelistNumber,
-      );
-      const previousChangelistNumber = changelist?.parentNumber ?? null;
+  const handleSelectFile = useCallback(
+    async (filePath: string) => {
+      if (isPopout && localState) {
+        // Popout: compute previousChangelistNumber from workspace history, invoke for diff
+        const history = store.get(workspaceHistoryAtom);
+        const changelist = history?.find(
+          (cl) => cl.number === localState.changelistNumber,
+        );
+        const previousChangelistNumber = changelist?.parentNumber ?? null;
 
-      setLocalState({
-        ...localState,
-        selectedFilePath: filePath,
-        diffContent: null,
-      });
+        setLocalState({
+          ...localState,
+          selectedFilePath: filePath,
+          diffContent: null,
+        });
 
-      const diffResult = await ipc.invoke("popout:get-diff", {
-        filePath,
-        changelistNumber: localState.changelistNumber,
-        previousChangelistNumber,
-      });
+        const diffResult = await ipc.invoke("popout:get-diff", {
+          filePath,
+          changelistNumber: localState.changelistNumber,
+          previousChangelistNumber,
+        });
 
-      setLocalState((prev) =>
-        prev
-          ? { ...prev, selectedFilePath: filePath, diffContent: diffResult }
-          : prev,
-      );
-    } else {
-      ipc.sendMessage("workspace:history:select-file", { filePath });
-    }
-  };
+        setLocalState((prev) =>
+          prev
+            ? { ...prev, selectedFilePath: filePath, diffContent: diffResult }
+            : prev,
+        );
+      } else {
+        ipc.sendMessage("workspace:history:select-file", { filePath });
+      }
+    },
+    [isPopout, localState],
+  );
 
-  const handleToggleExpand = (path: string) => {
+  const handleToggleExpand = useCallback((path: string) => {
     setExpandedPaths((prev) => {
       const next = new Set(prev);
       if (next.has(path)) {
@@ -269,7 +99,7 @@ export default function ChangelistChanges({
       }
       return next;
     });
-  };
+  }, []);
 
   // Build tree when files change
   useEffect(() => {
@@ -278,17 +108,7 @@ export default function ChangelistChanges({
       setTreeNodes(tree);
 
       // Auto-expand all directories
-      const allDirPaths = new Set<string>();
-      const collectDirPaths = (nodes: FileTreeNode[]) => {
-        for (const node of nodes) {
-          if (node.isDirectory) {
-            allDirPaths.add(node.path);
-            collectDirPaths(node.children);
-          }
-        }
-      };
-      collectDirPaths(tree);
-      setExpandedPaths(allDirPaths);
+      setExpandedPaths(collectDirPaths(tree));
     }
   }, [changelistChanges?.files]);
 

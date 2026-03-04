@@ -1,7 +1,7 @@
 import { publicProcedure, router } from "../../trpc.js";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
-import { DaemonManager } from "../../../daemon-manager.js";
+
 import { pull, checkConflicts } from "../../../util/index.js";
 import { TRPCError } from "@trpc/server";
 import { ApiTypes } from "../../../types/api-types.js";
@@ -17,7 +17,7 @@ export const syncRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -101,7 +101,7 @@ export const syncRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {
@@ -135,7 +135,7 @@ export const syncRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const manager = DaemonManager.Get();
+      const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
       if (!workspaces) {

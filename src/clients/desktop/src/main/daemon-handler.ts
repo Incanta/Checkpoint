@@ -127,6 +127,10 @@ export default class DaemonHandler {
       this.workspaceRefresh();
     });
 
+    ipcOn(this.ipcMain, "workspace:refresh-ignores", async (event, data) => {
+      this.workspaceRefreshIgnores();
+    });
+
     ipcOn(this.ipcMain, "workspace:history", async (event, data) => {
       this.workspaceHistory();
     });
@@ -154,6 +158,14 @@ export default class DaemonHandler {
     ipcOn(this.ipcMain, "workspace:get-directory", async (event, data) => {
       this.workspaceGetDirectory(data);
     });
+
+    ipcOn(
+      this.ipcMain,
+      "workspace:get-directory-pending",
+      async (event, data) => {
+        this.workspaceGetDirectoryPending(data);
+      },
+    );
 
     ipcOn(this.ipcMain, "workspace:diff:file", async (event, data) => {
       this.workspaceDiffFile(data);
@@ -710,6 +722,31 @@ export default class DaemonHandler {
     });
   }
 
+  private async workspaceRefreshIgnores(): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+
+    if (!currentWorkspace) {
+      return;
+    }
+
+    const client = await CreateDaemonClient();
+    const pendingChanges =
+      await client.workspaces.pending.rescanIgnoreFiles.query({
+        daemonId: currentWorkspace.daemonId,
+        workspaceId: currentWorkspace.id,
+      });
+
+    store.set(workspacePendingChangesAtom, pendingChanges || null);
+
+    // Reset workspaceDirectoriesAtom to trigger tree re-initialization
+    store.set(workspaceDirectoriesAtom, {
+      [currentWorkspace.localPath]: {
+        children: [],
+        containsChanges: false,
+      },
+    });
+  }
+
   private async workspacePull(data: Channels["workspace:pull"]): Promise<void> {
     const currentWorkspace = store.get(currentWorkspaceAtom);
     if (!currentWorkspace) {
@@ -800,11 +837,14 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      await client.workspaces.pending.submit.query({
+      const payload = {
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         ...data,
-      });
+      };
+      console.log("Submitting with data: ", payload);
+      console.log(JSON.stringify(payload, null, 2));
+      await client.workspaces.pending.submit.query(payload);
 
       if (this.webContents) {
         ipcSend(this.webContents, "workspace:submit:success", null);
@@ -1366,6 +1406,47 @@ export default class DaemonHandler {
 
       // Send the directory contents back to the renderer process
       ipcSend(this.webContents, "workspace:directory-contents", {
+        path: dirPath,
+        directory: directoryResponse,
+      });
+    }
+  }
+
+  private async workspaceGetDirectoryPending(
+    data: Channels["workspace:get-directory-pending"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace || !this.webContents) return;
+
+    const dirPath = data.path;
+
+    if (this.isMocked) {
+      // Send empty response in mock mode
+      ipcSend(this.webContents, "workspace:directory-pending-contents", {
+        path: dirPath,
+        directory: {
+          children: [],
+          containsChanges: false,
+        },
+      });
+    } else {
+      const currentUser = store.get(currentUserAtom);
+
+      if (!currentUser) {
+        throw new Error(
+          "Could not find local user account; please try restarting the app",
+        );
+      }
+
+      const client = await CreateDaemonClient();
+      const directoryResponse =
+        await client.workspaces.pending.getDirectoryPending.query({
+          daemonId: currentUser.daemonId,
+          workspaceId: currentWorkspace.id,
+          path: data.path,
+        });
+
+      ipcSend(this.webContents, "workspace:directory-pending-contents", {
         path: dirPath,
         directory: directoryResponse,
       });
