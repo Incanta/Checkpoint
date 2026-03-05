@@ -116,11 +116,17 @@ jobs:
       # Upload the built .node binary
       # ----------------------------------------------------------------
 
+      - name: Collect native binary
+        shell: bash
+        run: |
+          mkdir -p out
+          find src/longtail/addon/build -name longtail_addon.node | head -1 | xargs -I{} cp {} out/
+
       - name: Upload native binary
         uses: actions/upload-artifact@v4
         with:
           name: prebuild-${{ matrix.platform }}-${{ matrix.arch }}
-          path: src/longtail/addon/build/longtail_addon.node
+          path: out/longtail_addon.node
           retention-days: 1
 
   publish:
