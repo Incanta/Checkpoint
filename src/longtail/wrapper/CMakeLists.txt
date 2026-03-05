@@ -4,6 +4,10 @@ project(LongtailWrapper)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+# Ensure all static libraries are built with -fPIC on Unix
+# (required because they get linked into a shared .node addon)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 # Fetch and build curl
 include(FetchContent)
 set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
