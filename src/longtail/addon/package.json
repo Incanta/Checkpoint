@@ -7,7 +7,7 @@
   "license": "(Elastic-2.0 OR AGPL-3.0)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/checkpointvcs/checkpoint.git",
+    "url": "git+https://github.com/checkpointvcs/checkpoint.git",
     "directory": "src/longtail/addon"
   },
   "files": [
