@@ -224,6 +224,7 @@ jobs:
       # ----------------------------------------------------------------
 
       - name: Commit and push
+        continue-on-error: true # Don't fail if there are no changes to commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
