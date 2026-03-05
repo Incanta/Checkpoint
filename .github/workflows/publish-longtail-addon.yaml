@@ -94,7 +94,7 @@ jobs:
 
       - name: Install addon dependencies
         working-directory: src/longtail/addon
-        run: yarn install --frozen-lockfile
+        run: yarn install --immutable
 
       - name: Download Node.js headers
         working-directory: src/longtail/addon
@@ -206,7 +206,7 @@ jobs:
 
       - name: Install addon dependencies
         working-directory: src/longtail/addon
-        run: yarn install --frozen-lockfile
+        run: yarn install --immutable
 
       - name: Build TypeScript
         working-directory: src/longtail/addon
