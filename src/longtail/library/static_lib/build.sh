@@ -23,7 +23,7 @@ else
     RELEASE_MODE="debug"
 fi
 
-CXXFLAGS="-std=gnu99 -g -pthread"
+CXXFLAGS="-std=gnu99 -g -pthread -fPIC"
 TARGET=longtail_static
 
 . $BASE_DIR/all_sources.sh
