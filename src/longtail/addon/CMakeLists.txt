@@ -152,6 +152,16 @@ elseif(APPLE)
     target_link_libraries(${PROJECT_NAME} ${CURL_STATIC_LIB})
   endif()
 
+  # macOS frameworks required by curl (Secure Transport TLS backend)
+  find_library(SECURITY_FW Security)
+  find_library(COREFOUNDATION_FW CoreFoundation)
+  find_library(SYSTEMCONFIGURATION_FW SystemConfiguration)
+  target_link_libraries(${PROJECT_NAME}
+    ${SECURITY_FW}
+    ${COREFOUNDATION_FW}
+    ${SYSTEMCONFIGURATION_FW}
+  )
+
   target_compile_definitions(${PROJECT_NAME} PRIVATE CURL_STATICLIB)
 
 elseif(UNIX)
@@ -167,6 +177,9 @@ elseif(UNIX)
     target_link_libraries(${PROJECT_NAME} ${CURL_STATIC_LIB})
   endif()
 
-  target_link_libraries(${PROJECT_NAME} pthread dl)
+  # OpenSSL required by curl on Linux
+  find_package(OpenSSL REQUIRED)
+  target_link_libraries(${PROJECT_NAME} OpenSSL::SSL OpenSSL::Crypto pthread dl)
+
   target_compile_definitions(${PROJECT_NAME} PRIVATE CURL_STATICLIB)
 endif()

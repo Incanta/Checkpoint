@@ -8,9 +8,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 include(FetchContent)
 set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)  # Use Windows native SSL
-set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
 set(HTTP_ONLY ON CACHE BOOL "" FORCE)  # We only need HTTP
+
+# Platform-specific SSL backend for curl
+if(WIN32)
+  set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
+  set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
+elseif(APPLE)
+  set(CURL_USE_SECTRANSPORT ON CACHE BOOL "" FORCE)
+  set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
+else()
+  set(CURL_USE_OPENSSL ON CACHE BOOL "" FORCE)
+  set(CURL_USE_SCHANNEL OFF CACHE BOOL "" FORCE)
+endif()
 FetchContent_Declare(
   curl
   GIT_REPOSITORY https://github.com/curl/curl.git

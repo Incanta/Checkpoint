@@ -1,9 +1,46 @@
 // TypeScript bindings for the longtail-addon N-API module.
 // Drop-in replacement for the Bun FFI-based longtail.ts utilities.
 
-// The native addon — resolved at runtime from the build output
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const addon: LongtailAddonNative = require("../build/longtail_addon.node");
+import * as path from "path";
+import * as os from "os";
+
+// --------------------------------------------------------------------------
+// Native addon loader — tries prebuilt binaries first (npm package),
+// then falls back to local build output (development).
+// --------------------------------------------------------------------------
+
+function loadNativeAddon(): LongtailAddonNative {
+  const platform = os.platform();
+  const arch = os.arch();
+
+  const candidates = [
+    path.join(
+      __dirname,
+      "..",
+      "prebuilds",
+      `${platform}-${arch}`,
+      "longtail_addon.node",
+    ),
+    path.join(__dirname, "..", "build", "longtail_addon.node"),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      return require(candidate);
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(
+    `@checkpointvcs/longtail-addon: No native binary found for ${platform}-${arch}. ` +
+      `Ensure the package includes prebuilds for your platform, or build from source. ` +
+      `Searched: ${candidates.join(", ")}`,
+  );
+}
+
+const addon: LongtailAddonNative = loadNativeAddon();
 
 // --------------------------------------------------------------------------
 // Native addon interface (what the C++ module exports)

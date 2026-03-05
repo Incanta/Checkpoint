@@ -1,0 +1,246 @@
+name: Publish Longtail Addon
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g., 1.2.3)"
+        required: true
+        type: string
+
+jobs:
+  build-native:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            arch: x64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+          - os: macos-13
+            platform: darwin
+            arch: x64
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # ----------------------------------------------------------------
+      # System dependencies
+      # ----------------------------------------------------------------
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+
+      # ----------------------------------------------------------------
+      # Build longtail C static library
+      # ----------------------------------------------------------------
+
+      - name: Build longtail C library (Windows)
+        if: matrix.platform == 'win32'
+        shell: cmd
+        working-directory: src/longtail/library/static_lib
+        run: call build-and-copy-msvc.bat
+
+      - name: Build longtail C library (Unix)
+        if: matrix.platform != 'win32'
+        shell: bash
+        working-directory: src/longtail/library
+        run: |
+          ARCH="${{ matrix.arch }}"
+
+          # Build shared lib to get the dist structure (headers)
+          cd shared_lib
+          ./build.sh $ARCH
+          ./build.sh $ARCH release
+          cd ..
+          ./dist.sh $ARCH
+
+          # Copy dist (headers + shared lib) to wrapper/longtail
+          rm -rf ../wrapper/longtail
+          cp -r dist ../wrapper/longtail
+
+          # Build static lib for proper static linking in the addon
+          cd static_lib
+          ./build.sh $ARCH release
+          cd ..
+
+          # Determine platform string
+          if [[ "$(uname)" == "Darwin" ]]; then
+            PLAT="darwin_${ARCH}"
+          else
+            PLAT="linux_${ARCH}"
+          fi
+
+          # Replace the shared lib with the static lib
+          rm -f "../wrapper/longtail/release/liblongtail.so"
+          cp "build/${PLAT}/longtail_static/release/liblongtail_static.a" \
+             "../wrapper/longtail/release/liblongtail.a"
+
+      # ----------------------------------------------------------------
+      # Build wrapper (fetches + builds libcurl via CMake FetchContent)
+      # ----------------------------------------------------------------
+
+      - name: Build wrapper (Windows)
+        if: matrix.platform == 'win32'
+        shell: bash
+        working-directory: src/longtail/wrapper
+        run: ./full-build-msvc.sh
+
+      - name: Build wrapper (Unix)
+        if: matrix.platform != 'win32'
+        shell: bash
+        working-directory: src/longtail/wrapper
+        run: |
+          rm -rf build
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+          ../copy.sh
+
+      # ----------------------------------------------------------------
+      # Build native addon (.node)
+      # ----------------------------------------------------------------
+
+      - name: Install addon dependencies
+        working-directory: src/longtail/addon
+        run: yarn install
+
+      - name: Download Node.js headers
+        working-directory: src/longtail/addon
+        run: npx cmake-js install
+
+      - name: Build addon (Windows)
+        if: matrix.platform == 'win32'
+        shell: cmd
+        working-directory: src/longtail/addon
+        run: call build-msvc.bat
+
+      - name: Build addon (Unix)
+        if: matrix.platform != 'win32'
+        shell: bash
+        working-directory: src/longtail/addon
+        run: npx cmake-js build --config Release
+
+      # ----------------------------------------------------------------
+      # Upload the built .node binary
+      # ----------------------------------------------------------------
+
+      - name: Upload native binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuild-${{ matrix.platform }}-${{ matrix.arch }}
+          path: src/longtail/addon/build/longtail_addon.node
+          retention-days: 1
+
+  publish:
+    needs: build-native
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # ----------------------------------------------------------------
+      # Collect prebuilt binaries from all platform jobs
+      # ----------------------------------------------------------------
+
+      - name: Download all prebuild artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Organize prebuilds
+        working-directory: src/longtail/addon
+        run: |
+          mkdir -p prebuilds/win32-x64
+          mkdir -p prebuilds/linux-x64
+          mkdir -p prebuilds/darwin-x64
+          mkdir -p prebuilds/darwin-arm64
+
+          cp "$GITHUB_WORKSPACE/artifacts/prebuild-win32-x64/longtail_addon.node" prebuilds/win32-x64/
+          cp "$GITHUB_WORKSPACE/artifacts/prebuild-linux-x64/longtail_addon.node" prebuilds/linux-x64/
+          cp "$GITHUB_WORKSPACE/artifacts/prebuild-darwin-x64/longtail_addon.node" prebuilds/darwin-x64/
+          cp "$GITHUB_WORKSPACE/artifacts/prebuild-darwin-arm64/longtail_addon.node" prebuilds/darwin-arm64/
+
+      # ----------------------------------------------------------------
+      # Update version numbers
+      # ----------------------------------------------------------------
+
+      - name: Update version in package.json files
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          # Update addon version
+          cd src/longtail/addon
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '${VERSION}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+          # Update server dependency
+          cd ../../core/server
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.dependencies['@checkpointvcs/longtail-addon'] = '^${VERSION}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+          # Update daemon dependency
+          cd ../daemon
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.dependencies['@checkpointvcs/longtail-addon'] = '^${VERSION}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      # ----------------------------------------------------------------
+      # Build TypeScript
+      # ----------------------------------------------------------------
+
+      - name: Install addon dependencies
+        working-directory: src/longtail/addon
+        run: yarn install
+
+      - name: Build TypeScript
+        working-directory: src/longtail/addon
+        run: yarn build:ts
+
+      # ----------------------------------------------------------------
+      # Commit, push, and publish
+      # ----------------------------------------------------------------
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: release @checkpointvcs/longtail-addon v${{ inputs.version }}"
+          git push
+
+      - name: Publish to npm
+        working-directory: src/longtail/addon
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

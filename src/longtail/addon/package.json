@@ -4,18 +4,29 @@
   "description": "Node.js N-API addon for the Longtail C++ wrapper",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "scripts": {
-    "preinstall": "cmake-js install",
-    "build:native": "cmd /c build-msvc.bat",
-    "build:native:debug": "cmd /c build-msvc.bat debug",
-    "clean": "cmake-js clean",
-    "build:ts": "tsc",
-    "build": "yarn run build:native && yarn run build:ts"
+  "license": "(Elastic-2.0 OR AGPL-3.0)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/checkpointvcs/checkpoint.git",
+    "directory": "src/longtail/addon"
   },
-  "dependencies": {
-    "node-addon-api": "^8.3.1"
+  "files": [
+    "dist",
+    "prebuilds"
+  ],
+  "packageManager": "yarn@4.13.0",
+  "scripts": {
+    "build:native": "cmake-js build --config Release",
+    "build:native:msvc": "cmd /c build-msvc.bat",
+    "build:native:msvc:debug": "cmd /c build-msvc.bat debug",
+    "build:ts": "tsc",
+    "build": "yarn run build:native && yarn run build:ts",
+    "clean": "cmake-js clean"
   },
   "devDependencies": {
-    "cmake-js": "^8.0.0"
+    "@types/node": "*",
+    "cmake-js": "^8.0.0",
+    "node-addon-api": "^8.3.1",
+    "typescript": "^5.9.3"
   }
 }
