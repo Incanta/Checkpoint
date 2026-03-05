@@ -4,7 +4,6 @@
   "minDesktopVersion": "0.1.0",
   "private": true,
   "type": "module",
-  "packageManager": "yarn@1.22.22",
   "main": "dist/lib/trpc-client.js",
   "types": "dist/lib/trpc-client.d.ts",
   "exports": {
@@ -15,8 +14,8 @@
   },
   "scripts": {
     "build": "next build",
-    "build:lib": "tsc --project tsconfig.lib.json && node scripts/resolve-prisma-enums.mjs",
-    "check": "next lint && tsc --noEmit",
+    "build:lib": "tsgo --project tsconfig.lib.json && node scripts/resolve-prisma-enums.mjs",
+    "check": "eslint . && tsgo --noEmit",
     "db:types": "prisma generate",
     "db:migrate:dev": "config-env --env=dev prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
@@ -26,47 +25,40 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mdx}\" --cache",
     "format:write": "prettier --write \"**/*.{ts,tsx,js,jsx,mdx}\" --cache",
     "postinstall": "prisma generate",
-    "lint": "next lint",
-    "lint:fix": "next lint --fix",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "preview": "next build && next start",
     "start": "config-env --env=dev next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit"
+  },
+  "peerDependencies": {
+    "@incanta/config": "*",
+    "@trpc/client": "*",
+    "@trpc/server": "*",
+    "njwt": "*",
+    "pretty-bytes": "*",
+    "react": "*",
+    "react-dom": "*",
+    "superjson": "*",
+    "zod": "*"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "^1.5.3",
-    "@incanta/config": "^2.1.10",
     "@prisma/client": "^6.5.0",
     "@t3-oss/env-nextjs": "^0.12.0",
     "@tanstack/react-query": "^5.69.0",
-    "@trpc/client": "^11.8.1",
     "@trpc/react-query": "^11.8.1",
-    "@trpc/server": "^11.8.1",
     "better-auth": "^1.5.3",
     "next": "^16.1.5",
-    "njwt": "^2.0.1",
-    "pretty-bytes": "^7.1.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "server-only": "^0.0.1",
-    "superjson": "^2.2.1",
-    "zod": "^3.24.2"
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.1",
     "@tailwindcss/postcss": "^4.1.18",
-    "@types/node": "^20.14.10",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "cross-env": "^10.0.0",
-    "eslint": "^9.23.0",
-    "eslint-config-next": "^15.2.3",
+    "@types/node": "*",
     "postcss": "^8.5.3",
-    "prettier": "^3.5.3",
     "prettier-plugin-tailwindcss": "^0.6.11",
     "prisma": "^6.5.0",
-    "tailwindcss": "^4.1.18",
-    "typescript": "^5.8.2",
-    "typescript-eslint": "^8.27.0"
+    "tailwindcss": "^4.1.18"
   },
   "ct3aMetadata": {
     "initVersion": "7.39.3"

@@ -1,9 +1,5 @@
 {
   "compilerOptions": {
-    "typeRoots": [
-      "./types",
-      "node_modules/@types",
-    ],
     // Enable latest features
     // "lib": [
     //   "ESNext"

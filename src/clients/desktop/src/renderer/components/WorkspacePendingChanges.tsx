@@ -56,7 +56,7 @@ const columnSizeStyle: React.CSSProperties = { width: "5rem" };
 
 // ─── Memoized TreeTable wrapper ─────────────────────────────────────
 interface PendingChangesTreeProps {
-  treeTableRef: React.RefObject<TreeTable>;
+  treeTableRef: React.RefObject<TreeTable | null>;
   nodes: TreeNode[];
   selectedNodeKeys: TreeTableSelectionKeysType | null;
   onSelectionChange: (e: any) => void;

@@ -11,14 +11,13 @@
     "start": "yarn build && NODE_CONFIG_ENV=dev node --inspect=0.0.0.0:9230 lib/index.js"
   },
   "dependencies": {
-    "@checkpointvcs/common": "portal:../common",
+    "@checkpointvcs/common": "workspace:*",
     "@checkpointvcs/longtail-addon": "portal:../../longtail/addon",
     "express": "^5.2.1",
     "multer": "^2.0.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
-    "@types/multer": "^2.0.0",
-    "@typescript/native-preview": "^7.0.0-dev.20260212.1"
+    "@types/multer": "^2.0.0"
   }
 }

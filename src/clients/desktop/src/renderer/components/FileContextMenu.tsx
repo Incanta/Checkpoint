@@ -583,7 +583,7 @@ export default function FileContextMenu({
   return (
     <>
       <ContextMenu
-        ref={contextMenuRef as React.RefObject<ContextMenu>}
+        ref={contextMenuRef as React.RefObject<ContextMenu | null>}
         model={menuItems}
         breakpoint="767px"
         pt={{

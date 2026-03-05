@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "license": "(Elastic-2.0 OR AGPL-3.0)",
   "private": true,
-  "packageManager": "yarn@4.12.0",
   "workspaces": [
     "client",
     "daemon",
@@ -12,40 +11,31 @@
   ],
   "scripts": {
     "build": "cd server && yarn build && cd ../daemon && yarn build",
-    "lint": "eslint **/*.{js,ts,tsx}",
+    "lint": "eslint .",
     "cli": "NODE_CONFIG_DIR=client/config bun run client/src/bin.ts",
     "package": "bun package.ts",
     "server": "cd server && yarn start",
     "daemon": "cd daemon && yarn start"
   },
+  "peerDependencies": {
+    "@incanta/config": "*",
+    "@trpc/client": "*",
+    "@trpc/server": "*",
+    "njwt": "*",
+    "pino": "*",
+    "pino-pretty": "*",
+    "superjson": "*"
+  },
   "dependencies": {
-    "@checkpointvcs/app": "portal:../app",
-    "@incanta/config": "^2.1.4",
-    "@trpc/client": "^11.8.1",
+    "@checkpointvcs/app": "workspace:*",
     "async-sema": "^3.1.1",
     "inquirer": "^12.5.0",
     "lodash.merge": "^4.6.2",
-    "njwt": "^2.0.1",
     "open": "^10.1.0",
-    "pino": "^9.6.0",
-    "pino-pretty": "^11.3.0",
-    "superjson": "^2.2.2",
     "yup": "^1.6.1"
   },
   "devDependencies": {
-    "@eslint/compat": "^1.3.2",
-    "@types/bun": "^1.2.19",
     "@types/lodash.merge": "^4.6.9",
-    "@types/node": "^25.2.3",
-    "@typescript-eslint/eslint-plugin": "^8.41.0",
-    "@typescript-eslint/parser": "^8.41.0",
-    "cross-env": "^7.0.3",
-    "eslint": "^9.34.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-prefer-arrow": "^1.2.3",
-    "eslint-plugin-prettier": "^5.5.4",
-    "prettier": "^3.6.2",
     "tmp-promise": "^3.0.3"
   }
 }
