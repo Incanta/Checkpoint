@@ -86,6 +86,12 @@ jobs:
       # Build native addon (.node)
       # ----------------------------------------------------------------
 
+      - name: Prepare yarn
+        working-directory: src/longtail/addon
+        run: |
+          corepack enable
+          corepack prepare
+
       - name: Install addon dependencies
         working-directory: src/longtail/addon
         run: yarn install
@@ -191,6 +197,12 @@ jobs:
       # ----------------------------------------------------------------
       # Build TypeScript
       # ----------------------------------------------------------------
+
+      - name: Prepare yarn
+        working-directory: src/longtail/addon
+        run: |
+          corepack enable
+          corepack prepare
 
       - name: Install addon dependencies
         working-directory: src/longtail/addon
