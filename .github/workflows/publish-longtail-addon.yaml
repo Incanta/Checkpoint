@@ -56,37 +56,10 @@ jobs:
       - name: Build longtail C library (Unix)
         if: matrix.platform != 'win32'
         shell: bash
-        working-directory: src/longtail/library
+        working-directory: src/longtail/library/static_lib
         run: |
-          ARCH="${{ matrix.arch }}"
-
-          # Build shared lib to get the dist structure (headers)
-          cd shared_lib
-          ./build.sh $ARCH
-          ./build.sh $ARCH release
-          cd ..
-          ./dist.sh $ARCH
-
-          # Copy dist (headers + shared lib) to wrapper/longtail
-          rm -rf ../wrapper/longtail
-          cp -r dist ../wrapper/longtail
-
-          # Build static lib for proper static linking in the addon
-          cd static_lib
-          ./build.sh $ARCH release
-          cd ..
-
-          # Determine platform string
-          if [[ "$(uname)" == "Darwin" ]]; then
-            PLAT="darwin_${ARCH}"
-          else
-            PLAT="linux_${ARCH}"
-          fi
-
-          # Replace the shared lib with the static lib
-          rm -f "../wrapper/longtail/release/liblongtail.so"
-          cp "build/${PLAT}/longtail_static/release/liblongtail_static.a" \
-             "../wrapper/longtail/release/liblongtail.a"
+          chmod +x build.sh build-and-copy.sh ../arch_helper.sh ../all_sources.sh
+          ./build-and-copy.sh ${{ matrix.arch }}
 
       # ----------------------------------------------------------------
       # Build wrapper (fetches + builds libcurl via CMake FetchContent)
