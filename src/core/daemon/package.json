@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@checkpointvcs/common": "workspace:*",
-    "@checkpointvcs/longtail-addon": "^1.0.2",
+    "@checkpointvcs/longtail-addon": "^1.0.3",
     "commander": "^12.0.0",
     "date-fns": "^4.1.0",
     "ignore": "^7.0.5",
