@@ -8,7 +8,7 @@ newoption
 
 workspace "longtail"
    configurations { "Debug", "Release" }
-   platforms { 'x86_64' }   
+   platforms { 'x86_64' }
    location ( _OPTIONS["to"] )
    intrinsics "on"
    vectorextensions "AVX2"
@@ -49,16 +49,6 @@ project "longtail-cli"
    language ("C")
    warnings "Default"
    files { 'cmd/*.c', 'cmd/*.h', 'cmd/ext/*.h' }
-   links { "longtail-src" }
-   links { "longtail-lib" }
-   links { "longtail-lib-ext" }
-
-project "longtail-tests"
-   kind "ConsoleApp"
-   debugdir ("test")
-   language ("C++")
-   warnings "Default"
-   files { 'test/*.cpp', 'test/*.h', 'test/ext/*.h' }
    links { "longtail-src" }
    links { "longtail-lib" }
    links { "longtail-lib-ext" }
