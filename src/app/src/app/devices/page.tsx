@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { auth } from "~/server/auth";
+import { getSession } from "~/server/auth";
 import { LinkDeviceForm } from "./_components/link-device-form";
 import { DevicesTable } from "./_components/devices-table";
 
 export default async function DevicesPage() {
-  const session = await auth();
+  const session = await getSession();
 
   if (!session?.user) {
     redirect("/signin");

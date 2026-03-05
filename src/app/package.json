@@ -33,7 +33,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@auth/prisma-adapter": "^2.7.2",
+    "@better-auth/prisma-adapter": "^1.5.3",
     "@incanta/config": "^2.1.10",
     "@prisma/client": "^6.5.0",
     "@t3-oss/env-nextjs": "^0.12.0",
@@ -41,8 +41,8 @@
     "@trpc/client": "^11.8.1",
     "@trpc/react-query": "^11.8.1",
     "@trpc/server": "^11.8.1",
+    "better-auth": "^1.5.3",
     "next": "^16.1.5",
-    "next-auth": "5.0.0-beta.30",
     "njwt": "^2.0.1",
     "pretty-bytes": "^7.1.0",
     "react": "^19.0.0",

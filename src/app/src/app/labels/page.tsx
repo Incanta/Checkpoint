@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { auth } from "~/server/auth";
+import { getSession } from "~/server/auth";
 import { LabelsView } from "./_components/labels-view";
 
 export default async function LabelsPage({
@@ -8,7 +8,7 @@ export default async function LabelsPage({
 }: {
   searchParams: Promise<{ repoId?: string }>;
 }) {
-  const session = await auth();
+  const session = await getSession();
 
   if (!session?.user) {
     redirect("/signin");

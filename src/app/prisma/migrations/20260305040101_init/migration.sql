@@ -4,7 +4,7 @@ CREATE TABLE "User" (
     "name" TEXT,
     "username" TEXT,
     "email" TEXT NOT NULL,
-    "emailVerified" DATETIME,
+    "emailVerified" BOOLEAN NOT NULL DEFAULT false,
     "image" TEXT,
     "checkpointAdmin" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -60,7 +60,13 @@ CREATE TABLE "Branch" (
     "name" TEXT NOT NULL,
     "headNumber" INTEGER NOT NULL,
     "isDefault" BOOLEAN NOT NULL DEFAULT false,
-    CONSTRAINT "Branch_repoId_fkey" FOREIGN KEY ("repoId") REFERENCES "Repo" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+    "type" TEXT NOT NULL DEFAULT 'MAINLINE',
+    "archivedAt" DATETIME,
+    "parentBranchName" TEXT,
+    "createdById" TEXT,
+    CONSTRAINT "Branch_repoId_fkey" FOREIGN KEY ("repoId") REFERENCES "Repo" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "Branch_repoId_parentBranchName_fkey" FOREIGN KEY ("repoId", "parentBranchName") REFERENCES "Branch" ("repoId", "name") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "Branch_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -118,8 +124,10 @@ CREATE TABLE "FileCheckout" (
     "removedAt" DATETIME,
     "locked" BOOLEAN NOT NULL DEFAULT false,
     "fileId" TEXT NOT NULL,
+    "repoId" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
     CONSTRAINT "FileCheckout_fileId_fkey" FOREIGN KEY ("fileId") REFERENCES "File" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "FileCheckout_repoId_fkey" FOREIGN KEY ("repoId") REFERENCES "Repo" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "FileCheckout_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
@@ -152,56 +160,43 @@ CREATE TABLE "ApiToken" (
 
 -- CreateTable
 CREATE TABLE "Account" (
+    "id" TEXT NOT NULL PRIMARY KEY,
     "userId" TEXT NOT NULL,
-    "type" TEXT NOT NULL,
-    "provider" TEXT NOT NULL,
-    "providerAccountId" TEXT NOT NULL,
-    "refresh_token" TEXT,
-    "access_token" TEXT,
-    "expires_at" INTEGER,
-    "token_type" TEXT,
+    "accountId" TEXT NOT NULL,
+    "providerId" TEXT NOT NULL,
+    "accessToken" TEXT,
+    "refreshToken" TEXT,
+    "idToken" TEXT,
+    "accessTokenExpiresAt" DATETIME,
+    "refreshTokenExpiresAt" DATETIME,
     "scope" TEXT,
-    "id_token" TEXT,
-    "session_state" TEXT,
+    "password" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
-
-    PRIMARY KEY ("provider", "providerAccountId"),
     CONSTRAINT "Account_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Session" (
-    "sessionToken" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "expires" DATETIME NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "expiresAt" DATETIME NOT NULL,
+    "token" TEXT NOT NULL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
+    "ipAddress" TEXT,
+    "userAgent" TEXT,
+    "userId" TEXT NOT NULL,
     CONSTRAINT "Session_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
-CREATE TABLE "VerificationToken" (
+CREATE TABLE "Verification" (
+    "id" TEXT NOT NULL PRIMARY KEY,
     "identifier" TEXT NOT NULL,
-    "token" TEXT NOT NULL,
-    "expires" DATETIME NOT NULL,
-
-    PRIMARY KEY ("identifier", "token")
-);
-
--- CreateTable
-CREATE TABLE "Authenticator" (
-    "credentialID" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "providerAccountId" TEXT NOT NULL,
-    "credentialPublicKey" TEXT NOT NULL,
-    "counter" INTEGER NOT NULL,
-    "credentialDeviceType" TEXT NOT NULL,
-    "credentialBackedUp" BOOLEAN NOT NULL,
-    "transports" TEXT,
-
-    PRIMARY KEY ("userId", "credentialID"),
-    CONSTRAINT "Authenticator_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "value" TEXT NOT NULL,
+    "expiresAt" DATETIME NOT NULL,
+    "createdAt" DATETIME DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME
 );
 
 -- CreateIndex
@@ -235,7 +230,4 @@ CREATE UNIQUE INDEX "ApiToken_token_key" ON "ApiToken"("token");
 CREATE UNIQUE INDEX "ApiToken_deviceCode_key" ON "ApiToken"("deviceCode");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Session_sessionToken_key" ON "Session"("sessionToken");
-
--- CreateIndex
-CREATE UNIQUE INDEX "Authenticator_credentialID_key" ON "Authenticator"("credentialID");
+CREATE UNIQUE INDEX "Session_token_key" ON "Session"("token");

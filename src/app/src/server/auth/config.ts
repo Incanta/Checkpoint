@@ -1,129 +1,105 @@
 import config from "@incanta/config";
-import { PrismaAdapter } from "@auth/prisma-adapter";
-import { type DefaultSession, type NextAuthConfig } from "next-auth";
-import Auth0Provider from "next-auth/providers/auth0";
-import KeycloakProvider from "next-auth/providers/keycloak";
-import GitHubProvider from "next-auth/providers/github";
-import GitLabProvider from "next-auth/providers/gitlab";
-import OktaProvider from "next-auth/providers/okta";
-import SlackProvider from "next-auth/providers/slack";
-import DiscordProvider from "next-auth/providers/discord";
-
+import { betterAuth } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
 import { db } from "~/server/db";
-import type { Provider } from "next-auth/providers";
-import type { DefaultJWT } from "next-auth/jwt";
 
-export interface Session extends DefaultSession {
+/**
+ * Session type used throughout the app for compatibility.
+ * Maps the better-auth session shape to a simpler interface.
+ */
+export interface Session {
   user: {
     id: string;
-    // username: string;
-  } & DefaultSession["user"];
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+  };
+  expires: string;
 }
 
 /**
- * Module augmentation for `next-auth` types. Allows us to add custom properties to the `session`
- * object and keep type safety.
- *
- * @see https://next-auth.js.org/getting-started/typescript#module-augmentation
+ * Build the social providers config from YAML.
+ * Each provider is only included if enabled in config.
  */
-declare module "next-auth" {
-  interface JWT extends DefaultJWT {
-    id: string;
-    // username: string;
+function buildSocialProviders() {
+  const socialProviders: Record<string, Record<string, string>> = {};
+
+  if (config.get<boolean>("auth.discord.enabled")) {
+    socialProviders.discord = {
+      clientId: config.get<string>("auth.discord.client.id"),
+      clientSecret: config.get<string>("auth.discord.client.secret"),
+    };
   }
 
-  interface Session extends DefaultSession {
-    user: {
-      id: string;
-      // username: string;
-    } & DefaultSession["user"];
+  if (config.get<boolean>("auth.github.enabled")) {
+    socialProviders.github = {
+      clientId: config.get<string>("auth.github.client.id"),
+      clientSecret: config.get<string>("auth.github.client.secret"),
+    };
   }
 
-  interface User {
-    id?: string;
-    // username: string;
+  if (config.get<boolean>("auth.gitlab.enabled")) {
+    socialProviders.gitlab = {
+      clientId: config.get<string>("auth.gitlab.client.id"),
+      clientSecret: config.get<string>("auth.gitlab.client.secret"),
+    };
   }
+
+  if (config.get<boolean>("auth.auth0.enabled")) {
+    socialProviders.auth0 = {
+      clientId: config.get<string>("auth.auth0.client.id"),
+      clientSecret: config.get<string>("auth.auth0.client.secret"),
+      issuer: config.get<string>("auth.auth0.issuer"),
+    };
+  }
+
+  if (config.get<boolean>("auth.okta.enabled")) {
+    socialProviders.okta = {
+      clientId: config.get<string>("auth.okta.client.id"),
+      clientSecret: config.get<string>("auth.okta.client.secret"),
+      issuer: config.get<string>("auth.okta.issuer"),
+    };
+  }
+
+  if (config.get<boolean>("auth.slack.enabled")) {
+    socialProviders.slack = {
+      clientId: config.get<string>("auth.slack.client.id"),
+      clientSecret: config.get<string>("auth.slack.client.secret"),
+    };
+  }
+
+  return socialProviders;
 }
 
-const providers: Provider[] = [];
+export const enabledProviderIds = (() => {
+  const ids: string[] = [];
+  const allProviders = [
+    "discord",
+    "github",
+    "gitlab",
+    "auth0",
+    "okta",
+    "slack",
+  ];
+  for (const p of allProviders) {
+    if (config.get<boolean>(`auth.${p}.enabled`)) {
+      ids.push(p);
+    }
+  }
+  return ids;
+})();
 
-if (config.get<boolean>("auth.auth0.enabled")) {
-  const auth0Provider = Auth0Provider({
-    clientId: config.get<string>("auth.auth0.client.id"),
-    clientSecret: config.get<string>("auth.auth0.client.secret"),
-    issuer: config.get<string>("auth.auth0.issuer"),
-  });
-
-  providers.push(auth0Provider);
-}
-
-if (config.get<boolean>("auth.keycloak.enabled")) {
-  const keycloakProvider = KeycloakProvider({
-    clientId: config.get<string>("auth.keycloak.client.id"),
-    clientSecret: config.get<string>("auth.keycloak.client.secret"),
-    issuer: config.get<string>("auth.keycloak.issuer"),
-  });
-
-  providers.push(keycloakProvider);
-}
-
-if (config.get<boolean>("auth.github.enabled")) {
-  const githubProvider = GitHubProvider({
-    clientId: config.get<string>("auth.github.client.id"),
-    clientSecret: config.get<string>("auth.github.client.secret"),
-  });
-
-  providers.push(githubProvider);
-}
-
-if (config.get<boolean>("auth.gitlab.enabled")) {
-  const gitlabProvider = GitLabProvider({
-    clientId: config.get<string>("auth.gitlab.client.id"),
-    clientSecret: config.get<string>("auth.gitlab.client.secret"),
-  });
-
-  providers.push(gitlabProvider);
-}
-
-if (config.get<boolean>("auth.okta.enabled")) {
-  const oktaProvider = OktaProvider({
-    clientId: config.get<string>("auth.okta.client.id"),
-    clientSecret: config.get<string>("auth.okta.client.secret"),
-    issuer: config.get<string>("auth.okta.issuer"),
-  });
-
-  providers.push(oktaProvider);
-}
-
-if (config.get<boolean>("auth.slack.enabled")) {
-  const slackProvider = SlackProvider({
-    clientId: config.get<string>("auth.slack.client.id"),
-    clientSecret: config.get<string>("auth.slack.client.secret"),
-  });
-
-  providers.push(slackProvider);
-}
-
-if (config.get<boolean>("auth.discord.enabled")) {
-  const discordProvider = DiscordProvider({
-    clientId: config.get<string>("auth.discord.client.id"),
-    clientSecret: config.get<string>("auth.discord.client.secret"),
-  });
-
-  providers.push(discordProvider);
-}
-
-/**
- * Options for NextAuth.js used to configure adapters, providers, callbacks, etc.
- *
- * @see https://next-auth.js.org/configuration/options
- */
-export const authConfig: NextAuthConfig = {
-  trustHost: true,
+export const auth = betterAuth({
+  database: prismaAdapter(db, {
+    provider: "sqlite",
+  }),
   secret: config.get<string>("auth.jwt.secret"),
-  providers,
-  adapter: PrismaAdapter(db),
+  trustedOrigins: ["*"],
+  emailAndPassword: {
+    enabled: config.get<boolean>("auth.email-password.enabled"),
+  },
+  socialProviders: buildSocialProviders(),
   pages: {
     signIn: "/signin",
   },
-} satisfies NextAuthConfig;
+});

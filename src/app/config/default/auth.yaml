@@ -9,14 +9,10 @@ dev:
   # This allows automated tests to create API tokens without OAuth flow
   allow-dev-login: false
 
-auth0:
-  enabled: false
-  client:
-    id: ""
-    secret: ""
-  issuer: ""
+email-password:
+  enabled: true
 
-keycloak:
+auth0:
   enabled: false
   client:
     id: ""

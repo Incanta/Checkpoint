@@ -2,11 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { CheckpointHome } from "~/app/_components/checkpoint-home";
-import { auth } from "~/server/auth";
+import { SignOutButton } from "~/app/_components/sign-out-button";
+import { getSession } from "~/server/auth";
 import { api, HydrateClient } from "~/trpc/server";
 
 export default async function Home() {
-  const session = await auth();
+  const session = await getSession();
 
   if (!session?.user) {
     return (
@@ -42,7 +43,7 @@ export default async function Home() {
   } catch (error) {
     // If user doesn't exist in Checkpoint, redirect to sign in
     console.error("User not found in Checkpoint system:", error);
-    redirect("/api/auth/signin");
+    redirect("/signin");
   }
 
   return (
@@ -53,12 +54,7 @@ export default async function Home() {
             <h1 className="text-3xl font-bold">
               Checkpoint<span className="text-[hsl(280,100%,70%)]">VCS</span>
             </h1>
-            <Link
-              href="/api/auth/signout"
-              className="rounded-full bg-white/10 px-6 py-2 font-semibold no-underline transition hover:bg-white/20"
-            >
-              Sign out
-            </Link>
+            <SignOutButton />
           </div>
 
           <CheckpointHome />
