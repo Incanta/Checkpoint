@@ -52,35 +52,3 @@ export const DefaultConfig: CheckpointConfig = {
   },
   logging: DefaultLoggingConfig,
 };
-
-export async function getConfig(
-  workspaceRoot: string
-): Promise<CheckpointConfig> {
-  const configPath = path.join(workspaceRoot, ".checkpoint", "config.json");
-
-  if (!existsSync(configPath)) {
-    return {
-      ...DefaultConfig,
-    };
-  }
-
-  const config = await fs.readFile(configPath, "utf-8");
-
-  const overrideConfigPath = path.join(
-    workspaceRoot,
-    ".checkpoint",
-    "config-override.json"
-  );
-
-  let overrideConfig: string = "{}";
-  if (existsSync(overrideConfigPath)) {
-    overrideConfig = await fs.readFile(overrideConfigPath, "utf-8");
-  }
-
-  return {
-    ...DefaultConfig,
-    ...JSON.parse(config),
-    ...JSON.parse(overrideConfig),
-    repoRoot: workspaceRoot,
-  };
-}
