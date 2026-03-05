@@ -234,4 +234,4 @@ jobs:
 
       - name: Publish to npm
         working-directory: src/longtail/addon
-        run: npm publish --access public --provenance
+        run: npm publish
