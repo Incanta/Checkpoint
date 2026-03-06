@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@checkpointvcs/common": "workspace:*",
-    "@checkpointvcs/longtail-addon": "^1.0.4",
+    "@checkpointvcs/longtail-addon": "^1.0.5",
     "express": "^5.2.1",
     "multer": "^2.0.2"
   },
