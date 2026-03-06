@@ -237,6 +237,8 @@ jobs:
 
       - name: Publish to npm
         working-directory: src/longtail/addon
+        env:
+          NODE_AUTH_TOKEN: ""
         run: |
           npm --version
           npm publish --access public
