@@ -7,7 +7,7 @@
   "license": "(Elastic-2.0 OR AGPL-3.0)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/incanta/checkpoint.git",
+    "url": "git+https://github.com/Incanta/Checkpoint.git",
     "directory": "src/longtail/addon"
   },
   "files": [
