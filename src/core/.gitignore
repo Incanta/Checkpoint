@@ -5,3 +5,4 @@ dist
 !/.data/seaweed-config
 wk*
 tsconfig.tsbuildinfo
+/server/data

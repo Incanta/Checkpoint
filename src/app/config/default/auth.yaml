@@ -1,3 +1,5 @@
+secret: "betterauthsecretthatsatleast32characterslong"
+
 api-tokens:
   signing-key: "secret"
 

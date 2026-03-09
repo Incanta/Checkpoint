@@ -287,6 +287,9 @@ async function handleGet(
  *
  * Behaviors:
  *   - `?mv.from=<source>`: Rename/move from source to target path.
+ *   - `?op=append`: Append data to an existing file (used by C++ wrapper
+ *     when writing stored blocks, which are written in two passes:
+ *     first the block index header, then the chunk data).
  *   - No files in body: Create directory (mkdir).
  *   - Multipart file upload: Write file to disk.
  *
@@ -349,14 +352,24 @@ async function handlePost(
     return;
   }
 
+  const op = req.query["op"] as string | undefined;
+
   try {
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
 
-    // Write to a temp file first, then rename for atomicity.
-    // This prevents partial reads from concurrent downloaders.
-    const tmpPath = `${fullPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;
-    await fs.writeFile(tmpPath, file.buffer);
-    await fs.rename(tmpPath, fullPath);
+    if (op === "append") {
+      // Append mode: used by Longtail_WriteStoredBlock which writes
+      // a block in two passes — first the block index, then the chunk data.
+      // The C++ wrapper adds ?op=append for offset > 0 writes.
+      await fs.appendFile(fullPath, file.buffer);
+    } else {
+      // Normal write: create/replace the file atomically.
+      // Write to a temp file first, then rename for atomicity.
+      // This prevents partial reads from concurrent downloaders.
+      const tmpPath = `${fullPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+      await fs.writeFile(tmpPath, file.buffer);
+      await fs.rename(tmpPath, fullPath);
+    }
 
     res.status(201).json({ size: file.size });
   } catch (err) {

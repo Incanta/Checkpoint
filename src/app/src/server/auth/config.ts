@@ -90,10 +90,11 @@ export const enabledProviderIds = (() => {
 })();
 
 export const auth = betterAuth({
+  baseURL: `http${config.get<boolean>("server.tls") ? "s" : ""}://${config.get<string>("server.hostname")}:${config.get<number>("server.port")}`,
   database: prismaAdapter(db, {
     provider: "sqlite",
   }),
-  secret: config.get<string>("auth.jwt.secret"),
+  secret: config.get<string>("auth.secret"),
   trustedOrigins: ["*"],
   emailAndPassword: {
     enabled: config.get<boolean>("auth.email-password.enabled"),

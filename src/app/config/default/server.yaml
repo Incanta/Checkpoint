@@ -1,1 +1,3 @@
+tls: false
+hostname: "localhost"
 port: 3000
