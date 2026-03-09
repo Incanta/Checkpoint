@@ -76,7 +76,8 @@ Checkpoint is a monorepo containing several interconnected components. The syste
 ```mermaid
 graph TB
     subgraph Client["Client Machine"]
-        Desktop["Desktop App<br/>(Electron + React)"]
+        DesktopRenderer["Desktop App Renderer Process<br/>(Electron + React)"]
+        DesktopMain["Desktop App Main Process<br/>(Electron + Node.js)"]
         Unreal["Unreal Plugin"]
         Daemon["Daemon<br/>(Node.js tRPC Server)"]
         LongtailAddon["Longtail Addon<br/>(N-API)"]
@@ -89,9 +90,13 @@ graph TB
         StorageServer["Storage Server<br/>(Express)"]
         DB[(Database<br/>SQLite / PostgreSQL)]
         SeaweedFS[(SeaweedFS<br/>Object Storage)]
+        LongtailAddonServer["Longtail Addon<br/>(N-API)"]
+        LongtailWrapperServer["Longtail Wrapper<br/>(C++)"]
+        LongtailLibServer["Longtail Library<br/>(C)"]
     end
 
-    Desktop -- "Electron IPC" --> Daemon
+    DesktopRenderer -- "Electron IPC" --> DesktopMain
+    DesktopMain -- "tRPC HTTP" --> Daemon
     Unreal -- "tRPC HTTP" --> Daemon
     Daemon -- "tRPC HTTP" --> WebApp
     Daemon --> LongtailAddon
@@ -99,6 +104,9 @@ graph TB
     LongtailWrapper --> LongtailLib
     LongtailWrapper -- "HTTP (curl)" --> SeaweedFS
     LongtailWrapper -- "HTTP POST /submit" --> StorageServer
+    LongtailAddonServer --> LongtailWrapperServer
+    LongtailWrapperServer --> LongtailLibServer
+    LongtailWrapperServer -- "HTTP (curl)" --> SeaweedFS
     StorageServer --> LongtailAddon
     StorageServer -- "Merge indexes" --> SeaweedFS
     StorageServer -- "tRPC" --> WebApp
