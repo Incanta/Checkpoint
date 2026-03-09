@@ -108,6 +108,7 @@ graph TB
     LongtailWrapperServer --> LongtailLibServer
     LongtailWrapperServer -- "HTTP (curl)" --> SeaweedFS
     StorageServer --> LongtailAddon
+    StorageServer --> LongtailAddonServer
     StorageServer -- "Merge indexes" --> SeaweedFS
     StorageServer -- "tRPC" --> WebApp
     WebApp --> DB
