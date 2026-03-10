@@ -15,6 +15,7 @@ Checkpoint is a version control system designed for large files and binary asset
 
 - Node.js (v20+)
 - Corepack (ships with Node.js)
+- CMake, a C++ compiler, libcurl, and nlohmann-json (for the CLI — optional)
 
 ### Setup
 
@@ -40,6 +41,34 @@ To start the desktop Electron app separately (after `yarn dev` is running):
 
 ```bash
 yarn desktop
+```
+
+### Building the CLI
+
+The CLI is a standalone C++ application that talks to the daemon. It requires CMake, a C++ compiler, libcurl, and nlohmann-json.
+
+```bash
+cd src/clients/cli
+mkdir -p build && cd build
+cmake ..
+cmake --build .
+```
+
+This produces two executables: `checkpoint` and `chk` (a short alias). Add the build directory to your `PATH` or copy the binaries somewhere convenient.
+
+**Usage:**
+
+```bash
+chk init myorg/myrepo   # Initialize a workspace in the current directory
+chk status              # Show pending changes
+chk add file1 file2     # Stage files for submission
+chk submit -m "message" # Submit staged files
+chk pull                # Sync changes from remote
+chk log                 # Show version history
+chk branch              # List branches
+chk checkout file       # Check out a controlled file for editing
+chk revert file         # Revert files to head version
+chk diff file           # Show diff for a file
 ```
 
 ### Individual Services
@@ -68,6 +97,7 @@ Checkpoint is a monorepo containing several interconnected components. The syste
 | **Longtail Wrapper** | `src/longtail/wrapper` | C++ wrapper around the Longtail C library. Provides higher-level functions for submit, pull, and merge operations. Includes a custom SeaweedFS storage API that reads/writes blocks via HTTP using curl.                                                                                                                                                   |
 | **Longtail Addon**   | `src/longtail/addon`   | Node.js N-API addon that bridges JavaScript to the C++ wrapper. Exposes async functions (`submitAsync`, `pullAsync`, `mergeAsync`) that run Longtail operations in background threads.                                                                                                                                                                     |
 | **Desktop App**      | `src/clients/desktop`  | Electron application with React UI. Provides a graphical interface for managing workspaces, viewing pending changes, browsing history, submitting versions, and pulling updates.                                                                                                                                                                           |
+| **CLI**              | `src/clients/cli`      | Cross-platform C++ command-line client. Provides git-like commands (`init`, `status`, `add`, `submit`, `pull`, `log`, `branch`, `checkout`, `revert`, `diff`) that communicate with the daemon over its tRPC HTTP API.                                                                                                                                     |
 | **Unreal Plugin**    | `src/clients/unreal`   | Unreal Engine source control plugin that integrates Checkpoint directly into the Unreal Editor.                                                                                                                                                                                                                                                            |
 | **SeaweedFS**        | `src/seaweedfs`        | A fork of SeaweedFS with custom modifications for Checkpoint's storage needs. Provides the distributed object storage backend **only in scalable scenarios**.                                                                                                                                                                                              |
 
@@ -78,6 +108,7 @@ graph TB
     subgraph Client["Client Machine"]
         DesktopRenderer["Desktop App Renderer Process<br/>(Electron + React)"]
         DesktopMain["Desktop App Main Process<br/>(Electron + Node.js)"]
+        CLI["CLI<br/>(C++)"]
         Unreal["Unreal Plugin"]
         Daemon["Daemon<br/>(Node.js tRPC Server)"]
         LongtailAddon["Longtail Addon<br/>(N-API)"]
@@ -97,6 +128,7 @@ graph TB
 
     DesktopRenderer -- "Electron IPC" --> DesktopMain
     DesktopMain -- "tRPC HTTP" --> Daemon
+    CLI -- "tRPC HTTP" --> Daemon
     Unreal -- "tRPC HTTP" --> Daemon
     Daemon -- "tRPC HTTP" --> WebApp
     Daemon --> LongtailAddon
