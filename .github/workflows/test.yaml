@@ -221,47 +221,16 @@ jobs:
       - name: Create workspace 1
         id: ws1
         run: |
-          DAEMON_ID="${{ steps.auth.outputs.DAEMON_ID }}"
-          REPO_ID="${{ steps.repo.outputs.REPO_ID }}"
           WS_PATH="/tmp/ci-workspace-1"
-
           mkdir -p "$WS_PATH"
+          cd "$WS_PATH"
 
-          WS=$(curl -sf -X POST "http://localhost:3010/workspaces.ops.create?batch=1" \
-            -H 'Content-Type: application/json' \
-            -d "{\"0\":{\"json\":{\"daemonId\":\"$DAEMON_ID\",\"name\":\"ci-ws-1\",\"repoId\":\"$REPO_ID\",\"path\":\"$WS_PATH\",\"defaultBranchName\":\"main\"}}}")
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk init ci-test-org/ci-test-repo
 
-          echo "Create workspace response: $WS"
-
-          WS_ID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.id')
-          WS_ORGID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.orgId')
-          WS_USERID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.userId')
-
-          if [ -z "$WS_ID" ] || [ "$WS_ID" = "null" ]; then
-            echo "ERROR: Failed to create workspace"
-            exit 1
-          fi
-
-          echo "WS_ID=$WS_ID" >> "$GITHUB_OUTPUT"
           echo "WS_PATH=$WS_PATH" >> "$GITHUB_OUTPUT"
-          echo "Created workspace: $WS_ID at $WS_PATH"
+          echo "Initialized workspace at $WS_PATH"
 
-          # Write .checkpoint/workspace.json so the CLI can find it
-          mkdir -p "$WS_PATH/.checkpoint"
-          cat > "$WS_PATH/.checkpoint/workspace.json" << EOF
-          {
-            "id": "$WS_ID",
-            "name": "ci-ws-1",
-            "repoId": "$REPO_ID",
-            "orgId": "$WS_ORGID",
-            "userId": "$WS_USERID",
-            "localPath": "$WS_PATH",
-            "daemonId": "$DAEMON_ID",
-            "branchName": "main"
-          }
-          EOF
-
-          echo "Wrote workspace.json:"
+          echo "=== workspace.json ==="
           cat "$WS_PATH/.checkpoint/workspace.json"
 
       - name: Create test files in workspace 1
@@ -348,47 +317,16 @@ jobs:
       - name: Create workspace 2
         id: ws2
         run: |
-          DAEMON_ID="${{ steps.auth.outputs.DAEMON_ID }}"
-          REPO_ID="${{ steps.repo.outputs.REPO_ID }}"
           WS_PATH="/tmp/ci-workspace-2"
-
           mkdir -p "$WS_PATH"
+          cd "$WS_PATH"
 
-          WS=$(curl -sf -X POST "http://localhost:3010/workspaces.ops.create?batch=1" \
-            -H 'Content-Type: application/json' \
-            -d "{\"0\":{\"json\":{\"daemonId\":\"$DAEMON_ID\",\"name\":\"ci-ws-2\",\"repoId\":\"$REPO_ID\",\"path\":\"$WS_PATH\",\"defaultBranchName\":\"main\"}}}")
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk init ci-test-org/ci-test-repo
 
-          echo "Create workspace 2 response: $WS"
-
-          WS_ID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.id')
-          WS_ORGID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.orgId')
-          WS_USERID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.userId')
-
-          if [ -z "$WS_ID" ] || [ "$WS_ID" = "null" ]; then
-            echo "ERROR: Failed to create workspace 2"
-            exit 1
-          fi
-
-          echo "WS_ID=$WS_ID" >> "$GITHUB_OUTPUT"
           echo "WS_PATH=$WS_PATH" >> "$GITHUB_OUTPUT"
-          echo "Created workspace 2: $WS_ID at $WS_PATH"
+          echo "Initialized workspace at $WS_PATH"
 
-          # Write .checkpoint/workspace.json so the CLI can find it
-          mkdir -p "$WS_PATH/.checkpoint"
-          cat > "$WS_PATH/.checkpoint/workspace.json" << EOF
-          {
-            "id": "$WS_ID",
-            "name": "ci-ws-2",
-            "repoId": "$REPO_ID",
-            "orgId": "$WS_ORGID",
-            "userId": "$WS_USERID",
-            "localPath": "$WS_PATH",
-            "daemonId": "$DAEMON_ID",
-            "branchName": "main"
-          }
-          EOF
-
-          echo "Wrote workspace.json:"
+          echo "=== workspace.json ==="
           cat "$WS_PATH/.checkpoint/workspace.json"
 
       - name: CLI - pull into workspace 2

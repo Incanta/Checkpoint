@@ -258,4 +258,50 @@ inline void from_json(const nlohmann::json& j, User& u) {
   u.endpoint = j.value("endpoint", "");
 }
 
+// ─── Org ─────────────────────────────────────────────────────────
+
+struct OrgRepoSummary {
+  std::string id;
+  std::string name;
+};
+
+inline void from_json(const nlohmann::json& j, OrgRepoSummary& r) {
+  r.id = j.value("id", "");
+  r.name = j.value("name", "");
+}
+
+struct Org {
+  std::string id;
+  std::string name;
+  std::vector<OrgRepoSummary> repos;
+};
+
+inline void from_json(const nlohmann::json& j, Org& o) {
+  o.id = j.value("id", "");
+  o.name = j.value("name", "");
+  if (j.contains("repos") && j["repos"].is_array()) {
+    for (auto& entry : j["repos"]) {
+      OrgRepoSummary r;
+      from_json(entry, r);
+      o.repos.push_back(r);
+    }
+  }
+}
+
+// ─── Repo ────────────────────────────────────────────────────────
+
+struct Repo {
+  std::string id;
+  std::string name;
+  std::string orgId;
+  bool isPublic = false;
+};
+
+inline void from_json(const nlohmann::json& j, Repo& r) {
+  r.id = j.value("id", "");
+  r.name = j.value("name", "");
+  r.orgId = j.value("orgId", "");
+  r.isPublic = j.value("public", false);
+}
+
 }  // namespace checkpoint

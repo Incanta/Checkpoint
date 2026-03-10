@@ -16,6 +16,7 @@
  *   checkout <file>               Check out a controlled file
  *   revert <file...>              Revert files to head version
  *   diff <file>                   Show diff for a file
+ *   init [orgName/repoName]       Initialize a workspace in the current directory
  */
 
 #include <filesystem>
@@ -102,6 +103,14 @@ int main(int argc, char** argv) {
   diffCmd.add_argument("file")
       .help("File to diff");
 
+  // init
+  argparse::ArgumentParser initCmd("init");
+  initCmd.add_description("Initialize a workspace in the current directory");
+  initCmd.add_argument("repo")
+      .help("Repository in orgName/repoName format (interactive if omitted)")
+      .default_value(std::string(""))
+      .nargs(argparse::nargs_pattern::optional);
+
   // ─── Register sub-commands ─────────────────────────────────────
 
   program.add_subparser(statusCmd);
@@ -114,6 +123,7 @@ int main(int argc, char** argv) {
   program.add_subparser(checkoutCmd);
   program.add_subparser(revertCmd);
   program.add_subparser(diffCmd);
+  program.add_subparser(initCmd);
 
   // ─── Parse arguments ──────────────────────────────────────────
 
@@ -146,6 +156,8 @@ int main(int argc, char** argv) {
         std::cerr << revertCmd;
       } else if (cmd == "diff") {
         std::cerr << diffCmd;
+      } else if (cmd == "init") {
+        std::cerr << initCmd;
       } else {
         std::cerr << program;
       }
@@ -205,6 +217,11 @@ int main(int argc, char** argv) {
     if (program.is_subcommand_used(diffCmd)) {
       auto file = diffCmd.get<std::string>("file");
       return checkpoint::cmdDiff(file);
+    }
+
+    if (program.is_subcommand_used(initCmd)) {
+      auto repo = initCmd.get<std::string>("repo");
+      return checkpoint::cmdInit(repo);
     }
 
     // No command specified — show help

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "daemon_client.hpp"
+#include "terminal_menu.hpp"
 #include "types.hpp"
 #include "workspace.hpp"
 
@@ -681,6 +682,182 @@ inline int cmdDiff(const std::string& file) {
       std::cout << " " << l << std::endl;
     }
   }
+
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: init (initialize a workspace)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdInit(const std::string& repoArg) {
+  fs::path cwd = fs::current_path();
+
+  // Check if workspace already exists
+  if (fs::exists(cwd / ".checkpoint")) {
+    std::cerr << color::red() << "error: workspace already initialized in this directory."
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  // Connect to daemon
+  int port = getDaemonPort();
+  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  DaemonClient client(baseUrl);
+
+  // Get authenticated user / daemon id
+  auto usersResult = client.query("auth.getUsers");
+  if (usersResult.is_null() || !usersResult.is_array() || usersResult.empty()) {
+    std::cerr << color::red()
+              << "error: not authenticated. Please sign in via the Checkpoint desktop app."
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  User user;
+  from_json(usersResult[0], user);
+  std::string daemonId = user.daemonId;
+
+  if (daemonId.empty()) {
+    std::cerr << color::red() << "error: could not determine daemon ID from auth."
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  // Fetch orgs
+  nlohmann::json orgsInput = {{"daemonId", daemonId}};
+  auto orgsResult = client.query("orgs.list", orgsInput);
+
+  if (orgsResult.is_null() || !orgsResult.is_array() || orgsResult.empty()) {
+    std::cerr << color::red()
+              << "error: no organizations found. Create one in the Checkpoint web app first."
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  std::vector<Org> orgs;
+  for (auto& entry : orgsResult) {
+    Org o;
+    from_json(entry, o);
+    orgs.push_back(o);
+  }
+
+  std::string selectedOrgId;
+  std::string selectedOrgName;
+  std::string selectedRepoId;
+  std::string selectedRepoName;
+
+  if (!repoArg.empty()) {
+    // Parse orgName/repoName
+    auto slashPos = repoArg.find('/');
+    if (slashPos == std::string::npos) {
+      std::cerr << color::red()
+                << "error: invalid format. Expected orgName/repoName."
+                << color::reset() << std::endl;
+      return 1;
+    }
+
+    std::string orgName = repoArg.substr(0, slashPos);
+    std::string repoName = repoArg.substr(slashPos + 1);
+
+    // Find org by name
+    for (auto& org : orgs) {
+      if (org.name == orgName) {
+        selectedOrgId = org.id;
+        selectedOrgName = org.name;
+        // Find repo by name within the org
+        for (auto& repo : org.repos) {
+          if (repo.name == repoName) {
+            selectedRepoId = repo.id;
+            selectedRepoName = repo.name;
+            break;
+          }
+        }
+        break;
+      }
+    }
+
+    if (selectedOrgId.empty()) {
+      std::cerr << color::red() << "error: organization '" << orgName
+                << "' not found." << color::reset() << std::endl;
+      return 1;
+    }
+    if (selectedRepoId.empty()) {
+      std::cerr << color::red() << "error: repository '" << repoName
+                << "' not found in organization '" << orgName << "'."
+                << color::reset() << std::endl;
+      return 1;
+    }
+  } else {
+    // Interactive org selection
+    std::vector<std::string> orgNames;
+    for (auto& org : orgs) {
+      orgNames.push_back(org.name);
+    }
+
+    auto orgChoice = interactiveSelect("Select an organization:", orgNames);
+    if (!orgChoice.has_value()) {
+      std::cout << "Cancelled." << std::endl;
+      return 1;
+    }
+
+    auto& chosenOrg = orgs[orgChoice.value()];
+    selectedOrgId = chosenOrg.id;
+    selectedOrgName = chosenOrg.name;
+
+    if (chosenOrg.repos.empty()) {
+      std::cerr << color::red()
+                << "error: no repositories in organization '" << chosenOrg.name
+                << "'. Create one in the web app first."
+                << color::reset() << std::endl;
+      return 1;
+    }
+
+    // Interactive repo selection
+    std::vector<std::string> repoNames;
+    for (auto& repo : chosenOrg.repos) {
+      repoNames.push_back(repo.name);
+    }
+
+    auto repoChoice = interactiveSelect("Select a repository:", repoNames);
+    if (!repoChoice.has_value()) {
+      std::cout << "Cancelled." << std::endl;
+      return 1;
+    }
+
+    auto& chosenRepo = chosenOrg.repos[repoChoice.value()];
+    selectedRepoId = chosenRepo.id;
+    selectedRepoName = chosenRepo.name;
+  }
+
+  // Use the current directory name as the workspace name
+  std::string workspaceName = cwd.filename().string();
+  std::string localPath = cwd.string();
+
+  // Replace backslashes with forward slashes for consistency
+  std::replace(localPath.begin(), localPath.end(), '\\', '/');
+
+  std::cout << "Initializing workspace for "
+            << color::bold() << selectedOrgName << "/" << selectedRepoName
+            << color::reset() << "..." << std::endl;
+
+  // Create workspace via daemon
+  nlohmann::json createInput = {
+      {"daemonId", daemonId},
+      {"name", workspaceName},
+      {"repoId", selectedRepoId},
+      {"path", localPath},
+      {"defaultBranchName", "main"},
+  };
+
+  auto result = client.mutate("workspaces.ops.create", createInput);
+
+  std::cout << color::green() << color::bold()
+            << "Workspace initialized successfully!" << color::reset() << std::endl;
+  std::cout << color::dim() << "  Organization: " << selectedOrgName << color::reset() << std::endl;
+  std::cout << color::dim() << "  Repository:   " << selectedRepoName << color::reset() << std::endl;
+  std::cout << color::dim() << "  Workspace:    " << workspaceName << color::reset() << std::endl;
+  std::cout << color::dim() << "  Path:         " << localPath << color::reset() << std::endl;
 
   return 0;
 }
