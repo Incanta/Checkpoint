@@ -709,7 +709,7 @@ inline int cmdInit(const std::string& repoArg) {
   auto usersResult = client.query("auth.getUsers");
   if (usersResult.is_null() || !usersResult.is_array() || usersResult.empty()) {
     std::cerr << color::red()
-              << "error: not authenticated. Please sign in via the Checkpoint desktop app."
+              << "error: not authenticated."
               << color::reset() << std::endl;
     return 1;
   }
