@@ -1,6 +1,8 @@
 import { publicProcedure, router } from "../../trpc.js";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
 import { Workspace } from "../../../types/index.js";
 import { DaemonConfig } from "../../../daemon-config.js";
@@ -61,6 +63,25 @@ export const opsRouter = router({
 
       DaemonConfig.Ensure().vars.workspaces.push(newWorkspace);
       await DaemonConfig.Save();
+
+      // Write .checkpoint/workspace.json so CLI and other tools can discover the workspace
+      const configDir = path.join(newWorkspace.localPath, ".checkpoint");
+      await fs.mkdir(configDir, { recursive: true });
+      await fs.writeFile(
+        path.join(configDir, "workspace.json"),
+        JSON.stringify(
+          {
+            id: newWorkspace.id,
+            repoId: newWorkspace.repoId,
+            branchName: newWorkspace.branchName,
+            workspaceName: newWorkspace.name,
+            localPath: newWorkspace.localPath,
+            daemonId: newWorkspace.daemonId,
+          },
+          null,
+          2,
+        ),
+      );
 
       const manager = ctx.manager;
       const existingWorkspaces = manager.workspaces.get(input.daemonId) || [];
