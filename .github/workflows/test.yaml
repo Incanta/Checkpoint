@@ -109,9 +109,33 @@ jobs:
           echo "DAEMON_ID=$DAEMON_ID" >> "$GITHUB_OUTPUT"
 
           # Dev login (public procedure, no auth needed)
-          DEV_LOGIN=$(curl -sf -X POST 'http://localhost:3000/api/trpc/auth.devLogin?batch=1' \
-            -H 'Content-Type: application/json' \
-            -d "{\"0\":{\"json\":{\"email\":\"ci-test@checkpoint.dev\",\"deviceCode\":\"$DAEMON_ID\",\"tokenName\":\"ci-token\"}}}")
+          # Next.js compiles route handlers on first request in dev mode,
+          # so we retry a few times to let it warm up.
+          DEV_LOGIN=""
+          for attempt in $(seq 1 10); do
+            HTTP_CODE=$(curl -s -o /tmp/devlogin_resp.json -w "%{http_code}" \
+              -X POST 'http://localhost:3000/api/trpc/auth.devLogin?batch=1' \
+              -H 'Content-Type: application/json' \
+              -d "{\"0\":{\"json\":{\"email\":\"ci-test@checkpoint.dev\",\"deviceCode\":\"$DAEMON_ID\",\"tokenName\":\"ci-token\"}}}")
+
+            echo "Attempt $attempt: HTTP $HTTP_CODE"
+            cat /tmp/devlogin_resp.json || true
+            echo ""
+
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              DEV_LOGIN=$(cat /tmp/devlogin_resp.json)
+              break
+            fi
+
+            echo "  Retrying in 5s..."
+            sleep 5
+          done
+
+          if [ -z "$DEV_LOGIN" ]; then
+            echo "ERROR: devLogin failed after 10 attempts (last HTTP $HTTP_CODE)"
+            cat /tmp/devlogin_resp.json 2>/dev/null || true
+            exit 1
+          fi
 
           echo "Dev login response: $DEV_LOGIN"
 
