@@ -407,7 +407,20 @@ jobs:
         run: |
           echo "=== Service Logs ==="
           for log in logs/*.log; do
-            echo "--- $log ---"
-            tail -100 "$log" 2>/dev/null || true
-            echo ""
+            if [ -f "$log" ]; then
+              echo ""
+              echo "============================================================"
+              echo "  $log ($(wc -l < "$log") lines)"
+              echo "============================================================"
+              cat "$log"
+              echo ""
+            fi
           done
+
+          echo ""
+          echo "=== auth.json ==="
+          cat ~/.checkpoint/auth.json 2>/dev/null || echo "(not found)"
+
+          echo ""
+          echo "=== daemon.json ==="
+          cat ~/.checkpoint/daemon.json 2>/dev/null || echo "(not found)"
