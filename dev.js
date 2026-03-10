@@ -21,6 +21,8 @@ const { spawn, execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
+const isCI = process.env.CI === "true";
+
 // PID file location
 const pidFile = path.join(__dirname, "logs", ".dev.pid");
 
@@ -45,7 +47,7 @@ const services = [
     name: "app",
     color: colors.cyan,
     command: process.platform === "win32" ? "yarn.cmd" : "yarn",
-    args: ["dev"],
+    args: isCI ? ["dev:test"] : ["dev"],
     cwd: path.join(__dirname, "src/app"),
     healthPattern: /\[healthy\]|Ready in/i,
   },
