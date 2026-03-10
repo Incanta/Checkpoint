@@ -63,7 +63,7 @@ jobs:
       # Start services in background
       # ----------------------------------------------------------------
       - name: Start services
-        run: node dev.js --background
+        run: yarn dev --background
 
       - name: Wait for services to be fully ready
         run: |
@@ -423,7 +423,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: Stop services
         if: always()
-        run: node dev.js stop || true
+        run: yarn dev stop || true
 
       - name: Show logs on failure
         if: failure()

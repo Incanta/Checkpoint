@@ -416,7 +416,7 @@ function removePidFile() {
 /**
  * Wait for all services to be healthy by monitoring the all.log file
  */
-async function waitForHealthy(timeout = 120000) {
+async function waitForHealthy(timeout = 30000) {
   const startTime = Date.now();
   const healthyPattern = /All services healthy/;
 
