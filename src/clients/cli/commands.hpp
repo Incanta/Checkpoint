@@ -707,15 +707,18 @@ inline int cmdInit(const std::string& repoArg) {
 
   // Get authenticated user / daemon id
   auto usersResult = client.query("auth.getUsers");
-  if (usersResult.is_null() || !usersResult.is_array() || usersResult.empty()) {
+  if (usersResult.is_null() ||
+      !usersResult.contains("users") ||
+      !usersResult["users"].is_array() ||
+      usersResult["users"].empty()) {
     std::cerr << color::red()
-              << "error: not authenticated."
+              << "error: not authenticated. Please sign in via the Checkpoint desktop app."
               << color::reset() << std::endl;
     return 1;
   }
 
   User user;
-  from_json(usersResult[0], user);
+  from_json(usersResult["users"][0], user);
   std::string daemonId = user.daemonId;
 
   if (daemonId.empty()) {
@@ -728,7 +731,10 @@ inline int cmdInit(const std::string& repoArg) {
   nlohmann::json orgsInput = {{"daemonId", daemonId}};
   auto orgsResult = client.query("orgs.list", orgsInput);
 
-  if (orgsResult.is_null() || !orgsResult.is_array() || orgsResult.empty()) {
+  if (orgsResult.is_null() ||
+      !orgsResult.contains("orgs") ||
+      !orgsResult["orgs"].is_array() ||
+      orgsResult["orgs"].empty()) {
     std::cerr << color::red()
               << "error: no organizations found. Create one in the Checkpoint web app first."
               << color::reset() << std::endl;
@@ -736,7 +742,7 @@ inline int cmdInit(const std::string& repoArg) {
   }
 
   std::vector<Org> orgs;
-  for (auto& entry : orgsResult) {
+  for (auto& entry : orgsResult["orgs"]) {
     Org o;
     from_json(entry, o);
     orgs.push_back(o);
