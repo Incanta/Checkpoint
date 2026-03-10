@@ -1,0 +1,10 @@
+build/
+cmake-build-*/
+.cache/
+*.exe
+*.out
+*.obj
+*.o
+*.log
+*.pdb
+CMakeUserPresets.json
