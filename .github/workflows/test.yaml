@@ -1,0 +1,436 @@
+name: CLI Integration Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ----------------------------------------------------------------
+      # Setup
+      # ----------------------------------------------------------------
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      # ----------------------------------------------------------------
+      # Install & build Node.js services
+      # ----------------------------------------------------------------
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Build services
+        run: yarn build
+
+      # ----------------------------------------------------------------
+      # Install C++ build dependencies
+      # ----------------------------------------------------------------
+      - name: Install C++ dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libcurl4-openssl-dev nlohmann-json3-dev
+
+      # ----------------------------------------------------------------
+      # Build the CLI
+      # ----------------------------------------------------------------
+      - name: Build CLI
+        run: |
+          cd src/clients/cli
+          mkdir -p build
+          cd build
+          cmake ..
+          cmake --build . --parallel
+
+      - name: Verify CLI builds
+        run: |
+          ls -la src/clients/cli/build/checkpoint
+          ls -la src/clients/cli/build/chk
+          src/clients/cli/build/chk --help
+
+      # ----------------------------------------------------------------
+      # Start services in background
+      # ----------------------------------------------------------------
+      - name: Start services
+        run: node dev.js --background
+
+      - name: Wait for services to be fully ready
+        run: |
+          echo "Waiting for services to be reachable..."
+
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000 > /dev/null 2>&1; then
+              echo "App is reachable"
+              break
+            fi
+            echo "  Waiting for app... ($i/30)"
+            sleep 2
+          done
+
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3010 > /dev/null 2>&1 || \
+               curl -sf "http://localhost:3010/workspaces.ops.list.local?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22daemonId%22%3A%22probe%22%7D%7D%7D" > /dev/null 2>&1; then
+              echo "Daemon is reachable"
+              break
+            fi
+            echo "  Waiting for daemon... ($i/30)"
+            sleep 2
+          done
+
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001 > /dev/null 2>&1; then
+              echo "Server is reachable"
+              break
+            fi
+            echo "  Waiting for server... ($i/30)"
+            sleep 2
+          done
+
+          echo "All services reachable!"
+
+      # ----------------------------------------------------------------
+      # Authenticate: dev login → write auth.json
+      # ----------------------------------------------------------------
+      - name: Create dev user and authenticate
+        id: auth
+        run: |
+          DAEMON_ID="ci-daemon-$(date +%s)"
+          echo "DAEMON_ID=$DAEMON_ID" >> "$GITHUB_OUTPUT"
+
+          # Dev login (public procedure, no auth needed)
+          DEV_LOGIN=$(curl -sf -X POST 'http://localhost:3000/api/trpc/auth.devLogin?batch=1' \
+            -H 'Content-Type: application/json' \
+            -d "{\"0\":{\"json\":{\"email\":\"ci-test@checkpoint.dev\",\"deviceCode\":\"$DAEMON_ID\",\"tokenName\":\"ci-token\"}}}")
+
+          echo "Dev login response: $DEV_LOGIN"
+
+          API_TOKEN=$(echo "$DEV_LOGIN" | jq -r '.[0].result.data.json.apiToken')
+          USER_ID=$(echo "$DEV_LOGIN" | jq -r '.[0].result.data.json.user.id')
+
+          if [ -z "$API_TOKEN" ] || [ "$API_TOKEN" = "null" ]; then
+            echo "ERROR: Failed to get API token"
+            exit 1
+          fi
+
+          echo "API_TOKEN=$API_TOKEN" >> "$GITHUB_OUTPUT"
+          echo "USER_ID=$USER_ID" >> "$GITHUB_OUTPUT"
+          echo "Authenticated as user: $USER_ID"
+
+          # Write auth.json for the daemon
+          mkdir -p ~/.checkpoint
+          cat > ~/.checkpoint/auth.json << EOF
+          {
+            "users": {
+              "$DAEMON_ID": {
+                "endpoint": "http://localhost:3000",
+                "apiToken": "$API_TOKEN"
+              }
+            }
+          }
+          EOF
+
+          echo "Wrote ~/.checkpoint/auth.json"
+          cat ~/.checkpoint/auth.json
+
+      # ----------------------------------------------------------------
+      # Create org and repo via app API
+      # ----------------------------------------------------------------
+      - name: Create org
+        id: org
+        run: |
+          TOKEN="${{ steps.auth.outputs.API_TOKEN }}"
+
+          ORG=$(curl -sf -X POST 'http://localhost:3000/api/trpc/org.createOrg?batch=1' \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $TOKEN" \
+            -d '{"0":{"json":{"name":"ci-test-org"}}}')
+
+          echo "Create org response: $ORG"
+
+          ORG_ID=$(echo "$ORG" | jq -r '.[0].result.data.json.id')
+
+          if [ -z "$ORG_ID" ] || [ "$ORG_ID" = "null" ]; then
+            echo "ERROR: Failed to create org"
+            exit 1
+          fi
+
+          echo "ORG_ID=$ORG_ID" >> "$GITHUB_OUTPUT"
+          echo "Created org: $ORG_ID"
+
+      - name: Create repo
+        id: repo
+        run: |
+          TOKEN="${{ steps.auth.outputs.API_TOKEN }}"
+          ORG_ID="${{ steps.org.outputs.ORG_ID }}"
+
+          REPO=$(curl -sf -X POST 'http://localhost:3000/api/trpc/repo.createRepo?batch=1' \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $TOKEN" \
+            -d "{\"0\":{\"json\":{\"name\":\"ci-test-repo\",\"orgId\":\"$ORG_ID\"}}}")
+
+          echo "Create repo response: $REPO"
+
+          REPO_ID=$(echo "$REPO" | jq -r '.[0].result.data.json.id')
+
+          if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
+            echo "ERROR: Failed to create repo"
+            exit 1
+          fi
+
+          echo "REPO_ID=$REPO_ID" >> "$GITHUB_OUTPUT"
+          echo "Created repo: $REPO_ID"
+
+      # ----------------------------------------------------------------
+      # Create workspace 1 via daemon, add files, submit
+      # ----------------------------------------------------------------
+      - name: Create workspace 1
+        id: ws1
+        run: |
+          DAEMON_ID="${{ steps.auth.outputs.DAEMON_ID }}"
+          REPO_ID="${{ steps.repo.outputs.REPO_ID }}"
+          WS_PATH="/tmp/ci-workspace-1"
+
+          mkdir -p "$WS_PATH"
+
+          WS=$(curl -sf -X POST "http://localhost:3010/workspaces.ops.create?batch=1" \
+            -H 'Content-Type: application/json' \
+            -d "{\"0\":{\"json\":{\"daemonId\":\"$DAEMON_ID\",\"name\":\"ci-ws-1\",\"repoId\":\"$REPO_ID\",\"path\":\"$WS_PATH\",\"defaultBranchName\":\"main\"}}}")
+
+          echo "Create workspace response: $WS"
+
+          WS_ID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.id')
+          WS_ORGID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.orgId')
+          WS_USERID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.userId')
+
+          if [ -z "$WS_ID" ] || [ "$WS_ID" = "null" ]; then
+            echo "ERROR: Failed to create workspace"
+            exit 1
+          fi
+
+          echo "WS_ID=$WS_ID" >> "$GITHUB_OUTPUT"
+          echo "WS_PATH=$WS_PATH" >> "$GITHUB_OUTPUT"
+          echo "Created workspace: $WS_ID at $WS_PATH"
+
+          # Write .checkpoint/workspace.json so the CLI can find it
+          mkdir -p "$WS_PATH/.checkpoint"
+          cat > "$WS_PATH/.checkpoint/workspace.json" << EOF
+          {
+            "id": "$WS_ID",
+            "name": "ci-ws-1",
+            "repoId": "$REPO_ID",
+            "orgId": "$WS_ORGID",
+            "userId": "$WS_USERID",
+            "localPath": "$WS_PATH",
+            "daemonId": "$DAEMON_ID",
+            "branchName": "main"
+          }
+          EOF
+
+          echo "Wrote workspace.json:"
+          cat "$WS_PATH/.checkpoint/workspace.json"
+
+      - name: Create test files in workspace 1
+        run: |
+          WS_PATH="${{ steps.ws1.outputs.WS_PATH }}"
+
+          echo "Hello from Checkpoint CI!" > "$WS_PATH/readme.txt"
+          mkdir -p "$WS_PATH/src"
+          echo "int main() { return 0; }" > "$WS_PATH/src/main.cpp"
+          echo "# Build\nrun make" > "$WS_PATH/src/notes.md"
+
+          echo "Created test files:"
+          find "$WS_PATH" -not -path '*/.checkpoint/*' -type f
+
+      - name: Wait for daemon to detect files
+        run: sleep 3
+
+      - name: CLI - check status in workspace 1
+        run: |
+          WS_PATH="${{ steps.ws1.outputs.WS_PATH }}"
+          cd "$WS_PATH"
+
+          echo "=== chk status ==="
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk status || true
+
+      - name: CLI - add files in workspace 1
+        run: |
+          WS_PATH="${{ steps.ws1.outputs.WS_PATH }}"
+          cd "$WS_PATH"
+
+          echo "=== chk add readme.txt ==="
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk add readme.txt src/main.cpp src/notes.md
+
+      - name: CLI - verify staged status
+        run: |
+          WS_PATH="${{ steps.ws1.outputs.WS_PATH }}"
+          cd "$WS_PATH"
+
+          echo "=== chk status (after add) ==="
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk status
+
+      - name: CLI - submit from workspace 1
+        run: |
+          WS_PATH="${{ steps.ws1.outputs.WS_PATH }}"
+          cd "$WS_PATH"
+
+          echo "=== chk submit ==="
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk submit --message "CI test: initial submit with 3 files"
+
+      - name: Verify submission via app API
+        run: |
+          TOKEN="${{ steps.auth.outputs.API_TOKEN }}"
+          REPO_ID="${{ steps.repo.outputs.REPO_ID }}"
+
+          # Wait a moment for the submission to propagate
+          sleep 2
+
+          # Query changelists via app API
+          INPUT=$(python3 -c "
+          import urllib.parse, json
+          data = {'0': {'json': {'repoId': '$REPO_ID', 'branchName': 'main', 'start': {'number': None, 'timestamp': None}, 'count': 100}}}
+          print(urllib.parse.quote(json.dumps(data)))
+          ")
+
+          HISTORY=$(curl -sf "http://localhost:3000/api/trpc/changelist.getChangelists?batch=1&input=$INPUT" \
+            -H "Authorization: Bearer $TOKEN")
+
+          echo "Changelist history: $HISTORY"
+
+          # Should have changelist number 1 (initial is 0)
+          CL_COUNT=$(echo "$HISTORY" | jq '.[0].result.data.json | length')
+          echo "Changelist count: $CL_COUNT"
+
+          if [ "$CL_COUNT" -lt 2 ]; then
+            echo "ERROR: Expected at least 2 changelists (initial + our submit), got $CL_COUNT"
+            exit 1
+          fi
+
+          echo "Submission verified!"
+
+      # ----------------------------------------------------------------
+      # Create workspace 2, pull, verify
+      # ----------------------------------------------------------------
+      - name: Create workspace 2
+        id: ws2
+        run: |
+          DAEMON_ID="${{ steps.auth.outputs.DAEMON_ID }}"
+          REPO_ID="${{ steps.repo.outputs.REPO_ID }}"
+          WS_PATH="/tmp/ci-workspace-2"
+
+          mkdir -p "$WS_PATH"
+
+          WS=$(curl -sf -X POST "http://localhost:3010/workspaces.ops.create?batch=1" \
+            -H 'Content-Type: application/json' \
+            -d "{\"0\":{\"json\":{\"daemonId\":\"$DAEMON_ID\",\"name\":\"ci-ws-2\",\"repoId\":\"$REPO_ID\",\"path\":\"$WS_PATH\",\"defaultBranchName\":\"main\"}}}")
+
+          echo "Create workspace 2 response: $WS"
+
+          WS_ID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.id')
+          WS_ORGID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.orgId')
+          WS_USERID=$(echo "$WS" | jq -r '.[0].result.data.json.workspace.userId')
+
+          if [ -z "$WS_ID" ] || [ "$WS_ID" = "null" ]; then
+            echo "ERROR: Failed to create workspace 2"
+            exit 1
+          fi
+
+          echo "WS_ID=$WS_ID" >> "$GITHUB_OUTPUT"
+          echo "WS_PATH=$WS_PATH" >> "$GITHUB_OUTPUT"
+          echo "Created workspace 2: $WS_ID at $WS_PATH"
+
+          # Write .checkpoint/workspace.json so the CLI can find it
+          mkdir -p "$WS_PATH/.checkpoint"
+          cat > "$WS_PATH/.checkpoint/workspace.json" << EOF
+          {
+            "id": "$WS_ID",
+            "name": "ci-ws-2",
+            "repoId": "$REPO_ID",
+            "orgId": "$WS_ORGID",
+            "userId": "$WS_USERID",
+            "localPath": "$WS_PATH",
+            "daemonId": "$DAEMON_ID",
+            "branchName": "main"
+          }
+          EOF
+
+          echo "Wrote workspace.json:"
+          cat "$WS_PATH/.checkpoint/workspace.json"
+
+      - name: CLI - pull into workspace 2
+        run: |
+          WS_PATH="${{ steps.ws2.outputs.WS_PATH }}"
+          cd "$WS_PATH"
+
+          echo "=== chk pull ==="
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk pull
+
+      - name: Verify workspace 2 has the submitted files
+        run: |
+          WS1="${{ steps.ws1.outputs.WS_PATH }}"
+          WS2="${{ steps.ws2.outputs.WS_PATH }}"
+
+          echo "=== Workspace 1 files ==="
+          find "$WS1" -not -path '*/.checkpoint/*' -type f | sort
+
+          echo ""
+          echo "=== Workspace 2 files ==="
+          find "$WS2" -not -path '*/.checkpoint/*' -type f | sort
+
+          # Check each file exists and matches
+          echo ""
+          echo "=== Comparing files ==="
+
+          for file in readme.txt src/main.cpp src/notes.md; do
+            if [ ! -f "$WS2/$file" ]; then
+              echo "FAIL: $file missing in workspace 2"
+              exit 1
+            fi
+
+            if ! diff -q "$WS1/$file" "$WS2/$file" > /dev/null 2>&1; then
+              echo "FAIL: $file content differs between workspaces"
+              echo "  WS1:" && cat "$WS1/$file"
+              echo "  WS2:" && cat "$WS2/$file"
+              exit 1
+            fi
+
+            echo "OK: $file matches"
+          done
+
+          echo ""
+          echo "All files verified!"
+
+      - name: CLI - check status in workspace 2 (should be clean)
+        run: |
+          WS_PATH="${{ steps.ws2.outputs.WS_PATH }}"
+          cd "$WS_PATH"
+
+          echo "=== chk status ==="
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk status
+
+      # ----------------------------------------------------------------
+      # Cleanup
+      # ----------------------------------------------------------------
+      - name: Stop services
+        if: always()
+        run: node dev.js stop || true
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          echo "=== Service Logs ==="
+          for log in logs/*.log; do
+            echo "--- $log ---"
+            tail -100 "$log" 2>/dev/null || true
+            echo ""
+          done
