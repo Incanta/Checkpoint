@@ -460,7 +460,16 @@ if (command === "stop") {
       process.exit(0);
     } else {
       console.error(`Timeout waiting for services to become healthy.`);
-      console.error(`Check logs at: ${logsDir}`);
+
+      // output the logs
+      for (const service of services) {
+        const logFile = path.join(logsDir, `${service.name}.log`);
+
+        console.log(`---- ${service.name} Logs ---`);
+        console.log(fs.readFileSync(logFile, "utf-8"));
+        console.log();
+      }
+
       // Kill the child process since it didn't become healthy
       try {
         process.kill(-child.pid); // Kill process group on Unix
