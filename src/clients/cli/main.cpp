@@ -17,10 +17,13 @@
  *   revert <file...>              Revert files to head version
  *   diff <file>                   Show diff for a file
  *   init [orgName/repoName]       Initialize a workspace in the current directory
+ *   accounts                      List authenticated accounts
+ *   login [--endpoint URL]        Authenticate with a Checkpoint server
  */
 
 #include <filesystem>
 #include <iostream>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -111,6 +114,20 @@ int main(int argc, char** argv) {
       .default_value(std::string(""))
       .nargs(argparse::nargs_pattern::optional);
 
+  // accounts
+  argparse::ArgumentParser accountsCmd("accounts");
+  accountsCmd.add_description("List authenticated accounts");
+
+  // login
+  argparse::ArgumentParser loginCmd("login");
+  loginCmd.add_description("Authenticate with a Checkpoint server");
+  loginCmd.add_argument("--endpoint", "-e")
+      .help("Server URL (e.g. https://app.checkpointvcs.com or http://localhost:3000)")
+      .default_value(std::string("http://localhost:3000"));
+  loginCmd.add_argument("--id")
+      .help("Daemon ID for this credential (default: auto-generated)")
+      .default_value(std::string(""));
+
   // ─── Register sub-commands ─────────────────────────────────────
 
   program.add_subparser(statusCmd);
@@ -124,6 +141,8 @@ int main(int argc, char** argv) {
   program.add_subparser(revertCmd);
   program.add_subparser(diffCmd);
   program.add_subparser(initCmd);
+  program.add_subparser(accountsCmd);
+  program.add_subparser(loginCmd);
 
   // ─── Parse arguments ──────────────────────────────────────────
 
@@ -158,6 +177,10 @@ int main(int argc, char** argv) {
         std::cerr << diffCmd;
       } else if (cmd == "init") {
         std::cerr << initCmd;
+      } else if (cmd == "accounts") {
+        std::cerr << accountsCmd;
+      } else if (cmd == "login") {
+        std::cerr << loginCmd;
       } else {
         std::cerr << program;
       }
@@ -222,6 +245,28 @@ int main(int argc, char** argv) {
     if (program.is_subcommand_used(initCmd)) {
       auto repo = initCmd.get<std::string>("repo");
       return checkpoint::cmdInit(repo);
+    }
+
+    if (program.is_subcommand_used(accountsCmd)) {
+      return checkpoint::cmdAccounts();
+    }
+
+    if (program.is_subcommand_used(loginCmd)) {
+      auto endpoint = loginCmd.get<std::string>("--endpoint");
+      auto daemonId = loginCmd.get<std::string>("--id");
+      if (daemonId.empty()) {
+        // Generate a unique daemon ID (21-char alphanumeric, similar to nanoid)
+        static const char charset[] =
+            "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dist(0, sizeof(charset) - 2);
+        daemonId = "cli-";
+        for (int i = 0; i < 21; i++) {
+          daemonId += charset[dist(gen)];
+        }
+      }
+      return checkpoint::cmdLogin(endpoint, daemonId);
     }
 
     // No command specified — show help

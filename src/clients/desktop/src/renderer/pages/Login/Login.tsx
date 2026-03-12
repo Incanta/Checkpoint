@@ -8,7 +8,7 @@ import { useState } from "react";
 export default function Login(): React.ReactElement {
   const [daemonId] = useState(nanoid());
   const user = useAtomValue(currentUserAtom);
-  const [url, setUrl] = useState("http://checkpoint.localhost:3000");
+  const [url, setUrl] = useState("http://localhost:3000");
   const navigate = useNavigate();
 
   if (user?.details) {

@@ -15,7 +15,7 @@
     "lint:fix": "eslint src/app src/core src/clients/desktop --fix",
     "build": "cd src/app && yarn build:lib && cd ../core && yarn build",
     "dev": "node dev.js",
-    "desktop": "cd src/clients/desktop && yarn start"
+    "desktop": "cd src/clients/desktop && yarn dev"
   },
   "dependencies": {
     "@incanta/config": "^2.1.10",

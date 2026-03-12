@@ -1,11 +1,14 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <random>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "daemon_client.hpp"
@@ -138,29 +141,19 @@ inline int cmdStatus() {
     return 0;
   }
 
+  // Read CLI staging state
+  auto stagedSet = readStagedFiles(ctx.root);
+
   // Categorize files
   std::vector<std::pair<std::string, FileStatus>> staged;
   std::vector<std::pair<std::string, FileStatus>> unstaged;
 
   for (auto& [path, file] : pending.files) {
     auto status = static_cast<FileStatus>(file.status);
-    switch (status) {
-      case FileStatus::Added:
-      case FileStatus::ChangedCheckedOut:
-      case FileStatus::NotChangedCheckedOut:
-      case FileStatus::Renamed:
-        staged.push_back({path, status});
-        break;
-      case FileStatus::Local:
-      case FileStatus::Deleted:
-      case FileStatus::ChangedNotCheckedOut:
-      case FileStatus::Conflicted:
-      case FileStatus::MergeConflict:
-        unstaged.push_back({path, status});
-        break;
-      default:
-        unstaged.push_back({path, status});
-        break;
+    if (stagedSet.count(path)) {
+      staged.push_back({path, status});
+    } else {
+      unstaged.push_back({path, status});
     }
   }
 
@@ -201,7 +194,7 @@ inline int cmdStatus() {
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  COMMAND: add (stage files — mark for add)
+//  COMMAND: add (stage files)
 // ═════════════════════════════════════════════════════════════════
 
 inline int cmdAdd(const std::vector<std::string>& files) {
@@ -216,13 +209,41 @@ inline int cmdAdd(const std::vector<std::string>& files) {
     resolvedPaths.push_back(resolved);
   }
 
-  nlohmann::json input = {
+  // Refresh to get current file statuses
+  nlohmann::json refreshInput = {
       {"daemonId", ws.daemonId},
       {"workspaceId", ws.id},
-      {"paths", resolvedPaths},
   };
+  auto refreshResult = client.query("workspaces.pending.refresh", refreshInput);
 
-  auto result = client.mutate("workspaces.pending.markForAdd", input);
+  // For Local (untracked) files, also tell daemon to markForAdd
+  if (!refreshResult.is_null()) {
+    PendingChanges pending;
+    from_json(refreshResult, pending);
+
+    std::vector<std::string> localPaths;
+    for (auto& path : resolvedPaths) {
+      auto it = pending.files.find(path);
+      if (it != pending.files.end()) {
+        auto status = static_cast<FileStatus>(it->second.status);
+        if (status == FileStatus::Local) {
+          localPaths.push_back(path);
+        }
+      }
+    }
+
+    if (!localPaths.empty()) {
+      nlohmann::json markInput = {
+          {"daemonId", ws.daemonId},
+          {"workspaceId", ws.id},
+          {"paths", localPaths},
+      };
+      client.mutate("workspaces.pending.markForAdd", markInput);
+    }
+  }
+
+  // Add all paths to CLI staged.json
+  addStagedFiles(ctx.root, resolvedPaths);
 
   for (auto& path : resolvedPaths) {
     std::cout << color::green() << "  + " << path << color::reset() << std::endl;
@@ -248,14 +269,40 @@ inline int cmdRestore(const std::vector<std::string>& files, bool staged) {
   }
 
   if (staged) {
-    // Unstage: unmark for add
-    nlohmann::json input = {
+    // For files that were Added (Local + markForAdd), tell daemon to unmarkForAdd
+    nlohmann::json refreshInput = {
         {"daemonId", ws.daemonId},
         {"workspaceId", ws.id},
-        {"paths", resolvedPaths},
     };
+    auto refreshResult = client.query("workspaces.pending.refresh", refreshInput);
 
-    client.mutate("workspaces.pending.unmarkForAdd", input);
+    if (!refreshResult.is_null()) {
+      PendingChanges pending;
+      from_json(refreshResult, pending);
+
+      std::vector<std::string> addedPaths;
+      for (auto& path : resolvedPaths) {
+        auto it = pending.files.find(path);
+        if (it != pending.files.end()) {
+          auto status = static_cast<FileStatus>(it->second.status);
+          if (status == FileStatus::Added) {
+            addedPaths.push_back(path);
+          }
+        }
+      }
+
+      if (!addedPaths.empty()) {
+        nlohmann::json unmarkInput = {
+            {"daemonId", ws.daemonId},
+            {"workspaceId", ws.id},
+            {"paths", addedPaths},
+        };
+        client.mutate("workspaces.pending.unmarkForAdd", unmarkInput);
+      }
+    }
+
+    // Remove from CLI staged.json
+    removeStagedFiles(ctx.root, resolvedPaths);
 
     for (auto& path : resolvedPaths) {
       std::cout << color::yellow() << "  - " << path << color::reset() << std::endl;
@@ -305,33 +352,23 @@ inline int cmdSubmit(const std::string& message) {
   PendingChanges pending;
   from_json(refreshResult, pending);
 
+  // Read CLI staging state
+  auto stagedSet = readStagedFiles(ctx.root);
+
   // Build modifications list from staged files
   nlohmann::json modifications = nlohmann::json::array();
   int stagedCount = 0;
 
   for (auto& [path, file] : pending.files) {
+    if (!stagedSet.count(path)) continue;
+
     auto status = static_cast<FileStatus>(file.status);
-    switch (status) {
-      case FileStatus::Added:
-      case FileStatus::ChangedCheckedOut:
-      case FileStatus::Renamed:
-        modifications.push_back({
-            {"path", path},
-            {"delete", false},
-        });
-        stagedCount++;
-        break;
-      case FileStatus::Deleted:
-        // Only include deleted files if they were controlled (checked out)
-        modifications.push_back({
-            {"path", path},
-            {"delete", true},
-        });
-        stagedCount++;
-        break;
-      default:
-        break;
-    }
+    bool isDelete = (status == FileStatus::Deleted);
+    modifications.push_back({
+        {"path", path},
+        {"delete", isDelete},
+    });
+    stagedCount++;
   }
 
   if (stagedCount == 0) {
@@ -352,6 +389,9 @@ inline int cmdSubmit(const std::string& message) {
 
   // Note: submit is a query in the daemon API, not a mutation
   client.query("workspaces.pending.submit", submitInput);
+
+  // Clear staged.json after successful submit
+  writeStagedFiles(ctx.root, {});
 
   std::cout << color::green() << color::bold()
             << "Successfully submitted " << stagedCount << " file(s)."
@@ -717,8 +757,36 @@ inline int cmdInit(const std::string& repoArg) {
     return 1;
   }
 
+  std::vector<User> users;
+  for (auto& entry : usersResult["users"]) {
+    User u;
+    from_json(entry, u);
+    users.push_back(u);
+  }
+
   User user;
-  from_json(usersResult["users"][0], user);
+  if (users.size() == 1) {
+    user = users[0];
+  } else {
+    // Multiple accounts — prompt user to select
+    std::vector<std::string> userLabels;
+    for (auto& u : users) {
+      std::string label = u.name.empty() ? u.username : u.name;
+      if (label.empty()) label = u.email;
+      if (!u.email.empty() && label != u.email) {
+        label += " <" + u.email + ">";
+      }
+      userLabels.push_back(label);
+    }
+
+    auto choice = interactiveSelect("Select an account:", userLabels);
+    if (!choice.has_value()) {
+      std::cout << "Cancelled." << std::endl;
+      return 1;
+    }
+    user = users[choice.value()];
+  }
+
   std::string daemonId = user.daemonId;
 
   if (daemonId.empty()) {
@@ -866,6 +934,155 @@ inline int cmdInit(const std::string& repoArg) {
   std::cout << color::dim() << "  Path:         " << localPath << color::reset() << std::endl;
 
   return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: accounts (list authenticated accounts)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdAccounts() {
+  int port = getDaemonPort();
+  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  DaemonClient client(baseUrl);
+
+  auto usersResult = client.query("auth.getUsers");
+  if (usersResult.is_null() ||
+      !usersResult.contains("users") ||
+      !usersResult["users"].is_array() ||
+      usersResult["users"].empty()) {
+    std::cout << "No authenticated accounts." << std::endl;
+    std::cout << color::dim() << "  (use \"chk login\" to sign in)"
+              << color::reset() << std::endl;
+    return 0;
+  }
+
+  auto& users = usersResult["users"];
+  std::cout << color::bold() << "Authenticated accounts:"
+            << color::reset() << std::endl;
+  std::cout << std::endl;
+
+  for (auto& entry : users) {
+    User user;
+    from_json(entry, user);
+
+    std::string displayName = user.name.empty() ? user.username : user.name;
+    if (displayName.empty()) {
+      displayName = user.email;
+    }
+
+    std::cout << "  " << color::green() << displayName << color::reset();
+    if (!user.email.empty() && displayName != user.email) {
+      std::cout << color::dim() << " <" << user.email << ">" << color::reset();
+    }
+    std::cout << std::endl;
+
+    std::cout << "    " << color::dim() << "ID:       " << user.id << color::reset() << std::endl;
+    std::cout << "    " << color::dim() << "Daemon:   " << user.daemonId << color::reset() << std::endl;
+    std::cout << "    " << color::dim() << "Endpoint: " << user.endpoint << color::reset() << std::endl;
+    std::cout << std::endl;
+  }
+
+  std::cout << users.size() << " account(s) total." << std::endl;
+
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: login (authenticate with a Checkpoint server)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdLogin(const std::string& endpoint, const std::string& daemonId) {
+  int port = getDaemonPort();
+  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  DaemonClient client(baseUrl);
+
+  std::cout << "Authenticating with " << color::bold() << endpoint
+            << color::reset() << "..." << std::endl;
+
+  // Call auth.login on the daemon — this returns { code, url } immediately
+  // and the daemon opens the browser + polls for authorization in the background
+  nlohmann::json loginInput = {
+      {"endpoint", endpoint},
+      {"daemonId", daemonId},
+  };
+
+  nlohmann::json loginResult;
+  try {
+    loginResult = client.query("auth.login", loginInput);
+  } catch (const std::exception& e) {
+    std::cerr << color::red() << "error: failed to start login: " << e.what()
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  std::string code = loginResult.value("code", "");
+  std::string url = loginResult.value("url", "");
+
+  if (code.empty() || url.empty()) {
+    std::cerr << color::red() << "error: daemon returned invalid login response."
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  std::cout << std::endl;
+  std::cout << "A browser window should have opened. If not, open this URL:" << std::endl;
+  std::cout << std::endl;
+  std::cout << "  " << color::cyan() << color::bold() << url << color::reset() << std::endl;
+  std::cout << std::endl;
+  std::cout << "Your device code is: " << color::yellow() << color::bold()
+            << code << color::reset() << std::endl;
+  std::cout << std::endl;
+  std::cout << "Waiting for authorization..." << std::flush;
+
+  // Poll auth.getUser until the daemon has the token
+  nlohmann::json getUserInput = {{"daemonId", daemonId}};
+  constexpr int maxAttempts = 5 * 60;  // 5 minutes at 1 second intervals
+
+  for (int i = 0; i < maxAttempts; i++) {
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    try {
+      auto userResult = client.query("auth.getUser", getUserInput);
+      if (!userResult.is_null() && userResult.contains("user")) {
+        auto& u = userResult["user"];
+        std::string name = jsonStr(u, "name");
+        std::string email = jsonStr(u, "email");
+        std::string username = jsonStr(u, "username");
+
+        std::string displayName = name.empty() ? username : name;
+        if (displayName.empty()) {
+          displayName = email;
+        }
+
+        std::cout << std::endl
+                  << std::endl;
+        std::cout << color::green() << color::bold()
+                  << "Authenticated successfully!" << color::reset() << std::endl;
+        std::cout << color::dim() << "  Signed in as: " << displayName;
+        if (!email.empty() && displayName != email) {
+          std::cout << " <" << email << ">";
+        }
+        std::cout << color::reset() << std::endl;
+        std::cout << color::dim() << "  Daemon ID:    " << daemonId
+                  << color::reset() << std::endl;
+
+        return 0;
+      }
+    } catch (...) {
+      // Not yet authorized — keep polling
+    }
+
+    // Print a dot every 5 seconds to show progress
+    if (i % 5 == 4) {
+      std::cout << "." << std::flush;
+    }
+  }
+
+  std::cout << std::endl;
+  std::cerr << color::red()
+            << "error: timed out waiting for authorization (5 minutes)."
+            << color::reset() << std::endl;
+  return 1;
 }
 
 }  // namespace checkpoint

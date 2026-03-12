@@ -325,7 +325,7 @@ export default class DaemonHandler {
             details: null,
             auth: {
               code: "1234",
-              url: "http://checkpoint.localhost:3000/devices/1234",
+              url: "http://checkpoint.localhost:3000/devices?code=1234",
             },
           };
 

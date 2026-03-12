@@ -148,7 +148,7 @@ inline std::optional<size_t> interactiveSelect(
     // Print items
     for (size_t i = 0; i < count; i++) {
       if (i == selected) {
-        std::cout << "  \033[36m❯ " << items[i] << "\033[0m";
+        std::cout << "  \033[36m> " << items[i] << "\033[0m";
       } else {
         std::cout << "    \033[2m" << items[i] << "\033[0m";
       }

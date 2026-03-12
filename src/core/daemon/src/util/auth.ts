@@ -15,7 +15,7 @@ export async function AuthenticateDevice(
   }
 
   const { code } = deviceCodeResponse;
-  const url = `${endpoint}/devices?${code}`;
+  const url = `${endpoint}/devices?code=${code}`;
 
   onCodeForDisplay(code, url);
 

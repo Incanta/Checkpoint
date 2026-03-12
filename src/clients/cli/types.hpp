@@ -238,6 +238,16 @@ inline void from_json(const nlohmann::json& j, SyncStatus& ss) {
   ss.checkedAt = j.value("checkedAt", "");
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────
+
+// Safely get a string from JSON, returning defaultVal for missing or null keys.
+inline std::string jsonStr(const nlohmann::json& j, const char* key, const std::string& defaultVal = "") {
+  if (j.contains(key) && j[key].is_string()) {
+    return j[key].get<std::string>();
+  }
+  return defaultVal;
+}
+
 // ─── User ────────────────────────────────────────────────────────
 
 struct User {
@@ -250,12 +260,12 @@ struct User {
 };
 
 inline void from_json(const nlohmann::json& j, User& u) {
-  u.id = j.value("id", "");
-  u.email = j.value("email", "");
-  u.name = j.value("name", "");
-  u.username = j.value("username", "");
-  u.daemonId = j.value("daemonId", "");
-  u.endpoint = j.value("endpoint", "");
+  u.id = jsonStr(j, "id");
+  u.email = jsonStr(j, "email");
+  u.name = jsonStr(j, "name");
+  u.username = jsonStr(j, "username");
+  u.daemonId = jsonStr(j, "daemonId");
+  u.endpoint = jsonStr(j, "endpoint");
 }
 
 // ─── Org ─────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -123,6 +124,79 @@ inline std::string resolveWorkspacePath(
   // Normalize to forward slashes (cross-platform)
   std::string result = resolved.generic_string();
   return result;
+}
+
+// ─── staged.json management ──────────────────────────────────────
+
+/**
+ * Reads the set of staged file paths from .checkpoint/staged.json.
+ * Returns an empty set if the file doesn't exist.
+ */
+inline std::set<std::string> readStagedFiles(const fs::path& workspaceRoot) {
+  fs::path stagedPath = workspaceRoot / ".checkpoint" / "staged.json";
+  std::set<std::string> staged;
+
+  if (!fs::exists(stagedPath)) {
+    return staged;
+  }
+
+  try {
+    std::ifstream file(stagedPath);
+    nlohmann::json j = nlohmann::json::parse(file);
+    if (j.is_array()) {
+      for (auto& entry : j) {
+        if (entry.is_string()) {
+          staged.insert(entry.get<std::string>());
+        }
+      }
+    }
+  } catch (...) {
+    // Corrupted file — treat as empty
+  }
+
+  return staged;
+}
+
+/**
+ * Writes the set of staged file paths to .checkpoint/staged.json.
+ */
+inline void writeStagedFiles(const fs::path& workspaceRoot,
+                             const std::set<std::string>& staged) {
+  fs::path stagedPath = workspaceRoot / ".checkpoint" / "staged.json";
+  nlohmann::json j = nlohmann::json::array();
+  for (auto& path : staged) {
+    j.push_back(path);
+  }
+  std::ofstream file(stagedPath);
+  file << j.dump(2);
+}
+
+/**
+ * Adds paths to staged.json and returns the updated set.
+ */
+inline std::set<std::string> addStagedFiles(
+    const fs::path& workspaceRoot,
+    const std::vector<std::string>& paths) {
+  auto staged = readStagedFiles(workspaceRoot);
+  for (auto& p : paths) {
+    staged.insert(p);
+  }
+  writeStagedFiles(workspaceRoot, staged);
+  return staged;
+}
+
+/**
+ * Removes paths from staged.json and returns the updated set.
+ */
+inline std::set<std::string> removeStagedFiles(
+    const fs::path& workspaceRoot,
+    const std::vector<std::string>& paths) {
+  auto staged = readStagedFiles(workspaceRoot);
+  for (auto& p : paths) {
+    staged.erase(p);
+  }
+  writeStagedFiles(workspaceRoot, staged);
+  return staged;
 }
 
 }  // namespace checkpoint
