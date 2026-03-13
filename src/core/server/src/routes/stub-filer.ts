@@ -43,6 +43,32 @@ interface UserJWTClaims {
 const DIR_MODE_BIT = 0x80000000;
 const PAGE_LIMIT = 100;
 
+/**
+ * Rename with retry — works around Windows EPERM / EACCES errors that occur
+ * when the target file is momentarily locked (e.g. a recently-closed read
+ * stream whose handle hasn't been fully released yet).
+ */
+async function renameWithRetry(
+  source: string,
+  target: string,
+  maxRetries = 5,
+  baseDelayMs = 50,
+): Promise<void> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await fs.rename(source, target);
+      return;
+    } catch (err: any) {
+      const isRetryable =
+        process.platform === "win32" &&
+        (err.code === "EPERM" || err.code === "EACCES") &&
+        attempt < maxRetries;
+      if (!isRetryable) throw err;
+      await new Promise((r) => setTimeout(r, baseDelayMs * (attempt + 1)));
+    }
+  }
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -315,7 +341,7 @@ async function handlePost(
 
     try {
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
-      await fs.rename(sourcePath, targetPath);
+      await renameWithRetry(sourcePath, targetPath);
       res.status(200).json({ success: true });
     } catch (err) {
       console.error("Stub filer: rename error:", err);
@@ -368,13 +394,36 @@ async function handlePost(
       // This prevents partial reads from concurrent downloaders.
       const tmpPath = `${fullPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;
       await fs.writeFile(tmpPath, file.buffer);
-      await fs.rename(tmpPath, fullPath);
+      await renameWithRetry(tmpPath, fullPath);
     }
 
     res.status(201).json({ size: file.size });
   } catch (err) {
     console.error("Stub filer: write error:", err);
     res.status(500).send("Internal server error");
+  }
+}
+
+/**
+ * Unlink with retry — same Windows file-locking workaround as renameWithRetry.
+ */
+async function unlinkWithRetry(
+  target: string,
+  maxRetries = 5,
+  baseDelayMs = 50,
+): Promise<void> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await fs.unlink(target);
+      return;
+    } catch (err: any) {
+      const isRetryable =
+        process.platform === "win32" &&
+        (err.code === "EPERM" || err.code === "EACCES") &&
+        attempt < maxRetries;
+      if (!isRetryable) throw err;
+      await new Promise((r) => setTimeout(r, baseDelayMs * (attempt + 1)));
+    }
   }
 }
 
@@ -399,7 +448,7 @@ async function handleDelete(
     if (stat.isDirectory()) {
       await fs.rm(fullPath, { recursive: true });
     } else {
-      await fs.unlink(fullPath);
+      await unlinkWithRetry(fullPath);
     }
 
     res.status(202).json({ success: true });

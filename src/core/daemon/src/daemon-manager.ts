@@ -1290,6 +1290,20 @@ export class DaemonManager {
       },
     );
 
+    watcher.on("error", (err) => {
+      Logger.warn(
+        `[DaemonManager] Watcher error for workspace ${workspace.name}: ${err.message}`,
+      );
+      // Remove the broken watcher and try to re-establish after a short delay.
+      // The directory may have been temporarily removed (e.g. test cleanup).
+      this.watchers.delete(workspace.id);
+      setTimeout(() => {
+        if (!this.watchers.has(workspace.id)) {
+          this.watchWorkspace(workspace);
+        }
+      }, 5000);
+    });
+
     this.watchers.set(workspace.id, watcher);
   }
 

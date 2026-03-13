@@ -204,11 +204,15 @@ async function main() {
   // ----------------------------------------------------------------
   heading("Creating org & repo");
 
+  const uniqueSuffix = Date.now();
+
   const orgRes = await (
     await fetch(`${APP_URL}/api/trpc/org.createOrg?batch=1`, {
       method: "POST",
       headers: authHeaders,
-      body: JSON.stringify({ 0: { json: { name: "test-org" } } }),
+      body: JSON.stringify({
+        0: { json: { name: `test-org-${uniqueSuffix}` } },
+      }),
     })
   ).json();
 
@@ -220,7 +224,7 @@ async function main() {
       method: "POST",
       headers: authHeaders,
       body: JSON.stringify({
-        0: { json: { name: "test-repo", orgId } },
+        0: { json: { name: `test-repo-${uniqueSuffix}`, orgId } },
       }),
     })
   ).json();
@@ -234,7 +238,9 @@ async function main() {
   heading("Workspace 1: init, add files, submit");
 
   fs.mkdirSync(WS1, { recursive: true });
-  run(`"${CHK}" init test-org/test-repo`, { cwd: WS1 });
+  run(`"${CHK}" init test-org-${uniqueSuffix}/test-repo-${uniqueSuffix}`, {
+    cwd: WS1,
+  });
 
   // Create test files
   fs.writeFileSync(path.join(WS1, "readme.txt"), "Hello from Checkpoint CI!\n");
@@ -292,7 +298,9 @@ async function main() {
   heading("Workspace 2: init, pull, verify");
 
   fs.mkdirSync(WS2, { recursive: true });
-  run(`"${CHK}" init test-org/test-repo`, { cwd: WS2 });
+  run(`"${CHK}" init test-org-${uniqueSuffix}/test-repo-${uniqueSuffix}`, {
+    cwd: WS2,
+  });
   run(`"${CHK}" pull`, { cwd: WS2 });
 
   for (const file of ["readme.txt", "src/main.cpp", "src/notes.md"]) {
