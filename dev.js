@@ -6,6 +6,8 @@
  *   node dev.js              - Start all services
  *   node dev.js --background - Start all services in the background (detached)
  *   node dev.js -b           - Same as --background
+ *   node dev.js --test       - Start with NODE_CONFIG_ENV=test for the app service
+ *   node dev.js -t           - Same as --test
  *   node dev.js stop         - Stop running services
  *
  * Starts: app, daemon, server
@@ -163,7 +165,7 @@ function startService(service) {
 
   const proc = spawn(service.command, service.args, {
     cwd: service.cwd,
-    env: { ...process.env, FORCE_COLOR: "1" },
+    env: { ...process.env, FORCE_COLOR: "1", ...service.env },
     stdio: ["pipe", "pipe", "pipe"],
     shell: process.platform === "win32",
     windowsHide: true,
@@ -438,6 +440,15 @@ async function waitForHealthy(timeout = 30000) {
 const args = process.argv.slice(2);
 const command = args.find((arg) => !arg.startsWith("-"));
 const backgroundMode = args.includes("--background") || args.includes("-b");
+const testMode = args.includes("--test") || args.includes("-t");
+
+// In test mode, inject NODE_CONFIG_ENV=test into the app service
+if (testMode) {
+  const appService = services.find((s) => s.name === "app");
+  if (appService) {
+    appService.env = { NODE_CONFIG_ENV: "test" };
+  }
+}
 
 if (command === "stop") {
   stopExisting();

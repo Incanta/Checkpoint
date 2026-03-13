@@ -1,3 +1,6 @@
+# ⚠️  IMPORTANT: When modifying this workflow, also update the corresponding
+# Node.js test script at .github/workflows/test.js to keep them in sync.
+
 name: CLI Integration Test
 
 on:
@@ -394,6 +397,87 @@ jobs:
 
           echo "=== chk status ==="
           $GITHUB_WORKSPACE/src/clients/cli/build/chk status
+
+      # ----------------------------------------------------------------
+      # Workspace 2 modifies a file, submits; workspace 1 pulls
+      # ----------------------------------------------------------------
+      - name: Modify a file in workspace 2
+        run: |
+          WS_PATH="${{ steps.ws2.outputs.WS_PATH }}"
+          cd "$WS_PATH"
+
+          echo "=== chk checkout readme.txt ==="
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk checkout readme.txt
+
+          echo "Hello from workspace 2 — modified!" > "$WS_PATH/readme.txt"
+          echo "Wrote updated readme.txt:"
+          cat "$WS_PATH/readme.txt"
+
+      - name: Wait for daemon to detect modification
+        run: sleep 3
+
+      - name: CLI - add modified file in workspace 2
+        run: |
+          WS_PATH="${{ steps.ws2.outputs.WS_PATH }}"
+          cd "$WS_PATH"
+
+          echo "=== chk add readme.txt ==="
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk add readme.txt
+
+          echo ""
+          echo "=== chk status (after add) ==="
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk status
+
+      - name: CLI - submit from workspace 2
+        run: |
+          WS_PATH="${{ steps.ws2.outputs.WS_PATH }}"
+          cd "$WS_PATH"
+
+          echo "=== chk submit ==="
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk submit --message "CI test: workspace 2 modifies readme.txt"
+
+      - name: CLI - pull into workspace 1
+        run: |
+          WS_PATH="${{ steps.ws1.outputs.WS_PATH }}"
+          cd "$WS_PATH"
+
+          echo "=== chk pull ==="
+          $GITHUB_WORKSPACE/src/clients/cli/build/chk pull
+
+      - name: Verify workspace 1 has the modified file
+        run: |
+          WS1="${{ steps.ws1.outputs.WS_PATH }}"
+          WS2="${{ steps.ws2.outputs.WS_PATH }}"
+
+          echo "=== Workspace 1 readme.txt ==="
+          cat "$WS1/readme.txt"
+
+          echo ""
+          echo "=== Workspace 2 readme.txt ==="
+          cat "$WS2/readme.txt"
+
+          echo ""
+          echo "=== Comparing ==="
+
+          if ! diff -q "$WS1/readme.txt" "$WS2/readme.txt" > /dev/null 2>&1; then
+            echo "FAIL: readme.txt content differs after ws2 submit + ws1 pull"
+            echo "  WS1:" && cat "$WS1/readme.txt"
+            echo "  WS2:" && cat "$WS2/readme.txt"
+            exit 1
+          fi
+
+          EXPECTED="Hello from workspace 2 — modified!"
+          ACTUAL=$(cat "$WS1/readme.txt")
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL: readme.txt does not contain the expected content"
+            echo "  Expected: $EXPECTED"
+            echo "  Actual:   $ACTUAL"
+            exit 1
+          fi
+
+          echo "OK: readme.txt matches after round-trip modify"
+          echo ""
+          echo "All files verified!"
 
       # ----------------------------------------------------------------
       # Cleanup
