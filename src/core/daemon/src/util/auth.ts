@@ -24,7 +24,7 @@ export async function AuthenticateDevice(
   let apiToken: string;
   while (true) {
     try {
-      const apiTokenResponse = await client.apiToken.getApiToken.query({
+      const apiTokenResponse = await client.apiToken.getApiToken.mutate({
         code,
       });
 

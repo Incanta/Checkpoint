@@ -405,8 +405,8 @@ inline int cmdSubmit(const std::string& message) {
       {"shelved", false},
   };
 
-  // Note: submit is a query in the daemon API, not a mutation
-  client.query("workspaces.pending.submit", submitInput);
+  // Note: submit is a mutation in the daemon API (sends input as POST body)
+  client.mutate("workspaces.pending.submit", submitInput);
 
   // Clear staged.json after successful submit
   writeStagedFiles(ctx.root, {});
@@ -457,7 +457,7 @@ inline int cmdPull() {
       {"filePaths", nullptr},
   };
 
-  auto pullResult = client.query("workspaces.sync.pull", pullInput);
+  auto pullResult = client.mutate("workspaces.sync.pull", pullInput);
 
   std::cout << color::green() << color::bold()
             << "Pull complete." << color::reset() << std::endl;
@@ -1026,7 +1026,7 @@ inline int cmdLogin(const std::string& endpoint, const std::string& daemonId) {
 
   nlohmann::json loginResult;
   try {
-    loginResult = client.query("auth.login", loginInput);
+    loginResult = client.mutate("auth.login", loginInput);
   } catch (const std::exception& e) {
     std::cerr << color::red() << "error: failed to start login: " << e.what()
               << color::reset() << std::endl;

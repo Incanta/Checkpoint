@@ -43,7 +43,7 @@ export const apiTokenRouter = createTRPCRouter({
         code: z.string(),
       }),
     )
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       // Find the Checkpoint user associated with this NextAuth user
       const apiToken = await ctx.db.apiToken.findUnique({
         where: {

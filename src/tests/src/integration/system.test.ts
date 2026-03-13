@@ -244,7 +244,7 @@ This is a test file created at ${new Date().toISOString()}.
     // ========================================
     // Step 8: users[1] pulls the latest version via daemon
     // ========================================
-    await env.users[1].daemonClient.workspaces.pull.query({
+    await env.users[1].daemonClient.workspaces.pull.mutate({
       daemonId: env.users[1].daemonId,
       workspaceId: user1WorkspaceId,
       changelistId: null, // Pull latest
@@ -404,7 +404,7 @@ This section was added by user 1 to test modification syncing.
     // ========================================
     // Step 12: users[0] pulls the change
     // ========================================
-    await env.users[0].daemonClient.workspaces.pull.query({
+    await env.users[0].daemonClient.workspaces.pull.mutate({
       daemonId: env.users[0].daemonId,
       workspaceId: user0WorkspaceId,
       changelistId: null, // Pull latest
@@ -523,7 +523,7 @@ Created at ${new Date().toISOString()}
     // ========================================
     // Step 16: users[0] pulls the changes
     // ========================================
-    await env.users[0].daemonClient.workspaces.pull.query({
+    await env.users[0].daemonClient.workspaces.pull.mutate({
       daemonId: env.users[0].daemonId,
       workspaceId: user0WorkspaceId,
       changelistId: null, // Pull latest
@@ -694,7 +694,7 @@ Created by User 1 at ${new Date().toISOString()}
     // ========================================
     // Step 20: Both users pull to sync
     // ========================================
-    await env.users[0].daemonClient.workspaces.pull.query({
+    await env.users[0].daemonClient.workspaces.pull.mutate({
       daemonId: env.users[0].daemonId,
       workspaceId: user0WorkspaceId,
       changelistId: null,
@@ -703,7 +703,7 @@ Created by User 1 at ${new Date().toISOString()}
 
     console.log(`[Step 20] User 0 pulled latest changes`);
 
-    await env.users[1].daemonClient.workspaces.pull.query({
+    await env.users[1].daemonClient.workspaces.pull.mutate({
       daemonId: env.users[1].daemonId,
       workspaceId: user1WorkspaceId,
       changelistId: null,

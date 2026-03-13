@@ -16,7 +16,7 @@ export const authRouter = router({
         daemonId: z.string(),
       }),
     )
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       const [code, url] = await new Promise<[string, string]>((resolve) =>
         AuthenticateDevice(input.endpoint, input.daemonId, (code, url) => {
           resolve([code, url]);

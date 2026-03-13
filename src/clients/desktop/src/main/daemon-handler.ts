@@ -360,7 +360,7 @@ export default class DaemonHandler {
       }
     } else {
       const client = await CreateDaemonClient();
-      const loginResponse = await client.auth.login.query({
+      const loginResponse = await client.auth.login.mutate({
         endpoint: data.endpoint,
         daemonId: data.daemonId,
       });
@@ -767,7 +767,7 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const mergeResult = await client.workspaces.sync.pull.query({
+      const mergeResult = await client.workspaces.sync.pull.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         ...data,
@@ -844,7 +844,7 @@ export default class DaemonHandler {
       };
       console.log("Submitting with data: ", payload);
       console.log(JSON.stringify(payload, null, 2));
-      await client.workspaces.pending.submit.query(payload);
+      await client.workspaces.pending.submit.mutate(payload);
 
       if (this.webContents) {
         ipcSend(this.webContents, "workspace:submit:success", null);

@@ -16,7 +16,7 @@ export const syncRouter = router({
         filePaths: z.array(z.string()).nullable(),
       }),
     )
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
