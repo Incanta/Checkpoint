@@ -222,12 +222,30 @@ inline int cmdAdd(const std::vector<std::string>& files) {
     from_json(refreshResult, pending);
 
     std::vector<std::string> localPaths;
-    for (auto& path : resolvedPaths) {
-      auto it = pending.files.find(path);
+    for (auto& p : resolvedPaths) {
+      auto it = pending.files.find(p);
       if (it != pending.files.end()) {
         auto status = static_cast<FileStatus>(it->second.status);
         if (status == FileStatus::Local) {
-          localPaths.push_back(path);
+          localPaths.push_back(p);
+        }
+      } else {
+        // The daemon collapses untracked directories into single
+        // directory-level entries.  When adding a file like "src/main.cpp",
+        // pending.files may only contain "src" (Directory, Local).
+        // Walk ancestor paths to detect this case.
+        std::string ancestor = p;
+        while (true) {
+          auto slash = ancestor.rfind('/');
+          if (slash == std::string::npos) break;
+          ancestor = ancestor.substr(0, slash);
+          auto ait = pending.files.find(ancestor);
+          if (ait != pending.files.end() &&
+              static_cast<FileStatus>(ait->second.status) == FileStatus::Local &&
+              static_cast<FileType>(ait->second.type) == FileType::Directory) {
+            localPaths.push_back(p);
+            break;
+          }
         }
       }
     }
