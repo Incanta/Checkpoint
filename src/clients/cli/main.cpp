@@ -78,6 +78,9 @@ int main(int argc, char** argv) {
   // log
   argparse::ArgumentParser logCmd("log");
   logCmd.add_description("Show version history");
+  logCmd.add_argument("-l", "--limit")
+      .help("Limit the number of changelists shown")
+      .scan<'i', int>();
 
   // branch
   argparse::ArgumentParser branchCmd("branch");
@@ -219,7 +222,8 @@ int main(int argc, char** argv) {
     }
 
     if (program.is_subcommand_used(logCmd)) {
-      return checkpoint::cmdLog();
+      auto limit = logCmd.present<int>("--limit");
+      return checkpoint::cmdLog(limit.has_value() ? limit.value() : 0);
     }
 
     if (program.is_subcommand_used(branchCmd)) {

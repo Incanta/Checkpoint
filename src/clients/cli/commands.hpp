@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -10,6 +11,14 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#else
+#include <sys/ioctl.h>
+#include <unistd.h>
+#endif
 
 #include "daemon_client.hpp"
 #include "terminal_menu.hpp"
@@ -496,14 +505,65 @@ inline int cmdPull() {
 //  COMMAND: log (show history)
 // ═════════════════════════════════════════════════════════════════
 
-inline int cmdLog() {
+// ─── Pager helper ────────────────────────────────────────────────
+
+inline FILE* openPager(const std::string& output) {
+#ifdef _WIN32
+  // On Windows, check if stdout is a console handle
+  HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (hOut == INVALID_HANDLE_VALUE) return nullptr;
+  DWORD mode;
+  if (!GetConsoleMode(hOut, &mode)) return nullptr;
+  // Check if output fits in the terminal — skip pager if so
+  CONSOLE_SCREEN_BUFFER_INFO csbi;
+  if (GetConsoleScreenBufferInfo(hOut, &csbi)) {
+    int termHeight = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+    int lineCount = 1;
+    for (char c : output) {
+      if (c == '\n') lineCount++;
+    }
+    if (lineCount <= termHeight) return nullptr;
+  }
+  FILE* pager = _popen("less -FRX 2>nul || more", "w");
+  return pager;
+#else
+  if (!isatty(fileno(stdout))) return nullptr;
+  // Check if output fits in the terminal — skip pager if so
+  struct winsize w;
+  if (ioctl(fileno(stdout), TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
+    int lineCount = 1;
+    for (char c : output) {
+      if (c == '\n') lineCount++;
+    }
+    if (lineCount <= static_cast<int>(w.ws_row)) return nullptr;
+  }
+  const char* pagerEnv = getenv("PAGER");
+  std::string pagerCmd = pagerEnv ? pagerEnv : "less -FRX";
+  FILE* pager = popen(pagerCmd.c_str(), "w");
+  return pager;
+#endif
+}
+
+inline void closePager(FILE* pager) {
+  if (!pager) return;
+#ifdef _WIN32
+  _pclose(pager);
+#else
+  pclose(pager);
+#endif
+}
+
+inline int cmdLog(int limit = 0) {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
 
+  int count = (limit > 0) ? limit : 100;
+
   nlohmann::json input = {
       {"daemonId", ws.daemonId},
       {"workspaceId", ws.id},
+      {"count", count},
   };
 
   auto result = client.query("workspaces.history.get", input);
@@ -513,12 +573,20 @@ inline int cmdLog() {
     return 0;
   }
 
+  // If a limit was explicitly set, truncate the result
+  if (limit > 0 && static_cast<int>(result.size()) > limit) {
+    result = nlohmann::json(
+        std::vector<nlohmann::json>(result.begin(), result.begin() + limit));
+  }
+
+  // Build output string
+  std::ostringstream out;
   for (auto& entry : result) {
     Changelist cl;
     from_json(entry, cl);
 
-    std::cout << color::yellow() << "changelist " << cl.number
-              << color::reset() << std::endl;
+    out << color::yellow() << "changelist " << cl.number
+        << color::reset() << "\n";
 
     std::string author;
     if (!cl.user.name.empty()) {
@@ -530,18 +598,29 @@ inline int cmdLog() {
     }
 
     if (!author.empty()) {
-      std::cout << "Author: " << author << std::endl;
+      out << "Author: " << author << "\n";
     }
     if (!cl.createdAt.empty()) {
-      std::cout << "Date:   " << cl.createdAt << std::endl;
+      out << "Date:   " << cl.createdAt << "\n";
     }
-    std::cout << std::endl;
+    out << "\n";
     if (!cl.message.empty()) {
-      std::cout << "    " << cl.message << std::endl;
+      out << "    " << cl.message << "\n";
     } else {
-      std::cout << "    " << color::dim() << "(no message)" << color::reset() << std::endl;
+      out << "    " << color::dim() << "(no message)" << color::reset() << "\n";
     }
-    std::cout << std::endl;
+    out << "\n";
+  }
+
+  std::string output = out.str();
+
+  // Page output if interactive TTY and output exceeds terminal height
+  FILE* pager = openPager(output);
+  if (pager) {
+    fwrite(output.c_str(), 1, output.size(), pager);
+    closePager(pager);
+  } else {
+    std::cout << output;
   }
 
   return 0;

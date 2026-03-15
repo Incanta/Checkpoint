@@ -10,6 +10,7 @@ export const historyRouter = router({
       z.object({
         daemonId: z.string(),
         workspaceId: z.string(),
+        count: z.number().min(1).max(100).optional().default(100),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -45,7 +46,7 @@ export const historyRouter = router({
           number: null,
           timestamp: null,
         },
-        count: 100,
+        count: input.count,
       });
 
       return changelists;
