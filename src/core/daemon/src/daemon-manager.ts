@@ -847,8 +847,26 @@ export class DaemonManager {
       baselineState = this.workspaceStates.get(workspace.id)!;
     }
 
-    const cached = this.workspacePendingChanges.get(workspace.id);
+    // Ensure any dirty ignore/hidden files are processed before choosing the
+    // refresh strategy.  The watcher callback is async (fire-and-forget) so
+    // its ignore-cache update may still be in-flight when a refresh is
+    // requested.  Processing them here guarantees the cache is current.
     const dirty = this.dirtyFiles.get(workspace.id);
+    if (dirty) {
+      let ignoreChanged = false;
+      for (const dirtyPath of dirty) {
+        const baseName = path.basename(dirtyPath);
+        if (baseName === IGNORE_FILE || baseName === HIDDEN_FILE) {
+          await this.handleIgnoreFileChange(workspace, dirtyPath);
+          ignoreChanged = true;
+        }
+      }
+      if (ignoreChanged) {
+        this.workspacePendingChanges.delete(workspace.id);
+      }
+    }
+
+    const cached = this.workspacePendingChanges.get(workspace.id);
 
     // Fast path: nothing changed since last refresh – return cached result
     if (!forceFullRefresh && cached && dirty && dirty.size === 0) {
