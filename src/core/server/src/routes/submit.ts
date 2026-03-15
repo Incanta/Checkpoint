@@ -255,6 +255,15 @@ export function routeSubmit(): Router {
       );
 
       freeHandle(handle);
+
+      if (status.error !== 0) {
+        res
+          .status(500)
+          .send(
+            `Failed to merge store indexes: ${status.currentStep} (error ${status.error})`,
+          );
+        return;
+      }
     } else if (
       payload.modifications.some((m) => !m.delete) ||
       payload.versionIndex

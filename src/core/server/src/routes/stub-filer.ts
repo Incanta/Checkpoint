@@ -301,6 +301,10 @@ async function handleGet(
         res.status(500).send("Internal server error");
       }
     });
+    // Ensure the file descriptor is released promptly when the response
+    // ends or the client disconnects, so concurrent renames are not blocked
+    // by a lingering Windows file handle.
+    res.on("close", () => stream.destroy());
     stream.pipe(res);
     return;
   }
