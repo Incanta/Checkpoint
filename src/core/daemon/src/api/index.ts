@@ -6,6 +6,7 @@ import { GetDaemonListenPort } from "../index.js";
 import { workspacesRouter } from "./routers/workspace/index.js";
 import { orgRouter } from "./routers/org.js";
 import { repoRouter } from "./routers/repo.js";
+import { jobsRouter } from "./routers/jobs.js";
 import path from "path";
 import { homedir } from "os";
 import { promises as fs } from "fs";
@@ -16,6 +17,7 @@ const appRouter = router({
   workspaces: workspacesRouter,
   orgs: orgRouter,
   repos: repoRouter,
+  jobs: jobsRouter,
 });
 
 // Export type router type signature,

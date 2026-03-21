@@ -16,7 +16,7 @@ export const fileRouter = createTRPCRouter({
         repoId: z.string(),
       }),
     )
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       return ctx.db.file.findMany({
@@ -35,7 +35,7 @@ export const fileRouter = createTRPCRouter({
         repoId: z.string(),
       }),
     )
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       const files = await ctx.db.file.findMany({
@@ -82,7 +82,7 @@ export const fileRouter = createTRPCRouter({
         filePaths: z.array(z.string()),
       }),
     )
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       const normalizedPaths = input.filePaths.map((p) =>

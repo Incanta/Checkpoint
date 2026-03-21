@@ -21,6 +21,7 @@ import { isBinaryFile, readFileFromChangelist } from "./read-file.js";
 import { autoMergeText, type AutoMergeResult } from "./auto-merge.js";
 import { existsSync, promises as fs } from "fs";
 import path from "path";
+import { Logger } from "../logging.js";
 
 /**
  * Files that were auto-merged during pull.
@@ -41,6 +42,7 @@ export async function pull(
   logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
     "longtail.log-level",
   ),
+  onStep?: (step: string) => void,
 ): Promise<PullMergeResult> {
   const client = await CreateApiClientAuth(workspace.daemonId);
 
@@ -95,7 +97,7 @@ export async function pull(
   );
 
   const changelistsResponse =
-    await client.changelist.getChangelistsWithNumbers.query({
+    await client.changelist.getChangelistsWithNumbers.mutate({
       repoId: workspace.repoId,
       numbers: diff.changelistsToPull,
     });
@@ -171,6 +173,10 @@ export async function pull(
       continue;
     }
 
+    Logger.debug(
+      `Starting longtail pull for version index ${versionIndex} for workspace ${workspace.workspaceName}...`,
+    );
+
     const handle = pullAsync({
       versionIndex,
       enableMmapIndexing: config.get<boolean>("longtail.enable-mmap-indexing"),
@@ -192,11 +198,16 @@ export async function pull(
     const { status } = await pollHandle(handle, {
       onStep: (step) => {
         lastStep = step;
+        onStep?.(step);
       },
     });
 
+    Logger.debug(
+      `Longtail pull for version index ${versionIndex} completed with status: ${status.error === 0 ? "success" : "failure"}. Last step: ${lastStep}`,
+    );
+
     if (status.error !== 0) {
-      console.log(
+      Logger.error(
         `Completed with exit code: ${status.error} and last step ${status.currentStep}`,
       );
     }
@@ -211,7 +222,7 @@ export async function pull(
 
   if (!errored) {
     // Handle deletions
-    const filesResponse = await client.file.getFiles.query({
+    const filesResponse = await client.file.getFiles.mutate({
       ids: diff.deletions,
       repoId: workspace.repoId,
     });
@@ -268,7 +279,7 @@ export async function pull(
         }
       } catch (err) {
         // If merge fails for any reason, leave the file as-is (remote version)
-        console.error(`Auto-merge failed for ${candidate.relativePath}:`, err);
+        Logger.error(`Auto-merge failed for ${candidate.relativePath}: ${err}`);
       }
     }
 
@@ -276,7 +287,7 @@ export async function pull(
     const allFileIds = Object.keys(serverStateTree);
 
     // Get all file info from server
-    const allFilesResponse = await client.file.getFiles.query({
+    const allFilesResponse = await client.file.getFiles.mutate({
       ids: allFileIds,
       repoId: workspace.repoId,
     });

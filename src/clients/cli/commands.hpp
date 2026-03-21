@@ -88,6 +88,40 @@ inline WorkspaceContext getWorkspaceContext() {
   return {std::move(client), std::move(ws), root};
 }
 
+// ─── Helper: poll a background job until complete ────────────────
+
+struct JobResult {
+  std::string status;       // "completed" or "failed"
+  nlohmann::json result;    // present when completed
+  std::string error;        // present when failed
+};
+
+inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
+  std::string lastStep;
+  while (true) {
+    nlohmann::json input = {{"jobId", jobId}};
+    auto job = client.query("jobs.getStatus", input);
+
+    std::string status = job.value("status", "");
+    std::string currentStep = job.value("currentStep", "");
+
+    if (!currentStep.empty() && currentStep != lastStep) {
+      std::cout << color::dim() << "  " << currentStep << color::reset()
+                << std::endl;
+      lastStep = currentStep;
+    }
+
+    if (status == "completed") {
+      return {status, job.value("result", nlohmann::json(nullptr)), ""};
+    }
+    if (status == "failed") {
+      return {status, nullptr, job.value("error", "Unknown error")};
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  }
+}
+
 // ═════════════════════════════════════════════════════════════════
 //  COMMAND: status
 // ═════════════════════════════════════════════════════════════════
@@ -415,7 +449,23 @@ inline int cmdSubmit(const std::string& message) {
   };
 
   // Note: submit is a mutation in the daemon API (sends input as POST body)
-  client.mutate("workspaces.pending.submit", submitInput);
+  auto submitResult = client.mutate("workspaces.pending.submit", submitInput);
+
+  std::string jobId = submitResult.value("jobId", "");
+  if (jobId.empty()) {
+    std::cerr << "error: No job ID returned from submit." << std::endl;
+    return 1;
+  }
+
+  std::cout << "Submitting " << stagedCount << " file(s)..." << std::endl;
+
+  auto jobResult = pollJob(client, jobId);
+
+  if (jobResult.status == "failed") {
+    std::cerr << color::red() << "error: " << jobResult.error
+              << color::reset() << std::endl;
+    return 1;
+  }
 
   // Clear staged.json after successful submit
   writeStagedFiles(ctx.root, {});
@@ -468,20 +518,34 @@ inline int cmdPull() {
 
   auto pullResult = client.mutate("workspaces.sync.pull", pullInput);
 
+  std::string jobId = pullResult.value("jobId", "");
+  if (jobId.empty()) {
+    std::cerr << "error: No job ID returned from pull." << std::endl;
+    return 1;
+  }
+
+  auto jobResult = pollJob(client, jobId);
+
+  if (jobResult.status == "failed") {
+    std::cerr << color::red() << "error: " << jobResult.error
+              << color::reset() << std::endl;
+    return 1;
+  }
+
   std::cout << color::green() << color::bold()
             << "Pull complete." << color::reset() << std::endl;
 
   // Report merge results if any
-  if (!pullResult.is_null()) {
-    if (pullResult.contains("cleanMerges") && pullResult["cleanMerges"].is_array()) {
-      auto& cleanMerges = pullResult["cleanMerges"];
+  if (!jobResult.result.is_null()) {
+    if (jobResult.result.contains("cleanMerges") && jobResult.result["cleanMerges"].is_array()) {
+      auto& cleanMerges = jobResult.result["cleanMerges"];
       if (!cleanMerges.empty()) {
         std::cout << color::cyan() << cleanMerges.size()
                   << " file(s) auto-merged." << color::reset() << std::endl;
       }
     }
-    if (pullResult.contains("conflictMerges") && pullResult["conflictMerges"].is_array()) {
-      auto& conflictMerges = pullResult["conflictMerges"];
+    if (jobResult.result.contains("conflictMerges") && jobResult.result["conflictMerges"].is_array()) {
+      auto& conflictMerges = jobResult.result["conflictMerges"];
       if (!conflictMerges.empty()) {
         std::cout << color::red() << color::bold()
                   << conflictMerges.size() << " file(s) have merge conflicts!"

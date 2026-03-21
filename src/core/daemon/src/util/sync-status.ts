@@ -164,7 +164,7 @@ export async function checkSyncStatus(
   const resolvedNewOnRemote: string[] = [];
   if (newOnRemote.length > 0) {
     try {
-      const filesResponse = await client.file.getFiles.query({
+      const filesResponse = await client.file.getFiles.mutate({
         ids: newOnRemote,
         repoId: workspace.repoId,
       });

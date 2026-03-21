@@ -174,9 +174,15 @@ class DaemonClient {
     std::string response;
     struct curl_slist* headers = nullptr;
     headers = curl_slist_append(headers, "Content-Type: application/json");
+    // Disable Expect: 100-continue to avoid body truncation issues with
+    // Node.js HTTP servers that may not handle 100 Continue reliably.
+    headers = curl_slist_append(headers, "Expect:");
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
+    // Explicitly set body size instead of relying on strlen()
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE,
+                     static_cast<curl_off_t>(body.size()));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
@@ -210,7 +216,12 @@ class DaemonClient {
     try {
       parsed = nlohmann::json::parse(response);
     } catch (const nlohmann::json::exception& e) {
-      throw std::runtime_error("Invalid JSON response from daemon: " + std::string(e.what()));
+      // Include response preview for debugging truncation issues
+      std::string preview = response.substr(0, 200);
+      throw std::runtime_error("Invalid JSON response from daemon (HTTP " +
+                               std::to_string(httpCode) + ", " +
+                               std::to_string(response.size()) + " bytes): " +
+                               std::string(e.what()) + "\nResponse preview: " + preview);
     }
 
     // httpBatchLink wraps responses in an array: [{result: ...}]
@@ -232,6 +243,10 @@ class DaemonClient {
         }
       } else if (err.contains("message")) {
         message = err["message"].get<std::string>();
+      }
+      // Include HTTP status for diagnostics (e.g. 400 = parse error, 500 = server error)
+      if (httpCode >= 400) {
+        message += " (HTTP " + std::to_string(httpCode) + ")";
       }
       throw std::runtime_error(message);
     }

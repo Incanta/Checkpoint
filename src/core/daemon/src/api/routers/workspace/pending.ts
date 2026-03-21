@@ -12,6 +12,7 @@ import {
   pullTextFilesForSubmit,
 } from "../../../util/index.js";
 import { TRPCError } from "@trpc/server";
+import { JobManager } from "../../../job-manager.js";
 
 export const pendingRouter = router({
   refresh: publicProcedure
@@ -247,7 +248,7 @@ export const pendingRouter = router({
       > = {};
 
       if (filePaths.length > 0) {
-        const checkouts = await client.file.getActiveCheckoutsForFiles.query({
+        const checkouts = await client.file.getActiveCheckoutsForFiles.mutate({
           repoId: workspace.repoId,
           filePaths,
         });
@@ -385,96 +386,97 @@ export const pendingRouter = router({
         });
       }
 
-      try {
-        // Expand any directory paths into individual file modifications
-        const expandedModifications = await manager.expandDirectoriesForSubmit(
-          workspace,
-          input.modifications,
-        );
+      // Expand any directory paths into individual file modifications
+      const expandedModifications = await manager.expandDirectoriesForSubmit(
+        workspace,
+        input.modifications,
+      );
 
-        // Check for conflicts before submitting
-        const modificationPaths = expandedModifications.map((m) =>
-          m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
-        );
-        const conflictResult = await checkConflicts(
-          {
-            id: workspace.id,
-            repoId: workspace.repoId,
-            branchName: workspace.branchName,
-            workspaceName: workspace.name,
-            localPath: workspace.localPath,
-            daemonId: workspace.daemonId,
-          },
-          modificationPaths,
-        );
+      // Check for conflicts before submitting (sync — fail fast)
+      const modificationPaths = expandedModifications.map((m) =>
+        m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+      );
+      const conflictResult = await checkConflicts(
+        {
+          id: workspace.id,
+          repoId: workspace.repoId,
+          branchName: workspace.branchName,
+          workspaceName: workspace.name,
+          localPath: workspace.localPath,
+          daemonId: workspace.daemonId,
+        },
+        modificationPaths,
+      );
 
-        if (conflictResult.hasConflicts) {
-          const conflictPaths = conflictResult.conflicts
-            .map((c) => c.path)
-            .join(", ");
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: `Cannot submit: ${conflictResult.conflicts.length} conflicting file(s) detected. These files have been modified locally and also changed on the remote. Please pull first to resolve: ${conflictPaths}`,
-          });
-        }
-
-        // Auto-merge outdated text files before submitting.
-        // This pulls only the individual text files that are behind,
-        // performs 3-way merge, and patches their state entries without
-        // advancing the workspace head CL.
-        const mergeResult = await pullTextFilesForSubmit(
-          {
-            id: workspace.id,
-            repoId: workspace.repoId,
-            branchName: workspace.branchName,
-            workspaceName: workspace.name,
-            localPath: workspace.localPath,
-            daemonId: workspace.daemonId,
-          },
-          repo.orgId,
-          modificationPaths,
-        );
-
-        if (mergeResult.conflictMerges.length > 0) {
-          const conflictPaths = mergeResult.conflictMerges.join(", ");
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: `Cannot submit: ${mergeResult.conflictMerges.length} text file(s) have merge conflicts after auto-merge. Please resolve the conflict markers and try again: ${conflictPaths}`,
-          });
-        }
-
-        await submit(
-          {
-            id: workspace.id,
-            repoId: workspace.repoId,
-            branchName: workspace.branchName,
-            workspaceName: workspace.name,
-            localPath: workspace.localPath,
-            daemonId: workspace.daemonId,
-          },
-          repo.orgId,
-          input.message,
-          expandedModifications,
-          workspace.id,
-          input.keepCheckedOut ?? false,
-        );
-
-        // Reload workspace state from the updated state.json
-        await manager.reloadWorkspaceState(workspace);
-
-        // Clear submitted files from marked-for-add list
-        const submittedPaths = expandedModifications.map((m) =>
-          m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
-        );
-        if (submittedPaths.length > 0) {
-          await manager.unmarkForAdd(workspace, submittedPaths);
-        }
-      } catch (e: any) {
+      if (conflictResult.hasConflicts) {
+        const conflictPaths = conflictResult.conflicts
+          .map((c) => c.path)
+          .join(", ");
         throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: e.message ?? JSON.stringify(e),
+          code: "CONFLICT",
+          message: `Cannot submit: ${conflictResult.conflicts.length} conflicting file(s) detected. These files have been modified locally and also changed on the remote. Please pull first to resolve: ${conflictPaths}`,
         });
       }
+
+      // Create async job for the long-running work
+      const jobManager = JobManager.Get();
+      const job = jobManager.createJob("submit");
+
+      const workspaceInfo = {
+        id: workspace.id,
+        repoId: workspace.repoId,
+        branchName: workspace.branchName,
+        workspaceName: workspace.name,
+        localPath: workspace.localPath,
+        daemonId: workspace.daemonId,
+      };
+
+      // Fire-and-forget: run the submit in the background
+      (async () => {
+        try {
+          jobManager.updateStep(job.id, "Merging outdated text files");
+
+          const mergeResult = await pullTextFilesForSubmit(
+            workspaceInfo,
+            repo.orgId,
+            modificationPaths,
+          );
+
+          if (mergeResult.conflictMerges.length > 0) {
+            const conflictPaths = mergeResult.conflictMerges.join(", ");
+            throw new Error(
+              `${mergeResult.conflictMerges.length} text file(s) have merge conflicts after auto-merge. Please resolve the conflict markers and try again: ${conflictPaths}`,
+            );
+          }
+
+          await submit(
+            workspaceInfo,
+            repo.orgId,
+            input.message,
+            expandedModifications,
+            workspace.id,
+            input.keepCheckedOut ?? false,
+            undefined,
+            (step) => jobManager.updateStep(job.id, step),
+          );
+
+          jobManager.updateStep(job.id, "Reloading workspace state");
+          await manager.reloadWorkspaceState(workspace);
+
+          const submittedPaths = expandedModifications.map((m) =>
+            m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+          );
+          if (submittedPaths.length > 0) {
+            await manager.unmarkForAdd(workspace, submittedPaths);
+          }
+
+          jobManager.completeJob(job.id);
+        } catch (e: any) {
+          jobManager.failJob(job.id, e.message ?? String(e));
+        }
+      })();
+
+      return { jobId: job.id };
     }),
 
   checkout: publicProcedure
@@ -627,7 +629,7 @@ export const pendingRouter = router({
         filePaths: z.array(z.string()),
       }),
     )
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       const manager = ctx.manager;
       const workspaces = manager.workspaces.get(input.daemonId);
 
@@ -649,7 +651,7 @@ export const pendingRouter = router({
         p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
       );
 
-      return client.file.getActiveCheckoutsForFiles.query({
+      return client.file.getActiveCheckoutsForFiles.mutate({
         repoId: workspace.repoId,
         filePaths: normalizedPaths,
       });

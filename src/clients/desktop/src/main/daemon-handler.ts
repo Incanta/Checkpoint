@@ -38,6 +38,32 @@ import { promisify } from "util";
 
 const execAsync = promisify(exec);
 
+const JOB_POLL_INTERVAL_MS = 500;
+
+interface DaemonJobResult {
+  status: string;
+  result: any;
+  error: string | null;
+}
+
+async function pollDaemonJob(
+  client: Awaited<ReturnType<typeof CreateDaemonClient>>,
+  jobId: string,
+): Promise<DaemonJobResult> {
+  while (true) {
+    const job = await client.jobs.getStatus.query({ jobId });
+
+    if (job.status === "completed") {
+      return { status: job.status, result: job.result, error: null };
+    }
+    if (job.status === "failed") {
+      return { status: job.status, result: null, error: job.error };
+    }
+
+    await new Promise((r) => setTimeout(r, JOB_POLL_INTERVAL_MS));
+  }
+}
+
 /**
  * Reads diffContent from the fileHistoryDiff response, which now returns
  * cache file paths instead of raw content.
@@ -767,11 +793,22 @@ export default class DaemonHandler {
 
     try {
       const client = await CreateDaemonClient();
-      const mergeResult = await client.workspaces.sync.pull.mutate({
+      const { jobId } = await client.workspaces.sync.pull.mutate({
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         ...data,
       });
+
+      const jobResult = await pollDaemonJob(client, jobId);
+
+      if (jobResult.status === "failed") {
+        throw new Error(jobResult.error ?? "Pull failed");
+      }
+
+      const mergeResult = jobResult.result as {
+        cleanMerges: string[];
+        conflictMerges: string[];
+      } | null;
 
       // Refresh sync status after successful pull
       this.workspaceSyncStatus(true);
@@ -844,7 +881,13 @@ export default class DaemonHandler {
       };
       console.log("Submitting with data: ", payload);
       console.log(JSON.stringify(payload, null, 2));
-      await client.workspaces.pending.submit.mutate(payload);
+      const { jobId } = await client.workspaces.pending.submit.mutate(payload);
+
+      const jobResult = await pollDaemonJob(client, jobId);
+
+      if (jobResult.status === "failed") {
+        throw new Error(jobResult.error ?? "Submit failed");
+      }
 
       if (this.webContents) {
         ipcSend(this.webContents, "workspace:submit:success", null);
@@ -1938,7 +1981,7 @@ export default class DaemonHandler {
         // Check if the file is locked by another user
         if (data.checkForLock) {
           const checkouts =
-            await client.workspaces.pending.getActiveCheckoutsForFiles.query({
+            await client.workspaces.pending.getActiveCheckoutsForFiles.mutate({
               daemonId: currentUser.daemonId,
               workspaceId: currentWorkspace.id,
               filePaths: [data.path],

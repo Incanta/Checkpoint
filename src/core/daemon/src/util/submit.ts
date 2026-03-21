@@ -31,6 +31,7 @@ export async function submit(
   logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
     "longtail.log-level",
   ),
+  onStep?: (step: string) => void,
 ): Promise<void> {
   const user = await GetAuthConfigUser(workspace.daemonId);
 
@@ -112,6 +113,7 @@ export async function submit(
   const { status, result } = await pollHandle(handle, {
     onStep: (step) => {
       console.log(`[submit] Step: ${step}`);
+      onStep?.(step);
     },
   });
 
@@ -128,7 +130,7 @@ export async function submit(
 
     workspaceState.changelistNumber = result.changelistNumber;
 
-    const fileIds = await client.file.getFileIds.query({
+    const fileIds = await client.file.getFileIds.mutate({
       repoId: workspace.repoId,
       paths: modifications.map((mod) => mod.path),
     });

@@ -219,6 +219,50 @@ bool FCheckpointDaemonClient::MutateProcedure(
   return ParseTrpcResponse(ResponseBody, OutResult, OutError);
 }
 
+bool FCheckpointDaemonClient::PollJob(
+  const FString &JobId,
+  TSharedPtr<FJsonObject> &OutResult,
+  FString &OutError
+) {
+  TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
+  Input->SetStringField(TEXT("jobId"), JobId);
+
+  while (true) {
+    TSharedPtr<FJsonObject> StatusResult;
+    FString StatusError;
+    if (!QueryProcedure(TEXT("jobs.getStatus"), Input, StatusResult, StatusError)) {
+      OutError = FString::Printf(TEXT("Failed to poll job status: %s"), *StatusError);
+      return false;
+    }
+
+    if (!StatusResult.IsValid()) {
+      OutError = TEXT("Invalid job status response");
+      return false;
+    }
+
+    FString Status;
+    StatusResult->TryGetStringField(TEXT("status"), Status);
+
+    if (Status == TEXT("completed")) {
+      const TSharedPtr<FJsonObject> *ResultObj;
+      if (StatusResult->TryGetObjectField(TEXT("result"), ResultObj)) {
+        OutResult = *ResultObj;
+      }
+      return true;
+    }
+
+    if (Status == TEXT("failed")) {
+      StatusResult->TryGetStringField(TEXT("error"), OutError);
+      if (OutError.IsEmpty()) {
+        OutError = TEXT("Job failed with unknown error");
+      }
+      return false;
+    }
+
+    FPlatformProcess::Sleep(0.5f);
+  }
+}
+
 // ---- High-level API methods ----
 
 bool FCheckpointDaemonClient::GetUsers(
@@ -324,7 +368,7 @@ bool FCheckpointDaemonClient::GetActiveCheckouts(
   Input->SetArrayField(TEXT("filePaths"), PathsArray);
 
   TSharedPtr<FJsonObject> Result;
-  if (!QueryProcedure(
+  if (!MutateProcedure(
         TEXT("workspaces.getActiveCheckoutsForFiles"), Input, Result, OutError
       )) {
     return false;
@@ -397,8 +441,18 @@ bool FCheckpointDaemonClient::Submit(
   Input->SetBoolField(TEXT("keepCheckedOut"), bKeepCheckedOut);
 
   TSharedPtr<FJsonObject> Result;
-  // submit is implemented as a query in the daemon
-  return QueryProcedure(TEXT("workspaces.submit"), Input, Result, OutError);
+  if (!MutateProcedure(TEXT("workspaces.submit"), Input, Result, OutError)) {
+    return false;
+  }
+
+  FString JobId;
+  if (!Result.IsValid() || !Result->TryGetStringField(TEXT("jobId"), JobId)) {
+    OutError = TEXT("No job ID returned from submit");
+    return false;
+  }
+
+  TSharedPtr<FJsonObject> JobResult;
+  return PollJob(JobId, JobResult, OutError);
 }
 
 bool FCheckpointDaemonClient::Pull(
@@ -423,8 +477,18 @@ bool FCheckpointDaemonClient::Pull(
   }
 
   TSharedPtr<FJsonObject> Result;
-  // pull is implemented as a query in the daemon
-  return QueryProcedure(TEXT("workspaces.pull"), Input, Result, OutError);
+  if (!MutateProcedure(TEXT("workspaces.pull"), Input, Result, OutError)) {
+    return false;
+  }
+
+  FString JobId;
+  if (!Result.IsValid() || !Result->TryGetStringField(TEXT("jobId"), JobId)) {
+    OutError = TEXT("No job ID returned from pull");
+    return false;
+  }
+
+  TSharedPtr<FJsonObject> JobResult;
+  return PollJob(JobId, JobResult, OutError);
 }
 
 bool FCheckpointDaemonClient::GetHistory(
@@ -674,7 +738,7 @@ bool FCheckpointDaemonClient::Login(
   Input->SetStringField(TEXT("daemonId"), DaemonId);
 
   TSharedPtr<FJsonObject> Result;
-  if (!QueryProcedure(TEXT("auth.login"), Input, Result, OutError)) {
+  if (!MutateProcedure(TEXT("auth.login"), Input, Result, OutError)) {
     return false;
   }
 

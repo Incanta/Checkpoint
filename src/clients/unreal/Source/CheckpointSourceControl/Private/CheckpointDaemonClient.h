@@ -286,4 +286,17 @@ private:
 
   /** Serialize a JSON object to a compact string */
   static FString JsonToString(const TSharedPtr<FJsonObject> &JsonObj);
+
+  /**
+   * Poll a background job until it completes or fails.
+   * @param JobId   The job ID returned by submit/pull mutations
+   * @param OutResult  The job result data (if completed)
+   * @param OutError   Error message (if failed)
+   * @return true if job completed successfully
+   */
+  bool PollJob(
+    const FString &JobId,
+    TSharedPtr<FJsonObject> &OutResult,
+    FString &OutError
+  );
 };

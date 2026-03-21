@@ -36,7 +36,7 @@ export const changelistRouter = createTRPCRouter({
         numbers: z.array(z.number()),
       }),
     )
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       return await ctx.db.changelist.findMany({
