@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "build": "cd ../common && yarn build && cd ../server && tsgo -p .",
-    "start": "yarn build && NODE_CONFIG_ENV=dev node --inspect=0.0.0.0:9230 lib/index.js"
+    "start": "yarn build && NODE_CONFIG_ENV=default node --inspect=0.0.0.0:9230 lib/index.js"
   },
   "dependencies": {
     "@checkpointvcs/common": "workspace:*",

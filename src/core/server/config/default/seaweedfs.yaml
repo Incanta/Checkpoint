@@ -8,8 +8,8 @@ connection:
     port: 9333
     tls: false
   filer:
-    host: "filer"
-    port: 8888
+    host: "localhost"
+    port: 80
     tls: false
 
 jwt:

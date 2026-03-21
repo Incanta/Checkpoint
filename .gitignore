@@ -4,3 +4,4 @@ logs
 .yarn
 node_modules
 artifacts
+override.json

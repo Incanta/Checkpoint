@@ -1,0 +1,7 @@
+stub:
+  enabled: false
+
+connection:
+  filer:
+    host: "filer"
+    port: 8888
