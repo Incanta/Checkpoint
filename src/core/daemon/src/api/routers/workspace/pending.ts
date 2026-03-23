@@ -433,6 +433,7 @@ export const pendingRouter = router({
 
       // Fire-and-forget: run the submit in the background
       (async () => {
+        manager.beginVcsOperation(workspace.id);
         try {
           jobManager.updateStep(job.id, "Merging outdated text files");
 
@@ -473,6 +474,8 @@ export const pendingRouter = router({
           jobManager.completeJob(job.id);
         } catch (e: any) {
           jobManager.failJob(job.id, e.message ?? String(e));
+        } finally {
+          await manager.endVcsOperation(workspace.id);
         }
       })();
 

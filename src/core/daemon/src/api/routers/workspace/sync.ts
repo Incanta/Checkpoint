@@ -105,6 +105,7 @@ export const syncRouter = router({
 
       // Fire-and-forget: run the pull in the background
       (async () => {
+        manager.beginVcsOperation(workspace.id);
         try {
           const mergeResult = await pull(
             workspaceInfo,
@@ -129,6 +130,8 @@ export const syncRouter = router({
         } catch (e: any) {
           Logger.error(`Pull failed for workspace ${workspace.name}: ${e.message}`);
           jobManager.failJob(job.id, e.message ?? String(e));
+        } finally {
+          await manager.endVcsOperation(workspace.id);
         }
       })();
 

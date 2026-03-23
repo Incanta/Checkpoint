@@ -227,19 +227,24 @@ export const branchesRouter = router({
       // Pull to the target branch head
       const repo = await client.repo.getRepo.query({ id: workspace.repoId });
       if (repo) {
-        await pull(
-          {
-            id: workspace.id,
-            repoId: workspace.repoId,
-            branchName: input.branchName,
-            workspaceName: workspace.name,
-            localPath: workspace.localPath,
-            daemonId: workspace.daemonId,
-          },
-          repo.orgId,
-          null,
-          null,
-        );
+        manager.beginVcsOperation(workspace.id);
+        try {
+          await pull(
+            {
+              id: workspace.id,
+              repoId: workspace.repoId,
+              branchName: input.branchName,
+              workspaceName: workspace.name,
+              localPath: workspace.localPath,
+              daemonId: workspace.daemonId,
+            },
+            repo.orgId,
+            null,
+            null,
+          );
+        } finally {
+          await manager.endVcsOperation(workspace.id);
+        }
       }
 
       // Reload workspace state
@@ -388,19 +393,24 @@ export const branchesRouter = router({
       // Pull the merge CL into the workspace
       const repo = await client.repo.getRepo.query({ id: workspace.repoId });
       if (repo) {
-        await pull(
-          {
-            id: workspace.id,
-            repoId: workspace.repoId,
-            branchName: workspace.branchName,
-            workspaceName: workspace.name,
-            localPath: workspace.localPath,
-            daemonId: workspace.daemonId,
-          },
-          repo.orgId,
-          null,
-          null,
-        );
+        manager.beginVcsOperation(workspace.id);
+        try {
+          await pull(
+            {
+              id: workspace.id,
+              repoId: workspace.repoId,
+              branchName: workspace.branchName,
+              workspaceName: workspace.name,
+              localPath: workspace.localPath,
+              daemonId: workspace.daemonId,
+            },
+            repo.orgId,
+            null,
+            null,
+          );
+        } finally {
+          await manager.endVcsOperation(workspace.id);
+        }
       }
 
       // Reload workspace state

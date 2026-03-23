@@ -76,11 +76,29 @@ export class DaemonManager {
   /** Interval handle for sync polling */
   private syncPollInterval: ReturnType<typeof setInterval> | null = null;
 
+  /**
+   * Workspaces currently undergoing a VCS operation (pull/submit/merge).
+   * While set, the file watcher buffers events instead of marking files
+   * dirty so that mid-operation queries don't produce false pending changes.
+   */
+  private vcsOperationActive: Map<string, boolean> = new Map();
+
+  /**
+   * File-change events buffered during a VCS operation, keyed by workspace.id.
+   * After the operation ends these are replayed into {@link dirtyFiles} so
+   * legitimate user edits (e.g. editing file D while pulling A, B, C) are
+   * still detected on the next refresh.
+   */
+  private vcsBufferedEvents: Map<string, Set<string>> = new Map();
+
   /** Sync poll interval in milliseconds (5 minutes) */
   private static readonly SYNC_POLL_INTERVAL_MS = 5 * 60 * 1000;
 
   /** Max dirty files before falling back to full refresh */
   private static readonly INCREMENTAL_DIRTY_THRESHOLD = 5000;
+
+  /** Grace period (ms) after a VCS operation ends before re-enabling the watcher */
+  private static readonly VCS_GRACE_PERIOD_MS = 500;
 
   private constructor() {
     //
@@ -1288,6 +1306,20 @@ export class DaemonManager {
           return;
         }
 
+        // During VCS operations (pull/submit/merge) buffer events instead
+        // of marking dirty. This prevents mid-operation queries from seeing
+        // transient false pending-changes, while still capturing legitimate
+        // user edits that happen concurrently (e.g. editing file D while
+        // pulling files A, B, C). Buffered events are replayed in
+        // endVcsOperation() after the baseline state is reloaded.
+        if (this.vcsOperationActive.get(workspace.id)) {
+          const buffer = this.vcsBufferedEvents.get(workspace.id);
+          if (buffer) {
+            buffer.add(relativePath);
+          }
+          return;
+        }
+
         Logger.debug(
           `[DaemonManager] Detected change in workspace ${workspace.name} (${eventType} on ${relativePath})`,
         );
@@ -1401,6 +1433,89 @@ export class DaemonManager {
     state: WorkspaceState,
   ): Promise<void> {
     await saveWorkspaceState(workspace as any, state);
+  }
+
+  // ─── VCS Operation Guard ─────────────────────────────────────────
+
+  /**
+   * Begins buffering file-watcher events for a workspace while a VCS
+   * operation (pull, submit, merge) runs. Call this before the operation
+   * starts and pair it with {@link endVcsOperation} in a `finally` block.
+   */
+  public beginVcsOperation(workspaceId: string): void {
+    this.vcsOperationActive.set(workspaceId, true);
+    this.vcsBufferedEvents.set(workspaceId, new Set());
+    Logger.debug(
+      `[DaemonManager] VCS operation started for workspace ${workspaceId} — watcher events buffered`,
+    );
+  }
+
+  /**
+   * Re-enables the file watcher after a VCS operation completes.
+   *
+   * Waits a short grace period to let any in-flight `fs.watch()` events
+   * arrive in the buffer, then replays the buffered events into the
+   * dirty-files set. The next {@link refreshWorkspaceContents} call will
+   * run an incremental refresh against the **new** baseline state (loaded
+   * by `reloadWorkspaceState` during the VCS operation). VCS-caused file
+   * changes will match the new baseline and be filtered out automatically,
+   * while genuine user edits (e.g. editing an unrelated file during a pull)
+   * will be detected as actual pending changes.
+   */
+  public async endVcsOperation(workspaceId: string): Promise<void> {
+    // Wait for queued fs.watch() events to arrive in the buffer
+    await new Promise((resolve) =>
+      setTimeout(resolve, DaemonManager.VCS_GRACE_PERIOD_MS),
+    );
+
+    this.vcsOperationActive.set(workspaceId, false);
+
+    // Replay buffered events into dirtyFiles. reloadWorkspaceState()
+    // (called by the VCS operation before this method) already cleared
+    // dirtyFiles and loaded the updated baseline, so these events will
+    // be checked against the post-VCS state on the next refresh.
+    const buffered = this.vcsBufferedEvents.get(workspaceId);
+    if (buffered && buffered.size > 0) {
+      const dirty = this.dirtyFiles.get(workspaceId);
+      if (dirty) {
+        for (const p of buffered) {
+          dirty.add(p);
+        }
+      }
+
+      // Handle any ignore/hidden file changes that arrived during the
+      // VCS operation so the ignore cache stays current.
+      for (const relativePath of buffered) {
+        const baseName = path.basename(relativePath);
+        if (baseName === IGNORE_FILE || baseName === HIDDEN_FILE) {
+          const workspace = this.findWorkspaceById(workspaceId);
+          if (workspace) {
+            await this.handleIgnoreFileChange(workspace, relativePath);
+          }
+        }
+      }
+
+      Logger.debug(
+        `[DaemonManager] VCS operation ended for workspace ${workspaceId} — replayed ${buffered.size} buffered event(s)`,
+      );
+    } else {
+      Logger.debug(
+        `[DaemonManager] VCS operation ended for workspace ${workspaceId} — no buffered events`,
+      );
+    }
+
+    this.vcsBufferedEvents.delete(workspaceId);
+  }
+
+  /**
+   * Finds a workspace by its ID across all daemon entries.
+   */
+  private findWorkspaceById(workspaceId: string): Workspace | undefined {
+    for (const [, workspaceList] of this.workspaces) {
+      const found = workspaceList.find((w) => w.id === workspaceId);
+      if (found) return found;
+    }
+    return undefined;
   }
 
   // ─── Sync Status Polling ───────────────────────────────────────────
