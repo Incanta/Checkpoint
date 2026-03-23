@@ -69,19 +69,41 @@ set "SRC_DIR=%cd%"
 set "BUILD_DIR=%cd%\build"
 
 echo.
-echo === Configuring addon (%BUILD_TYPE%) ===
 
-REM Clean build directory
-if exist "!BUILD_DIR!" rmdir /s /q "!BUILD_DIR!"
-mkdir "!BUILD_DIR!"
+REM Support "clean" as second argument: build-msvc.bat [debug] [clean]
+if /i "%2"=="clean" (
+    echo === Cleaning build directory ===
+    if exist "!BUILD_DIR!" rmdir /s /q "!BUILD_DIR!"
+)
 
-REM Configure with NMake Makefiles
-cmake -S "!SRC_DIR!" -B "!BUILD_DIR!" -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=!BUILD_TYPE! -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_JS_INC="!NODE_INC!" -DCMAKE_JS_LIB="!NODE_LIB!" -DCMAKE_JS_SRC="!DELAY_LOAD_HOOK!" -DCMAKE_SHARED_LINKER_FLAGS="/DELAYLOAD:NODE.EXE" -DNODE_RUNTIME=node -DNODE_RUNTIMEVERSION=!NODE_VER! -DNODE_ARCH=x64
+if not exist "!BUILD_DIR!" mkdir "!BUILD_DIR!"
 
-if errorlevel 1 (
-    echo.
-    echo ERROR: CMake configure failed
-    exit /b 1
+REM Check if existing config uses a different generator (e.g. VS instead of NMake)
+set "NEED_CONFIGURE=0"
+if not exist "!BUILD_DIR!\CMakeCache.txt" (
+    set "NEED_CONFIGURE=1"
+) else (
+    findstr /C:"CMAKE_GENERATOR:INTERNAL=NMake Makefiles" "!BUILD_DIR!\CMakeCache.txt" >nul 2>&1
+    if errorlevel 1 (
+        echo Detected stale build config ^(wrong generator^) — reconfiguring...
+        rmdir /s /q "!BUILD_DIR!"
+        mkdir "!BUILD_DIR!"
+        set "NEED_CONFIGURE=1"
+    )
+)
+
+if "!NEED_CONFIGURE!"=="1" (
+    echo === Configuring addon ^(%BUILD_TYPE%^) ===
+    cmake -S "!SRC_DIR!" -B "!BUILD_DIR!" -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=!BUILD_TYPE! -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_JS_INC="!NODE_INC!" -DCMAKE_JS_LIB="!NODE_LIB!" -DCMAKE_JS_SRC="!DELAY_LOAD_HOOK!" -DCMAKE_SHARED_LINKER_FLAGS="/DELAYLOAD:NODE.EXE" -DNODE_RUNTIME=node -DNODE_RUNTIMEVERSION=!NODE_VER! -DNODE_ARCH=x64
+
+    if errorlevel 1 (
+        echo.
+        echo ERROR: CMake configure failed
+        exit /b 1
+    )
+) else (
+    echo === Using existing build configuration ^(%BUILD_TYPE%^) ===
+    echo    To reconfigure from scratch: build-msvc.bat [debug^|release] clean
 )
 
 echo.

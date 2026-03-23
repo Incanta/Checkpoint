@@ -12,6 +12,7 @@ project(longtail_addon)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # --------------------------------------------------------------------------
 # Node.js / node-addon-api setup
@@ -27,6 +28,42 @@ execute_process(
 )
 string(REPLACE "\"" "" NODE_ADDON_API_DIR ${NODE_ADDON_API_DIR})
 include_directories(${NODE_ADDON_API_DIR})
+
+# --------------------------------------------------------------------------
+# Longtail C library (built from source)
+# --------------------------------------------------------------------------
+
+add_subdirectory(
+  "${CMAKE_CURRENT_SOURCE_DIR}/../library"
+  "${CMAKE_CURRENT_BINARY_DIR}/longtail_library"
+)
+
+# --------------------------------------------------------------------------
+# libcurl (fetched and built from source)
+# --------------------------------------------------------------------------
+
+include(FetchContent)
+set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(HTTP_ONLY ON CACHE BOOL "" FORCE)
+
+if(WIN32)
+  set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
+  set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
+elseif(APPLE)
+  set(CURL_USE_SECTRANSPORT ON CACHE BOOL "" FORCE)
+  set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
+else()
+  set(CURL_USE_OPENSSL ON CACHE BOOL "" FORCE)
+  set(CURL_USE_SCHANNEL OFF CACHE BOOL "" FORCE)
+endif()
+
+FetchContent_Declare(
+  curl
+  GIT_REPOSITORY https://github.com/curl/curl.git
+  GIT_TAG curl-8_5_0
+)
+FetchContent_MakeAvailable(curl)
 
 # --------------------------------------------------------------------------
 # Wrapper source files — compiled directly into the addon
@@ -51,6 +88,7 @@ add_library(${PROJECT_NAME} SHARED
 target_compile_definitions(${PROJECT_NAME} PRIVATE
   NAPI_VERSION=8
   NODE_ADDON_API_DISABLE_DEPRECATED
+  CURL_STATICLIB
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -68,63 +106,26 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   "${WRAPPER_DIR}/src/util"
 )
 
-# Longtail C library headers
+# Longtail C library headers are provided transitively by the longtail
+# target (PUBLIC include dirs from add_subdirectory above).
+
+# libcurl headers (from FetchContent)
 target_include_directories(${PROJECT_NAME} PRIVATE
-  "${WRAPPER_DIR}/longtail/include/src"
-  "${WRAPPER_DIR}/longtail/include/lib"
+  "${curl_SOURCE_DIR}/include"
+  "${curl_BINARY_DIR}/include/curl"
 )
 
-# libcurl headers (from wrapper's CMake build — check msvc build first, then generic)
-if(EXISTS "${WRAPPER_DIR}/build-msvc/_deps/curl-src/include")
-  target_include_directories(${PROJECT_NAME} PRIVATE
-    "${WRAPPER_DIR}/build-msvc/_deps/curl-src/include"
-    "${WRAPPER_DIR}/build-msvc/_deps/curl-build/include/curl"
-  )
-elseif(EXISTS "${WRAPPER_DIR}/build/_deps/curl-src/include")
-  target_include_directories(${PROJECT_NAME} PRIVATE
-    "${WRAPPER_DIR}/build/_deps/curl-src/include"
-    "${WRAPPER_DIR}/build/_deps/curl-build/include/curl"
-  )
-else()
-  message(WARNING "libcurl headers not found — build the wrapper first")
-endif()
-
 # --------------------------------------------------------------------------
-# Link static libraries
+# Link libraries
 # --------------------------------------------------------------------------
 
-target_link_libraries(${PROJECT_NAME} ${CMAKE_JS_LIB})
+target_link_libraries(${PROJECT_NAME}
+  ${CMAKE_JS_LIB}
+  longtail
+  libcurl
+)
 
 if(WIN32)
-  set(LIB_DIR "${CMAKE_SOURCE_DIR}/libraries/windows")
-
-  # Static longtail C library
-  find_library(LONGTAIL_STATIC_LIB
-    NAMES longtail liblongtail
-    PATHS "${LIB_DIR}"
-    NO_DEFAULT_PATH
-  )
-  if(LONGTAIL_STATIC_LIB)
-    target_link_libraries(${PROJECT_NAME} ${LONGTAIL_STATIC_LIB})
-    message(STATUS "Found longtail static lib: ${LONGTAIL_STATIC_LIB}")
-  else()
-    message(FATAL_ERROR "longtail static library not found in ${LIB_DIR}")
-  endif()
-
-  # Static libcurl
-  find_library(CURL_STATIC_LIB
-    NAMES libcurl-d libcurl curl
-    PATHS "${LIB_DIR}"
-    NO_DEFAULT_PATH
-  )
-  if(CURL_STATIC_LIB)
-    target_link_libraries(${PROJECT_NAME} ${CURL_STATIC_LIB})
-    message(STATUS "Found curl static lib: ${CURL_STATIC_LIB}")
-  else()
-    message(FATAL_ERROR "libcurl static library not found in ${LIB_DIR}")
-  endif()
-
-  # Windows system libraries required by libcurl (Schannel) and longtail
   target_link_libraries(${PROJECT_NAME}
     ws2_32
     crypt32
@@ -134,25 +135,7 @@ if(WIN32)
     bcrypt
     delayimp
   )
-
-  target_compile_definitions(${PROJECT_NAME} PRIVATE
-    CURL_STATICLIB
-  )
-
 elseif(APPLE)
-  set(LIB_DIR "${CMAKE_SOURCE_DIR}/libraries/macos")
-
-  find_library(LONGTAIL_STATIC_LIB NAMES longtail liblongtail PATHS "${LIB_DIR}" NO_DEFAULT_PATH)
-  find_library(CURL_STATIC_LIB NAMES curl libcurl PATHS "${LIB_DIR}" NO_DEFAULT_PATH)
-
-  if(LONGTAIL_STATIC_LIB)
-    target_link_libraries(${PROJECT_NAME} ${LONGTAIL_STATIC_LIB})
-  endif()
-  if(CURL_STATIC_LIB)
-    target_link_libraries(${PROJECT_NAME} ${CURL_STATIC_LIB})
-  endif()
-
-  # macOS frameworks required by curl (Secure Transport TLS backend)
   find_library(SECURITY_FW Security)
   find_library(COREFOUNDATION_FW CoreFoundation)
   find_library(SYSTEMCONFIGURATION_FW SystemConfiguration)
@@ -161,25 +144,7 @@ elseif(APPLE)
     ${COREFOUNDATION_FW}
     ${SYSTEMCONFIGURATION_FW}
   )
-
-  target_compile_definitions(${PROJECT_NAME} PRIVATE CURL_STATICLIB)
-
 elseif(UNIX)
-  set(LIB_DIR "${CMAKE_SOURCE_DIR}/libraries/linux")
-
-  find_library(LONGTAIL_STATIC_LIB NAMES longtail liblongtail PATHS "${LIB_DIR}" NO_DEFAULT_PATH)
-  find_library(CURL_STATIC_LIB NAMES curl libcurl PATHS "${LIB_DIR}" NO_DEFAULT_PATH)
-
-  if(LONGTAIL_STATIC_LIB)
-    target_link_libraries(${PROJECT_NAME} ${LONGTAIL_STATIC_LIB})
-  endif()
-  if(CURL_STATIC_LIB)
-    target_link_libraries(${PROJECT_NAME} ${CURL_STATIC_LIB})
-  endif()
-
-  # OpenSSL required by curl on Linux
   find_package(OpenSSL REQUIRED)
   target_link_libraries(${PROJECT_NAME} OpenSSL::SSL OpenSSL::Crypto pthread dl)
-
-  target_compile_definitions(${PROJECT_NAME} PRIVATE CURL_STATICLIB)
 endif()

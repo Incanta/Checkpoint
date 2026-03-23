@@ -44,46 +44,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libssl-dev
 
       # ----------------------------------------------------------------
-      # Build longtail C static library
-      # ----------------------------------------------------------------
-
-      - name: Build longtail C library (Windows)
-        if: matrix.platform == 'win32'
-        shell: cmd
-        working-directory: src/longtail/library/static_lib
-        run: call build-and-copy-msvc.bat
-
-      - name: Build longtail C library (Unix)
-        if: matrix.platform != 'win32'
-        shell: bash
-        working-directory: src/longtail/library/static_lib
-        run: |
-          chmod +x build.sh build-and-copy.sh ../arch_helper.sh ../all_sources.sh
-          ./build-and-copy.sh ${{ matrix.arch }}
-
-      # ----------------------------------------------------------------
-      # Build wrapper (fetches + builds libcurl via CMake FetchContent)
-      # ----------------------------------------------------------------
-
-      - name: Build wrapper (Windows)
-        if: matrix.platform == 'win32'
-        shell: bash
-        working-directory: src/longtail/wrapper
-        run: ./full-build-msvc.sh
-
-      - name: Build wrapper (Unix)
-        if: matrix.platform != 'win32'
-        shell: bash
-        working-directory: src/longtail/wrapper
-        run: |
-          rm -rf build
-          mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
-          make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
-          ../copy.sh
-
-      # ----------------------------------------------------------------
       # Build native addon (.node)
+      # The addon CMakeLists.txt builds the longtail C library from
+      # source (add_subdirectory) and fetches libcurl (FetchContent).
       # ----------------------------------------------------------------
 
       - name: Prepare yarn
