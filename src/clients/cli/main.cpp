@@ -125,8 +125,8 @@ int main(int argc, char** argv) {
   argparse::ArgumentParser loginCmd("login");
   loginCmd.add_description("Authenticate with a Checkpoint server");
   loginCmd.add_argument("--endpoint", "-e")
-      .help("Server URL (e.g. https://app.checkpointvcs.com or http://localhost:3000)")
-      .default_value(std::string("http://localhost:3000"));
+      .help("Server URL (e.g. https://app.checkpointvcs.com or http://localhost:13000)")
+      .default_value(std::string("http://localhost:13000"));
   loginCmd.add_argument("--id")
       .help("Daemon ID for this credential (default: auto-generated)")
       .default_value(std::string(""));

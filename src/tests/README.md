@@ -6,9 +6,9 @@ Full system integration tests for Checkpoint.
 
 This package provides integration tests for the complete Checkpoint stack. Tests assume services are already running:
 
-- **App**: Next.js web application and tRPC API (port 3000)
-- **Daemon**: Background service for file monitoring and workspace management (port 3010)
-- **Server**: Bun server for chunk uploads and version submissions (port 3001)
+- **App**: Next.js web application and tRPC API (port 13000)
+- **Daemon**: Background service for file monitoring and workspace management (port 13010)
+- **Server**: Bun server for chunk uploads and version submissions (port 13001)
 
 ## Prerequisites
 
@@ -108,9 +108,9 @@ Default service ports:
 
 | Service | Default Port |
 | ------- | ------------ |
-| App     | 3000         |
-| Server  | 3001         |
-| Daemon  | 3010         |
+| App     | 13000        |
+| Server  | 13001        |
+| Daemon  | 13010        |
 
 Override ports when creating the environment:
 

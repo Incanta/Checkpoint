@@ -117,8 +117,8 @@ process.on("SIGINT", () => {
 
 // ── Main ─────────────────────────────────────────────────────────
 
-const APP_URL = "http://localhost:3000";
-const DAEMON_URL = "http://localhost:3010";
+const APP_URL = "http://localhost:13000";
+const DAEMON_URL = "http://localhost:13010";
 
 async function main() {
   // ----------------------------------------------------------------
@@ -131,7 +131,7 @@ async function main() {
   for (const [name, url] of [
     ["App", APP_URL],
     ["Daemon", daemonProbe],
-    ["Server", "http://localhost:3001"],
+    ["Server", "http://localhost:13001"],
   ]) {
     await retryFetch(url, {}, { retries: 30, delay: 2000 });
     console.log(`  ${name} is reachable`);

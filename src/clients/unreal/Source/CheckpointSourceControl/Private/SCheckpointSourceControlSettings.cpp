@@ -398,7 +398,7 @@ void SCheckpointSourceControlSettings::RefreshAccounts() {
   FString HomeDir = FPlatformProcess::UserHomeDir();
   FString DaemonJsonPath =
     FPaths::Combine(HomeDir, TEXT(".checkpoint"), TEXT("daemon.json"));
-  int32 Port = 3010;
+  int32 Port = 13010;
 
   TSharedPtr<FJsonObject> DaemonJson =
     FCheckpointSourceControlSettings::ReadJsonFile(DaemonJsonPath);

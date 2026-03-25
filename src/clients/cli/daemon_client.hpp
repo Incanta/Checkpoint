@@ -238,10 +238,10 @@ class DaemonClient {
       auto& err = parsed["error"];
       std::string message = "Daemon error";
       if (err.contains("json") && err["json"].is_object()) {
-        if (err["json"].contains("message")) {
+        if (err["json"].contains("message") && err["json"]["message"].is_string()) {
           message = err["json"]["message"].get<std::string>();
         }
-      } else if (err.contains("message")) {
+      } else if (err.contains("message") && err["message"].is_string()) {
         message = err["message"].get<std::string>();
       }
       // Include HTTP status for diagnostics (e.g. 400 = parse error, 500 = server error)

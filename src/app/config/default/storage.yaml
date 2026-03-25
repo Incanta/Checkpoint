@@ -5,7 +5,7 @@ signing-keys:
 
 token-expiration-seconds: 600
 
-backend-url: "http://localhost:3001"
+backend-url: "http://localhost:13001"
 
 filer-ui-enabled: false
-filer-url: "http://checkpoint.localhost"
+filer-url: "http://localhost"

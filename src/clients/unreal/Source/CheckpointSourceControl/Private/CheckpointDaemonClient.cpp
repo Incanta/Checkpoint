@@ -10,7 +10,7 @@
 #include "Interfaces/IHttpResponse.h"
 
 FCheckpointDaemonClient::FCheckpointDaemonClient() :
-  DaemonUrl(TEXT("http://127.0.0.1:3010")) {}
+  DaemonUrl(TEXT("http://127.0.0.1:13010")) {}
 
 void FCheckpointDaemonClient::SetDaemonUrl(const FString &InUrl) {
   DaemonUrl = InUrl;
@@ -220,9 +220,7 @@ bool FCheckpointDaemonClient::MutateProcedure(
 }
 
 bool FCheckpointDaemonClient::PollJob(
-  const FString &JobId,
-  TSharedPtr<FJsonObject> &OutResult,
-  FString &OutError
+  const FString &JobId, TSharedPtr<FJsonObject> &OutResult, FString &OutError
 ) {
   TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
   Input->SetStringField(TEXT("jobId"), JobId);
@@ -230,8 +228,11 @@ bool FCheckpointDaemonClient::PollJob(
   while (true) {
     TSharedPtr<FJsonObject> StatusResult;
     FString StatusError;
-    if (!QueryProcedure(TEXT("jobs.getStatus"), Input, StatusResult, StatusError)) {
-      OutError = FString::Printf(TEXT("Failed to poll job status: %s"), *StatusError);
+    if (!QueryProcedure(
+          TEXT("jobs.getStatus"), Input, StatusResult, StatusError
+        )) {
+      OutError =
+        FString::Printf(TEXT("Failed to poll job status: %s"), *StatusError);
       return false;
     }
 

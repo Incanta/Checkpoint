@@ -14,7 +14,7 @@ namespace fs = std::filesystem;
 
 /**
  * Reads the daemon port from ~/.checkpoint/daemon.json.
- * Falls back to default port 3010.
+ * Falls back to default port 13010.
  */
 inline int getDaemonPort() {
   std::string homeDir;
@@ -31,12 +31,12 @@ inline int getDaemonPort() {
 #endif
 
   if (homeDir.empty()) {
-    return 3010;  // default
+    return 13010;  // default
   }
 
   fs::path configPath = fs::path(homeDir) / ".checkpoint" / "daemon.json";
   if (!fs::exists(configPath)) {
-    return 3010;
+    return 13010;
   }
 
   try {
@@ -49,7 +49,7 @@ inline int getDaemonPort() {
     // Fall through to default
   }
 
-  return 3010;
+  return 13010;
 }
 
 /**

@@ -103,7 +103,9 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
     auto job = client.query("jobs.getStatus", input);
 
     std::string status = job.value("status", "");
-    std::string currentStep = job.value("currentStep", "");
+    std::string currentStep = (job.contains("currentStep") && job["currentStep"].is_string())
+        ? job["currentStep"].get<std::string>()
+        : "";
 
     if (!currentStep.empty() && currentStep != lastStep) {
       std::cout << color::dim() << "  " << currentStep << color::reset()
@@ -115,7 +117,10 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
       return {status, job.value("result", nlohmann::json(nullptr)), ""};
     }
     if (status == "failed") {
-      return {status, nullptr, job.value("error", "Unknown error")};
+      std::string errMsg = (job.contains("error") && job["error"].is_string())
+          ? job["error"].get<std::string>()
+          : "Unknown error";
+      return {status, nullptr, errMsg};
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));

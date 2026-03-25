@@ -17,7 +17,7 @@ class FCheckpointDaemonClient {
 public:
   FCheckpointDaemonClient();
 
-  /** Set the base daemon URL (e.g. http://127.0.0.1:3010) */
+  /** Set the base daemon URL (e.g. http://127.0.0.1:13010) */
   void SetDaemonUrl(const FString &InUrl);
 
   /**
@@ -295,8 +295,6 @@ private:
    * @return true if job completed successfully
    */
   bool PollJob(
-    const FString &JobId,
-    TSharedPtr<FJsonObject> &OutResult,
-    FString &OutError
+    const FString &JobId, TSharedPtr<FJsonObject> &OutResult, FString &OutError
   );
 };

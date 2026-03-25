@@ -57,7 +57,7 @@ cmake --build .
 
 ## How It Works
 
-The CLI communicates with the Checkpoint daemon via its tRPC HTTP API (default: `http://127.0.0.1:3010`). It auto-detects the workspace by walking up from the current directory to find a `.checkpoint/` directory.
+The CLI communicates with the Checkpoint daemon via its tRPC HTTP API (default: `http://127.0.0.1:13010`). It auto-detects the workspace by walking up from the current directory to find a `.checkpoint/` directory.
 
 ### Workspace Detection
 
@@ -65,7 +65,7 @@ Run any command from within a Checkpoint workspace directory. The CLI walks up t
 
 ### Daemon Configuration
 
-The daemon port is read from `~/.checkpoint/daemon.json` (key: `daemonPort`, default: `3010`).
+The daemon port is read from `~/.checkpoint/daemon.json` (key: `daemonPort`, default: `13010`).
 
 ## Platform Support
 

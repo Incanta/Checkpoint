@@ -9,7 +9,7 @@
 #include "Serialization/JsonSerializer.h"
 
 FCheckpointSourceControlSettings::FCheckpointSourceControlSettings() :
-  DaemonPort(3010), bConfigured(false) {}
+  DaemonPort(13010), bConfigured(false) {}
 
 FString FCheckpointSourceControlSettings::FindWorkspaceJson(
   const FString &StartDir

@@ -73,7 +73,7 @@ jobs:
           echo "Waiting for services to be reachable..."
 
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:3000 > /dev/null 2>&1; then
+            if curl -sf http://localhost:13000 > /dev/null 2>&1; then
               echo "App is reachable"
               break
             fi
@@ -82,8 +82,8 @@ jobs:
           done
 
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:3010 > /dev/null 2>&1 || \
-               curl -sf "http://localhost:3010/workspaces.ops.list.local?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22daemonId%22%3A%22probe%22%7D%7D%7D" > /dev/null 2>&1; then
+            if curl -sf http://localhost:13010 > /dev/null 2>&1 || \
+               curl -sf "http://localhost:13010/workspaces.ops.list.local?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22daemonId%22%3A%22probe%22%7D%7D%7D" > /dev/null 2>&1; then
               echo "Daemon is reachable"
               break
             fi
@@ -92,7 +92,7 @@ jobs:
           done
 
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:3001 > /dev/null 2>&1; then
+            if curl -sf http://localhost:13001 > /dev/null 2>&1; then
               echo "Server is reachable"
               break
             fi
@@ -117,7 +117,7 @@ jobs:
           DEV_LOGIN=""
           for attempt in $(seq 1 10); do
             HTTP_CODE=$(curl -s -o /tmp/devlogin_resp.json -w "%{http_code}" \
-              -X POST 'http://localhost:3000/api/trpc/auth.devLogin?batch=1' \
+              -X POST 'http://localhost:13000/api/trpc/auth.devLogin?batch=1' \
               -H 'Content-Type: application/json' \
               -d "{\"0\":{\"json\":{\"email\":\"ci-test@checkpoint.dev\",\"deviceCode\":\"$DAEMON_ID\",\"tokenName\":\"ci-token\"}}}")
 
@@ -160,7 +160,7 @@ jobs:
           {
             "users": {
               "$DAEMON_ID": {
-                "endpoint": "http://localhost:3000",
+                "endpoint": "http://localhost:13000",
                 "apiToken": "$API_TOKEN"
               }
             }
@@ -175,7 +175,7 @@ jobs:
           # on the first attempt from the CLI.
           for i in $(seq 1 10); do
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-              "http://localhost:3000/api/trpc/user.me?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D" \
+              "http://localhost:13000/api/trpc/user.me?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D" \
               -H "Authorization: Bearer $API_TOKEN")
             if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
               echo "user.me route warmed up (HTTP $HTTP_CODE)"
@@ -193,7 +193,7 @@ jobs:
         run: |
           TOKEN="${{ steps.auth.outputs.API_TOKEN }}"
 
-          ORG=$(curl -sf -X POST 'http://localhost:3000/api/trpc/org.createOrg?batch=1' \
+          ORG=$(curl -sf -X POST 'http://localhost:13000/api/trpc/org.createOrg?batch=1' \
             -H 'Content-Type: application/json' \
             -H "Authorization: Bearer $TOKEN" \
             -d '{"0":{"json":{"name":"ci-test-org"}}}')
@@ -216,7 +216,7 @@ jobs:
           TOKEN="${{ steps.auth.outputs.API_TOKEN }}"
           ORG_ID="${{ steps.org.outputs.ORG_ID }}"
 
-          REPO=$(curl -sf -X POST 'http://localhost:3000/api/trpc/repo.createRepo?batch=1' \
+          REPO=$(curl -sf -X POST 'http://localhost:13000/api/trpc/repo.createRepo?batch=1' \
             -H 'Content-Type: application/json' \
             -H "Authorization: Bearer $TOKEN" \
             -d "{\"0\":{\"json\":{\"name\":\"ci-test-repo\",\"orgId\":\"$ORG_ID\"}}}")
@@ -313,7 +313,7 @@ jobs:
           print(urllib.parse.quote(json.dumps(data)))
           ")
 
-          HISTORY=$(curl -sf "http://localhost:3000/api/trpc/changelist.getChangelists?batch=1&input=$INPUT" \
+          HISTORY=$(curl -sf "http://localhost:13000/api/trpc/changelist.getChangelists?batch=1&input=$INPUT" \
             -H "Authorization: Bearer $TOKEN")
 
           echo "Changelist history: $HISTORY"

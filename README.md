@@ -76,9 +76,9 @@ chk diff file           # Show diff for a file
 You can also run services individually if needed:
 
 ```bash
-cd src/app && yarn dev       # Next.js web app (port 3000)
-cd src/core && yarn daemon   # Local daemon (port 3010)
-cd src/core && yarn server   # Storage server (port 3001)
+cd src/app && yarn dev       # Next.js web app (port 13000)
+cd src/core && yarn daemon   # Local daemon (port 13010)
+cd src/core && yarn server   # Storage server (port 13001)
 ```
 
 ## Architecture
@@ -283,7 +283,7 @@ Created automatically on first run. Controls global daemon behavior:
       "path": "logs/daemon.log"
     }
   },
-  "daemonPort": 3010
+  "daemonPort": 13010
 }
 ```
 

@@ -10,25 +10,25 @@ import { v4 as uuidv4 } from "uuid";
 
 export interface TestEnvironmentConfig {
   /**
-   * Port for the Next.js app (default: 3000)
+   * Port for the Next.js app (default: 13000)
    */
   appPort?: number;
 
   /**
-   * Port for the Bun server (default: 3001)
+   * Port for the Bun server (default: 13001)
    */
   serverPort?: number;
 
   /**
-   * Port for the daemon (default: 3010)
+   * Port for the daemon (default: 13010)
    */
   daemonPort?: number;
 }
 
 const DEFAULT_CONFIG: Required<TestEnvironmentConfig> = {
-  appPort: 3000,
-  serverPort: 3001,
-  daemonPort: 3010,
+  appPort: 13000,
+  serverPort: 13001,
+  daemonPort: 13010,
 };
 
 export interface TestEnvironment {
