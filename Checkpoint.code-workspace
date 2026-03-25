@@ -17,6 +17,10 @@
       "path": "src/seaweedfs"
     },
     {
+      "name": "CLI",
+      "path": "src/clients/cli"
+    },
+    {
       "name": "Unreal",
       "path": "src/clients/unreal"
     },
