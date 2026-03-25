@@ -21,6 +21,7 @@
     "build:native:msvc:debug": "cmd /c build-msvc.bat debug",
     "build:ts": "tsc",
     "build": "yarn run build:native && yarn run build:ts",
+    "build:msvc": "yarn run build:native:msvc && yarn run build:ts",
     "clean": "cmake-js clean"
   },
   "devDependencies": {
