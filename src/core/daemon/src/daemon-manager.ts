@@ -936,6 +936,7 @@ export class DaemonManager {
 
     const trackedDirs = this.getTrackedDirSet(workspace.id);
     const ignoreCache = this.getIgnoreCache(workspace.id);
+    const markedForAdd = this.getMarkedForAdd(workspace.id);
 
     // Walk recursively, skipping ignored/hidden paths.
     // Untracked directories get a single directory entry instead of recursion.
@@ -971,7 +972,9 @@ export class DaemonManager {
                 type: FileType.Directory,
                 size: 0,
                 modifiedAt: 0,
-                status: FileStatus.Local,
+                status: markedForAdd.has(relativePath)
+                  ? FileStatus.Added
+                  : FileStatus.Local,
                 id: null,
                 changelist: null,
                 checkouts: [],
@@ -1003,9 +1006,6 @@ export class DaemonManager {
 
     // Track which baseline files we've seen (to detect deletions)
     const seenBaselineFiles = new Set<string>();
-
-    // Get the set of files marked for add
-    const markedForAdd = this.getMarkedForAdd(workspace.id);
 
     // Process all files found on disk
     const promises = diskFiles.map(async (f) => {
@@ -1175,7 +1175,9 @@ export class DaemonManager {
                   type: FileType.Directory,
                   size: 0,
                   modifiedAt: 0,
-                  status: FileStatus.Local,
+                  status: markedForAdd.has(relativePath)
+                    ? FileStatus.Added
+                    : FileStatus.Local,
                   id: null,
                   changelist: null,
                   checkouts: [],
