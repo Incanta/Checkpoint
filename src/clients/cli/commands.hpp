@@ -88,6 +88,75 @@ inline WorkspaceContext getWorkspaceContext() {
   return {std::move(client), std::move(ws), root};
 }
 
+// ─── Helper: get terminal width ──────────────────────────────────
+
+inline int getTerminalWidth() {
+#ifdef _WIN32
+  CONSOLE_SCREEN_BUFFER_INFO csbi;
+  if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
+    return csbi.srWindow.Right - csbi.srWindow.Left + 1;
+  }
+#else
+  struct winsize w;
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0) {
+    return w.ws_col;
+  }
+#endif
+  return 80;
+}
+
+// ─── Helper: format seconds as human-readable duration ───────────
+
+inline std::string formatDuration(int seconds) {
+  if (seconds < 60) return std::to_string(seconds) + "s";
+  int m = seconds / 60;
+  int s = seconds % 60;
+  if (m < 60) return std::to_string(m) + "m " + std::to_string(s) + "s";
+  int h = m / 60;
+  m = m % 60;
+  return std::to_string(h) + "h " + std::to_string(m) + "m";
+}
+
+// ─── Helper: render progress bar ─────────────────────────────────
+
+inline void renderProgressBar(
+    uint32_t done,
+    uint32_t total,
+    std::chrono::steady_clock::time_point stepStart) {
+  if (total == 0) return;
+
+  double fraction = static_cast<double>(done) / total;
+  int percent = static_cast<int>(fraction * 100);
+
+  // Calculate ETA
+  auto now = std::chrono::steady_clock::now();
+  double elapsed =
+      std::chrono::duration<double>(now - stepStart).count();
+  std::string eta;
+  if (done > 0 && done < total) {
+    double remaining = elapsed * (total - done) / done;
+    eta = " ETA: " + formatDuration(static_cast<int>(remaining + 0.5));
+  }
+
+  // Build the bar: "  [████████░░░░░░░░] 50% ETA: 12s"
+  int termWidth = getTerminalWidth();
+  std::string prefix = "  [";
+  std::string suffix = "] " + std::to_string(percent) + "%" + eta;
+  int barWidth = termWidth - static_cast<int>(prefix.size() + suffix.size()) - 1;
+  if (barWidth < 10) barWidth = 10;
+
+  int filled = static_cast<int>(fraction * barWidth);
+  if (filled > barWidth) filled = barWidth;
+
+  std::string bar(filled, '#');
+  bar += std::string(barWidth - filled, '-');
+
+  std::cout << "\r" << color::dim() << prefix << color::reset()
+            << color::green() << bar.substr(0, filled) << color::reset()
+            << color::dim() << bar.substr(filled) << suffix
+            << color::reset() << std::flush;
+}
+
 // ─── Helper: poll a background job until complete ────────────────
 
 struct JobResult {
@@ -98,6 +167,10 @@ struct JobResult {
 
 inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
   std::string lastStep;
+  uint32_t lastDone = 0;
+  auto stepStart = std::chrono::steady_clock::now();
+  bool hadProgress = false;
+
   while (true) {
     nlohmann::json input = {{"jobId", jobId}};
     auto job = client.query("jobs.getStatus", input);
@@ -108,15 +181,42 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
         : "";
 
     if (!currentStep.empty() && currentStep != lastStep) {
+      if (hadProgress) {
+        // Clear the progress line and move to next line
+        renderProgressBar(1, 1, stepStart);
+        std::cout << std::endl;
+        hadProgress = false;
+      }
       std::cout << color::dim() << "  " << currentStep << color::reset()
                 << std::endl;
       lastStep = currentStep;
+      lastDone = 0;
+      stepStart = std::chrono::steady_clock::now();
+    }
+
+    // Read progress fields
+    uint32_t progressTotal = 0;
+    uint32_t progressDone = 0;
+    if (job.contains("progress") && job["progress"].is_object()) {
+      progressTotal = job["progress"].value("total", (uint32_t)0);
+      progressDone = job["progress"].value("done", (uint32_t)0);
+    }
+
+    if (progressTotal > 0 && progressDone != lastDone) {
+      lastDone = progressDone;
+      hadProgress = true;
+      renderProgressBar(progressDone, progressTotal, stepStart);
     }
 
     if (status == "completed") {
+      if (hadProgress) {
+        renderProgressBar(1, 1, stepStart);
+        std::cout << std::endl;
+      }
       return {status, job.value("result", nlohmann::json(nullptr)), ""};
     }
     if (status == "failed") {
+      if (hadProgress) std::cout << std::endl;
       std::string errMsg = (job.contains("error") && job["error"].is_string())
           ? job["error"].get<std::string>()
           : "Unknown error";

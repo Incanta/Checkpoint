@@ -141,7 +141,7 @@ int PullSync(
     tags[i] = 0;
   }
 
-  struct Longtail_ProgressAPI* progress = MakeProgressAPI("Indexing version");
+  struct Longtail_ProgressAPI* progress = MakeProgressAPI("Indexing version", handle);
   if (progress) {
     err = Longtail_CreateVersionIndex(
         file_storage_api,
@@ -302,7 +302,7 @@ int PullSync(
 
   Longtail_Free(required_chunk_hashes);
 
-  progress = MakeProgressAPI("Updating version");
+  progress = MakeProgressAPI("Updating version", handle);
   if (progress) {
     err = Longtail_ChangeVersion(
         store_block_store_api,

@@ -32,6 +32,7 @@ export async function submit(
     "longtail.log-level",
   ),
   onStep?: (step: string) => void,
+  onProgress?: (step: string, done: number, total: number) => void,
 ): Promise<void> {
   const user = await GetAuthConfigUser(workspace.daemonId);
 
@@ -114,6 +115,9 @@ export async function submit(
     onStep: (step) => {
       console.log(`[submit] Step: ${step}`);
       onStep?.(step);
+    },
+    onProgress: (step, done, total) => {
+      onProgress?.(step, done, total);
     },
   });
 

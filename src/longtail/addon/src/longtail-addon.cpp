@@ -364,6 +364,8 @@ static Napi::Value NapiGetHandleStatus(const Napi::CallbackInfo& info) {
   result.Set("canceled", Napi::Boolean::New(env, handle->canceled != 0));
   result.Set("completed", Napi::Boolean::New(env, handle->completed != 0));
   result.Set("error", Napi::Number::New(env, handle->error));
+  result.Set("progressTotal", Napi::Number::New(env, handle->progressTotal));
+  result.Set("progressDone", Napi::Number::New(env, handle->progressDone));
 
   return result;
 }

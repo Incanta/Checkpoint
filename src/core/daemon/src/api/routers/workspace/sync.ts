@@ -114,6 +114,7 @@ export const syncRouter = router({
             input.filePaths,
             undefined,
             (step) => jobManager.updateStep(job.id, step),
+            (step, done, total) => jobManager.updateProgress(job.id, done, total),
           );
 
           Logger.debug(

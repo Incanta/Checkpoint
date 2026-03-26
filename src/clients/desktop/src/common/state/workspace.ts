@@ -120,6 +120,18 @@ export interface SyncStatusState {
 export const workspaceSyncStatusAtom = atom<SyncStatusState | null>(null);
 syncAtom(workspaceSyncStatusAtom, "workspaceSyncStatus");
 
+// Operation progress (submit/pull progress bar)
+export interface OperationProgress {
+  type: "submit" | "pull";
+  currentStep: string;
+  done: number;
+  total: number;
+  stepStartedAt: string | null;
+}
+
+export const operationProgressAtom = atom<OperationProgress | null>(null);
+syncAtom(operationProgressAtom, "operationProgress");
+
 // Sync preview types (detailed view of incoming changes)
 export interface SyncPreviewFileChange {
   fileId: string;

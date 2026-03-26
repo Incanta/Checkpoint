@@ -40,6 +40,8 @@ struct WrapperAsyncHandle {
   uint32_t completed;
   int32_t error;
   char result[2048];
+  uint32_t progressTotal;
+  uint32_t progressDone;
 };
 
 void SetHandleStep(WrapperAsyncHandle* handle, const char* step);

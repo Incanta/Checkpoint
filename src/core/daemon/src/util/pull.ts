@@ -43,6 +43,7 @@ export async function pull(
     "longtail.log-level",
   ),
   onStep?: (step: string) => void,
+  onProgress?: (step: string, done: number, total: number) => void,
 ): Promise<PullMergeResult> {
   const client = await CreateApiClientAuth(workspace.daemonId);
 
@@ -199,6 +200,9 @@ export async function pull(
       onStep: (step) => {
         lastStep = step;
         onStep?.(step);
+      },
+      onProgress: (step, done, total) => {
+        onProgress?.(step, done, total);
       },
     });
 

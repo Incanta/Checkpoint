@@ -5,6 +5,7 @@
 struct Progress {
   struct Longtail_ProgressAPI m_API;
   struct Longtail_ProgressAPI* m_RateLimitedProgressAPI;
+  WrapperAsyncHandle* m_Handle;
   const char* m_Task;
   uint32_t m_UpdateCount;
 };
@@ -14,4 +15,6 @@ void Progress_OnProgress(
     uint32_t total,
     uint32_t jobs_done);
 
-struct Longtail_ProgressAPI* MakeProgressAPI(const char* task);
+struct Longtail_ProgressAPI* MakeProgressAPI(
+    const char* task,
+    WrapperAsyncHandle* handle = nullptr);

@@ -1,9 +1,116 @@
 import { useAtomValue } from "jotai";
-import { workspaceSyncStatusAtom } from "../../common/state/workspace";
+import {
+  workspaceSyncStatusAtom,
+  operationProgressAtom,
+} from "../../common/state/workspace";
 import { ipc } from "../pages/ipc";
+
+function formatEta(stepStartedAt: string | null, done: number, total: number): string {
+  if (!stepStartedAt || done <= 0 || done >= total) return "";
+  const elapsed = (Date.now() - new Date(stepStartedAt).getTime()) / 1000;
+  const remaining = elapsed * (total - done) / done;
+  if (remaining < 60) return `${Math.round(remaining)}s`;
+  const m = Math.floor(remaining / 60);
+  const s = Math.round(remaining % 60);
+  return `${m}m ${s}s`;
+}
+
+function ProgressBar() {
+  const progress = useAtomValue(operationProgressAtom);
+  if (!progress) return null;
+
+  const { type, currentStep, done, total, stepStartedAt } = progress;
+  const fraction = total > 0 ? Math.min(done / total, 1) : 0;
+  const percent = Math.round(fraction * 100);
+  const eta = formatEta(stepStartedAt, done, total);
+  const label = type === "pull" ? "Pulling" : "Submitting";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "0.5rem",
+        fontSize: "0.75rem",
+        color: "#60A5FA",
+        padding: "0 0.5rem",
+        flex: 1,
+        minWidth: 0,
+      }}
+    >
+      {/* Spinner */}
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="12"
+        height="12"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{
+          flexShrink: 0,
+          animation: "spin 1s linear infinite",
+        }}
+      >
+        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+      </svg>
+
+      <span style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
+        {label}: {currentStep || "Starting..."}
+      </span>
+
+      {total > 0 && (
+        <>
+          {/* Progress bar */}
+          <div
+            style={{
+              flex: 1,
+              minWidth: "60px",
+              maxWidth: "180px",
+              height: "6px",
+              backgroundColor: "rgba(255,255,255,0.1)",
+              borderRadius: "3px",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${percent}%`,
+                height: "100%",
+                backgroundColor: "#60A5FA",
+                borderRadius: "3px",
+                transition: "width 0.3s ease",
+              }}
+            />
+          </div>
+
+          <span style={{ flexShrink: 0, whiteSpace: "nowrap", color: "#9CA3AF" }}>
+            {percent}%{eta ? ` (${eta})` : ""}
+          </span>
+        </>
+      )}
+
+      {/* Inject keyframes for spinner */}
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
 
 export default function SyncStatusBadge() {
   const syncStatus = useAtomValue(workspaceSyncStatusAtom);
+  const progress = useAtomValue(operationProgressAtom);
+
+  // Show progress bar when an operation is active
+  if (progress) {
+    return <ProgressBar />;
+  }
 
   const handleRefresh = () => {
     ipc.sendMessage("workspace:sync-status:refresh", null);

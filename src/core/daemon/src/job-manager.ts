@@ -3,12 +3,19 @@ import { randomUUID } from "crypto";
 export type JobType = "submit" | "pull";
 export type JobStatus = "pending" | "running" | "completed" | "failed";
 
+export interface JobProgress {
+  done: number;
+  total: number;
+}
+
 export interface Job {
   id: string;
   type: JobType;
   status: JobStatus;
   steps: string[];
   currentStep: string | null;
+  progress: JobProgress | null;
+  stepStartedAt: Date | null;
   result: unknown | null;
   error: string | null;
   createdAt: Date;
@@ -41,6 +48,8 @@ export class JobManager {
       status: "pending",
       steps: [],
       currentStep: null,
+      progress: null,
+      stepStartedAt: null,
       result: null,
       error: null,
       createdAt: new Date(),
@@ -56,6 +65,15 @@ export class JobManager {
     job.status = "running";
     job.currentStep = step;
     job.steps.push(step);
+    job.progress = null;
+    job.stepStartedAt = new Date();
+    job.updatedAt = new Date();
+  }
+
+  updateProgress(jobId: string, done: number, total: number): void {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+    job.progress = { done, total };
     job.updatedAt = new Date();
   }
 

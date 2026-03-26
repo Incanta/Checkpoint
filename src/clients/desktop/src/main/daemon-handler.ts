@@ -23,6 +23,7 @@ import {
   workspaceConflictsAtom,
   resolveConfirmSuppressedAtom,
   workspaceBranchesAtom,
+  operationProgressAtom,
 } from "../common/state/workspace";
 import { promises as fs, existsSync } from "fs";
 import path from "path";
@@ -49,9 +50,14 @@ interface DaemonJobResult {
 async function pollDaemonJob(
   client: Awaited<ReturnType<typeof CreateDaemonClient>>,
   jobId: string,
+  onProgress?: (job: any) => void,
 ): Promise<DaemonJobResult> {
   while (true) {
     const job = await client.jobs.getStatus.query({ jobId });
+
+    if (onProgress) {
+      onProgress(job);
+    }
 
     if (job.status === "completed") {
       return { status: job.status, result: job.result, error: null };
@@ -799,7 +805,17 @@ export default class DaemonHandler {
         ...data,
       });
 
-      const jobResult = await pollDaemonJob(client, jobId);
+      const jobResult = await pollDaemonJob(client, jobId, (job) => {
+        store.set(operationProgressAtom, {
+          type: "pull",
+          currentStep: job.currentStep ?? "",
+          done: job.progress?.done ?? 0,
+          total: job.progress?.total ?? 0,
+          stepStartedAt: job.stepStartedAt,
+        });
+      });
+
+      store.set(operationProgressAtom, null);
 
       if (jobResult.status === "failed") {
         throw new Error(jobResult.error ?? "Pull failed");
@@ -826,6 +842,7 @@ export default class DaemonHandler {
         });
       }
     } catch (error: any) {
+      store.set(operationProgressAtom, null);
       const message = error?.message || "An unknown error occurred during pull";
       if (message.includes("conflicting file")) {
         // Extract conflict paths from error message
@@ -883,7 +900,17 @@ export default class DaemonHandler {
       console.log(JSON.stringify(payload, null, 2));
       const { jobId } = await client.workspaces.pending.submit.mutate(payload);
 
-      const jobResult = await pollDaemonJob(client, jobId);
+      const jobResult = await pollDaemonJob(client, jobId, (job) => {
+        store.set(operationProgressAtom, {
+          type: "submit",
+          currentStep: job.currentStep ?? "",
+          done: job.progress?.done ?? 0,
+          total: job.progress?.total ?? 0,
+          stepStartedAt: job.stepStartedAt,
+        });
+      });
+
+      store.set(operationProgressAtom, null);
 
       if (jobResult.status === "failed") {
         throw new Error(jobResult.error ?? "Submit failed");
@@ -893,6 +920,7 @@ export default class DaemonHandler {
         ipcSend(this.webContents, "workspace:submit:success", null);
       }
     } catch (error: any) {
+      store.set(operationProgressAtom, null);
       const message =
         error?.message || "An unknown error occurred during submit";
       if (this.webContents) {

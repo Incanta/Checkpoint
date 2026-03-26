@@ -52,6 +52,8 @@ interface HandleStatus {
   canceled: boolean;
   completed: boolean;
   error: number;
+  progressTotal: number;
+  progressDone: number;
 }
 
 /** Opaque native handle — do not inspect directly */
@@ -227,6 +229,8 @@ export interface PollOptions {
   intervalMs?: number;
   /** Callback invoked on each step change */
   onStep?: (step: string) => void;
+  /** Callback invoked when progress changes within a step */
+  onProgress?: (step: string, done: number, total: number) => void;
 }
 
 /**
@@ -248,15 +252,30 @@ export async function pollHandle(
 ): Promise<{ status: HandleStatus; result: any }> {
   const intervalMs = options.intervalMs ?? 10;
   let lastStep = "";
+  let lastDone = 0;
 
   while (true) {
     const status = getHandleStatus(handle);
 
     if (status.currentStep !== lastStep) {
       lastStep = status.currentStep;
+      lastDone = 0;
       if (options.onStep) {
         options.onStep(status.currentStep);
       }
+    }
+
+    if (
+      options.onProgress &&
+      status.progressTotal > 0 &&
+      status.progressDone !== lastDone
+    ) {
+      lastDone = status.progressDone;
+      options.onProgress(
+        status.currentStep,
+        status.progressDone,
+        status.progressTotal,
+      );
     }
 
     if (status.completed) {

@@ -26,6 +26,8 @@ export const jobsRouter = router({
         status: job.status,
         steps: job.steps,
         currentStep: job.currentStep,
+        progress: job.progress,
+        stepStartedAt: job.stepStartedAt,
         result: job.result,
         error: job.error,
         createdAt: job.createdAt,

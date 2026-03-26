@@ -185,7 +185,7 @@ int32_t SubmitSync(
     return ECANCELED;
   }
 
-  struct Longtail_ProgressAPI* progress = MakeProgressAPI("Indexing version");
+  struct Longtail_ProgressAPI* progress = MakeProgressAPI("Indexing version", handle);
   if (progress) {
     SetHandleStep(handle, "Indexing version");
     err = Longtail_CreateVersionIndex(
@@ -282,7 +282,7 @@ int32_t SubmitSync(
 
   SetHandleStep(handle, "Creating store blocks");
 
-  progress = MakeProgressAPI("Writing blocks");
+  progress = MakeProgressAPI("Writing blocks", handle);
   if (progress) {
     err = Longtail_WriteContent(
         file_storage_api,
