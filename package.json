@@ -13,7 +13,7 @@
     "postinstall": "cd src/app && yarn db:types && yarn db:migrate:dev",
     "lint": "eslint src/app src/core src/clients/desktop",
     "lint:fix": "eslint src/app src/core src/clients/desktop --fix",
-    "build": "cd ../../app && yarn build:lib && cd ../core && yarn build",
+    "build": "cd src/app && yarn build:lib && cd ../core && yarn build",
     "dev": "node dev.js",
     "dev:agent": "node dev-agent.js",
     "desktop": "cd src/clients/desktop && yarn dev"
