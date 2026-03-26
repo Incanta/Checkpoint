@@ -7,11 +7,10 @@
     "src/core/daemon",
     "src/core/server",
     "src/core/common",
-    "src/clients/desktop",
-    "src/longtail/addon"
+    "src/clients/desktop"
   ],
   "scripts": {
-    "postinstall": "cd src/app && yarn db:types && yarn db:migrate:dev",
+    "postinstall": "cd src/app && yarn db:types && yarn db:migrate:dev && cd src/longtail/addon && yarn install",
     "lint": "eslint src/app src/core src/clients/desktop",
     "lint:fix": "eslint src/app src/core src/clients/desktop --fix",
     "build": "cd src/longtail/addon && yarn build:ts && cd ../../app && yarn build:lib && cd ../core && yarn build",
