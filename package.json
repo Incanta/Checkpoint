@@ -7,7 +7,8 @@
     "src/core/daemon",
     "src/core/server",
     "src/core/common",
-    "src/clients/desktop"
+    "src/clients/desktop",
+    "src/longtail/addon"
   ],
   "scripts": {
     "postinstall": "cd src/app && yarn db:types && yarn db:migrate:dev",
