@@ -173,6 +173,12 @@ elseif(LT_ARCH_X86)
   endif()
 endif()
 
+# Disable zstd x86-64 assembly.  The .S file marks symbols as .hidden, which
+# produces R_X86_64_PC32 relocations that the linker rejects when linking the
+# static archive into a shared object (.node addon).  The C fallback is used
+# instead — negligible performance difference for this workload.
+target_compile_definitions(longtail PRIVATE ZSTD_DISABLE_ASM)
+
 # Debug-mode assertions
 target_compile_definitions(longtail PRIVATE
   $<$<CONFIG:Debug>:LONGTAIL_ASSERTS>
