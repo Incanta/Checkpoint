@@ -264,36 +264,65 @@ inline int cmdAdd(const std::vector<std::string>& files) {
   };
   auto refreshResult = client.query("workspaces.pending.refresh", refreshInput);
 
-  // For Local (untracked) files, also tell daemon to markForAdd
+  std::vector<std::string> localPaths;
+  std::vector<std::string> expandedPaths;
+
   if (!refreshResult.is_null()) {
     PendingChanges pending;
     from_json(refreshResult, pending);
 
-    std::vector<std::string> localPaths;
     for (auto& p : resolvedPaths) {
       auto it = pending.files.find(p);
       if (it != pending.files.end()) {
+        // Direct match in pending changes
+        expandedPaths.push_back(p);
         auto status = static_cast<FileStatus>(it->second.status);
         if (status == FileStatus::Local) {
           localPaths.push_back(p);
         }
-      } else {
-        // The daemon collapses untracked directories into single
-        // directory-level entries.  When adding a file like "src/main.cpp",
-        // pending.files may only contain "src" (Directory, Local).
-        // Walk ancestor paths to detect this case.
-        std::string ancestor = p;
-        while (true) {
-          auto slash = ancestor.rfind('/');
-          if (slash == std::string::npos) break;
-          ancestor = ancestor.substr(0, slash);
-          auto ait = pending.files.find(ancestor);
-          if (ait != pending.files.end() &&
-              static_cast<FileStatus>(ait->second.status) == FileStatus::Local &&
-              static_cast<FileType>(ait->second.type) == FileType::Directory) {
-            localPaths.push_back(p);
-            break;
+        continue;
+      }
+
+      // No direct match — try expanding as a directory prefix.
+      // In a partially tracked directory, the daemon expands individual
+      // files instead of collapsing it.  Treat the path as a glob to
+      // find all pending children.  Fully untracked child directories
+      // appear as single Directory/Local entries (no further recursion needed).
+      std::string prefix = p;
+      if (!prefix.empty() && prefix.back() != '/') {
+        prefix += '/';
+      }
+
+      bool foundChildren = false;
+      for (auto& [filePath, fileInfo] : pending.files) {
+        if (filePath.compare(0, prefix.size(), prefix) == 0) {
+          foundChildren = true;
+          expandedPaths.push_back(filePath);
+          auto status = static_cast<FileStatus>(fileInfo.status);
+          if (status == FileStatus::Local) {
+            localPaths.push_back(filePath);
           }
+        }
+      }
+
+      if (foundChildren) {
+        continue;
+      }
+
+      // Still no match — the file may live inside a collapsed untracked
+      // directory.  Walk ancestor paths to detect this case.
+      expandedPaths.push_back(p);
+      std::string ancestor = p;
+      while (true) {
+        auto slash = ancestor.rfind('/');
+        if (slash == std::string::npos) break;
+        ancestor = ancestor.substr(0, slash);
+        auto ait = pending.files.find(ancestor);
+        if (ait != pending.files.end() &&
+            static_cast<FileStatus>(ait->second.status) == FileStatus::Local &&
+            static_cast<FileType>(ait->second.type) == FileType::Directory) {
+          localPaths.push_back(p);
+          break;
         }
       }
     }
@@ -306,15 +335,17 @@ inline int cmdAdd(const std::vector<std::string>& files) {
       };
       client.mutate("workspaces.pending.markForAdd", markInput);
     }
+  } else {
+    expandedPaths = resolvedPaths;
   }
 
-  // Add all paths to CLI staged.json
-  addStagedFiles(ctx.root, resolvedPaths);
+  // Add expanded paths to CLI staged.json
+  addStagedFiles(ctx.root, expandedPaths);
 
-  for (auto& path : resolvedPaths) {
+  for (auto& path : expandedPaths) {
     std::cout << color::green() << "  + " << path << color::reset() << std::endl;
   }
-  std::cout << resolvedPaths.size() << " file(s) staged." << std::endl;
+  std::cout << expandedPaths.size() << " file(s) staged." << std::endl;
 
   return 0;
 }
