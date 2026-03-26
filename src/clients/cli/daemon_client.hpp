@@ -158,8 +158,7 @@ class DaemonClient {
 
     if (res != CURLE_OK) {
       throw std::runtime_error(
-          "Failed to connect to daemon: " + std::string(curl_easy_strerror(res)) +
-          "\nIs the Checkpoint daemon running? Start it with: cd src/core && yarn daemon");
+          "Failed to connect to daemon at " + url + ": " + std::string(curl_easy_strerror(res)));
     }
 
     return parseResponse(response, httpCode);
@@ -197,8 +196,7 @@ class DaemonClient {
 
     if (res != CURLE_OK) {
       throw std::runtime_error(
-          "Failed to connect to daemon: " + std::string(curl_easy_strerror(res)) +
-          "\nIs the Checkpoint daemon running? Start it with: cd src/core && yarn daemon");
+          "Failed to connect to daemon at " + url + ": " + std::string(curl_easy_strerror(res)));
     }
 
     return parseResponse(response, httpCode);
