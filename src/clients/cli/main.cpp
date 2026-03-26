@@ -21,6 +21,7 @@
  *   login [--endpoint URL]        Authenticate with a Checkpoint server
  */
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <random>
@@ -31,6 +32,28 @@
 #include "commands.hpp"
 
 int main(int argc, char** argv) {
+  // Preprocess argv: expand "-N" shorthand to "--limit N" for the log command.
+  // e.g. `chk log -5` becomes `chk log --limit 5`
+  // Two-pass: collect strings first, then take pointers (avoids dangling from realloc).
+  std::vector<std::string> argStorage;
+  bool seenLog = false;
+  for (int i = 0; i < argc; ++i) {
+    std::string arg = argv[i];
+    if (i > 0 && arg == "log") seenLog = true;
+    if (seenLog && arg.size() >= 2 && arg[0] == '-' && arg[1] != '-' &&
+        std::all_of(arg.begin() + 1, arg.end(), ::isdigit)) {
+      argStorage.push_back("--limit");
+      argStorage.push_back(arg.substr(1));
+    } else {
+      argStorage.push_back(arg);
+    }
+  }
+  std::vector<char*> newArgv;
+  newArgv.reserve(argStorage.size());
+  for (auto& s : argStorage) newArgv.push_back(s.data());
+  argc = static_cast<int>(newArgv.size());
+  argv = newArgv.data();
+
   // Determine if running as "chk" alias
   std::string exeName = std::filesystem::path(argv[0]).stem().string();
   std::string programName = (exeName == "chk") ? "chk" : "checkpoint";
