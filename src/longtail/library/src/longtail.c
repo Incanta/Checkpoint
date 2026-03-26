@@ -1610,6 +1610,72 @@ int Longtail_GetFilesRecursively(
     return 0;
 }
 
+static uint64_t HashPathString(const char* path)
+{
+    uint64_t hash = 14695981039346656037ULL;
+    while (*path)
+    {
+        hash ^= (uint64_t)(unsigned char)*path++;
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+struct FilteredAddFile_Context {
+    struct Longtail_StorageAPI* m_StorageAPI;
+    uint32_t m_ReservedPathCount;
+    uint32_t m_ReservedPathSize;
+    uint32_t m_RootPathLength;
+    struct Longtail_FileInfos* m_FileInfos;
+    struct Longtail_LookupTable* m_PathLUT;
+    const char* m_NameData;
+    const uint32_t* m_NameOffsets;
+};
+
+static int FilteredAddFile(void* context, const char* root_path, const char* asset_path, const struct Longtail_StorageAPI_EntryProperties* properties)
+{
+#if defined(LONGTAIL_ASSERTS)
+    MAKE_LOG_CONTEXT_FIELDS(ctx)
+        LONGTAIL_LOGFIELD(context, "%p"),
+        LONGTAIL_LOGFIELD(root_path, "%s"),
+        LONGTAIL_LOGFIELD(asset_path, "%s"),
+        LONGTAIL_LOGFIELD(properties, "%p")
+    MAKE_LOG_CONTEXT_WITH_FIELDS(ctx, 0, LONGTAIL_LOG_LEVEL_OFF)
+#else
+    struct Longtail_LogContextFmt_Private* ctx = 0;
+#endif // defined(LONGTAIL_ASSERTS)
+
+    LONGTAIL_FATAL_ASSERT(ctx, context != 0, return EINVAL)
+    LONGTAIL_FATAL_ASSERT(ctx, properties != 0, return EINVAL)
+
+    if (properties->m_IsDir)
+    {
+        return 0;
+    }
+
+    struct FilteredAddFile_Context* paths_context = (struct FilteredAddFile_Context*)context;
+    uint64_t path_hash = HashPathString(asset_path);
+    uint32_t* index_ptr = LongtailPrivate_LookupTable_Get(paths_context->m_PathLUT, path_hash);
+    if (!index_ptr)
+    {
+        return 0;
+    }
+
+    // Verify string match to handle hash collisions
+    const char* version_path = &paths_context->m_NameData[paths_context->m_NameOffsets[*index_ptr]];
+    if (strcmp(asset_path, version_path) != 0)
+    {
+        return 0;
+    }
+
+    int err = AppendPath(&paths_context->m_FileInfos, asset_path, properties->m_Size, properties->m_Permissions, &paths_context->m_ReservedPathCount, &paths_context->m_ReservedPathSize, 1024, 1024 * 32);
+    if (err)
+    {
+        LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "AppendPath() failed with %d", err)
+    }
+    return err;
+}
+
 int Longtail_GetFilesFilteredByVersionIndex(
     struct Longtail_StorageAPI* storage_api,
     struct Longtail_VersionIndex* version_index,
@@ -1632,77 +1698,86 @@ int Longtail_GetFilesFilteredByVersionIndex(
   LONGTAIL_VALIDATE_INPUT(ctx, root_path != 0, return EINVAL)
   LONGTAIL_VALIDATE_INPUT(ctx, out_file_infos != 0, return EINVAL)
 
-  const uint32_t default_path_count = *version_index->m_AssetCount;
+  const uint32_t asset_count = *version_index->m_AssetCount;
+
+  // Count non-directory assets for lookup table sizing
+  uint32_t file_count = 0;
+  for (uint32_t i = 0; i < asset_count; ++i)
+  {
+      const char* path = &version_index->m_NameData[version_index->m_NameOffsets[i]];
+      if (!IsDirPath(path))
+      {
+          ++file_count;
+      }
+  }
+
+  if (file_count == 0)
+  {
+      *out_file_infos = CreateFileInfos(0, 0);
+      if (!*out_file_infos)
+      {
+          LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "CreateFileInfos() failed with %d", ENOMEM)
+          return ENOMEM;
+      }
+      return 0;
+  }
+
+  // Build hash lookup table of version index file paths
+  size_t lut_size = LongtailPrivate_LookupTable_GetSize(file_count);
+  void* lut_mem = Longtail_Alloc("GetFilesFilteredByVersionIndex", lut_size);
+  if (!lut_mem)
+  {
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "Longtail_Alloc() failed with %d", ENOMEM)
+      return ENOMEM;
+  }
+  struct Longtail_LookupTable* path_lut = LongtailPrivate_LookupTable_Create(lut_mem, file_count, 0);
+
+  for (uint32_t i = 0; i < asset_count; ++i)
+  {
+      const char* path = &version_index->m_NameData[version_index->m_NameOffsets[i]];
+      if (!IsDirPath(path))
+      {
+          uint64_t hash = HashPathString(path);
+          LongtailPrivate_LookupTable_Put(path_lut, hash, i);
+      }
+  }
+
+  const uint32_t default_path_count = file_count;
   const uint32_t default_path_data_size = default_path_count * 128;
 
   struct Longtail_FileInfos* file_infos = CreateFileInfos(default_path_count, default_path_data_size);
   if (!file_infos)
   {
       LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "CreateFileInfos() failed with %d", ENOMEM)
+      Longtail_Free(lut_mem);
       return ENOMEM;
   }
-  struct AddFile_Context context = {storage_api, default_path_count, default_path_data_size, (uint32_t)(strlen(root_path)), file_infos};
+
+  struct FilteredAddFile_Context context = {
+      storage_api,
+      default_path_count,
+      default_path_data_size,
+      (uint32_t)(strlen(root_path)),
+      file_infos,
+      path_lut,
+      version_index->m_NameData,
+      version_index->m_NameOffsets
+  };
   file_infos = 0;
 
-  int err = 0;
-  for (int i = 0; i < *version_index->m_AssetCount; ++i)
+  // Recursive directory scan: uses FindFirstFile/FindNextFile on Windows which
+  // retrieves size+permissions from cached WIN32_FIND_DATAW with no extra syscalls.
+  // This replaces the old per-file OpenReadFile loop which was extremely slow for
+  // files in non-existent directories (CreateFileW retry loop with Sleep).
+  int err = RecurseTree(storage_api, 0, optional_cancel_api, optional_cancel_token, root_path, FilteredAddFile, &context);
+
+  Longtail_Free(lut_mem);
+
+  if (err)
   {
-      uint32_t name_offset = version_index->m_NameOffsets[i];
-      const char* asset_path = version_index->m_NameData + name_offset;
-      const char* full_path = storage_api->ConcatPath(storage_api, root_path, asset_path);
-      if (IsDirPath(full_path))
-      {
-          continue;
-      }
-
-      Longtail_StorageAPI_HOpenFile file = 0;
-      err = storage_api->OpenReadFile(storage_api, full_path, &file);
-      if (err)
-      {
-          // file not found (new in this version index), continue
-          continue;
-      }
-
-      uint64_t file_size = 0;
-      err = storage_api->GetSize(storage_api, file, &file_size);
-      if (err)
-      {
-          LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_WARNING, "storage_api->GetSize() failed with %d", err)
-          storage_api->CloseFile(storage_api, file);
-          Longtail_Free(context.m_FileInfos);
-          return err;
-      }
-
-      uint16_t file_permissions = 0;
-      err = storage_api->GetPermissions(storage_api, full_path, &file_permissions);
-      if (err)
-      {
-          LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_WARNING, "storage_api->GetPermissions() failed with %d", err)
-          storage_api->CloseFile(storage_api, file);
-          Longtail_Free(context.m_FileInfos);
-          return err;
-      }
-
-      struct Longtail_StorageAPI_EntryProperties properties;
-      properties.m_Name = asset_path;
-      properties.m_IsDir = 0;
-      properties.m_Size = file_size;
-      properties.m_Permissions = file_permissions;
-
-      err = AddFile(
-        &context,
-        root_path,
-        asset_path,
-        &properties
-      );
-      if (err)
-      {
-          LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "AppendPath() failed with %d", err)
-          storage_api->CloseFile(storage_api, file);
-          Longtail_Free(context.m_FileInfos);
-          return err;
-      }
-      storage_api->CloseFile(storage_api, file);
+      LONGTAIL_LOG(ctx, (err == ECANCELED) ? LONGTAIL_LOG_LEVEL_DEBUG : LONGTAIL_LOG_LEVEL_ERROR, "RecurseTree() failed with %d", err)
+      Longtail_Free(context.m_FileInfos);
+      return err;
   }
 
   *out_file_infos = context.m_FileInfos;

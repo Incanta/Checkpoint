@@ -28,7 +28,7 @@ int32_t SubmitSync(
     const Checkpoint::Modification* Modifications,
     WrapperAsyncHandle* handle) {
   struct Longtail_HashRegistryAPI* hash_registry = Longtail_CreateFullHashRegistry();
-  struct Longtail_JobAPI* job_api = Longtail_CreateBikeshedJobAPI(1, 0);
+  struct Longtail_JobAPI* job_api = Longtail_CreateBikeshedJobAPI(Longtail_GetCPUCount(), 0);
   struct Longtail_CompressionRegistryAPI* compression_registry = Longtail_CreateFullCompressionRegistry();
 
   struct Longtail_StorageAPI* file_storage_api = Longtail_CreateFSStorageAPI();

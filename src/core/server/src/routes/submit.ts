@@ -53,7 +53,10 @@ interface RequestResponse {
   number: number;
 }
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fieldSize: 200 * 1024 * 1024 },
+});
 
 const DIR_MODE_BIT = 0x80000000;
 
