@@ -5,6 +5,7 @@ import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { getUserAndRepoWithAccess } from "../auth-utils";
+import { recordActivity } from "../activity";
 
 const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -22,6 +23,13 @@ export const storageRouter = createTRPCRouter({
         input.repoId,
         input.write ? "WRITE" : "READ",
       );
+
+      // Record activity for billing (fire-and-forget)
+      void recordActivity(ctx.db, {
+        userId: ctx.session.user.id,
+        orgId: repo.orgId,
+        type: input.write ? "write" : "read",
+      });
 
       const token = njwt.create(
         {

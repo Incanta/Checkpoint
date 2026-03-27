@@ -16,6 +16,7 @@ import {
   assertWorkspaceOwnership,
   getUserAndRepoWithAccess,
 } from "../auth-utils";
+import { recordActivity } from "../activity";
 
 const BINARY_EXTENSIONS = new Set([
   ".uasset",
@@ -219,7 +220,7 @@ export const fileRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
       await assertWorkspaceOwnership(ctx, input.workspaceId);
 
       const normalizedPath = input.filePath.replaceAll("\\", "/");
@@ -282,6 +283,13 @@ export const fileRouter = createTRPCRouter({
           workspaceId: input.workspaceId,
           locked: input.locked,
         },
+      });
+
+      // Record write activity for billing (fire-and-forget)
+      void recordActivity(ctx.db, {
+        userId: ctx.session.user.id,
+        orgId: repo.orgId,
+        type: "write",
       });
 
       return checkout;

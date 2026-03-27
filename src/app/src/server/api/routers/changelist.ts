@@ -7,6 +7,7 @@ import {
   assertWorkspaceOwnership,
   getUserAndRepoWithAccess,
 } from "../auth-utils";
+import { recordActivity } from "../activity";
 
 export const changelistRouter = createTRPCRouter({
   getChangelist: protectedProcedure
@@ -243,7 +244,7 @@ export const changelistRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
       await assertWorkspaceOwnership(ctx, input.workspaceId);
 
       // Check for locked files by other users
@@ -424,6 +425,13 @@ export const changelistRouter = createTRPCRouter({
           },
         });
       }
+
+      // Record write activity for billing (fire-and-forget)
+      void recordActivity(ctx.db, {
+        userId: ctx.session.user.id,
+        orgId: repo.orgId,
+        type: "write",
+      });
 
       return {
         id: changelist.id,

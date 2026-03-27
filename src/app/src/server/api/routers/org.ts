@@ -249,4 +249,65 @@ export const orgRouter = createTRPCRouter({
 
       return newOrgUser;
     }),
+
+  getOrgActivity: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string(),
+        year: z.number().optional(),
+        month: z.number().min(1).max(12).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      // Verify user is a member of the org
+      const orgUser = await ctx.db.orgUser.findFirst({
+        where: {
+          orgId: input.orgId,
+          userId: ctx.session.user.id,
+        },
+      });
+
+      if (!orgUser) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You do not have access to this organization",
+        });
+      }
+
+      const now = new Date();
+      const year = input.year ?? now.getUTCFullYear();
+      const month = input.month ?? now.getUTCMonth() + 1;
+
+      const activities = await ctx.db.orgUserActivity.findMany({
+        where: {
+          orgId: input.orgId,
+          year,
+          month,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              image: true,
+            },
+          },
+        },
+        orderBy: [
+          { writeCount: "desc" },
+          { readCount: "desc" },
+        ],
+      });
+
+      const summary = {
+        year,
+        month,
+        totalActiveWriteUsers: activities.filter((a) => a.writeCount > 0).length,
+        totalActiveReadUsers: activities.filter((a) => a.readCount > 0 && a.writeCount === 0).length,
+        totalActiveUsers: activities.length,
+      };
+
+      return { activities, summary };
+    }),
 });
