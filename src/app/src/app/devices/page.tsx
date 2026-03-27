@@ -3,6 +3,9 @@ import Link from "next/link";
 import { getSession } from "~/server/auth";
 import { LinkDeviceForm } from "./_components/link-device-form";
 import { DevicesTable } from "./_components/devices-table";
+import { type Metadata } from "next";
+
+export const metadata: Metadata = { title: "Devices · Checkpoint VCS" };
 
 export default async function DevicesPage() {
   const session = await getSession();

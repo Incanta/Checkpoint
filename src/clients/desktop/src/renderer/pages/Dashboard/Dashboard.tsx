@@ -1,3 +1,4 @@
+import { Avatar } from "primereact/avatar";
 import { Splitter, SplitterPanel } from "primereact/splitter";
 import Button from "../../components/Button";
 import { Dialog } from "primereact/dialog";
@@ -116,7 +117,27 @@ export default function Dashboard(): React.ReactElement {
   return (
     <div>
       <div className="p-[1.5rem] grid grid-rows-[2.5rem_calc(100vh-2.5rem-3rem-30px)] gap-4">
-        <div className="row-span-1">
+        <div className="row-span-1 flex items-center gap-2">
+          {currentUser?.details && (
+            <Avatar
+              image={currentUser.details.image ?? undefined}
+              label={
+                currentUser.details.image
+                  ? undefined
+                  : (currentUser.details.name ?? currentUser.details.email ?? "?")
+                      .charAt(0)
+                      .toUpperCase()
+              }
+              shape="circle"
+              size="normal"
+              style={{
+                backgroundColor: currentUser.details.image
+                  ? "transparent"
+                  : "#4b5563",
+                color: "#fff",
+              }}
+            />
+          )}
           <Dropdown
             value={currentUser?.details?.id || null}
             options={users

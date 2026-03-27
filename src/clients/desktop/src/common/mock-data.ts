@@ -17,6 +17,7 @@ export namespace MockedData {
         email: "user@gmail.com",
         username: "user1",
         name: "User One",
+        image: null,
       },
     },
   ];

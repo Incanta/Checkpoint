@@ -2,6 +2,9 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSession } from "~/server/auth";
 import { LabelsView } from "./_components/labels-view";
+import { type Metadata } from "next";
+
+export const metadata: Metadata = { title: "Labels · Checkpoint VCS" };
 
 export default async function LabelsPage({
   searchParams,

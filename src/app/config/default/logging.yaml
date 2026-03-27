@@ -18,6 +18,8 @@ prettify:
 # order value will also be printed. Custom levels can be added in packages/common/src/util/logging.ts
 level: "info"
 
+longtail-level: "off"
+
 log-file:
   # This will also log to a file in addition to stdout
   enabled: false

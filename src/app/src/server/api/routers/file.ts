@@ -1,5 +1,14 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import config from "@incanta/config";
+import njwt from "njwt";
+import path from "path";
+import {
+  readFileFromVersionAsync,
+  pollReadFileHandle,
+  freeReadFileHandle,
+  GetLogLevel,
+} from "@checkpointvcs/longtail-addon";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { RepoAccess, type Prisma } from "@prisma/client";
@@ -7,6 +16,62 @@ import {
   assertWorkspaceOwnership,
   getUserAndRepoWithAccess,
 } from "../auth-utils";
+
+const BINARY_EXTENSIONS = new Set([
+  ".uasset",
+  ".umap",
+  ".ubulk",
+  ".utxt",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".bmp",
+  ".tga",
+  ".exr",
+  ".hdr",
+  ".dds",
+  ".psd",
+  ".tif",
+  ".tiff",
+  ".gif",
+  ".ico",
+  ".svg",
+  ".mp3",
+  ".wav",
+  ".ogg",
+  ".mp4",
+  ".avi",
+  ".mov",
+  ".wmv",
+  ".fbx",
+  ".obj",
+  ".abc",
+  ".gltf",
+  ".glb",
+  ".blend",
+  ".3ds",
+  ".bnk",
+  ".wem",
+  ".zip",
+  ".rar",
+  ".7z",
+  ".tar",
+  ".gz",
+  ".dll",
+  ".so",
+  ".dylib",
+  ".exe",
+  ".bin",
+  ".dat",
+  ".db",
+  ".pdf",
+]);
+
+function isBinaryFile(filePath: string): boolean {
+  return BINARY_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+const MAX_TEXT_SIZE = 5 * 1024 * 1024; // 5 MB text limit
 
 export const fileRouter = createTRPCRouter({
   getFiles: protectedProcedure
@@ -339,5 +404,215 @@ export const fileRouter = createTRPCRouter({
           user: fc.changelist.user,
         },
       }));
+    }),
+
+  listFolder: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        changelistNumber: z.number(),
+        folderPath: z.string().default(""),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
+
+      const changelist = await ctx.db.changelist.findUnique({
+        where: {
+          repoId_number: {
+            repoId: input.repoId,
+            number: input.changelistNumber,
+          },
+        },
+        select: { stateTree: true },
+      });
+
+      if (!changelist) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Changelist not found",
+        });
+      }
+
+      const stateTree = changelist.stateTree as Record<string, number>;
+      const aliveFileIds = new Set(Object.keys(stateTree));
+
+      // Get all files for this repo (only id + path for efficiency)
+      const allFiles = await ctx.db.file.findMany({
+        where: { repoId: input.repoId },
+        select: { id: true, path: true },
+      });
+
+      // Normalize folderPath: ensure it ends with "/" if non-empty
+      const prefix =
+        input.folderPath === ""
+          ? ""
+          : input.folderPath.endsWith("/")
+            ? input.folderPath
+            : input.folderPath + "/";
+
+      const folders = new Set<string>();
+      const files: { name: string; path: string; lastCl: number }[] = [];
+      let totalFileCount = 0;
+
+      for (const file of allFiles) {
+        if (!aliveFileIds.has(file.id)) continue;
+        totalFileCount++;
+
+        // Check if this file is under the requested folder
+        if (!file.path.startsWith(prefix)) continue;
+
+        const remainder = file.path.slice(prefix.length);
+        const slashIndex = remainder.indexOf("/");
+
+        if (slashIndex === -1) {
+          // Direct child file
+          files.push({
+            name: remainder,
+            path: file.path,
+            lastCl: stateTree[file.id]!,
+          });
+        } else {
+          // Subfolder — collect unique folder name
+          folders.add(remainder.slice(0, slashIndex));
+        }
+      }
+
+      return {
+        folders: [...folders].sort((a, b) => a.localeCompare(b)),
+        files: files.sort((a, b) => a.name.localeCompare(b.name)),
+        totalFileCount,
+      };
+    }),
+
+  readFileContent: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        changelistNumber: z.number(),
+        filePath: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.READ,
+      );
+
+      // find the most recent FileChange prior to the requested CL for this file to get the file ID
+      const fileChange = await ctx.db.fileChange.findFirst({
+        where: {
+          repoId: input.repoId,
+          changelistNumber: {
+            lte: input.changelistNumber,
+          },
+          file: {
+            path: input.filePath,
+          },
+        },
+        orderBy: {
+          changelistNumber: "desc",
+        },
+        include: {
+          changelist: true,
+        },
+      });
+
+      if (!fileChange) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "File not found in changelist history",
+        });
+      }
+
+      if (!fileChange.changelist?.versionIndex) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Changelist or version index not found",
+        });
+      }
+
+      const binary = isBinaryFile(input.filePath);
+
+      // For binary files, return metadata only (no content)
+      if (binary) {
+        return { content: null, isBinary: true, size: 0 };
+      }
+
+      const remoteBasePath = `/${repo.orgId}/${repo.id}`;
+
+      const readToken = njwt.create(
+        {
+          iss: "checkpoint-vcs",
+          sub: ctx.session.user.id,
+          userId: ctx.session.user.id,
+          orgId: repo.orgId,
+          repoId: repo.id,
+          mode: "read",
+          basePath: remoteBasePath,
+        },
+        config.get<string>("storage.signing-keys.read"),
+      );
+
+      const expirationSeconds = config.get<number>(
+        "storage.token-expiration-seconds",
+      );
+      readToken.setExpiration(Date.now() + expirationSeconds * 1000);
+      const jwt = readToken.compact();
+      const jwtExpirationMs = Date.now() + expirationSeconds * 1000;
+
+      const backendUrl = config.get<string>("storage.backend-url");
+      const filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
+        res.text(),
+      );
+
+      const logLevel = GetLogLevel(
+        config.get<string>(
+          "logging.longtail-level",
+        ) as import("@checkpointvcs/longtail-addon").LongtailLogLevel,
+      );
+
+      const handle = readFileFromVersionAsync({
+        filePath: input.filePath,
+        versionIndexName: fileChange.changelist.versionIndex,
+        remoteBasePath,
+        filerUrl,
+        jwt,
+        jwtExpirationMs,
+        logLevel,
+      });
+
+      if (!handle) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to initiate file read",
+        });
+      }
+
+      try {
+        const { data, size } = await pollReadFileHandle(handle);
+
+        if (!data || size === 0) {
+          return { content: "", isBinary: false, size: 0 };
+        }
+
+        if (size > MAX_TEXT_SIZE) {
+          return {
+            content: null,
+            isBinary: false,
+            size,
+            tooLarge: true,
+          };
+        }
+
+        return {
+          content: data.toString("utf-8"),
+          isBinary: false,
+          size,
+        };
+      } finally {
+        freeReadFileHandle(handle);
+      }
     }),
 });

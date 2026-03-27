@@ -224,6 +224,8 @@ model File {
 
   changes   FileChange[]
   checkouts FileCheckout[]
+
+  @@index([repoId])
 }
 
 model FileCheckout {

@@ -127,6 +127,7 @@ export default class DaemonHandler {
           email: user.email,
           name: user.name,
           username: user.username,
+          image: user.image ?? null,
         },
         auth: undefined,
       }));
@@ -424,6 +425,7 @@ export default class DaemonHandler {
               email: user.email,
               name: user.name,
               username: user.username,
+              image: user.image ?? null,
             },
             auth: undefined,
           };

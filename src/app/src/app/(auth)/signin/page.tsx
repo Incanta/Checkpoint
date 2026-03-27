@@ -4,6 +4,7 @@ import { useState } from "react";
 import { authClient } from "~/lib/auth-client";
 import { useSearchParams } from "next/navigation";
 import { useEffect } from "react";
+import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 
 interface ProviderInfo {
   id: string;
@@ -20,6 +21,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 };
 
 export default function SignInPage() {
+  useDocumentTitle("Sign In · Checkpoint VCS");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
