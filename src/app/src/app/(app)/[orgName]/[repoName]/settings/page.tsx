@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { api } from "~/trpc/react";
 import { Button, Card, Badge } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
+import { useLicenseTier } from "~/app/_hooks/use-license-tier";
 
 function MergePermissionList({
   repoId,
@@ -95,6 +96,9 @@ export default function RepoSettingsPage() {
   const repoData = org?.repos?.find(
     (r: { name: string }) => r.name === repoName,
   );
+
+  const { hasFeature } = useLicenseTier(org?.id);
+  const showPrSettings = hasFeature("pullRequests");
 
   const [name, setName] = useState("");
   const [isPublic, setIsPublic] = useState(false);
@@ -187,11 +191,13 @@ export default function RepoSettingsPage() {
         </form>
       </Card>
 
-      {/* Pull Request / Merge settings */}
-      <Card>
-        <h3 className="mb-4 text-sm font-semibold text-[var(--color-text-primary)]">
-          Pull request settings
-        </h3>
+      {/* Pull Request / Merge settings (Pro+ only) */}
+      {showPrSettings && (
+        <>
+        <Card>
+          <h3 className="mb-4 text-sm font-semibold text-[var(--color-text-primary)]">
+            Pull request settings
+          </h3>
         <div className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
@@ -262,6 +268,8 @@ export default function RepoSettingsPage() {
             )}
           </div>
         </Card>
+      )}
+      </>
       )}
 
       {/* Danger zone */}

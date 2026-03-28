@@ -312,4 +312,56 @@ export const orgRouter = createTRPCRouter({
 
       return { activities, summary };
     }),
+
+  updateSubscription: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string(),
+        tier: z.enum(["BASIC", "PRO", "STUDIO", "INCANTA"]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Only available on license manager instances
+      const { isLicenseManager } = await import("~/server/license-utils");
+      if (!isLicenseManager()) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Subscription changes are only available on the cloud instance",
+        });
+      }
+
+      // Must be org admin or billing role
+      const orgUser = await ctx.db.orgUser.findFirst({
+        where: {
+          orgId: input.orgId,
+          userId: ctx.session.user.id,
+        },
+      });
+
+      if (!orgUser || (orgUser.role !== "ADMIN" && orgUser.role !== "BILLING")) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only org admins or billing managers can change subscriptions",
+        });
+      }
+
+      // Update org tier
+      const org = await ctx.db.org.update({
+        where: { id: input.orgId },
+        data: { subscriptionTier: input.tier },
+      });
+
+      // Also update the associated license if one exists
+      const license = await ctx.db.license.findUnique({
+        where: { orgId: input.orgId },
+      });
+      if (license) {
+        await ctx.db.license.update({
+          where: { id: license.id },
+          data: { tier: input.tier },
+        });
+      }
+
+      return org;
+    }),
 });

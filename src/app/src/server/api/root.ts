@@ -12,6 +12,7 @@ import { workspaceRouter } from "./routers/workspace";
 import { versionRouter } from "./routers/version";
 import { labelRouter } from "./routers/label";
 import { pullRequestRouter } from "./routers/pullRequest";
+import { licenseRouter } from "./routers/license";
 
 /**
  * This is the primary router for your server.
@@ -32,6 +33,7 @@ export const appRouter = createTRPCRouter({
   version: versionRouter,
   label: labelRouter,
   pullRequest: pullRequestRouter,
+  license: licenseRouter,
 });
 
 // export type definition of API

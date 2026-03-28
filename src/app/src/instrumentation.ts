@@ -10,5 +10,9 @@ export async function register() {
     setTimeout(() => {
       console.log("[healthy] App is ready");
     }, 100);
+
+    // Initialize license client for self-hosted instances
+    const { initLicenseClient } = await import("~/server/license-client");
+    void initLicenseClient();
   }
 }

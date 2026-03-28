@@ -80,6 +80,7 @@ export default function OrgSettingsPage() {
           General
         </Tab>
         <Tab href={`/${orgName}/settings/members`}>Members</Tab>
+        <Tab href={`/${orgName}/settings/subscription`}>Subscription</Tab>
       </Tabs>
 
       <div className="space-y-6">
