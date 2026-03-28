@@ -13,6 +13,7 @@
  *   pull                          Sync changes from remote
  *   log                           Show version history
  *   branch                        List branches
+ *   switch <branch>                Switch to a different branch
  *   checkout <file>               Check out a controlled file
  *   revert <file...>              Revert files to head version
  *   diff <file>                   Show diff for a file
@@ -109,6 +110,12 @@ int main(int argc, char** argv) {
   argparse::ArgumentParser branchCmd("branch");
   branchCmd.add_description("List branches");
 
+  // switch
+  argparse::ArgumentParser switchCmd("switch");
+  switchCmd.add_description("Switch to a different branch");
+  switchCmd.add_argument("branch")
+      .help("Name of the branch to switch to");
+
   // checkout
   argparse::ArgumentParser checkoutCmd("checkout");
   checkoutCmd.add_description("Check out a controlled file for editing");
@@ -163,6 +170,7 @@ int main(int argc, char** argv) {
   program.add_subparser(pullCmd);
   program.add_subparser(logCmd);
   program.add_subparser(branchCmd);
+  program.add_subparser(switchCmd);
   program.add_subparser(checkoutCmd);
   program.add_subparser(revertCmd);
   program.add_subparser(diffCmd);
@@ -251,6 +259,11 @@ int main(int argc, char** argv) {
 
     if (program.is_subcommand_used(branchCmd)) {
       return checkpoint::cmdBranch();
+    }
+
+    if (program.is_subcommand_used(switchCmd)) {
+      auto branch = switchCmd.get<std::string>("branch");
+      return checkpoint::cmdSwitch(branch);
     }
 
     if (program.is_subcommand_used(checkoutCmd)) {

@@ -1,10 +1,84 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "~/trpc/react";
-import { Button, Card } from "~/app/_components/ui";
+import { Button, Card, Badge } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
+
+function MergePermissionList({
+  repoId,
+  type,
+  label,
+}: {
+  repoId: string;
+  type: "MAINLINE" | "RELEASE";
+  label: string;
+}) {
+  const utils = api.useUtils();
+  const { data: permissions } = api.repo.getMergePermissions.useQuery({ repoId });
+  const setPermissions = api.repo.setMergePermissions.useMutation({
+    onSuccess: () => void utils.repo.getMergePermissions.invalidate(),
+  });
+
+  const current = permissions?.filter((p) => p.type === type) ?? [];
+  const [newEmail, setNewEmail] = useState("");
+
+  const handleAdd = () => {
+    const email = newEmail.trim();
+    if (!email) return;
+    const emails = [...current.map((p) => p.user.email), email];
+    setPermissions.mutate({ repoId, type, userEmails: emails });
+    setNewEmail("");
+  };
+
+  const handleRemove = (emailToRemove: string) => {
+    const emails = current.map((p) => p.user.email).filter((e) => e !== emailToRemove);
+    setPermissions.mutate({ repoId, type, userEmails: emails });
+  };
+
+  return (
+    <div>
+      <label className="mb-2 block text-sm font-medium text-[var(--color-text-primary)]">
+        {label}
+      </label>
+      <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+        If empty, all members with write access can merge.
+      </p>
+      <div className="space-y-1.5">
+        {current.map((p) => (
+          <div key={p.id} className="flex items-center gap-2">
+            <span className="text-sm text-[var(--color-text-primary)]">
+              {p.user.name ?? p.user.email}
+            </span>
+            <span className="text-xs text-[var(--color-text-muted)]">{p.user.email}</span>
+            <button
+              type="button"
+              onClick={() => handleRemove(p.user.email)}
+              className="ml-auto text-xs text-[var(--color-danger)] hover:underline"
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex gap-2">
+        <input
+          type="email"
+          value={newEmail}
+          onChange={(e) => setNewEmail(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAdd())}
+          placeholder="user@example.com"
+          className="flex-1 rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)]"
+        />
+        <Button size="sm" onClick={handleAdd} disabled={!newEmail.trim()}>Add</Button>
+      </div>
+      {setPermissions.error && (
+        <p className="mt-1 text-xs text-[var(--color-danger)]">{setPermissions.error.message}</p>
+      )}
+    </div>
+  );
+}
 
 export default function RepoSettingsPage() {
   const params = useParams<{ orgName: string; repoName: string }>();
@@ -24,11 +98,15 @@ export default function RepoSettingsPage() {
 
   const [name, setName] = useState("");
   const [isPublic, setIsPublic] = useState(false);
+  const [requiredReviews, setRequiredReviews] = useState(0);
+  const [mergePermissionsSame, setMergePermissionsSame] = useState(true);
   const [initialized, setInitialized] = useState(false);
 
   if (repoData && !initialized) {
     setName(repoData.name);
     setIsPublic(repoData.public);
+    setRequiredReviews((repoData as any).requiredReviews ?? 0);
+    setMergePermissionsSame((repoData as any).mergePermissionsSame ?? true);
     setInitialized(true);
   }
 
@@ -63,6 +141,8 @@ export default function RepoSettingsPage() {
               id: repoData.id,
               name: name.trim() || undefined,
               public: isPublic,
+              requiredReviews,
+              mergePermissionsSame,
             });
           }}
           className="space-y-4"
@@ -106,6 +186,83 @@ export default function RepoSettingsPage() {
           </div>
         </form>
       </Card>
+
+      {/* Pull Request / Merge settings */}
+      <Card>
+        <h3 className="mb-4 text-sm font-semibold text-[var(--color-text-primary)]">
+          Pull request settings
+        </h3>
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
+              Required approving reviews
+            </label>
+            <p className="mb-1.5 text-xs text-[var(--color-text-muted)]">
+              Minimum number of approvals before a pull request can be merged. Set to 0 to allow merging without reviews.
+            </p>
+            <input
+              type="number"
+              min={0}
+              value={requiredReviews}
+              onChange={(e) => setRequiredReviews(Math.max(0, parseInt(e.target.value) || 0))}
+              className="w-20 rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
+            />
+          </div>
+
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              id="merge-same"
+              checked={mergePermissionsSame}
+              onChange={(e) => setMergePermissionsSame(e.target.checked)}
+              className="h-4 w-4 accent-[var(--color-accent)]"
+            />
+            <label htmlFor="merge-same" className="text-sm text-[var(--color-text-primary)]">
+              Use the same merge permissions for Mainline and Release branches
+            </label>
+          </div>
+
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              disabled={updateRepo.isPending}
+              onClick={() => {
+                if (!repoData) return;
+                updateRepo.mutate({
+                  id: repoData.id,
+                  requiredReviews,
+                  mergePermissionsSame,
+                });
+              }}
+            >
+              {updateRepo.isPending ? "Saving..." : "Save PR settings"}
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      {/* Merge permissions */}
+      {repoData && (
+        <Card>
+          <h3 className="mb-4 text-sm font-semibold text-[var(--color-text-primary)]">
+            Merge permissions
+          </h3>
+          <div className="space-y-6">
+            <MergePermissionList
+              repoId={repoData.id}
+              type="MAINLINE"
+              label={mergePermissionsSame ? "Authorized mergers" : "Mainline branch mergers"}
+            />
+            {!mergePermissionsSame && (
+              <MergePermissionList
+                repoId={repoData.id}
+                type="RELEASE"
+                label="Release branch mergers"
+              />
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* Danger zone */}
       <Card className="border-[var(--color-danger)]/30">

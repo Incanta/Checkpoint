@@ -893,6 +893,51 @@ inline int cmdBranch() {
 }
 
 // ═════════════════════════════════════════════════════════════════
+//  COMMAND: switch (switch to a different branch)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdSwitch(const std::string& branchName) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  if (branchName == ws.branchName) {
+    std::cout << "Already on branch '" << branchName << "'." << std::endl;
+    return 0;
+  }
+
+  std::cout << "Switching to branch '" << branchName << "'..." << std::endl;
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"branchName", branchName},
+  };
+
+  try {
+    auto result = client.mutate("workspaces.branches.switch", input);
+
+    std::string newBranch = result.value("branchName", branchName);
+    std::cout << color::green() << color::bold()
+              << "Switched to branch '" << newBranch << "'."
+              << color::reset() << std::endl;
+    return 0;
+  } catch (std::exception& e) {
+    std::string msg = e.what();
+    // Surface the error message from the daemon
+    try {
+      auto errJson = nlohmann::json::parse(msg);
+      if (errJson.contains("message")) {
+        msg = errJson["message"].get<std::string>();
+      }
+    } catch (...) {}
+    std::cerr << color::red() << "error: " << msg
+              << color::reset() << std::endl;
+    return 1;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════
 //  COMMAND: checkout (check out a controlled file)
 // ═════════════════════════════════════════════════════════════════
 

@@ -76,11 +76,13 @@ export default function RepoBranchesPage() {
             onSubmit={(e) => {
               e.preventDefault();
               if (!repoData || !newName.trim() || !parentBranch) return;
+              const parent = branches?.find((b: any) => b.name === parentBranch);
               createBranch.mutate({
                 repoId: repoData.id,
                 name: newName.trim(),
                 type: newType,
                 parentBranchName: parentBranch,
+                headNumber: parent?.headNumber ?? 0,
               });
             }}
             className="space-y-3"

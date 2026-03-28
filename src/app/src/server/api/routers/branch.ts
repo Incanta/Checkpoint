@@ -44,6 +44,7 @@ export const branchRouter = createTRPCRouter({
 
       const branches = await ctx.db.branch.findMany({
         where: {
+          repoId: input.repoId,
           archivedAt: input.includeArchived ? undefined : null,
         },
         include: {

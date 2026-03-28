@@ -34,6 +34,11 @@ model User {
   createdBranches   Branch[]     @relation("BranchCreator")
   activity          OrgUserActivity[]
 
+  pullRequests       PullRequest[]
+  prComments         PullRequestComment[]
+  prReviews          PullRequestReview[]
+  mergePermissions   MergePermission[]
+
   // Auth
   accounts Account[]
   sessions Session[]
@@ -99,12 +104,17 @@ model Repo {
 
   additionalRoles RepoRole[]
 
-  files         File[]
-  changelists   Changelist[]
-  branches      Branch[]          @relation("RepoBranch")
-  labels        ChangelistLabel[]
-  workspaces    Workspace[]
-  fileCheckouts FileCheckout[]
+  requiredReviews      Int     @default(0)
+  mergePermissionsSame Boolean @default(true)
+
+  files            File[]
+  changelists      Changelist[]
+  branches         Branch[]          @relation("RepoBranch")
+  labels           ChangelistLabel[]
+  workspaces       Workspace[]
+  fileCheckouts    FileCheckout[]
+  pullRequests     PullRequest[]
+  mergePermissions MergePermission[]
 
   @@unique([orgId, name])
 }
@@ -302,6 +312,97 @@ model OrgUserActivity {
 
   @@unique([userId, orgId, year, month])
   @@index([orgId, year, month])
+}
+
+enum PullRequestStatus {
+  OPEN
+  MERGED
+  CLOSED
+}
+
+model PullRequest {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  number Int
+
+  title       String
+  description String @default("")
+
+  status   PullRequestStatus @default(OPEN)
+  mergedAt DateTime?
+  closedAt DateTime?
+
+  sourceBranchName String
+  targetBranchName String
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  comments PullRequestComment[]
+  reviews  PullRequestReview[]
+
+  @@unique([repoId, number])
+  @@index([repoId, status])
+}
+
+model PullRequestComment {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  body String
+
+  pullRequest   PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  pullRequestId String
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+}
+
+enum ReviewState {
+  PENDING
+  REQUEST_CHANGES
+  APPROVED
+}
+
+model PullRequestReview {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  state ReviewState @default(PENDING)
+
+  pullRequest   PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  pullRequestId String
+
+  reviewer   User   @relation(fields: [reviewerId], references: [id])
+  reviewerId String
+
+  @@unique([pullRequestId, reviewerId])
+}
+
+enum MergePermissionType {
+  MAINLINE
+  RELEASE
+}
+
+model MergePermission {
+  id String @id @default(cuid())
+
+  type MergePermissionType
+
+  repo   Repo   @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  repoId String
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@unique([repoId, userId, type])
 }
 
 // better-auth models

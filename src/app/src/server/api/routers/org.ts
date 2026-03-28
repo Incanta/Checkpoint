@@ -41,7 +41,9 @@ export const orgRouter = createTRPCRouter({
       const org = await ctx.db.org.findFirst({
         where: input.idIsName ? { name: input.id } : { id: input.id },
         include: {
-          users: input.includeUsers,
+          users: input.includeUsers
+            ? { include: { user: { select: { id: true, name: true, email: true, image: true } } } }
+            : false,
           repos: {
             include: {
               additionalRoles: true,

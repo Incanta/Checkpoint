@@ -112,6 +112,8 @@ export const repoRouter = createTRPCRouter({
         id: z.string(),
         name: z.string().optional(),
         public: z.boolean().optional(),
+        requiredReviews: z.number().min(0).optional(),
+        mergePermissionsSame: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -193,5 +195,54 @@ export const repoRouter = createTRPCRouter({
       });
 
       return await Promise.all(accessibleRepos);
+    }),
+
+  getMergePermissions: protectedProcedure
+    .input(z.object({ repoId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.ADMIN);
+
+      return ctx.db.mergePermission.findMany({
+        where: { repoId: input.repoId },
+        include: {
+          user: { select: { id: true, name: true, email: true, image: true } },
+        },
+      });
+    }),
+
+  setMergePermissions: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        type: z.enum(["MAINLINE", "RELEASE"]),
+        userEmails: z.array(z.string().email()),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.ADMIN);
+
+      // Resolve emails to user IDs
+      const users = await ctx.db.user.findMany({
+        where: { email: { in: input.userEmails } },
+        select: { id: true, email: true },
+      });
+
+      // Delete existing permissions for this type
+      await ctx.db.mergePermission.deleteMany({
+        where: { repoId: input.repoId, type: input.type },
+      });
+
+      // Create new permissions
+      if (users.length > 0) {
+        await ctx.db.mergePermission.createMany({
+          data: users.map((u) => ({
+            repoId: input.repoId,
+            userId: u.id,
+            type: input.type,
+          })),
+        });
+      }
+
+      return { count: users.length };
     }),
 });
