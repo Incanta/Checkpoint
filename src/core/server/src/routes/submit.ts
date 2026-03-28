@@ -33,6 +33,7 @@ interface JWTClaims {
 const RequestSchema = object({
   apiToken: string().required(),
   branchName: string().required(),
+  shelfName: string().optional(),
   message: string().required(),
   versionIndex: string().defined(),
   modifications: array(
@@ -285,21 +286,40 @@ export function routeSubmit(): Router {
     );
 
     try {
-      const createChangelistResponse =
-        await client.changelist.createChangelist.mutate({
-          message: payload.message,
+      let responseMessage: RequestResponse;
+
+      if (payload.shelfName) {
+        // Route to shelf creation instead of branch changelist
+        const shelfResponse = await client.shelf.createFromSubmit.mutate({
           repoId: claims.repoId,
+          shelfName: payload.shelfName,
+          description: "",
           versionIndex: payload.versionIndex,
-          branchName: payload.branchName,
+          message: payload.message,
           modifications: payload.modifications,
-          keepCheckedOut: payload.keepCheckedOut,
-          workspaceId: payload.workspaceId,
         });
 
-      const responseMessage: RequestResponse = {
-        id: createChangelistResponse.id,
-        number: createChangelistResponse.number,
-      };
+        responseMessage = {
+          id: shelfResponse.shelfName,
+          number: shelfResponse.changelistNumber,
+        };
+      } else {
+        const createChangelistResponse =
+          await client.changelist.createChangelist.mutate({
+            message: payload.message,
+            repoId: claims.repoId,
+            versionIndex: payload.versionIndex,
+            branchName: payload.branchName,
+            modifications: payload.modifications,
+            keepCheckedOut: payload.keepCheckedOut,
+            workspaceId: payload.workspaceId,
+          });
+
+        responseMessage = {
+          id: createChangelistResponse.id,
+          number: createChangelistResponse.number,
+        };
+      }
 
       res.status(200).json(responseMessage);
 

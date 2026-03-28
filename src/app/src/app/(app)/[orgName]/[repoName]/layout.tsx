@@ -27,6 +27,7 @@ export default function RepoLayout({
 
   const { hasFeature } = useLicenseTier(org?.id);
   const showPullRequests = hasFeature("pullRequests");
+  const showShelves = hasFeature("shelves");
 
   const { data: openPrCount } = api.pullRequest.countOpen.useQuery(
     { repoId: repoData?.id ?? "" },
@@ -64,6 +65,9 @@ export default function RepoLayout({
               )}
             </span>
           </Tab>
+        )}
+        {showShelves && (
+          <Tab href={`${basePath}/shelves`}>Shelves</Tab>
         )}
         <Tab href={`${basePath}/branches`}>Branches</Tab>
         <Tab href={`${basePath}/labels`}>Labels</Tab>

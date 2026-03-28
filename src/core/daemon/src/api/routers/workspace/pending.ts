@@ -354,7 +354,7 @@ export const pendingRouter = router({
             oldPath: z.string().optional(),
           }),
         ),
-        shelved: z.boolean(),
+        shelfName: z.string().optional(),
         keepCheckedOut: z.boolean().optional(),
       }),
     )
@@ -459,7 +459,9 @@ export const pendingRouter = router({
             input.keepCheckedOut ?? false,
             undefined,
             (step) => jobManager.updateStep(job.id, step),
-            (step, done, total) => jobManager.updateProgress(job.id, done, total),
+            (step, done, total) =>
+              jobManager.updateProgress(job.id, done, total),
+            input.shelfName ? input.shelfName : undefined,
           );
 
           jobManager.updateStep(job.id, "Reloading workspace state");

@@ -91,6 +91,7 @@ export interface Modification {
 
 export interface SubmitAsyncOptions {
   branchName: string;
+  shelfName?: string;
   message: string;
   targetChunkSize: number;
   targetBlockSize: number;

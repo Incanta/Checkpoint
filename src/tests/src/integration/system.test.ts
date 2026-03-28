@@ -142,7 +142,6 @@ This is a test file created at ${new Date().toISOString()}.
           path: testFileName,
         },
       ],
-      shelved: false,
     });
 
     console.log(`[Step 5] Submitted initial version`);
@@ -370,7 +369,6 @@ This section was added by user 1 to test modification syncing.
           path: testFileName,
         },
       ],
-      shelved: false,
     });
 
     console.log(`[Step 11] Submitted README modification`);
@@ -489,7 +487,6 @@ Created at ${new Date().toISOString()}
           path: secondFileName,
         },
       ],
-      shelved: false,
     });
 
     console.log(`[Step 15] Submitted combined add/delete changes`);
@@ -630,7 +627,6 @@ Modified by User 0 at ${new Date().toISOString()}
           path: secondFileName,
         },
       ],
-      shelved: false,
     });
 
     console.log(`[Step 18] User 0 modified and submitted CONTRIBUTING.md`);
@@ -666,7 +662,6 @@ Created by User 1 at ${new Date().toISOString()}
           path: thirdFileName,
         },
       ],
-      shelved: false,
     });
 
     console.log(

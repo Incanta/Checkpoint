@@ -160,9 +160,9 @@ inline void renderProgressBar(
 // ─── Helper: poll a background job until complete ────────────────
 
 struct JobResult {
-  std::string status;       // "completed" or "failed"
-  nlohmann::json result;    // present when completed
-  std::string error;        // present when failed
+  std::string status;     // "completed" or "failed"
+  nlohmann::json result;  // present when completed
+  std::string error;      // present when failed
 };
 
 inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
@@ -177,8 +177,8 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
 
     std::string status = job.value("status", "");
     std::string currentStep = (job.contains("currentStep") && job["currentStep"].is_string())
-        ? job["currentStep"].get<std::string>()
-        : "";
+                                  ? job["currentStep"].get<std::string>()
+                                  : "";
 
     if (!currentStep.empty() && currentStep != lastStep) {
       if (hadProgress) {
@@ -218,8 +218,8 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
     if (status == "failed") {
       if (hadProgress) std::cout << std::endl;
       std::string errMsg = (job.contains("error") && job["error"].is_string())
-          ? job["error"].get<std::string>()
-          : "Unknown error";
+                               ? job["error"].get<std::string>()
+                               : "Unknown error";
       return {status, nullptr, errMsg};
     }
 
@@ -581,7 +581,6 @@ inline int cmdSubmit(const std::string& message) {
       {"workspaceId", ws.id},
       {"message", message},
       {"modifications", modifications},
-      {"shelved", false},
   };
 
   // Note: submit is a mutation in the daemon API (sends input as POST body)
@@ -930,7 +929,8 @@ inline int cmdSwitch(const std::string& branchName) {
       if (errJson.contains("message")) {
         msg = errJson["message"].get<std::string>();
       }
-    } catch (...) {}
+    } catch (...) {
+    }
     std::cerr << color::red() << "error: " << msg
               << color::reset() << std::endl;
     return 1;
@@ -1425,6 +1425,207 @@ inline int cmdLogin(const std::string& endpoint, const std::string& daemonId) {
             << "error: timed out waiting for authorization (5 minutes)."
             << color::reset() << std::endl;
   return 1;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: shelve (shelve staged files)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdShelve(const std::string& name, const std::string& message) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  // Refresh to get current pending changes
+  nlohmann::json refreshInput = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+  };
+
+  auto refreshResult = client.query("workspaces.pending.refresh", refreshInput);
+
+  if (refreshResult.is_null()) {
+    std::cerr << "No pending changes to shelve." << std::endl;
+    return 1;
+  }
+
+  PendingChanges pending;
+  from_json(refreshResult, pending);
+
+  auto stagedSet = readStagedFiles(ctx.root);
+
+  nlohmann::json modifications = nlohmann::json::array();
+  int stagedCount = 0;
+
+  for (auto& [path, file] : pending.files) {
+    if (!stagedSet.count(path)) continue;
+
+    auto status = static_cast<FileStatus>(file.status);
+    bool isDelete = (status == FileStatus::Deleted);
+    modifications.push_back({
+        {"path", path},
+        {"delete", isDelete},
+    });
+    stagedCount++;
+  }
+
+  if (stagedCount == 0) {
+    std::cerr << "No staged changes to shelve." << std::endl;
+    std::cerr << color::dim() << "  (use \"chk add <file>\" to stage files)"
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  std::string submitMessage = message.empty() ? ("Shelf: " + name) : message;
+
+  nlohmann::json submitInput = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"message", submitMessage},
+      {"modifications", modifications},
+      {"shelfName", name},
+  };
+
+  auto submitResult = client.mutate("workspaces.pending.submit", submitInput);
+
+  std::string jobId = submitResult.value("jobId", "");
+  if (jobId.empty()) {
+    std::cerr << "error: No job ID returned from shelve." << std::endl;
+    return 1;
+  }
+
+  std::cout << "Shelving " << stagedCount << " file(s) to '" << name << "'..." << std::endl;
+
+  auto jobResult = pollJob(client, jobId);
+
+  if (jobResult.status == "failed") {
+    std::cerr << color::red() << "error: " << jobResult.error
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  // Clear staged.json after successful shelve
+  writeStagedFiles(ctx.root, {});
+
+  std::cout << color::green() << color::bold()
+            << "Successfully shelved " << stagedCount << " file(s) to '" << name << "'."
+            << color::reset() << std::endl;
+
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: shelf list
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdShelfList() {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"status", "ACTIVE"},
+  };
+
+  auto result = client.query("workspaces.shelves.list", input);
+
+  if (result.is_null() || !result.is_array() || result.empty()) {
+    std::cout << "No active shelves." << std::endl;
+    return 0;
+  }
+
+  for (auto& shelf : result) {
+    std::string name = shelf.value("name", "");
+    std::string status = shelf.value("status", "");
+    int clNum = shelf.value("changelistNumber", 0);
+    std::string desc = shelf.value("description", "");
+
+    // Get file count from _count
+    int fileCount = 0;
+    if (shelf.contains("_count") && shelf["_count"].contains("fileChanges")) {
+      fileCount = shelf["_count"]["fileChanges"].get<int>();
+    }
+
+    // Get author name
+    std::string authorName;
+    if (shelf.contains("author")) {
+      authorName = shelf["author"].value("name", shelf["author"].value("email", "unknown"));
+    }
+
+    std::cout << color::green() << "  " << name << color::reset();
+    std::cout << color::dim() << " (CL #" << clNum
+              << ", " << fileCount << " file" << (fileCount != 1 ? "s" : "")
+              << ", by " << authorName << ")";
+    if (!desc.empty()) {
+      std::cout << " — " << desc;
+    }
+    std::cout << color::reset() << std::endl;
+  }
+
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: shelf delete
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdShelfDelete(const std::string& name) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"name", name},
+  };
+
+  client.mutate("workspaces.shelves.delete", input);
+
+  std::cout << color::green() << "Deleted shelf '" << name << "'."
+            << color::reset() << std::endl;
+
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: unshelve (apply shelf to workspace)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdUnshelve(const std::string& name, const std::string& branchName) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  std::string targetBranch = branchName.empty() ? ws.branchName : branchName;
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"shelfName", name},
+      {"branchName", targetBranch},
+  };
+
+  auto result = client.mutate("workspaces.shelves.submitToBranch", input);
+
+  int clNum = 0;
+  if (!result.is_null() && result.contains("changelistNumber")) {
+    clNum = result["changelistNumber"].get<int>();
+  }
+
+  std::cout << color::green() << color::bold()
+            << "Shelf '" << name << "' submitted to branch '" << targetBranch << "'";
+  if (clNum > 0) {
+    std::cout << " as CL #" << clNum;
+  }
+  std::cout << "." << color::reset() << std::endl;
+
+  std::cout << color::dim() << "Run 'chk pull' to sync the changes to your workspace."
+            << color::reset() << std::endl;
+
+  return 0;
 }
 
 }  // namespace checkpoint

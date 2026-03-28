@@ -20,6 +20,9 @@
  *   init [orgName/repoName]       Initialize a workspace in the current directory
  *   accounts                      List authenticated accounts
  *   login [--endpoint URL]        Authenticate with a Checkpoint server
+ *   shelve <name> [-m msg]        Shelve staged files to a named shelf
+ *   unshelve <name> [-b branch]   Submit a shelf to a branch
+ *   shelf [list|delete <name>]    Manage shelves
  */
 
 #include <algorithm>
@@ -161,6 +164,36 @@ int main(int argc, char** argv) {
       .help("Daemon ID for this credential (default: auto-generated)")
       .default_value(std::string(""));
 
+  // shelve
+  argparse::ArgumentParser shelveCmd("shelve");
+  shelveCmd.add_description("Shelve staged files to a named shelf");
+  shelveCmd.add_argument("name")
+      .help("Name of the shelf");
+  shelveCmd.add_argument("--message", "-m")
+      .help("Shelf message")
+      .default_value(std::string(""));
+
+  // unshelve
+  argparse::ArgumentParser unshelveCmd("unshelve");
+  unshelveCmd.add_description("Submit a shelf to a branch");
+  unshelveCmd.add_argument("name")
+      .help("Name of the shelf to submit");
+  unshelveCmd.add_argument("--branch", "-b")
+      .help("Target branch (defaults to current branch)")
+      .default_value(std::string(""));
+
+  // shelf (management subcommand)
+  argparse::ArgumentParser shelfCmd("shelf");
+  shelfCmd.add_description("Manage shelves");
+  shelfCmd.add_argument("action")
+      .help("Action: list, delete")
+      .default_value(std::string("list"))
+      .nargs(argparse::nargs_pattern::optional);
+  shelfCmd.add_argument("name")
+      .help("Shelf name (for delete)")
+      .default_value(std::string(""))
+      .nargs(argparse::nargs_pattern::optional);
+
   // ─── Register sub-commands ─────────────────────────────────────
 
   program.add_subparser(statusCmd);
@@ -177,6 +210,9 @@ int main(int argc, char** argv) {
   program.add_subparser(initCmd);
   program.add_subparser(accountsCmd);
   program.add_subparser(loginCmd);
+  program.add_subparser(shelveCmd);
+  program.add_subparser(unshelveCmd);
+  program.add_subparser(shelfCmd);
 
   // ─── Parse arguments ──────────────────────────────────────────
 
@@ -215,6 +251,12 @@ int main(int argc, char** argv) {
         std::cerr << accountsCmd;
       } else if (cmd == "login") {
         std::cerr << loginCmd;
+      } else if (cmd == "shelve") {
+        std::cerr << shelveCmd;
+      } else if (cmd == "unshelve") {
+        std::cerr << unshelveCmd;
+      } else if (cmd == "shelf") {
+        std::cerr << shelfCmd;
       } else {
         std::cerr << program;
       }
@@ -307,6 +349,35 @@ int main(int argc, char** argv) {
         }
       }
       return checkpoint::cmdLogin(endpoint, daemonId);
+    }
+
+    if (program.is_subcommand_used(shelveCmd)) {
+      auto name = shelveCmd.get<std::string>("name");
+      auto msg = shelveCmd.get<std::string>("--message");
+      return checkpoint::cmdShelve(name, msg);
+    }
+
+    if (program.is_subcommand_used(unshelveCmd)) {
+      auto name = unshelveCmd.get<std::string>("name");
+      auto branch = unshelveCmd.get<std::string>("--branch");
+      return checkpoint::cmdUnshelve(name, branch);
+    }
+
+    if (program.is_subcommand_used(shelfCmd)) {
+      auto action = shelfCmd.get<std::string>("action");
+      auto name = shelfCmd.get<std::string>("name");
+      if (action == "list" || action.empty()) {
+        return checkpoint::cmdShelfList();
+      } else if (action == "delete") {
+        if (name.empty()) {
+          std::cerr << "error: shelf delete requires a shelf name." << std::endl;
+          return 1;
+        }
+        return checkpoint::cmdShelfDelete(name);
+      } else {
+        std::cerr << "error: unknown shelf action '" << action << "'. Use 'list' or 'delete'." << std::endl;
+        return 1;
+      }
     }
 
     // No command specified — show help

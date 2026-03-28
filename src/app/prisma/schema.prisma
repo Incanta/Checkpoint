@@ -38,6 +38,7 @@ model User {
   prComments         PullRequestComment[]
   prReviews          PullRequestReview[]
   mergePermissions   MergePermission[]
+  shelves            Shelf[]
 
   // Auth
   accounts Account[]
@@ -118,6 +119,7 @@ model Repo {
   fileCheckouts    FileCheckout[]
   pullRequests     PullRequest[]
   mergePermissions MergePermission[]
+  shelves          Shelf[]
 
   @@unique([orgId, name])
 }
@@ -239,6 +241,7 @@ model File {
 
   changes   FileChange[]
   checkouts FileCheckout[]
+  shelfChanges ShelfFileChange[]
 
   @@index([repoId])
 }
@@ -449,6 +452,61 @@ model MergePermission {
   userId String
 
   @@unique([repoId, userId, type])
+}
+
+// Shelves — mutable dangling changelists (Pro+)
+
+enum ShelfStatus {
+  ACTIVE
+  SUBMITTED
+  DELETED
+}
+
+model Shelf {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name        String
+  description String @default("")
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  // Current longtail version index (all-inclusive of shelf files)
+  versionIndex String
+  stateTree    Json   // {fileId → changelistNumber}
+
+  // Dangling changelist number (from repo sequence, not on any branch)
+  changelistNumber Int
+
+  status ShelfStatus @default(ACTIVE)
+
+  // Submitted metadata
+  submittedToBranch String?
+  submittedAt       DateTime?
+
+  fileChanges ShelfFileChange[]
+
+  @@unique([repoId, name])
+  @@index([repoId, status])
+}
+
+model ShelfFileChange {
+  id String @id @default(cuid())
+
+  shelf   Shelf  @relation(fields: [shelfId], references: [id], onDelete: Cascade)
+  shelfId String
+
+  file   File   @relation(fields: [fileId], references: [id])
+  fileId String
+
+  type String // ADD, MODIFY
+
+  @@unique([shelfId, fileId])
 }
 
 // better-auth models

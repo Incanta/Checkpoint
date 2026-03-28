@@ -54,6 +54,7 @@ void SetLogging(int level);
 
 int32_t SubmitSync(
     const char* BranchName,
+    const char* ShelfName,
     const char* Message,
     uint32_t TargetChunkSize,
     uint32_t TargetBlockSize,
