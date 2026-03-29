@@ -18,8 +18,9 @@ export default function IssueDetailPage() {
   const session = useSession();
   const currentUserId = session?.user?.id;
 
-  const { data: org } = api.org.getOrg.useQuery({ id: orgName, idIsName: true });
+  const { data: org } = api.org.getOrg.useQuery({ id: orgName, idIsName: true, includeUsers: true });
   const repoData = org?.repos?.find((r: { name: string }) => r.name === repoName);
+  const members = (org as any)?.users ?? [];
   const utils = api.useUtils();
 
   const { data: issue, isLoading } = api.issue.get.useQuery(
@@ -32,9 +33,9 @@ export default function IssueDetailPage() {
     { enabled: !!repoData?.id },
   );
 
-  const { data: members } = api.org.getMembers.useQuery(
-    { orgId: org?.id ?? "" },
-    { enabled: !!org?.id },
+  const { data: isSubscribed } = api.issue.isSubscribed.useQuery(
+    { issueId: issue?.id ?? "" },
+    { enabled: !!issue?.id },
   );
 
   useDocumentTitle(
@@ -75,6 +76,12 @@ export default function IssueDetailPage() {
   });
   const removeAssignee = api.issue.removeAssignee.useMutation({
     onSuccess: () => void utils.issue.get.invalidate(),
+  });
+  const subscribeMut = api.issue.subscribe.useMutation({
+    onSuccess: () => void utils.issue.isSubscribed.invalidate(),
+  });
+  const unsubscribeMut = api.issue.unsubscribe.useMutation({
+    onSuccess: () => void utils.issue.isSubscribed.invalidate(),
   });
 
   // ── Local state ───────────────────────────────────
@@ -435,6 +442,37 @@ export default function IssueDetailPage() {
                   ))}
               </select>
             )}
+          </Card>
+
+          {/* Subscription */}
+          <Card>
+            <h3 className="mb-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
+              Notifications
+            </h3>
+            <button
+              type="button"
+              onClick={() => {
+                if (!issue) return;
+                if (isSubscribed) {
+                  unsubscribeMut.mutate({ issueId: issue.id });
+                } else {
+                  subscribeMut.mutate({ issueId: issue.id });
+                }
+              }}
+              disabled={subscribeMut.isPending || unsubscribeMut.isPending}
+              className={`w-full rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                isSubscribed
+                  ? "border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                  : "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20"
+              }`}
+            >
+              {isSubscribed ? "Unsubscribe" : "Subscribe"}
+            </button>
+            <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+              {isSubscribed
+                ? "You\u2019re receiving notifications for this issue."
+                : "Subscribe to get notified of updates."}
+            </p>
           </Card>
         </div>
       </div>

@@ -108,6 +108,11 @@ export default function PullRequestDetailPage() {
     { enabled: !!repoData?.id },
   );
 
+  const { data: isSubscribed } = api.pullRequest.isSubscribed.useQuery(
+    { pullRequestId: pr?.id ?? "" },
+    { enabled: !!pr?.id },
+  );
+
   useDocumentTitle(pr ? `${pr.title} #${pr.number} · ${repoName} in ${orgName}` : `PR #${prNumber} · ${repoName}`);
 
   const [activeTab, setActiveTab] = useState<"discussion" | "history" | "changes">("discussion");
@@ -121,6 +126,12 @@ export default function PullRequestDetailPage() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const updatePr = api.pullRequest.update.useMutation({ onSuccess: invalidatePr });
+  const subscribeMut = api.pullRequest.subscribe.useMutation({
+    onSuccess: () => void utils.pullRequest.isSubscribed.invalidate(),
+  });
+  const unsubscribeMut = api.pullRequest.unsubscribe.useMutation({
+    onSuccess: () => void utils.pullRequest.isSubscribed.invalidate(),
+  });
   const isAuthor = session?.user?.id === pr?.authorId;
 
   if (isLoading) {
@@ -450,6 +461,35 @@ function DiscussionTab({
               </div>
             </Card>
           )}
+
+          {/* Subscription */}
+          <Card>
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Notifications</h4>
+            <button
+              type="button"
+              onClick={() => {
+                if (!pr) return;
+                if (isSubscribed) {
+                  unsubscribeMut.mutate({ pullRequestId: pr.id });
+                } else {
+                  subscribeMut.mutate({ pullRequestId: pr.id });
+                }
+              }}
+              disabled={subscribeMut.isPending || unsubscribeMut.isPending}
+              className={`w-full rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                isSubscribed
+                  ? "border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                  : "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20"
+              }`}
+            >
+              {isSubscribed ? "Unsubscribe" : "Subscribe"}
+            </button>
+            <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+              {isSubscribed
+                ? "You\u2019re receiving notifications for this PR."
+                : "Subscribe to get notified of updates."}
+            </p>
+          </Card>
         </div>
       </div>
 

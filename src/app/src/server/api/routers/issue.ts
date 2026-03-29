@@ -5,6 +5,14 @@ import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
+import {
+  subscribeToIssue,
+  notifyIssueSubscribers,
+} from "~/server/notifications";
+
+function issueLink(orgName: string, repoName: string, number: number) {
+  return `/${orgName}/${repoName}/issues/${number}`;
+}
 
 export const issueRouter = createTRPCRouter({
   // ── Queries ─────────────────────────────────────────────────────
@@ -189,6 +197,24 @@ export const issueRouter = createTRPCRouter({
         type: "write",
       });
 
+      // Auto-subscribe author
+      await subscribeToIssue(ctx.db, issue.id, ctx.session.user.id);
+      // Auto-subscribe assignees
+      for (const uid of input.assigneeIds) {
+        await subscribeToIssue(ctx.db, issue.id, uid);
+      }
+      // Notify subscribers (mentions in body auto-subscribed)
+      const link = issueLink(repo.org.name, repo.name, issue.number);
+      void notifyIssueSubscribers({
+        db: ctx.db,
+        actorId: ctx.session.user.id,
+        issueId: issue.id,
+        type: "issue_created",
+        title: `New issue #${issue.number}: ${issue.title}`,
+        link,
+        text: input.body,
+      });
+
       return issue;
     }),
 
@@ -225,21 +251,43 @@ export const issueRouter = createTRPCRouter({
   close: protectedProcedure
     .input(z.object({ repoId: z.string(), number: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
-      return ctx.db.issue.update({
+      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const issue = await ctx.db.issue.update({
         where: { repoId_number: { repoId: input.repoId, number: input.number } },
         data: { status: "CLOSED", closedAt: new Date() },
       });
+
+      void notifyIssueSubscribers({
+        db: ctx.db,
+        actorId: ctx.session.user.id,
+        issueId: issue.id,
+        type: "issue_closed",
+        title: `Issue #${issue.number} closed: ${issue.title}`,
+        link: issueLink(repo.org.name, repo.name, issue.number),
+      });
+
+      return issue;
     }),
 
   reopen: protectedProcedure
     .input(z.object({ repoId: z.string(), number: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
-      return ctx.db.issue.update({
+      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const issue = await ctx.db.issue.update({
         where: { repoId_number: { repoId: input.repoId, number: input.number } },
         data: { status: "OPEN", closedAt: null },
       });
+
+      void notifyIssueSubscribers({
+        db: ctx.db,
+        actorId: ctx.session.user.id,
+        issueId: issue.id,
+        type: "issue_reopened",
+        title: `Issue #${issue.number} reopened: ${issue.title}`,
+        link: issueLink(repo.org.name, repo.name, issue.number),
+      });
+
+      return issue;
     }),
 
   // ── Comments ────────────────────────────────────────────────────
@@ -249,7 +297,7 @@ export const issueRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const issue = await ctx.db.issue.findUnique({
         where: { id: input.issueId },
-        select: { repoId: true, repo: { select: { orgId: true } } },
+        select: { id: true, number: true, title: true, repoId: true, repo: { select: { name: true, orgId: true, org: { select: { name: true } } } } },
       });
       if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
       await getUserAndRepoWithAccess(ctx, issue.repoId, RepoAccess.READ);
@@ -269,6 +317,20 @@ export const issueRouter = createTRPCRouter({
         userId: ctx.session.user.id,
         orgId: issue.repo.orgId,
         type: "read",
+      });
+
+      // Auto-subscribe commenter
+      await subscribeToIssue(ctx.db, issue.id, ctx.session.user.id);
+
+      void notifyIssueSubscribers({
+        db: ctx.db,
+        actorId: ctx.session.user.id,
+        issueId: issue.id,
+        type: "issue_comment",
+        title: `Comment on #${issue.number}: ${issue.title}`,
+        body: input.body.slice(0, 200),
+        link: issueLink(issue.repo.org.name, issue.repo.name, issue.number),
+        text: input.body,
       });
 
       return comment;
@@ -334,13 +396,36 @@ export const issueRouter = createTRPCRouter({
   addAssignee: protectedProcedure
     .input(z.object({ issueId: z.string(), userId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const issue = await ctx.db.issue.findUnique({ where: { id: input.issueId }, select: { repoId: true } });
+      const issue = await ctx.db.issue.findUnique({
+        where: { id: input.issueId },
+        select: { id: true, number: true, title: true, repoId: true, repo: { select: { name: true, org: { select: { name: true } } } } },
+      });
       if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
       await getUserAndRepoWithAccess(ctx, issue.repoId, RepoAccess.WRITE);
-      return ctx.db.issueAssignee.create({
+
+      const result = await ctx.db.issueAssignee.create({
         data: { issueId: input.issueId, userId: input.userId },
         include: { user: { select: { id: true, name: true, email: true, image: true } } },
       });
+
+      // Auto-subscribe assignee
+      await subscribeToIssue(ctx.db, issue.id, input.userId);
+
+      // Notify assignee directly
+      if (input.userId !== ctx.session.user.id) {
+        await ctx.db.notification.create({
+          data: {
+            userId: input.userId,
+            actorId: ctx.session.user.id,
+            type: "issue_assigned",
+            title: `You were assigned to #${issue.number}: ${issue.title}`,
+            link: issueLink(issue.repo.org.name, issue.repo.name, issue.number),
+            issueId: issue.id,
+          },
+        });
+      }
+
+      return result;
     }),
 
   removeAssignee: protectedProcedure
@@ -353,5 +438,35 @@ export const issueRouter = createTRPCRouter({
         where: { issueId_userId: { issueId: input.issueId, userId: input.userId } },
       });
       return { success: true };
+    }),
+
+  // ── Subscriptions ──────────────────────────────────────────────
+
+  isSubscribed: protectedProcedure
+    .input(z.object({ issueId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const sub = await ctx.db.issueSubscription.findUnique({
+        where: { issueId_userId: { issueId: input.issueId, userId: ctx.session.user.id } },
+      });
+      return !!sub;
+    }),
+
+  subscribe: protectedProcedure
+    .input(z.object({ issueId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const issue = await ctx.db.issue.findUnique({ where: { id: input.issueId }, select: { repoId: true } });
+      if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
+      await getUserAndRepoWithAccess(ctx, issue.repoId, RepoAccess.READ);
+      await subscribeToIssue(ctx.db, input.issueId, ctx.session.user.id);
+      return { subscribed: true };
+    }),
+
+  unsubscribe: protectedProcedure
+    .input(z.object({ issueId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db.issueSubscription.deleteMany({
+        where: { issueId: input.issueId, userId: ctx.session.user.id },
+      });
+      return { subscribed: false };
     }),
 });

@@ -16,6 +16,7 @@ import { licenseRouter } from "./routers/license";
 import { shelfRouter } from "./routers/shelf";
 import { artifactRouter } from "./routers/artifact";
 import { issueRouter } from "./routers/issue";
+import { notificationRouter } from "./routers/notification";
 
 /**
  * This is the primary router for your server.
@@ -40,6 +41,7 @@ export const appRouter = createTRPCRouter({
   shelf: shelfRouter,
   artifact: artifactRouter,
   issue: issueRouter,
+  notification: notificationRouter,
 });
 
 // export type definition of API

@@ -44,6 +44,11 @@ model User {
   issueComments      IssueComment[]
   issueAssignments   IssueAssignee[]
 
+  notifications         Notification[]       @relation("NotificationRecipient")
+  actedNotifications    Notification[]       @relation("NotificationActor")
+  issueSubscriptions    IssueSubscription[]
+  prSubscriptions       PullRequestSubscription[]
+
   // Auth
   accounts Account[]
   sessions Session[]
@@ -380,6 +385,8 @@ model PullRequest {
 
   comments PullRequestComment[]
   reviews  PullRequestReview[]
+  subscriptions PullRequestSubscription[]
+  notifications Notification[]
 
   @@unique([repoId, number])
   @@index([repoId, status])
@@ -563,6 +570,8 @@ model Issue {
   comments  IssueComment[]
   labels    IssueLabelLink[]
   assignees IssueAssignee[]
+  subscriptions IssueSubscription[]
+  notifications Notification[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -620,6 +629,63 @@ model IssueAssignee {
   userId String
 
   @@unique([issueId, userId])
+}
+
+// ── Notifications & Subscriptions ────────────────────────────────
+
+model Notification {
+  id    String @id @default(cuid())
+  type  String // e.g. "issue_comment", "issue_mention", "pr_review", etc.
+  title String
+  body  String @default("")
+  link  String // relative URL to navigate to
+
+  read Boolean @default(false)
+
+  user   User   @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  actor   User?   @relation("NotificationActor", fields: [actorId], references: [id])
+  actorId String?
+
+  issue   Issue?  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId String?
+
+  pullRequest   PullRequest? @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  pullRequestId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+}
+
+model IssueSubscription {
+  id String @id @default(cuid())
+
+  issue   Issue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  createdAt DateTime @default(now())
+
+  @@unique([issueId, userId])
+}
+
+model PullRequestSubscription {
+  id String @id @default(cuid())
+
+  pullRequest   PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  pullRequestId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  createdAt DateTime @default(now())
+
+  @@unique([pullRequestId, userId])
 }
 
 // better-auth models

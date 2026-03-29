@@ -14,17 +14,13 @@ export default function NewIssuePage() {
   const basePath = `/${orgName}/${repoName}`;
   useDocumentTitle(`New Issue - ${repoName} in ${orgName}`);
 
-  const { data: org } = api.org.getOrg.useQuery({ id: orgName, idIsName: true });
+  const { data: org } = api.org.getOrg.useQuery({ id: orgName, idIsName: true, includeUsers: true });
   const repoData = org?.repos?.find((r: { name: string }) => r.name === repoName);
+  const members = (org as any)?.users ?? [];
 
   const { data: labels } = api.issue.listLabels.useQuery(
     { repoId: repoData?.id ?? "" },
     { enabled: !!repoData?.id },
-  );
-
-  const { data: members } = api.org.getMembers.useQuery(
-    { orgId: org?.id ?? "" },
-    { enabled: !!org?.id },
   );
 
   const [title, setTitle] = useState("");

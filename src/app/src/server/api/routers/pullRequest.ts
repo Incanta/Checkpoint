@@ -6,6 +6,14 @@ import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { FileChangeType, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
+import {
+  subscribeToPR,
+  notifyPRSubscribers,
+} from "~/server/notifications";
+
+function prLink(orgName: string, repoName: string, number: number) {
+  return `/${orgName}/${repoName}/pull-requests/${number}`;
+}
 
 export const pullRequestRouter = createTRPCRouter({
   list: protectedProcedure
@@ -151,6 +159,20 @@ export const pullRequestRouter = createTRPCRouter({
 
       void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "write" });
 
+      // Auto-subscribe author
+      await subscribeToPR(ctx.db, pr.id, ctx.session.user.id);
+      // Notify subscribers (mentions in description)
+      const link = prLink(repo.org.name, repo.name, pr.number);
+      void notifyPRSubscribers({
+        db: ctx.db,
+        actorId: ctx.session.user.id,
+        pullRequestId: pr.id,
+        type: "pr_created",
+        title: `New PR #${pr.number}: ${pr.title}`,
+        link,
+        text: input.description,
+      });
+
       return pr;
     }),
 
@@ -204,6 +226,16 @@ export const pullRequestRouter = createTRPCRouter({
       });
 
       void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "write" });
+
+      void notifyPRSubscribers({
+        db: ctx.db,
+        actorId: ctx.session.user.id,
+        pullRequestId: pr.id,
+        type: "pr_closed",
+        title: `PR #${pr.number} closed: ${pr.title}`,
+        link: prLink(repo.org.name, repo.name, pr.number),
+      });
+
       return updated;
     }),
 
@@ -224,6 +256,16 @@ export const pullRequestRouter = createTRPCRouter({
       });
 
       void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "write" });
+
+      void notifyPRSubscribers({
+        db: ctx.db,
+        actorId: ctx.session.user.id,
+        pullRequestId: pr.id,
+        type: "pr_reopened",
+        title: `PR #${pr.number} reopened: ${pr.title}`,
+        link: prLink(repo.org.name, repo.name, pr.number),
+      });
+
       return updated;
     }),
 
@@ -395,6 +437,15 @@ export const pullRequestRouter = createTRPCRouter({
 
       void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "write" });
 
+      void notifyPRSubscribers({
+        db: ctx.db,
+        actorId: ctx.session.user.id,
+        pullRequestId: pr.id,
+        type: "pr_merged",
+        title: `PR #${pr.number} merged: ${pr.title}`,
+        link: prLink(repo.org.name, repo.name, pr.number),
+      });
+
       return {
         mergeChangelist: { id: mergeCl.id, number: mergeCl.number },
         deletedBranch: pr.sourceBranchName,
@@ -429,6 +480,20 @@ export const pullRequestRouter = createTRPCRouter({
       });
 
       void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "read" });
+
+      // Auto-subscribe commenter
+      await subscribeToPR(ctx.db, pr.id, ctx.session.user.id);
+
+      void notifyPRSubscribers({
+        db: ctx.db,
+        actorId: ctx.session.user.id,
+        pullRequestId: pr.id,
+        type: "pr_comment",
+        title: `Comment on PR #${pr.number}: ${pr.title}`,
+        body: input.body.slice(0, 200),
+        link: prLink(repo.org.name, repo.name, pr.number),
+        text: input.body,
+      });
 
       return comment;
     }),
@@ -516,6 +581,37 @@ export const pullRequestRouter = createTRPCRouter({
       });
 
       void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "write" });
+
+      // Auto-subscribe reviewer
+      await subscribeToPR(ctx.db, pr.id, input.reviewerId);
+
+      const link = prLink(repo.org.name, repo.name, pr.number);
+      if (input.state === "PENDING") {
+        // Review requested — notify the reviewer
+        if (input.reviewerId !== ctx.session.user.id) {
+          await ctx.db.notification.create({
+            data: {
+              userId: input.reviewerId,
+              actorId: ctx.session.user.id,
+              type: "pr_review_requested",
+              title: `Review requested on PR #${pr.number}: ${pr.title}`,
+              link,
+              pullRequestId: pr.id,
+            },
+          });
+        }
+      } else {
+        // Approved or changes requested — notify all subscribers
+        const stateLabel = input.state === "APPROVED" ? "approved" : "requested changes on";
+        void notifyPRSubscribers({
+          db: ctx.db,
+          actorId: ctx.session.user.id,
+          pullRequestId: pr.id,
+          type: input.state === "APPROVED" ? "pr_approved" : "pr_changes_requested",
+          title: `${review.reviewer.name ?? review.reviewer.email} ${stateLabel} PR #${pr.number}`,
+          link,
+        });
+      }
 
       return review;
     }),
@@ -632,5 +728,40 @@ export const pullRequestRouter = createTRPCRouter({
       return ctx.db.pullRequest.count({
         where: { repoId: input.repoId, status: "OPEN" },
       });
+    }),
+
+  // ── Subscriptions ──────────────────────────────────────────────
+
+  isSubscribed: protectedProcedure
+    .input(z.object({ pullRequestId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const sub = await ctx.db.pullRequestSubscription.findUnique({
+        where: {
+          pullRequestId_userId: { pullRequestId: input.pullRequestId, userId: ctx.session.user.id },
+        },
+      });
+      return !!sub;
+    }),
+
+  subscribe: protectedProcedure
+    .input(z.object({ pullRequestId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const pr = await ctx.db.pullRequest.findUnique({
+        where: { id: input.pullRequestId },
+        select: { repoId: true },
+      });
+      if (!pr) throw new TRPCError({ code: "NOT_FOUND", message: "Pull request not found" });
+      await getUserAndRepoWithAccess(ctx, pr.repoId, RepoAccess.READ);
+      await subscribeToPR(ctx.db, input.pullRequestId, ctx.session.user.id);
+      return { subscribed: true };
+    }),
+
+  unsubscribe: protectedProcedure
+    .input(z.object({ pullRequestId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db.pullRequestSubscription.deleteMany({
+        where: { pullRequestId: input.pullRequestId, userId: ctx.session.user.id },
+      });
+      return { subscribed: false };
     }),
 });

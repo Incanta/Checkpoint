@@ -36,8 +36,50 @@ function MoonIcon() {
   );
 }
 
+function BellIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 16a2 2 0 0 0 1.985-1.75H6.015A2 2 0 0 0 8 16ZM8 1.5A3.5 3.5 0 0 0 4.5 5c0 .847-.235 2.58-.632 3.853-.193.619-.415 1.136-.654 1.466-.126.174-.236.271-.314.32H13.1a1.76 1.76 0 0 1-.314-.32c-.239-.33-.461-.847-.654-1.466C11.735 7.58 11.5 5.847 11.5 5A3.5 3.5 0 0 0 8 1.5ZM3 5c0-2.76 2.24-5 5-5s5 2.24 5 5c0 .857.222 2.476.597 3.674.186.595.409 1.12.674 1.518.253.38.64.808 1.229.808a1 1 0 0 1 0 2H.5a1 1 0 0 1 0-2c.59 0 .976-.428 1.229-.808.265-.398.488-.923.674-1.518C2.778 7.476 3 5.857 3 5Z" />
+    </svg>
+  );
+}
+
+function timeAgo(dateStr: string) {
+  const now = Date.now();
+  const d = new Date(dateStr).getTime();
+  const seconds = Math.floor((now - d) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(dateStr).toLocaleDateString();
+}
+
 export function AppHeader() {
   const { data: user } = api.user.me.useQuery();
+  const { data: unreadCount } = api.notification.countUnread.useQuery(undefined, {
+    refetchInterval: 30_000,
+  });
+  const { data: notifs } = api.notification.list.useQuery(
+    { limit: 10 },
+    { refetchInterval: 30_000 },
+  );
+  const utils = api.useUtils();
+  const markRead = api.notification.markRead.useMutation({
+    onSuccess: () => {
+      void utils.notification.countUnread.invalidate();
+      void utils.notification.list.invalidate();
+    },
+  });
+  const markAllRead = api.notification.markAllRead.useMutation({
+    onSuccess: () => {
+      void utils.notification.countUnread.invalidate();
+      void utils.notification.list.invalidate();
+    },
+  });
   const { theme, toggle } = useTheme();
 
   const handleSignOut = async () => {
@@ -97,6 +139,64 @@ export function AppHeader() {
         >
           <DropdownItem href="/new/org">New organization</DropdownItem>
           <DropdownItem href="/new/repo">New repository</DropdownItem>
+        </Dropdown>
+
+        {/* Notifications bell */}
+        <Dropdown
+          trigger={
+            <span className="relative flex h-8 w-8 items-center justify-center rounded-md text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-overlay)] hover:text-[var(--color-text-primary)]">
+              <BellIcon />
+              {(unreadCount ?? 0) > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-bold text-white">
+                  {unreadCount! > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+            </span>
+          }
+        >
+          <div className="w-80">
+            <div className="flex items-center justify-between px-4 py-2">
+              <span className="text-sm font-semibold text-[var(--color-text-primary)]">Notifications</span>
+              {(unreadCount ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => markAllRead.mutate()}
+                  className="text-xs text-[var(--color-text-link)] hover:underline"
+                >
+                  Mark all read
+                </button>
+              )}
+            </div>
+            <DropdownDivider />
+            {notifs?.items && notifs.items.length > 0 ? (
+              <div className="max-h-80 overflow-y-auto">
+                {notifs.items.map((n: any) => (
+                  <DropdownItem
+                    key={n.id}
+                    href={n.link}
+                    onClick={() => { if (!n.read) markRead.mutate({ id: n.id }); }}
+                  >
+                    <div className="flex gap-2">
+                      {!n.read && (
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]" />
+                      )}
+                      <div className={!n.read ? "" : "pl-4"}>
+                        <div className="text-xs font-medium text-[var(--color-text-primary)] line-clamp-2">{n.title}</div>
+                        {n.body && <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)] line-clamp-1">{n.body}</div>}
+                        <div className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
+                          {n.actor?.name ?? n.actor?.email ?? ""} · {timeAgo(n.createdAt)}
+                        </div>
+                      </div>
+                    </div>
+                  </DropdownItem>
+                ))}
+              </div>
+            ) : (
+              <div className="px-4 py-6 text-center text-xs text-[var(--color-text-muted)]">
+                No notifications yet
+              </div>
+            )}
+          </div>
         </Dropdown>
 
         {/* User avatar dropdown */}
