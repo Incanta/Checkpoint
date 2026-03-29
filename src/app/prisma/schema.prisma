@@ -180,6 +180,10 @@ model Changelist {
   versionIndex String
   stateTree    Json
 
+  // Artifact overlay (populated by CI after submit)
+  artifactVersionIndex String?
+  artifactStateTree    Json?
+
   repo   Repo   @relation(fields: [repoId], references: [id])
   repoId String
 
@@ -192,6 +196,7 @@ model Changelist {
 
   fileChanges FileChange[]
   labels      ChangelistLabel[]
+  artifacts   ArtifactFile[]
 
   @@unique([repoId, number])
 }
@@ -230,6 +235,23 @@ model FileChange {
   oldPath String?
 }
 
+model ArtifactFile {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  changelist       Changelist @relation(fields: [repoId, changelistNumber], references: [repoId, number])
+  repoId           String
+  changelistNumber Int
+
+  file   File   @relation(fields: [fileId], references: [id])
+  fileId String
+
+  size BigInt
+
+  @@unique([repoId, changelistNumber, fileId])
+  @@index([repoId, changelistNumber])
+}
+
 model File {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -242,6 +264,7 @@ model File {
   changes   FileChange[]
   checkouts FileCheckout[]
   shelfChanges ShelfFileChange[]
+  artifactFiles ArtifactFile[]
 
   @@index([repoId])
 }

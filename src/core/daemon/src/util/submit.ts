@@ -35,6 +35,7 @@ export async function submit(
   onStep?: (step: string) => void,
   onProgress?: (step: string, done: number, total: number) => void,
   shelfName?: string,
+  artifactForChangelistNum?: number,
 ): Promise<void> {
   const user = await GetAuthConfigUser(workspace.daemonId);
 
@@ -114,6 +115,10 @@ export async function submit(
 
   if (shelfName) {
     submitOptions.shelfName = shelfName;
+  }
+
+  if (artifactForChangelistNum != null && artifactForChangelistNum >= 0) {
+    submitOptions.artifactForChangelistNum = artifactForChangelistNum;
   }
 
   const handle = submitAsync(submitOptions);

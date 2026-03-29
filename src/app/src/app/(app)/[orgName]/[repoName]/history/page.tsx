@@ -179,7 +179,14 @@ export default function RepoHistoryPage() {
                   className="flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-surface)]"
                 >
                   <div className="shrink-0 pt-0.5">
-                    <Badge variant="accent">#{cl.number}</Badge>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="accent">#{cl.number}</Badge>
+                      {(cl as any).artifactVersionIndex && (
+                        <Badge variant="warning" className="text-[10px]">
+                          📦 Artifacts
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-[var(--color-text-primary)]">

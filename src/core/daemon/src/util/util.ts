@@ -60,6 +60,7 @@ export async function exec(
 export interface WorkspaceState {
   changelistNumber: number;
   files: Record<string, WorkspaceStateFile>; // path -> file info
+  artifactFiles?: Record<string, WorkspaceStateFile>; // path -> artifact file info
   /** Relative paths of files explicitly marked for add */
   markedForAdd?: string[];
 }
@@ -69,6 +70,8 @@ export interface WorkspaceConfig {
   repoId: string;
   branchName: string;
   workspaceName: string;
+  /** Whether to include artifacts when pulling */
+  includeArtifacts?: boolean;
   /**
    * Controls whether the "mark as resolved" confirmation dialog is suppressed.
    * - undefined/null: always show the confirmation

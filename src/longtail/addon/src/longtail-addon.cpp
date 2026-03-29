@@ -153,6 +153,13 @@ static Napi::Value NapiSubmitAsync(const Napi::CallbackInfo& info) {
       shelfName = StoreString(ctx, val.As<Napi::String>().Utf8Value());
     }
   }
+  int32_t artifactForChangelistNum = -1;
+  {
+    Napi::Value val = opts.Get("artifactForChangelistNum");
+    if (val.IsNumber()) {
+      artifactForChangelistNum = val.As<Napi::Number>().Int32Value();
+    }
+  }
   const char* message = StoreString(ctx, opts.Get("message").As<Napi::String>().Utf8Value());
   uint32_t targetChunkSize = opts.Get("targetChunkSize").As<Napi::Number>().Uint32Value();
   uint32_t targetBlockSize = opts.Get("targetBlockSize").As<Napi::Number>().Uint32Value();
@@ -193,7 +200,7 @@ static Napi::Value NapiSubmitAsync(const Napi::CallbackInfo& info) {
   }
 
   WrapperAsyncHandle* handle = ::SubmitAsync(
-      branchName, shelfName, message,
+      branchName, shelfName, artifactForChangelistNum, message,
       targetChunkSize, targetBlockSize, maxChunksPerBlock, minBlockUsagePercent,
       hashingAlgo, compressionAlgo,
       enableMmapIndexing, enableMmapBlockStore,

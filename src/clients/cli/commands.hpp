@@ -1628,4 +1628,113 @@ inline int cmdUnshelve(const std::string& name, const std::string& branchName) {
   return 0;
 }
 
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: artifact upload
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdArtifactUpload(int changelistNumber, const std::vector<std::string>& files, const std::string& message) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  if (files.empty()) {
+    std::cerr << "No files specified for artifact upload." << std::endl;
+    std::cerr << color::dim() << "  Usage: chk artifact upload <cl-number> <file1> [file2] ..."
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  nlohmann::json modifications = nlohmann::json::array();
+  for (const auto& filePath : files) {
+    // Normalize path relative to workspace root
+    auto absPath = fs::absolute(filePath);
+    auto relPath = fs::relative(absPath, ctx.root);
+    std::string relStr = relPath.generic_string();
+
+    if (!fs::exists(absPath)) {
+      std::cerr << color::red() << "error: File not found: " << filePath
+                << color::reset() << std::endl;
+      return 1;
+    }
+
+    modifications.push_back({
+        {"path", relStr},
+        {"delete", false},
+    });
+  }
+
+  std::string submitMessage = message.empty()
+    ? ("Artifact upload for CL #" + std::to_string(changelistNumber))
+    : message;
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"changelistNumber", changelistNumber},
+      {"modifications", modifications},
+      {"message", submitMessage},
+  };
+
+  auto result = client.mutate("workspaces.artifacts.upload", input);
+
+  std::string jobId = result.value("jobId", "");
+  if (jobId.empty()) {
+    std::cerr << "error: No job ID returned from artifact upload." << std::endl;
+    return 1;
+  }
+
+  std::cout << "Uploading " << files.size() << " artifact(s) for CL #"
+            << changelistNumber << "..." << std::endl;
+
+  auto jobResult = pollJob(client, jobId);
+
+  if (jobResult.status == "failed") {
+    std::cerr << color::red() << "error: " << jobResult.error
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  std::cout << color::green() << color::bold()
+            << "Successfully uploaded " << files.size() << " artifact(s) for CL #"
+            << changelistNumber << "."
+            << color::reset() << std::endl;
+
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: config artifacts
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdConfigArtifacts(const std::string& value) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  bool enable;
+  if (value == "on" || value == "true" || value == "yes" || value == "1") {
+    enable = true;
+  } else if (value == "off" || value == "false" || value == "no" || value == "0") {
+    enable = false;
+  } else {
+    std::cerr << "Invalid value: " << value << std::endl;
+    std::cerr << color::dim() << "  Usage: chk config artifacts <on|off>"
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"includeArtifacts", enable},
+  };
+
+  client.mutate("workspaces.artifacts.setPreference", input);
+
+  std::cout << "Artifact downloads " << (enable ? "enabled" : "disabled")
+            << " for this workspace." << std::endl;
+
+  return 0;
+}
+
 }  // namespace checkpoint

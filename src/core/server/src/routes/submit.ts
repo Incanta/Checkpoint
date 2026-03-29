@@ -5,6 +5,7 @@ import {
   ValidationError,
   array,
   boolean,
+  number,
 } from "yup";
 import jwt from "njwt";
 import config from "@incanta/config";
@@ -34,6 +35,7 @@ const RequestSchema = object({
   apiToken: string().required(),
   branchName: string().required(),
   shelfName: string().optional(),
+  artifactForChangelistNum: number().optional(),
   message: string().required(),
   versionIndex: string().defined(),
   modifications: array(
@@ -302,6 +304,23 @@ export function routeSubmit(): Router {
         responseMessage = {
           id: shelfResponse.shelfName,
           number: shelfResponse.changelistNumber,
+        };
+      } else if (
+        payload.artifactForChangelistNum != null &&
+        payload.artifactForChangelistNum >= 0
+      ) {
+        // Route to artifact attachment on existing CL
+        const artifactResponse =
+          await client.artifact.attachToChangelist.mutate({
+            repoId: claims.repoId,
+            changelistNumber: payload.artifactForChangelistNum,
+            versionIndex: payload.versionIndex,
+            modifications: payload.modifications,
+          });
+
+        responseMessage = {
+          id: String(artifactResponse.changelistNumber),
+          number: artifactResponse.changelistNumber,
         };
       } else {
         const createChangelistResponse =

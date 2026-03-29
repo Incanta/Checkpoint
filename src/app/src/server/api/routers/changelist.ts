@@ -378,7 +378,7 @@ export const changelistRouter = createTRPCRouter({
         }
       }
 
-      // Create the changelist
+      // Create the changelist (inherit artifact state from parent)
       const changelist = await ctx.db.changelist.create({
         data: {
           number: nextNumber,
@@ -386,6 +386,8 @@ export const changelistRouter = createTRPCRouter({
           versionIndex: input.versionIndex,
           parentNumber: branch.headNumber,
           stateTree: stateTree,
+          artifactVersionIndex: parentChangelist.artifactVersionIndex,
+          artifactStateTree: parentChangelist.artifactStateTree,
           repoId: input.repoId,
           userId: ctx.session.user.id,
         },

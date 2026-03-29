@@ -461,6 +461,17 @@ export const branchRouter = createTRPCRouter({
         targetState[fileId] = clNum;
       }
 
+      // Merge artifact state trees: incoming overwrites target
+      const targetArtifactState: Record<string, number> = {
+        ...(targetHead.artifactStateTree as Record<string, number> ?? {}),
+      };
+      const incomingArtifactState: Record<string, number> =
+        (incomingHead.artifactStateTree as Record<string, number>) ?? {};
+
+      for (const [fileId, clNum] of Object.entries(incomingArtifactState)) {
+        targetArtifactState[fileId] = clNum;
+      }
+
       // Collect all file changes from the incoming CLs
       const incomingClNumbers = incomingCls.map((cl) => cl.number);
       const fileChanges = await ctx.db.fileChange.findMany({
@@ -493,6 +504,8 @@ export const branchRouter = createTRPCRouter({
           versionIndex: incomingHead.versionIndex,
           parentNumber: targetBranch.headNumber,
           stateTree: targetState,
+          artifactVersionIndex: incomingHead.artifactVersionIndex,
+          artifactStateTree: Object.keys(targetArtifactState).length > 0 ? targetArtifactState : undefined,
           repoId: input.repoId,
           userId: ctx.session.user.id,
         },
