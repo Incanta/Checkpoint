@@ -9,6 +9,7 @@ export type LicenseFeature =
   | "shelves"
   | "hordeIntegration"
   | "artifacts"
+  | "issues"
   | "dataReplicas"
   | "enterpriseSaml";
 
@@ -19,6 +20,7 @@ const FEATURE_MIN_TIER: Record<LicenseFeature, LicenseTier> = {
   shelves: "PRO",
   hordeIntegration: "PRO",
   artifacts: "PRO",
+  issues: "PRO",
   dataReplicas: "STUDIO",
   enterpriseSaml: "STUDIO",
 };

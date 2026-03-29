@@ -40,6 +40,10 @@ model User {
   mergePermissions   MergePermission[]
   shelves            Shelf[]
 
+  issues             Issue[]
+  issueComments      IssueComment[]
+  issueAssignments   IssueAssignee[]
+
   // Auth
   accounts Account[]
   sessions Session[]
@@ -120,6 +124,8 @@ model Repo {
   pullRequests     PullRequest[]
   mergePermissions MergePermission[]
   shelves          Shelf[]
+  issues           Issue[]
+  issueLabels      IssueLabel[]
 
   @@unique([orgId, name])
 }
@@ -530,6 +536,90 @@ model ShelfFileChange {
   type String // ADD, MODIFY
 
   @@unique([shelfId, fileId])
+}
+
+// ── Issues ──────────────────────────────────────────────────────
+
+enum IssueStatus {
+  OPEN
+  CLOSED
+}
+
+model Issue {
+  id     String @id @default(cuid())
+  number Int
+  title  String
+  body   String @default("")
+
+  status   IssueStatus @default(OPEN)
+  closedAt DateTime?
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  comments  IssueComment[]
+  labels    IssueLabelLink[]
+  assignees IssueAssignee[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repoId, number])
+  @@index([repoId, status])
+}
+
+model IssueComment {
+  id   String @id @default(cuid())
+  body String
+
+  issue   Issue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId String
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model IssueLabel {
+  id    String @id @default(cuid())
+  name  String
+  color String @default("#6366f1")
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  issues IssueLabelLink[]
+
+  @@unique([repoId, name])
+}
+
+model IssueLabelLink {
+  id String @id @default(cuid())
+
+  issue   Issue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId String
+
+  label   IssueLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  labelId String
+
+  @@unique([issueId, labelId])
+}
+
+model IssueAssignee {
+  id String @id @default(cuid())
+
+  issue   Issue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId String
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@unique([issueId, userId])
 }
 
 // better-auth models

@@ -28,10 +28,16 @@ export default function RepoLayout({
   const { hasFeature } = useLicenseTier(org?.id);
   const showPullRequests = hasFeature("pullRequests");
   const showShelves = hasFeature("shelves");
+  const showIssues = hasFeature("issues");
 
   const { data: openPrCount } = api.pullRequest.countOpen.useQuery(
     { repoId: repoData?.id ?? "" },
     { enabled: !!repoData?.id && showPullRequests },
+  );
+
+  const { data: openIssueCount } = api.issue.countOpen.useQuery(
+    { repoId: repoData?.id ?? "" },
+    { enabled: !!repoData?.id && showIssues },
   );
 
   return (
@@ -62,6 +68,16 @@ export default function RepoLayout({
               Pull Requests
               {!!openPrCount && openPrCount > 0 && (
                 <Badge variant="accent" className="ml-0.5">{openPrCount}</Badge>
+              )}
+            </span>
+          </Tab>
+        )}
+        {showIssues && (
+          <Tab href={`${basePath}/issues`}>
+            <span className="flex items-center gap-1.5">
+              Issues
+              {!!openIssueCount && openIssueCount > 0 && (
+                <Badge variant="accent" className="ml-0.5">{openIssueCount}</Badge>
               )}
             </span>
           </Tab>
