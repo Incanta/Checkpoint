@@ -1,0 +1,13 @@
+enabled: false
+
+smtp:
+  host: ""
+  port: 587
+  secure: false
+  auth:
+    user: ""
+    pass: ""
+
+from:
+  name: "Checkpoint VCS"
+  address: "noreply@example.com"
