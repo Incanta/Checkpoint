@@ -3,7 +3,15 @@
 import { useState } from "react";
 import { useParams } from "next/navigation";
 import { api } from "~/trpc/react";
-import { Button, Card, PageHeader, Badge, Avatar, Tabs, Tab } from "~/app/_components/ui";
+import {
+  Button,
+  Card,
+  PageHeader,
+  Badge,
+  Avatar,
+  Tabs,
+  Tab,
+} from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 
 const ROLE_COLORS = {
@@ -13,8 +21,19 @@ const ROLE_COLORS = {
 };
 
 const MONTH_NAMES = [
-  "", "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 export default function OrgMembersPage() {
@@ -43,13 +62,29 @@ export default function OrgMembersPage() {
     },
   });
 
-  const members = (org as any)?.users ?? [];
+  const members = ((org as Record<string, unknown> | undefined)?.users ??
+    []) as Array<{
+    user: {
+      id: string;
+      name: string | null;
+      email: string;
+      image: string | null;
+    };
+    role: string;
+    userId: string;
+  }>;
 
   // Build a lookup from userId → activity for the current month
-  const activityByUser = new Map<string, { writeCount: number; readCount: number }>();
+  const activityByUser = new Map<
+    string,
+    { writeCount: number; readCount: number }
+  >();
   if (activityData) {
     for (const a of activityData.activities) {
-      activityByUser.set(a.userId, { writeCount: a.writeCount, readCount: a.readCount });
+      activityByUser.set(a.userId, {
+        writeCount: a.writeCount,
+        readCount: a.readCount,
+      });
     }
   }
 
@@ -59,7 +94,10 @@ export default function OrgMembersPage() {
         title={`${orgName} members`}
         breadcrumbs={
           <span>
-            <a href={`/${orgName}`} className="text-[var(--color-info)] hover:underline">
+            <a
+              href={`/${orgName}`}
+              className="text-[var(--color-info)] hover:underline"
+            >
               {orgName}
             </a>
             {" / Settings / Members"}
@@ -79,17 +117,22 @@ export default function OrgMembersPage() {
         {activityData && (
           <Card>
             <h3 className="mb-3 text-sm font-semibold text-[var(--color-text-primary)]">
-              Monthly active users — {MONTH_NAMES[activityData.summary.month]} {activityData.summary.year}
+              Monthly active users — {MONTH_NAMES[activityData.summary.month]}{" "}
+              {activityData.summary.year}
             </h3>
             <div className="flex gap-6 text-sm">
               <div>
-                <span className="text-[var(--color-text-muted)]">Write users (AWU): </span>
+                <span className="text-[var(--color-text-muted)]">
+                  Write users (AWU):{" "}
+                </span>
                 <span className="font-medium text-[var(--color-text-primary)]">
                   {activityData.summary.totalActiveWriteUsers}
                 </span>
               </div>
               <div>
-                <span className="text-[var(--color-text-muted)]">Read-only users (ARU): </span>
+                <span className="text-[var(--color-text-muted)]">
+                  Read-only users (ARU):{" "}
+                </span>
                 <span className="font-medium text-[var(--color-text-primary)]">
                   {activityData.summary.totalActiveReadUsers}
                 </span>
@@ -137,19 +180,25 @@ export default function OrgMembersPage() {
               <option value="MEMBER">Member</option>
               <option value="ADMIN">Admin</option>
             </select>
-            <Button type="submit" size="sm" disabled={!newEmail.trim() || addUser.isPending}>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={!newEmail.trim() || addUser.isPending}
+            >
               {addUser.isPending ? "Adding..." : "Add"}
             </Button>
           </form>
           {addUser.error && (
-            <p className="mt-2 text-sm text-[var(--color-danger)]">{addUser.error.message}</p>
+            <p className="mt-2 text-sm text-[var(--color-danger)]">
+              {addUser.error.message}
+            </p>
           )}
         </Card>
 
         {/* Member list */}
         <Card padding={false}>
           <div className="divide-y divide-[var(--color-border-default)]">
-            {members.map((member: any) => {
+            {members.map((member) => {
               const activity = activityByUser.get(member.user.id);
               return (
                 <div
@@ -178,10 +227,17 @@ export default function OrgMembersPage() {
                     {activity && activity.writeCount > 0 && (
                       <Badge variant="accent">AWU</Badge>
                     )}
-                    {activity && activity.readCount > 0 && activity.writeCount === 0 && (
-                      <Badge variant="info">ARU</Badge>
-                    )}
-                    <Badge variant={ROLE_COLORS[member.role as keyof typeof ROLE_COLORS] ?? "default"}>
+                    {activity &&
+                      activity.readCount > 0 &&
+                      activity.writeCount === 0 && (
+                        <Badge variant="info">ARU</Badge>
+                      )}
+                    <Badge
+                      variant={
+                        ROLE_COLORS[member.role as keyof typeof ROLE_COLORS] ??
+                        "default"
+                      }
+                    >
                       {member.role}
                     </Badge>
                   </div>

@@ -47,7 +47,7 @@ export const labelRouter = createTRPCRouter({
         where: { id: input.id },
       });
 
-      if (!label || label.repoId !== input.repoId) {
+      if (label?.repoId !== input.repoId) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Label not found",
@@ -74,7 +74,7 @@ export const labelRouter = createTRPCRouter({
         where: { id: input.id },
       });
 
-      if (!label || label.repoId !== input.repoId) {
+      if (label?.repoId !== input.repoId) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Label not found",
@@ -119,7 +119,7 @@ export const labelRouter = createTRPCRouter({
         where: { id: input.id },
       });
 
-      if (!label || label.repoId !== input.repoId) {
+      if (label?.repoId !== input.repoId) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Label not found",

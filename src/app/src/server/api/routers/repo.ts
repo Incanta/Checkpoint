@@ -192,6 +192,6 @@ export const repoRouter = createTRPCRouter({
         });
       });
 
-      return await Promise.all(accessibleRepos);
+      return accessibleRepos;
     }),
 });

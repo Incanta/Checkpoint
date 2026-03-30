@@ -92,8 +92,7 @@ function applyWhitespaceMarkers(html: string): string {
     }
   }
 
-  for (let i = 0; i < html.length; i++) {
-    const ch = html[i]!;
+  for (const ch of html) {
 
     if (ch === "<") {
       inTag = true;

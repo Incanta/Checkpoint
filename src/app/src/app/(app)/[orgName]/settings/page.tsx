@@ -25,8 +25,8 @@ export default function OrgSettingsPage() {
 
   if (org && !initialized) {
     setName(org.name);
-    setDefaultAccess((org as any).defaultRepoAccess ?? "NONE");
-    setDefaultCanCreate((org as any).defaultCanCreateRepos ?? true);
+    setDefaultAccess((org as Record<string, unknown>).defaultRepoAccess as string ?? "NONE");
+    setDefaultCanCreate((org as Record<string, unknown>).defaultCanCreateRepos as boolean ?? true);
     setInitialized(true);
   }
 

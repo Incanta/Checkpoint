@@ -448,13 +448,11 @@ export const branchRouter = createTRPCRouter({
       }
 
       // Merge the state trees: incoming overwrites target
-      /* eslint-disable @typescript-eslint/no-unsafe-assignment */
       const targetState: Record<string, number> = {
-        ...(targetHead.stateTree as any),
+        ...(targetHead.stateTree as Record<string, number>),
       };
       const incomingState: Record<string, number> =
-        incomingHead.stateTree as any;
-      /* eslint-enable @typescript-eslint/no-unsafe-assignment */
+        incomingHead.stateTree as Record<string, number>;
 
       for (const [fileId, clNum] of Object.entries(incomingState)) {
         targetState[fileId] = clNum;
