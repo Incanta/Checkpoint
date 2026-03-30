@@ -4,11 +4,10 @@ import config from "@incanta/config";
 import njwt from "njwt";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { FileChangeType, type Prisma, type PrismaClient, RepoAccess } from "@prisma/client";
+import { FileChangeType, type Prisma, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
-import { hasFeature, isLicenseManager, type LicenseTier } from "~/server/license-utils";
-import { getInstanceTier } from "~/server/license-client";
+import { assertFeature } from "~/server/license-client";
 import {
   readFileFromVersionAsync,
   pollReadFileHandle,
@@ -30,22 +29,6 @@ function isBinaryFile(filePath: string): boolean {
   ]);
   const ext = filePath.substring(filePath.lastIndexOf(".")).toLowerCase();
   return binaryExtensions.has(ext);
-}
-
-async function assertShelfFeature(orgId: string, db: PrismaClient) {
-  if (isLicenseManager()) {
-    const org = await db.org.findUnique({
-      where: { id: orgId },
-      select: { subscriptionTier: true },
-    });
-    if (!hasFeature((org?.subscriptionTier ?? "BASIC") as LicenseTier, "shelves")) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Shelves require a Pro or higher subscription" });
-    }
-  } else {
-    if (!hasFeature(getInstanceTier(), "shelves")) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Shelves require a Pro or higher license" });
-    }
-  }
 }
 
 export const shelfRouter = createTRPCRouter({
@@ -128,7 +111,7 @@ export const shelfRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
-      await assertShelfFeature(repo.orgId, ctx.db);
+      await assertFeature(repo.orgId, "shelves", ctx.db);
 
       // Check name uniqueness
       const existing = await ctx.db.shelf.findUnique({
@@ -225,7 +208,7 @@ export const shelfRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
-      await assertShelfFeature(repo.orgId, ctx.db);
+      await assertFeature(repo.orgId, "shelves", ctx.db);
 
       const shelf = await ctx.db.shelf.findUnique({
         where: { repoId_name: { repoId: input.repoId, name: input.shelfName } },
@@ -291,7 +274,7 @@ export const shelfRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
-      await assertShelfFeature(repo.orgId, ctx.db);
+      await assertFeature(repo.orgId, "shelves", ctx.db);
 
       const shelf = await ctx.db.shelf.findUnique({
         where: { repoId_name: { repoId: input.repoId, name: input.shelfName } },
@@ -353,7 +336,7 @@ export const shelfRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
-      await assertShelfFeature(repo.orgId, ctx.db);
+      await assertFeature(repo.orgId, "shelves", ctx.db);
 
       const shelf = await ctx.db.shelf.findUnique({
         where: { repoId_name: { repoId: input.repoId, name: input.shelfName } },
@@ -475,7 +458,7 @@ export const shelfRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
-      await assertShelfFeature(repo.orgId, ctx.db);
+      await assertFeature(repo.orgId, "shelves", ctx.db);
 
       // Allocate next CL number
       const lastChangelist = await ctx.db.changelist.findFirst({

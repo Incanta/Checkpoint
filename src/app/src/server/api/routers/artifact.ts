@@ -2,27 +2,10 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { type PrismaClient, RepoAccess } from "@prisma/client";
+import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
-import { hasFeature, isLicenseManager, type LicenseTier } from "~/server/license-utils";
-import { getInstanceTier } from "~/server/license-client";
-
-async function assertArtifactFeature(orgId: string, db: PrismaClient) {
-  if (isLicenseManager()) {
-    const org = await db.org.findUnique({
-      where: { id: orgId },
-      select: { subscriptionTier: true },
-    });
-    if (!hasFeature((org?.subscriptionTier ?? "BASIC") as LicenseTier, "artifacts")) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Artifacts require a Pro or higher subscription" });
-    }
-  } else {
-    if (!hasFeature(getInstanceTier(), "artifacts")) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Artifacts require a Pro or higher license" });
-    }
-  }
-}
+import { assertFeature } from "~/server/license-client";
 
 export const artifactRouter = createTRPCRouter({
   // Called by the backend server when CI uploads artifacts for an existing CL.
@@ -44,7 +27,7 @@ export const artifactRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
-      await assertArtifactFeature(repo.orgId, ctx.db);
+      await assertFeature(repo.orgId, "artifacts", ctx.db);
 
       const changelist = await ctx.db.changelist.findUnique({
         where: { repoId_number: { repoId: input.repoId, number: input.changelistNumber } },

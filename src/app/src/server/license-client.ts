@@ -1,5 +1,7 @@
-import { getLicenseConfig, isLicenseManager, type LicenseTier } from "~/server/license-utils";
+import { TRPCError } from "@trpc/server";
+import { getLicenseConfig, hasFeature, isLicenseManager, type LicenseFeature, type LicenseTier } from "~/server/license-utils";
 import { db } from "~/server/db";
+import type { PrismaClient } from "@prisma/client";
 
 let cachedTier: LicenseTier = "BASIC";
 let lastValidation = 0;
@@ -119,5 +121,56 @@ export function stopLicenseClient(): void {
   if (validationTimer) {
     clearInterval(validationTimer);
     validationTimer = null;
+  }
+}
+
+/**
+ * Returns the effective license tier for an org, handling both licensing modes:
+ *
+ * - **Org license** (cloud/license-manager instance): Each org has its own
+ *   `subscriptionTier` managed via the License model. The tier is read from
+ *   the org's database record.
+ *
+ * - **Instance license** (self-hosted): A single license key covers the
+ *   entire instance. All orgs share the same tier, cached from periodic
+ *   validation with the license manager. Billed in aggregate (AWU/ARU).
+ *
+ * @param orgId - The org to check
+ * @param prisma - Optional PrismaClient (defaults to the global db instance)
+ */
+export async function getEffectiveTier(
+  orgId: string,
+  prisma: PrismaClient = db,
+): Promise<LicenseTier> {
+  if (isLicenseManager()) {
+    const org = await prisma.org.findUnique({
+      where: { id: orgId },
+      select: { subscriptionTier: true },
+    });
+    return (org?.subscriptionTier ?? "BASIC") as LicenseTier;
+  }
+  return getInstanceTier();
+}
+
+/**
+ * Asserts that the given org has access to a feature, throwing a TRPCError
+ * if not. Handles both org licenses (cloud) and instance licenses (self-hosted).
+ *
+ * @param orgId - The org to check
+ * @param feature - The feature to gate on
+ * @param prisma - Optional PrismaClient (defaults to the global db instance)
+ * @throws TRPCError with code FORBIDDEN if the feature is not available
+ */
+export async function assertFeature(
+  orgId: string,
+  feature: LicenseFeature,
+  prisma: PrismaClient = db,
+): Promise<void> {
+  const tier = await getEffectiveTier(orgId, prisma);
+  if (!hasFeature(tier, feature)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Feature "${feature}" requires a higher license tier`,
+    });
   }
 }

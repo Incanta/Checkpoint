@@ -3,15 +3,18 @@ import config from "@incanta/config";
 export const LICENSE_TIERS = ["BASIC", "PRO", "STUDIO", "INCANTA"] as const;
 export type LicenseTier = (typeof LICENSE_TIERS)[number];
 
-export type LicenseFeature =
-  | "pullRequests"
-  | "reviews"
-  | "shelves"
-  | "hordeIntegration"
-  | "artifacts"
-  | "issues"
-  | "dataReplicas"
-  | "enterpriseSaml";
+export const LicenseFeatures = [
+  "pullRequests",
+  "reviews",
+  "shelves",
+  "hordeIntegration",
+  "artifacts",
+  "issues",
+  "dataReplicas",
+  "enterpriseSaml",
+] as const;
+
+export type LicenseFeature = (typeof LicenseFeatures)[number];
 
 // Minimum tier required for each feature
 const FEATURE_MIN_TIER: Record<LicenseFeature, LicenseTier> = {
@@ -29,7 +32,10 @@ function tierIndex(tier: LicenseTier): number {
   return LICENSE_TIERS.indexOf(tier);
 }
 
-export function hasFeature(tier: LicenseTier, feature: LicenseFeature): boolean {
+export function hasFeature(
+  tier: LicenseTier,
+  feature: LicenseFeature,
+): boolean {
   if (tier === "INCANTA") return true;
   const required = FEATURE_MIN_TIER[feature];
   return tierIndex(tier) >= tierIndex(required);

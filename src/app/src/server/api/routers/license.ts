@@ -9,8 +9,9 @@ import {
   getFeaturesForTier,
   type LicenseFeature,
   type LicenseTier,
+  LicenseFeatures,
 } from "~/server/license-utils";
-import { getInstanceTier } from "~/server/license-client";
+import { getEffectiveTier as getEffectiveTierHelper } from "~/server/license-client";
 
 export const licenseRouter = createTRPCRouter({
   // Admin: list all licenses (license manager only)
@@ -196,19 +197,8 @@ export const licenseRouter = createTRPCRouter({
   getEffectiveTier: protectedProcedure
     .input(z.object({ orgId: z.string() }))
     .query(async ({ ctx, input }): Promise<{ tier: LicenseTier; features: LicenseFeature[] }> => {
-      if (isLicenseManager()) {
-        // Cloud mode: read from the org's subscription tier
-        const org = await ctx.db.org.findUnique({
-          where: { id: input.orgId },
-          select: { subscriptionTier: true },
-        });
-        const tier = (org?.subscriptionTier ?? "BASIC") as LicenseTier;
-        return { tier, features: getFeaturesForTier(tier) };
-      } else {
-        // Self-hosted mode: use cached instance tier
-        const tier = getInstanceTier();
-        return { tier, features: getFeaturesForTier(tier) };
-      }
+      const tier = await getEffectiveTierHelper(input.orgId, ctx.db);
+      return { tier, features: getFeaturesForTier(tier) };
     }),
 
   // Public: check if a specific feature is available
@@ -216,26 +206,11 @@ export const licenseRouter = createTRPCRouter({
     .input(
       z.object({
         orgId: z.string(),
-        feature: z.enum([
-          "pullRequests",
-          "reviews",
-          "shelves",
-          "hordeIntegration",
-          "artifacts",
-          "dataReplicas",
-          "enterpriseSaml",
-        ]),
+        feature: z.enum(LicenseFeatures),
       }),
     )
     .query(async ({ ctx, input }): Promise<boolean> => {
-      if (isLicenseManager()) {
-        const org = await ctx.db.org.findUnique({
-          where: { id: input.orgId },
-          select: { subscriptionTier: true },
-        });
-        return hasFeature((org?.subscriptionTier ?? "BASIC") as LicenseTier, input.feature);
-      } else {
-        return hasFeature(getInstanceTier(), input.feature);
-      }
+      const tier = await getEffectiveTierHelper(input.orgId, ctx.db);
+      return hasFeature(tier, input.feature);
     }),
 });
