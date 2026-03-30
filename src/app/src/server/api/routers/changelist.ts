@@ -218,6 +218,7 @@ export const changelistRouter = createTRPCRouter({
       });
 
       return fileChanges.map((fc) => ({
+        id: fc.id,
         fileId: fc.file.id,
         path: fc.file.path,
         changeType: fc.type,
@@ -244,7 +245,11 @@ export const changelistRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
       await assertWorkspaceOwnership(ctx, input.workspaceId);
 
       // Check for locked files by other users
