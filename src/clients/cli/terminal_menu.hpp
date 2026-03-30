@@ -142,7 +142,7 @@ inline std::optional<size_t> interactiveSelect(
 
     // Print prompt
     std::cout << "\033[1m" << prompt << "\033[0m"
-              << "\033[2m  (↑/↓ select, enter confirm, esc cancel)\033[0m"
+              << "\033[2m  (up/down select, enter confirm, esc cancel)\033[0m"
               << "\033[K" << std::endl;
 
     // Print items

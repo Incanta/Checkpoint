@@ -160,9 +160,9 @@ inline void renderProgressBar(
 // ─── Helper: poll a background job until complete ────────────────
 
 struct JobResult {
-  std::string status;       // "completed" or "failed"
-  nlohmann::json result;    // present when completed
-  std::string error;        // present when failed
+  std::string status;     // "completed" or "failed"
+  nlohmann::json result;  // present when completed
+  std::string error;      // present when failed
 };
 
 inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
@@ -177,8 +177,8 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
 
     std::string status = job.value("status", "");
     std::string currentStep = (job.contains("currentStep") && job["currentStep"].is_string())
-        ? job["currentStep"].get<std::string>()
-        : "";
+                                  ? job["currentStep"].get<std::string>()
+                                  : "";
 
     if (!currentStep.empty() && currentStep != lastStep) {
       if (hadProgress) {
@@ -218,8 +218,8 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
     if (status == "failed") {
       if (hadProgress) std::cout << std::endl;
       std::string errMsg = (job.contains("error") && job["error"].is_string())
-          ? job["error"].get<std::string>()
-          : "Unknown error";
+                               ? job["error"].get<std::string>()
+                               : "Unknown error";
       return {status, nullptr, errMsg};
     }
 
@@ -702,6 +702,60 @@ inline int cmdPull() {
 }
 
 // ═════════════════════════════════════════════════════════════════
+//  COMMAND: merge (merge a branch into the current branch)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdMerge(const std::string& incomingBranch) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  std::cout << "Merging " << color::cyan() << incomingBranch
+            << color::reset() << " into " << color::cyan() << ws.branchName
+            << color::reset() << "..." << std::endl;
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"incomingBranchName", incomingBranch},
+  };
+
+  auto result = client.mutate("workspaces.branches.merge", input);
+
+  // Display merge result
+  if (!result.is_null() && result.contains("mergeChangelist")) {
+    auto& mc = result["mergeChangelist"];
+    int clNumber = mc.value("number", -1);
+    std::string msg = mc.value("message", "");
+
+    // Show just the first line of the merge message
+    auto firstNewline = msg.find('\n');
+    if (firstNewline != std::string::npos) {
+      msg = msg.substr(0, firstNewline);
+    }
+
+    std::cout << color::green() << color::bold()
+              << "Merge complete." << color::reset() << std::endl;
+    std::cout << "Created changelist #" << clNumber;
+    if (!msg.empty()) {
+      std::cout << ": " << msg;
+    }
+    std::cout << std::endl;
+
+    if (result.contains("deletedBranch") && result["deletedBranch"].is_string()) {
+      std::cout << color::dim() << "Branch '"
+                << result["deletedBranch"].get<std::string>()
+                << "' has been deleted." << color::reset() << std::endl;
+    }
+  } else {
+    std::cout << color::green() << color::bold()
+              << "Merge complete." << color::reset() << std::endl;
+  }
+
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
 //  COMMAND: log (show history)
 // ═════════════════════════════════════════════════════════════════
 
@@ -890,6 +944,52 @@ inline int cmdBranch() {
   }
 
   return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: switch (switch to a different branch)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdSwitch(const std::string& branchName) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  if (branchName == ws.branchName) {
+    std::cout << "Already on branch '" << branchName << "'." << std::endl;
+    return 0;
+  }
+
+  std::cout << "Switching to branch '" << branchName << "'..." << std::endl;
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"branchName", branchName},
+  };
+
+  try {
+    auto result = client.mutate("workspaces.branches.switch", input);
+
+    std::string newBranch = result.value("branchName", branchName);
+    std::cout << color::green() << color::bold()
+              << "Switched to branch '" << newBranch << "'."
+              << color::reset() << std::endl;
+    return 0;
+  } catch (std::exception& e) {
+    std::string msg = e.what();
+    // Surface the error message from the daemon
+    try {
+      auto errJson = nlohmann::json::parse(msg);
+      if (errJson.contains("message")) {
+        msg = errJson["message"].get<std::string>();
+      }
+    } catch (...) {
+    }
+    std::cerr << color::red() << "error: " << msg
+              << color::reset() << std::endl;
+    return 1;
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════
