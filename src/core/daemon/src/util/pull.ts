@@ -52,21 +52,21 @@ export async function pull(
     write: true,
   });
 
-  if (
-    !storageTokenResponse.token ||
-    !storageTokenResponse.expiration ||
-    !storageTokenResponse.backendUrl
-  ) {
+  if (!storageTokenResponse.expiration) {
     throw new Error("Could not get storage token");
   }
 
-  const token = storageTokenResponse.token;
   const tokenExpirationMs = storageTokenResponse.expiration * 1000;
-  const backendUrl = storageTokenResponse.backendUrl;
 
-  const filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
-    res.text(),
-  );
+  let filerUrl = "";
+  let token = "";
+  if (storageTokenResponse.storageType === "r2") {
+    // R2: no filer URL needed, credentials are passed directly to addon
+  } else {
+    token = storageTokenResponse.token;
+    const backendUrl = storageTokenResponse.backendUrl;
+    filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) => res.text());
+  }
 
   if (changelistNumber === null) {
     const branchResponse = await client.branch.getBranch.query({
@@ -189,6 +189,14 @@ export async function pull(
       filerUrl,
       jwt: token,
       jwtExpirationMs: tokenExpirationMs,
+      storageType: storageTokenResponse.storageType,
+      ...(storageTokenResponse.r2Credentials && {
+        r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
+        r2SecretAccessKey: storageTokenResponse.r2Credentials.secretAccessKey,
+        r2SessionToken: storageTokenResponse.r2Credentials.sessionToken,
+        r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
+        r2BucketName: storageTokenResponse.r2Credentials.bucket,
+      }),
       logLevel: GetLogLevel(logLevel),
     });
 
@@ -221,6 +229,136 @@ export async function pull(
     if (status.error !== 0) {
       errored = true;
       break;
+    }
+  }
+
+  // ─── Artifact pull (optional) ──────────────────────────────────
+  const newArtifactFiles: Record<string, WorkspaceStateFile> = {};
+  const wsConfig = await getWorkspaceConfig(workspace.localPath);
+  const artifactStateTree = changelistResponse.artifactStateTree as Record<
+    string,
+    number
+  > | null;
+
+  if (!errored && wsConfig?.includeArtifacts && artifactStateTree) {
+    const artifactDiff = DiffState(
+      workspaceState.artifactFiles ?? {},
+      artifactStateTree,
+    );
+
+    if (artifactDiff.changelistsToPull.length > 0) {
+      const artifactCls =
+        await client.changelist.getChangelistsWithNumbers.mutate({
+          repoId: workspace.repoId,
+          numbers: artifactDiff.changelistsToPull,
+        });
+
+      const sortedArtifactCls = artifactCls.sort(
+        (a: any, b: any) => a.number - b.number,
+      );
+
+      for (const cl of sortedArtifactCls) {
+        const artVersionIndex = (cl as any).artifactVersionIndex;
+        if (!artVersionIndex || artVersionIndex === "") continue;
+
+        Logger.debug(
+          `Starting longtail pull for artifact version index ${artVersionIndex}...`,
+        );
+
+        const handle = pullAsync({
+          versionIndex: artVersionIndex,
+          enableMmapIndexing: config.get<boolean>(
+            "longtail.enable-mmap-indexing",
+          ),
+          enableMmapBlockStore: config.get<boolean>(
+            "longtail.enable-mmap-block-store",
+          ),
+          localRootPath: workspace.localPath,
+          remoteBasePath: `/${orgId}/${workspace.repoId}`,
+          filerUrl,
+          jwt: token,
+          jwtExpirationMs: tokenExpirationMs,
+          storageType: storageTokenResponse.storageType,
+          ...(storageTokenResponse.r2Credentials && {
+            r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
+            r2SecretAccessKey:
+              storageTokenResponse.r2Credentials.secretAccessKey,
+            r2SessionToken: storageTokenResponse.r2Credentials.sessionToken,
+            r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
+            r2BucketName: storageTokenResponse.r2Credentials.bucket,
+          }),
+          logLevel: GetLogLevel(logLevel),
+        });
+
+        if (!handle) {
+          Logger.error("Failed to create longtail handle for artifact pull");
+          break;
+        }
+
+        const { status } = await pollHandle(handle, {
+          onStep: (step) => {
+            onStep?.(`[artifacts] ${step}`);
+          },
+          onProgress: (step, done, total) => {
+            onProgress?.(`[artifacts] ${step}`, done, total);
+          },
+        });
+
+        freeHandle(handle);
+
+        if (status.error !== 0) {
+          Logger.error(
+            `Artifact pull failed: ${status.error} ${status.currentStep}`,
+          );
+          break;
+        }
+      }
+    }
+
+    // Handle artifact deletions
+    if (artifactDiff.deletions.length > 0) {
+      const artFilesResponse = await client.file.getFiles.mutate({
+        ids: artifactDiff.deletions,
+        repoId: workspace.repoId,
+      });
+
+      for (const file of artFilesResponse) {
+        if (file.path) {
+          const filePath = path.join(workspace.localPath, file.path);
+          if (existsSync(filePath)) {
+            await fs.rm(filePath, { force: true });
+          }
+        }
+      }
+    }
+
+    // Build artifact file state
+    const artFileIds = Object.keys(artifactStateTree);
+    if (artFileIds.length > 0) {
+      const artFilesResponse = await client.file.getFiles.mutate({
+        ids: artFileIds,
+        repoId: workspace.repoId,
+      });
+
+      for (const file of artFilesResponse) {
+        if (!file.path) continue;
+        const normalizedPath = file.path.replace(/^\//, "").replace(/\\/g, "/");
+        const filePath = path.join(workspace.localPath, normalizedPath);
+        const changelist = artifactStateTree[file.id];
+
+        if (existsSync(filePath)) {
+          const stat = await fs.stat(filePath);
+          const hash = await hashFile(filePath);
+
+          newArtifactFiles[normalizedPath] = {
+            fileId: file.id,
+            changelist: changelist,
+            hash: hash,
+            size: stat.size,
+            mtime: stat.mtimeMs,
+          };
+        }
+      }
     }
   }
 

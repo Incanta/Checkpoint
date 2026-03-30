@@ -31,6 +31,7 @@
 
 #include "../util/json.h"
 #include "../util/seaweedfs.h"
+#include "../util/r2.h"
 #include "exposed.h"
 
 struct WrapperAsyncHandle {
@@ -70,6 +71,12 @@ int32_t SubmitSync(
     const char* JWT,
     uint64_t JWTExpirationMs,
     const char* API_JWT,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     bool KeepCheckedOut,
     const char* WorkspaceId,
     uint32_t NumModifications,
@@ -85,6 +92,12 @@ int32_t PullSync(
     const char* FilerUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     WrapperAsyncHandle* handle);
 
 // Extended handle for ReadFileFromVersion that includes the file data

@@ -51,22 +51,22 @@ export async function submit(
     write: true,
   });
 
-  if (
-    !storageTokenResponse ||
-    !storageTokenResponse.token ||
-    !storageTokenResponse.expiration ||
-    !storageTokenResponse.backendUrl
-  ) {
+  if (!storageTokenResponse || !storageTokenResponse.expiration) {
     throw new Error("Could not get storage token");
   }
 
-  const token = storageTokenResponse.token;
   const tokenExpirationMs = storageTokenResponse.expiration * 1000;
-  const backendUrl = storageTokenResponse.backendUrl;
 
-  const filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
-    res.text(),
-  );
+  let filerUrl = "";
+  let token = "";
+  let backendUrl = "";
+  if (storageTokenResponse.storageType === "r2") {
+    // R2: no filer URL needed
+  } else {
+    token = storageTokenResponse.token;
+    backendUrl = storageTokenResponse.backendUrl;
+    filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) => res.text());
+  }
 
   console.log(`[submit] Calling SubmitAsync:`);
   console.log(`[submit]   branchName: ${workspace.branchName}`);
@@ -100,6 +100,14 @@ export async function submit(
     backendUrl,
     jwt: token,
     jwtExpirationMs: tokenExpirationMs,
+    storageType: storageTokenResponse.storageType,
+    ...(storageTokenResponse.r2Credentials && {
+      r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
+      r2SecretAccessKey: storageTokenResponse.r2Credentials.secretAccessKey,
+      r2SessionToken: storageTokenResponse.r2Credentials.sessionToken,
+      r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
+      r2BucketName: storageTokenResponse.r2Credentials.bucket,
+    }),
     apiJwt: user.apiToken,
     keepCheckedOut,
     workspaceId,

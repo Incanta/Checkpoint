@@ -111,6 +111,12 @@ export interface SubmitAsyncOptions {
   workspaceId: string;
   modifications: Modification[];
   logLevel: number;
+  storageType?: "seaweedfs" | "r2";
+  r2AccessKeyId?: string;
+  r2SecretAccessKey?: string;
+  r2SessionToken?: string;
+  r2Endpoint?: string;
+  r2BucketName?: string;
 }
 
 export interface PullAsyncOptions {
@@ -123,6 +129,12 @@ export interface PullAsyncOptions {
   jwt: string;
   jwtExpirationMs: number;
   logLevel: number;
+  storageType?: "seaweedfs" | "r2";
+  r2AccessKeyId?: string;
+  r2SecretAccessKey?: string;
+  r2SessionToken?: string;
+  r2Endpoint?: string;
+  r2BucketName?: string;
 }
 
 export interface MergeAsyncOptions {
@@ -131,6 +143,12 @@ export interface MergeAsyncOptions {
   jwt: string;
   storeIndexBuffer: Buffer;
   logLevel: number;
+  storageType?: "seaweedfs" | "r2";
+  r2AccessKeyId?: string;
+  r2SecretAccessKey?: string;
+  r2SessionToken?: string;
+  r2Endpoint?: string;
+  r2BucketName?: string;
 }
 
 export interface ReadFileFromVersionAsyncOptions {
@@ -141,6 +159,12 @@ export interface ReadFileFromVersionAsyncOptions {
   jwt: string;
   jwtExpirationMs: number;
   logLevel: number;
+  storageType?: "seaweedfs" | "r2";
+  r2AccessKeyId?: string;
+  r2SecretAccessKey?: string;
+  r2SessionToken?: string;
+  r2Endpoint?: string;
+  r2BucketName?: string;
 }
 
 export { HandleStatus, NativeHandle };

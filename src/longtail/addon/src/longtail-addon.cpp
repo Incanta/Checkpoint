@@ -38,6 +38,12 @@ WrapperAsyncHandle* SubmitAsync(
     const char* JWT,
     uint64_t JWTExpirationMs,
     const char* API_JWT,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     bool KeepCheckedOut,
     const char* WorkspaceId,
     uint32_t NumModifications,
@@ -50,6 +56,12 @@ WrapperAsyncHandle* MergeAsync(
     const char* RemoteBasePath,
     const char* FilerUrl,
     const char* JWT,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     void* additional_store_index_buffer,
     size_t additional_store_index_size,
     int LogLevel);
@@ -63,6 +75,12 @@ WrapperAsyncHandle* PullAsync(
     const char* FilerUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     int LogLevel);
 
 ReadFileAsyncHandle* ReadFileFromVersionAsync(
@@ -72,6 +90,12 @@ ReadFileAsyncHandle* ReadFileFromVersionAsync(
     const char* FilerUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     int LogLevel);
 
 void FreeReadFileHandle(ReadFileAsyncHandle* handle);
@@ -162,6 +186,48 @@ static Napi::Value NapiSubmitAsync(const Napi::CallbackInfo& info) {
   const char* jwt = StoreString(ctx, opts.Get("jwt").As<Napi::String>().Utf8Value());
   uint64_t jwtExpirationMs = static_cast<uint64_t>(opts.Get("jwtExpirationMs").As<Napi::Number>().Int64Value());
   const char* apiJwt = StoreString(ctx, opts.Get("apiJwt").As<Napi::String>().Utf8Value());
+  const char* storageType = "seaweedfs";
+  const char* r2Endpoint = nullptr;
+  const char* r2BucketName = nullptr;
+  const char* r2AccessKeyId = nullptr;
+  const char* r2SecretAccessKey = nullptr;
+  const char* r2SessionToken = nullptr;
+  {
+    Napi::Value val = opts.Get("storageType");
+    if (val.IsString()) {
+      storageType = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2Endpoint");
+    if (val.IsString()) {
+      r2Endpoint = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2BucketName");
+    if (val.IsString()) {
+      r2BucketName = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2AccessKeyId");
+    if (val.IsString()) {
+      r2AccessKeyId = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2SecretAccessKey");
+    if (val.IsString()) {
+      r2SecretAccessKey = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2SessionToken");
+    if (val.IsString()) {
+      r2SessionToken = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
   bool keepCheckedOut = opts.Get("keepCheckedOut").As<Napi::Boolean>().Value();
   const char* workspaceId = StoreString(ctx, opts.Get("workspaceId").As<Napi::String>().Utf8Value());
   int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
@@ -192,6 +258,7 @@ static Napi::Value NapiSubmitAsync(const Napi::CallbackInfo& info) {
       enableMmapIndexing, enableMmapBlockStore,
       localRootPath, remoteBasePath, filerUrl, backendUrl,
       jwt, jwtExpirationMs, apiJwt,
+      storageType, r2Endpoint, r2BucketName, r2AccessKeyId, r2SecretAccessKey, r2SessionToken,
       keepCheckedOut, workspaceId,
       numMods, ctx->modifications.data(),
       logLevel);
@@ -230,13 +297,57 @@ static Napi::Value NapiPullAsync(const Napi::CallbackInfo& info) {
   const char* filerUrl = StoreString(ctx, opts.Get("filerUrl").As<Napi::String>().Utf8Value());
   const char* jwt = StoreString(ctx, opts.Get("jwt").As<Napi::String>().Utf8Value());
   uint64_t jwtExpirationMs = static_cast<uint64_t>(opts.Get("jwtExpirationMs").As<Napi::Number>().Int64Value());
+  const char* storageType = "seaweedfs";
+  const char* r2Endpoint = nullptr;
+  const char* r2BucketName = nullptr;
+  const char* r2AccessKeyId = nullptr;
+  const char* r2SecretAccessKey = nullptr;
+  const char* r2SessionToken = nullptr;
+  {
+    Napi::Value val = opts.Get("storageType");
+    if (val.IsString()) {
+      storageType = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2Endpoint");
+    if (val.IsString()) {
+      r2Endpoint = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2BucketName");
+    if (val.IsString()) {
+      r2BucketName = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2AccessKeyId");
+    if (val.IsString()) {
+      r2AccessKeyId = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2SecretAccessKey");
+    if (val.IsString()) {
+      r2SecretAccessKey = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2SessionToken");
+    if (val.IsString()) {
+      r2SessionToken = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
   int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
 
   WrapperAsyncHandle* handle = ::PullAsync(
       versionIndex,
       enableMmapIndexing, enableMmapBlockStore,
       localRootPath, remoteBasePath, filerUrl, jwt,
-      jwtExpirationMs, logLevel);
+      jwtExpirationMs,
+      storageType, r2Endpoint, r2BucketName, r2AccessKeyId, r2SecretAccessKey, r2SessionToken,
+      logLevel);
 
   if (!handle) {
     delete ctx;
@@ -267,6 +378,48 @@ static Napi::Value NapiMergeAsync(const Napi::CallbackInfo& info) {
   const char* remoteBasePath = StoreString(ctx, opts.Get("remoteBasePath").As<Napi::String>().Utf8Value());
   const char* filerUrl = StoreString(ctx, opts.Get("filerUrl").As<Napi::String>().Utf8Value());
   const char* jwt = StoreString(ctx, opts.Get("jwt").As<Napi::String>().Utf8Value());
+  const char* storageType = "seaweedfs";
+  const char* r2Endpoint = nullptr;
+  const char* r2BucketName = nullptr;
+  const char* r2AccessKeyId = nullptr;
+  const char* r2SecretAccessKey = nullptr;
+  const char* r2SessionToken = nullptr;
+  {
+    Napi::Value val = opts.Get("storageType");
+    if (val.IsString()) {
+      storageType = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2Endpoint");
+    if (val.IsString()) {
+      r2Endpoint = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2BucketName");
+    if (val.IsString()) {
+      r2BucketName = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2AccessKeyId");
+    if (val.IsString()) {
+      r2AccessKeyId = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2SecretAccessKey");
+    if (val.IsString()) {
+      r2SecretAccessKey = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2SessionToken");
+    if (val.IsString()) {
+      r2SessionToken = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
   int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
 
   // Copy the store index buffer so it stays alive for the async operation
@@ -275,6 +428,7 @@ static Napi::Value NapiMergeAsync(const Napi::CallbackInfo& info) {
 
   WrapperAsyncHandle* handle = ::MergeAsync(
       remoteBasePath, filerUrl, jwt,
+      storageType, r2Endpoint, r2BucketName, r2AccessKeyId, r2SecretAccessKey, r2SessionToken,
       ctx->bufferData.data(),
       ctx->bufferData.size(),
       logLevel);
@@ -311,11 +465,55 @@ static Napi::Value NapiReadFileFromVersionAsync(const Napi::CallbackInfo& info) 
   const char* filerUrl = StoreString(ctx, opts.Get("filerUrl").As<Napi::String>().Utf8Value());
   const char* jwt = StoreString(ctx, opts.Get("jwt").As<Napi::String>().Utf8Value());
   uint64_t jwtExpirationMs = static_cast<uint64_t>(opts.Get("jwtExpirationMs").As<Napi::Number>().Int64Value());
+  const char* storageType = "seaweedfs";
+  const char* r2Endpoint = nullptr;
+  const char* r2BucketName = nullptr;
+  const char* r2AccessKeyId = nullptr;
+  const char* r2SecretAccessKey = nullptr;
+  const char* r2SessionToken = nullptr;
+  {
+    Napi::Value val = opts.Get("storageType");
+    if (val.IsString()) {
+      storageType = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2Endpoint");
+    if (val.IsString()) {
+      r2Endpoint = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2BucketName");
+    if (val.IsString()) {
+      r2BucketName = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2AccessKeyId");
+    if (val.IsString()) {
+      r2AccessKeyId = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2SecretAccessKey");
+    if (val.IsString()) {
+      r2SecretAccessKey = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2SessionToken");
+    if (val.IsString()) {
+      r2SessionToken = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
   int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
 
   ReadFileAsyncHandle* handle = ::ReadFileFromVersionAsync(
       filePath, versionIndexName, remoteBasePath,
-      filerUrl, jwt, jwtExpirationMs, logLevel);
+      filerUrl, jwt, jwtExpirationMs,
+      storageType, r2Endpoint, r2BucketName, r2AccessKeyId, r2SecretAccessKey, r2SessionToken,
+      logLevel);
 
   if (!handle) {
     delete ctx;
