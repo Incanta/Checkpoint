@@ -52,6 +52,7 @@
     "@trpc/react-query": "^11.8.1",
     "better-auth": "^1.5.3",
     "next": "^16.1.7",
+    "nodemailer": "^8.0.4",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
