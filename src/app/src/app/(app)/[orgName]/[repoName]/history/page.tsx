@@ -16,7 +16,12 @@ function VirtualFileList({
   files,
   changeTypeColor,
 }: {
-  files: { fileId: string; path: string; changeType: string; oldPath: string | null }[];
+  files: {
+    fileId: string;
+    path: string;
+    changeType: string;
+    oldPath: string | null;
+  }[];
   changeTypeColor: Record<string, "success" | "warning" | "danger">;
 }) {
   const [scrollTop, setScrollTop] = useState(0);
@@ -181,7 +186,7 @@ export default function RepoHistoryPage() {
                   <div className="shrink-0 pt-0.5">
                     <div className="flex items-center gap-1">
                       <Badge variant="accent">#{cl.number}</Badge>
-                      {(cl as any).artifactVersionIndex && (
+                      {cl.artifactVersionIndex && (
                         <Badge variant="warning" className="text-[10px]">
                           📦 Artifacts
                         </Badge>
@@ -193,7 +198,7 @@ export default function RepoHistoryPage() {
                       {cl.message}
                     </div>
                     <div className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-                      {(cl as any).user?.email ?? "unknown"} ·{" "}
+                      {cl.user?.email ?? "unknown"} ·{" "}
                       {new Date(cl.createdAt).toLocaleDateString(undefined, {
                         month: "short",
                         day: "numeric",

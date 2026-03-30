@@ -76,7 +76,7 @@ export default function RepoBranchesPage() {
             onSubmit={(e) => {
               e.preventDefault();
               if (!repoData || !newName.trim() || !parentBranch) return;
-              const parent = branches?.find((b: any) => b.name === parentBranch);
+              const parent = branches?.find((b) => b.name === parentBranch);
               createBranch.mutate({
                 repoId: repoData.id,
                 name: newName.trim(),

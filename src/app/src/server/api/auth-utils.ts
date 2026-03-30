@@ -1,6 +1,8 @@
-import type { User, RepoAccess } from "@prisma/client";
+import type { User, RepoAccess, Repo, Org, OrgUser, RepoRole } from "@prisma/client";
 import type { TRPCContextPrivate } from "./trpc";
 import { TRPCError } from "@trpc/server";
+
+type RepoWithOrg = Repo & { org: Org & { users: OrgUser[] }; additionalRoles: RepoRole[] };
 
 export async function getCheckpointUser(
   ctx: TRPCContextPrivate,
@@ -24,9 +26,9 @@ export async function getUserAndRepoWithAccess(
   repoId: string,
   access: RepoAccess,
 ): Promise<{
-  repo: NonNullable<Awaited<ReturnType<typeof ctx.db.repo.findUnique>>>;
-  orgUser: Awaited<ReturnType<typeof ctx.db.orgUser.findFirst>> | null;
-  repoRole: Awaited<ReturnType<typeof ctx.db.repoRole.findFirst>> | null;
+  repo: RepoWithOrg;
+  orgUser: OrgUser | null;
+  repoRole: RepoRole | null;
   isAdmin: boolean;
 }> {
   const userId = ctx.session.user.id;
@@ -81,7 +83,7 @@ export async function getUserAndRepoWithAccess(
     isAdmin = !!(
       orgUser &&
       (repo.org.defaultRepoAccess === "ADMIN" ||
-        (repoRole && repoRole.access === "ADMIN"))
+        (repoRole?.access === "ADMIN"))
     );
 
     if (!isAdmin) {

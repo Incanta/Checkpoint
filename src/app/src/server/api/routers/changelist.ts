@@ -335,10 +335,8 @@ export const changelistRouter = createTRPCRouter({
         });
       }
 
-      /* eslint-disable @typescript-eslint/no-unsafe-assignment */
       const stateTree: Record<string, number> =
-        parentChangelist.stateTree as any;
-      /* eslint-enable @typescript-eslint/no-unsafe-assignment */
+        parentChangelist.stateTree as Record<string, number>;
 
       // Apply modifications to state tree
       const modifiedFiles = await ctx.db.file.findMany({
