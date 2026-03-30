@@ -12,6 +12,7 @@ export const LicenseFeatures = [
   "issues",
   "dataReplicas",
   "enterpriseSaml",
+  "r2Storage",
 ] as const;
 
 export type LicenseFeature = (typeof LicenseFeatures)[number];
@@ -26,6 +27,7 @@ const FEATURE_MIN_TIER: Record<LicenseFeature, LicenseTier> = {
   issues: "PRO",
   dataReplicas: "STUDIO",
   enterpriseSaml: "STUDIO",
+  r2Storage: "STUDIO",
 };
 
 function tierIndex(tier: LicenseTier): number {

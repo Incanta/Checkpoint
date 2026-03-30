@@ -129,6 +129,8 @@ model Repo {
 
   public Boolean @default(false)
 
+  r2BucketName String?
+
   org   Org    @relation(fields: [orgId], references: [id])
   orgId String
 

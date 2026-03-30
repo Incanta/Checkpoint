@@ -3,6 +3,9 @@ import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { createRepoDirectory } from "~/server/storage-service";
+import { isR2Enabled, createR2Bucket } from "~/server/r2-service";
+import { getEffectiveTier } from "~/server/license-client";
+import { hasFeature } from "~/server/license-utils";
 import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 
@@ -94,13 +97,35 @@ export const repoRouter = createTRPCRouter({
         });
       }
 
-      // Create the repo directory in storage
-      try {
-        await createRepoDirectory(input.orgId, repo.id);
-      } catch (error) {
-        console.error("Failed to create repo directory in storage:", error);
-        // Note: We don't fail the repo creation here since the DB record is created
-        // The directory can be created later if needed
+      // Create storage for the repo (R2 bucket or SeaweedFS directory)
+      if (isR2Enabled()) {
+        const tier = await getEffectiveTier(input.orgId, ctx.db);
+        if (hasFeature(tier, "r2Storage")) {
+          const bucketName = `checkpoint-${repo.id}`;
+          try {
+            await createR2Bucket(bucketName);
+            await ctx.db.repo.update({
+              where: { id: repo.id },
+              data: { r2BucketName: bucketName },
+            });
+          } catch (error) {
+            console.error("Failed to create R2 bucket:", error);
+          }
+        } else {
+          // Org/instance doesn't have R2 feature, fall back to SeaweedFS
+          try {
+            await createRepoDirectory(input.orgId, repo.id);
+          } catch (error) {
+            console.error("Failed to create repo directory in storage:", error);
+          }
+        }
+      } else {
+        // R2 not enabled, use SeaweedFS
+        try {
+          await createRepoDirectory(input.orgId, repo.id);
+        } catch (error) {
+          console.error("Failed to create repo directory in storage:", error);
+        }
       }
 
       return repo;

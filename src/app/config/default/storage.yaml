@@ -9,3 +9,11 @@ backend-url: "http://localhost:13001"
 
 filer-ui-enabled: false
 filer-url: "http://localhost"
+
+r2:
+  enabled: false
+  account-id: ""
+  api-token: ""
+  access-key-id: ""
+  secret-access-key: ""
+  endpoint: ""

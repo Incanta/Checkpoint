@@ -6,6 +6,13 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
+import {
+  isR2Enabled,
+  getR2Endpoint,
+  createR2TempCredentials,
+} from "~/server/r2-service";
+import { getEffectiveTier } from "~/server/license-client";
+import { hasFeature } from "~/server/license-utils";
 
 const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -31,6 +38,34 @@ export const storageRouter = createTRPCRouter({
         type: input.write ? "write" : "read",
       });
 
+      // Check if R2 storage should be used
+      if (isR2Enabled() && repo.r2BucketName) {
+        const tier = await getEffectiveTier(repo.orgId, ctx.db);
+        if (hasFeature(tier, "r2Storage")) {
+          const creds = await createR2TempCredentials(
+            repo.r2BucketName,
+            input.write ? "object-read-write" : "object-read-only",
+          );
+
+          return {
+            storageType: "r2" as const,
+            r2Credentials: {
+              accessKeyId: creds.accessKeyId,
+              secretAccessKey: creds.secretAccessKey,
+              sessionToken: creds.sessionToken,
+              endpoint: getR2Endpoint(),
+              bucket: repo.r2BucketName,
+            },
+            expiration:
+              Math.floor(Date.now() / 1000) +
+              config.get<number>("storage.token-expiration-seconds"),
+            token: "",
+            backendUrl: "",
+          };
+        }
+      }
+
+      // Existing SeaweedFS flow
       const token = njwt.create(
         {
           iss: "checkpoint-vcs",
