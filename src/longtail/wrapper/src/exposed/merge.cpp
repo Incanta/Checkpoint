@@ -4,12 +4,23 @@ int Merge(
     const char* RemoteBasePath,
     const char* FilerUrl,
     const char* JWT,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     void* additional_store_index_buffer,
     size_t additional_store_index_size,
     WrapperAsyncHandle* handle) {
-  struct Longtail_StorageAPI* storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT);
+  struct Longtail_StorageAPI* remote_storage_api;
+  if (StorageType && strcmp(StorageType, "r2") == 0) {
+    remote_storage_api = CreateR2StorageAPI(R2Endpoint, R2BucketName, R2AccessKeyId, R2SecretAccessKey, R2SessionToken);
+  } else {
+    remote_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT);
+  }
 
-  if (!storage_api) {
+  if (!remote_storage_api) {
     SetHandleStep(handle, "Failed to create seaweed storage api");
     handle->error = ENOMEM;
     handle->completed = 1;
@@ -25,39 +36,39 @@ int Merge(
   std::string LockFilePath = RemoteBasePath + std::string("/store.lsi.sync");
   std::string StoreFilePath = RemoteBasePath + std::string("/store.lsi");
 
-  while (storage_api->IsFile(storage_api, LockFilePath.c_str())) {
+  while (remote_storage_api->IsFile(remote_storage_api, LockFilePath.c_str())) {
     Longtail_Sleep(100000);  // sleep for 100ms
   }
 
   Longtail_StorageAPI_HOpenFile out_open_file;
-  err = Longtail_Storage_OpenWriteFile(storage_api, LockFilePath.c_str(), 0, &out_open_file);
+  err = Longtail_Storage_OpenWriteFile(remote_storage_api, LockFilePath.c_str(), 0, &out_open_file);
 
   if (err) {
     SetHandleStep(handle, "Failed to open lock file for writing");
     handle->error = err;
     handle->completed = 1;
     Longtail_Free(additional_store_index);
-    SAFE_DISPOSE_API(storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     return err;
   }
 
-  err = Longtail_Storage_Write(storage_api, out_open_file, 0, 4, "lock");
+  err = Longtail_Storage_Write(remote_storage_api, out_open_file, 0, 4, "lock");
 
   if (err) {
     SetHandleStep(handle, "Failed to write lock file");
     handle->error = err;
     handle->completed = 1;
-    Longtail_Storage_CloseFile(storage_api, out_open_file);
+    Longtail_Storage_CloseFile(remote_storage_api, out_open_file);
     Longtail_Free(additional_store_index);
-    SAFE_DISPOSE_API(storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     return err;
   }
 
-  Longtail_Storage_CloseFile(storage_api, out_open_file);
+  Longtail_Storage_CloseFile(remote_storage_api, out_open_file);
 
   struct Longtail_StoreIndex* existing_remote_store_index;
 
-  if (!storage_api->IsFile(storage_api, StoreFilePath.c_str())) {
+  if (!remote_storage_api->IsFile(remote_storage_api, StoreFilePath.c_str())) {
     // create new store index
     int err = Longtail_CreateStoreIndexFromBlocks(
         0,
@@ -68,17 +79,17 @@ int Merge(
       SetHandleStep(handle, "Failed to create new store index");
       handle->error = err;
       handle->completed = 1;
-      int removeError = Longtail_Storage_RemoveFile(storage_api, LockFilePath.c_str());
+      int removeError = Longtail_Storage_RemoveFile(remote_storage_api, LockFilePath.c_str());
       if (removeError) {
         SetHandleStep(handle, "Failed to create new store index AND failed to remove lock file");
       }
       Longtail_Free(additional_store_index);
-      SAFE_DISPOSE_API(storage_api);
+      SAFE_DISPOSE_API(remote_storage_api);
       return err;
     }
   } else {
     err = Longtail_ReadStoreIndex(
-        storage_api,
+        remote_storage_api,
         StoreFilePath.c_str(),
         &existing_remote_store_index);
 
@@ -86,12 +97,12 @@ int Merge(
       SetHandleStep(handle, "Failed to read the existing store index");
       handle->error = err;
       handle->completed = 1;
-      int removeError = Longtail_Storage_RemoveFile(storage_api, LockFilePath.c_str());
+      int removeError = Longtail_Storage_RemoveFile(remote_storage_api, LockFilePath.c_str());
       if (removeError) {
         SetHandleStep(handle, "Failed to read the existing store index AND failed to remove lock file");
       }
       Longtail_Free(additional_store_index);
-      SAFE_DISPOSE_API(storage_api);
+      SAFE_DISPOSE_API(remote_storage_api);
       return err;
     }
   }
@@ -107,17 +118,17 @@ int Merge(
     handle->error = err;
     handle->completed = 1;
     Longtail_Free(existing_remote_store_index);
-    int removeError = Longtail_Storage_RemoveFile(storage_api, LockFilePath.c_str());
+    int removeError = Longtail_Storage_RemoveFile(remote_storage_api, LockFilePath.c_str());
     if (removeError) {
       SetHandleStep(handle, "Failed to merge store indexes AND failed to remove lock file");
     }
     Longtail_Free(additional_store_index);
-    SAFE_DISPOSE_API(storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     return err;
   }
 
   err = Longtail_WriteStoreIndex(
-      storage_api,
+      remote_storage_api,
       merged_store_index,
       StoreFilePath.c_str());
 
@@ -126,16 +137,16 @@ int Merge(
     handle->error = err;
     handle->completed = 1;
     Longtail_Free(existing_remote_store_index);
-    int removeError = Longtail_Storage_RemoveFile(storage_api, LockFilePath.c_str());
+    int removeError = Longtail_Storage_RemoveFile(remote_storage_api, LockFilePath.c_str());
     if (removeError) {
       SetHandleStep(handle, "Failed to write merged store index AND failed to remove lock file");
     }
     Longtail_Free(additional_store_index);
-    SAFE_DISPOSE_API(storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     return err;
   }
 
-  err = Longtail_Storage_RemoveFile(storage_api, LockFilePath.c_str());
+  err = Longtail_Storage_RemoveFile(remote_storage_api, LockFilePath.c_str());
 
   if (err) {
     SetHandleStep(handle, "Failed to remove lock file");
@@ -143,7 +154,7 @@ int Merge(
     handle->completed = 1;
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(additional_store_index);
-    SAFE_DISPOSE_API(storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     return err;
   }
 
@@ -159,6 +170,12 @@ MergeAsync(
     const char* RemoteBasePath,
     const char* FilerUrl,
     const char* JWT,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     void* additional_store_index_buffer,
     size_t additional_store_index_size,
     int LogLevel = 4) {
@@ -178,6 +195,12 @@ MergeAsync(
         RemoteBasePath,
         FilerUrl,
         JWT,
+        StorageType,
+        R2Endpoint,
+        R2BucketName,
+        R2AccessKeyId,
+        R2SecretAccessKey,
+        R2SessionToken,
         additional_store_index_buffer,
         additional_store_index_size, handle);
 

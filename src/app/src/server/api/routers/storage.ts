@@ -52,11 +52,19 @@ export const storageRouter = createTRPCRouter({
       );
 
       return {
+        storageType: "seaweedfs" as const,
         token: token.compact(),
         expiration:
           Math.floor(Date.now() / 1000) +
           config.get<number>("storage.token-expiration-seconds"),
         backendUrl: config.get<string>("storage.backend-url"),
+        r2Credentials: null as {
+          accessKeyId: string;
+          secretAccessKey: string;
+          sessionToken: string;
+          endpoint: string;
+          bucket: string;
+        } | null,
       };
     }),
 

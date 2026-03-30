@@ -53,21 +53,23 @@ export async function pull(
     write: true,
   });
 
-  if (
-    !storageTokenResponse.token ||
-    !storageTokenResponse.expiration ||
-    !storageTokenResponse.backendUrl
-  ) {
+  if (!storageTokenResponse.expiration) {
     throw new Error("Could not get storage token");
   }
 
-  const token = storageTokenResponse.token;
   const tokenExpirationMs = storageTokenResponse.expiration * 1000;
-  const backendUrl = storageTokenResponse.backendUrl;
 
-  const filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
-    res.text(),
-  );
+  let filerUrl = "";
+  let token = "";
+  if (storageTokenResponse.storageType === "r2") {
+    // R2: no filer URL needed, credentials are passed directly to addon
+  } else {
+    token = storageTokenResponse.token;
+    const backendUrl = storageTokenResponse.backendUrl;
+    filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
+      res.text(),
+    );
+  }
 
   if (changelistNumber === null) {
     const branchResponse = await client.branch.getBranch.query({
@@ -190,6 +192,14 @@ export async function pull(
       filerUrl,
       jwt: token,
       jwtExpirationMs: tokenExpirationMs,
+      storageType: storageTokenResponse.storageType,
+      ...(storageTokenResponse.r2Credentials && {
+        r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
+        r2SecretAccessKey: storageTokenResponse.r2Credentials.secretAccessKey,
+        r2SessionToken: storageTokenResponse.r2Credentials.sessionToken,
+        r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
+        r2BucketName: storageTokenResponse.r2Credentials.bucket,
+      }),
       logLevel: GetLogLevel(logLevel),
     });
 
@@ -261,6 +271,14 @@ export async function pull(
           filerUrl,
           jwt: token,
           jwtExpirationMs: tokenExpirationMs,
+          storageType: storageTokenResponse.storageType,
+          ...(storageTokenResponse.r2Credentials && {
+            r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
+            r2SecretAccessKey: storageTokenResponse.r2Credentials.secretAccessKey,
+            r2SessionToken: storageTokenResponse.r2Credentials.sessionToken,
+            r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
+            r2BucketName: storageTokenResponse.r2Credentials.bucket,
+          }),
           logLevel: GetLogLevel(logLevel),
         });
 

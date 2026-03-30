@@ -14,17 +14,28 @@ int PullSync(
     const char* FilerUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     WrapperAsyncHandle* handle) {
   struct Longtail_HashRegistryAPI* hash_registry = Longtail_CreateFullHashRegistry();
   struct Longtail_JobAPI* job_api = Longtail_CreateBikeshedJobAPI(Longtail_GetCPUCount(), 0);
   struct Longtail_CompressionRegistryAPI* compression_registry = Longtail_CreateFullCompressionRegistry();
 
   struct Longtail_StorageAPI* file_storage_api = Longtail_CreateFSStorageAPI();
-  struct Longtail_StorageAPI* seaweed_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT);
+  struct Longtail_StorageAPI* remote_storage_api;
+  if (StorageType && strcmp(StorageType, "r2") == 0) {
+    remote_storage_api = CreateR2StorageAPI(R2Endpoint, R2BucketName, R2AccessKeyId, R2SecretAccessKey, R2SessionToken);
+  } else {
+    remote_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT);
+  }
 
   struct Longtail_BlockStoreAPI* store_block_remotestore_api = Longtail_CreateFSBlockStoreAPI(
       job_api,
-      seaweed_storage_api,
+      remote_storage_api,
       RemoteBasePath,
       0,
       EnableMmapBlockStore);
@@ -43,7 +54,7 @@ int PullSync(
   std::string remote_version_index_path = version_index_stream.str().c_str();
 
   struct Longtail_VersionIndex* remote_version_index = 0;
-  int err = Longtail_ReadVersionIndex(seaweed_storage_api, remote_version_index_path.c_str(), &remote_version_index);
+  int err = Longtail_ReadVersionIndex(remote_storage_api, remote_version_index_path.c_str(), &remote_version_index);
   if (err) {
     SetHandleStep(handle, "Failed to read version index");
     handle->error = err;
@@ -54,7 +65,7 @@ int PullSync(
     // SAFE_DISPOSE_API(store_block_cachestore_api);
     // SAFE_DISPOSE_API(store_block_localstore_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
@@ -76,7 +87,7 @@ int PullSync(
     // SAFE_DISPOSE_API(store_block_cachestore_api);
     // SAFE_DISPOSE_API(store_block_localstore_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
@@ -96,7 +107,7 @@ int PullSync(
     // SAFE_DISPOSE_API(store_block_cachestore_api);
     // SAFE_DISPOSE_API(store_block_localstore_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
@@ -128,7 +139,7 @@ int PullSync(
     // SAFE_DISPOSE_API(store_block_cachestore_api);
     // SAFE_DISPOSE_API(store_block_localstore_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
@@ -176,7 +187,7 @@ int PullSync(
     // SAFE_DISPOSE_API(store_block_cachestore_api);
     // SAFE_DISPOSE_API(store_block_localstore_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
@@ -203,7 +214,7 @@ int PullSync(
     // SAFE_DISPOSE_API(store_block_cachestore_api);
     // SAFE_DISPOSE_API(store_block_localstore_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
@@ -232,7 +243,7 @@ int PullSync(
     // SAFE_DISPOSE_API(store_block_cachestore_api);
     // SAFE_DISPOSE_API(store_block_localstore_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
@@ -262,7 +273,7 @@ int PullSync(
     // SAFE_DISPOSE_API(store_block_cachestore_api);
     // SAFE_DISPOSE_API(store_block_localstore_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
@@ -292,7 +303,7 @@ int PullSync(
     // SAFE_DISPOSE_API(store_block_cachestore_api);
     // SAFE_DISPOSE_API(store_block_localstore_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
@@ -338,7 +349,7 @@ int PullSync(
     // SAFE_DISPOSE_API(store_block_cachestore_api);
     // SAFE_DISPOSE_API(store_block_localstore_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
@@ -361,7 +372,7 @@ int PullSync(
   // SAFE_DISPOSE_API(store_block_cachestore_api);
   // SAFE_DISPOSE_API(store_block_localstore_api);
   SAFE_DISPOSE_API(store_block_remotestore_api);
-  SAFE_DISPOSE_API(seaweed_storage_api);
+  SAFE_DISPOSE_API(remote_storage_api);
   SAFE_DISPOSE_API(file_storage_api);
   SAFE_DISPOSE_API(compression_registry);
   SAFE_DISPOSE_API(hash_registry);
@@ -379,6 +390,12 @@ PullAsync(
     const char* FilerUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     int LogLevel = 4) {
   SetLogging(LogLevel);
 
@@ -401,6 +418,12 @@ PullAsync(
         FilerUrl,
         JWT,
         JWTExpirationMs,
+        StorageType,
+        R2Endpoint,
+        R2BucketName,
+        R2AccessKeyId,
+        R2SecretAccessKey,
+        R2SessionToken,
         handle);
 
     if (err) {

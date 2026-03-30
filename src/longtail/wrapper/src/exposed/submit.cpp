@@ -24,6 +24,12 @@ int32_t SubmitSync(
     const char* JWT,
     uint64_t JWTExpirationMs,
     const char* API_JWT,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     bool KeepCheckedOut,
     const char* WorkspaceId,
     uint32_t NumModifications,
@@ -34,11 +40,16 @@ int32_t SubmitSync(
   struct Longtail_CompressionRegistryAPI* compression_registry = Longtail_CreateFullCompressionRegistry();
 
   struct Longtail_StorageAPI* file_storage_api = Longtail_CreateFSStorageAPI();
-  struct Longtail_StorageAPI* seaweed_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT);
+  struct Longtail_StorageAPI* remote_storage_api;
+  if (StorageType && strcmp(StorageType, "r2") == 0) {
+    remote_storage_api = CreateR2StorageAPI(R2Endpoint, R2BucketName, R2AccessKeyId, R2SecretAccessKey, R2SessionToken);
+  } else {
+    remote_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT);
+  }
 
   struct Longtail_BlockStoreAPI* store_block_fsstore_api = Longtail_CreateFSBlockStoreAPI(
       job_api,
-      seaweed_storage_api,
+      remote_storage_api,
       RemoteBasePath,
       0,
       EnableMmapBlockStore);
@@ -64,7 +75,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -81,7 +92,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -109,7 +120,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -136,7 +147,7 @@ int32_t SubmitSync(
       SAFE_DISPOSE_API(store_block_store_api);
       SAFE_DISPOSE_API(store_block_fsstore_api);
       SAFE_DISPOSE_API(file_storage_api);
-      SAFE_DISPOSE_API(seaweed_storage_api);
+      SAFE_DISPOSE_API(remote_storage_api);
       SAFE_DISPOSE_API(compression_registry);
       SAFE_DISPOSE_API(hash_registry);
       SAFE_DISPOSE_API(job_api);
@@ -180,7 +191,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -221,7 +232,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -247,7 +258,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -275,7 +286,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -312,7 +323,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -334,7 +345,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -353,7 +364,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -371,7 +382,7 @@ int32_t SubmitSync(
       SAFE_DISPOSE_API(store_block_store_api);
       SAFE_DISPOSE_API(store_block_fsstore_api);
       SAFE_DISPOSE_API(file_storage_api);
-      SAFE_DISPOSE_API(seaweed_storage_api);
+      SAFE_DISPOSE_API(remote_storage_api);
       SAFE_DISPOSE_API(compression_registry);
       SAFE_DISPOSE_API(hash_registry);
       SAFE_DISPOSE_API(job_api);
@@ -393,7 +404,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -412,7 +423,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -430,7 +441,7 @@ int32_t SubmitSync(
       SAFE_DISPOSE_API(store_block_store_api);
       SAFE_DISPOSE_API(store_block_fsstore_api);
       SAFE_DISPOSE_API(file_storage_api);
-      SAFE_DISPOSE_API(seaweed_storage_api);
+      SAFE_DISPOSE_API(remote_storage_api);
       SAFE_DISPOSE_API(compression_registry);
       SAFE_DISPOSE_API(hash_registry);
       SAFE_DISPOSE_API(job_api);
@@ -438,7 +449,7 @@ int32_t SubmitSync(
     }
   }
 
-  SeaweedFSStorageAPI* seaweed_actual_api = (SeaweedFSStorageAPI*)seaweed_storage_api;
+  SeaweedFSStorageAPI* seaweed_actual_api = (SeaweedFSStorageAPI*)remote_storage_api;
 
   std::stringstream version_file_stream;
   void* missing_store_index_buffer = 0;
@@ -452,7 +463,7 @@ int32_t SubmitSync(
   SetHandleStep(handle, "Writing version index");
 
   err = Longtail_WriteVersionIndex(
-      seaweed_storage_api,
+      remote_storage_api,
       source_version_index,
       target_version_index_path.c_str());
 
@@ -467,7 +478,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -489,7 +500,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -538,7 +549,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -607,7 +618,7 @@ int32_t SubmitSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
     SAFE_DISPOSE_API(file_storage_api);
-    SAFE_DISPOSE_API(seaweed_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(compression_registry);
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
@@ -633,7 +644,7 @@ int32_t SubmitSync(
   SAFE_DISPOSE_API(store_block_store_api);
   SAFE_DISPOSE_API(store_block_fsstore_api);
   SAFE_DISPOSE_API(file_storage_api);
-  SAFE_DISPOSE_API(seaweed_storage_api);
+  SAFE_DISPOSE_API(remote_storage_api);
   SAFE_DISPOSE_API(compression_registry);
   SAFE_DISPOSE_API(hash_registry);
   SAFE_DISPOSE_API(job_api);
@@ -662,6 +673,12 @@ SubmitAsync(
     const char* JWT,
     uint64_t JWTExpirationMs,
     const char* API_JWT,
+    const char* StorageType,
+    const char* R2Endpoint,
+    const char* R2BucketName,
+    const char* R2AccessKeyId,
+    const char* R2SecretAccessKey,
+    const char* R2SessionToken,
     bool KeepCheckedOut,
     const char* WorkspaceId,
     uint32_t NumModifications,
@@ -699,6 +716,12 @@ SubmitAsync(
         JWT,
         JWTExpirationMs,
         API_JWT,
+        StorageType,
+        R2Endpoint,
+        R2BucketName,
+        R2AccessKeyId,
+        R2SecretAccessKey,
+        R2SessionToken,
         KeepCheckedOut,
         WorkspaceId,
         NumModifications,
