@@ -1295,17 +1295,11 @@ static int RecurseTree(
                         properties.m_Permissions)
                     )
                 {
-                    MAKE_LOG_CONTEXT_FIELDS(ctx3)
-                        LONGTAIL_LOGFIELD(context, "%p"),
-                        LONGTAIL_LOGFIELD(full_search_path, "%s"),
-                        LONGTAIL_LOGFIELD(asset_path, "%s"),
-                        LONGTAIL_LOGFIELDFMT_REF(properties, "%p")
-                    MAKE_LOG_CONTEXT_WITH_FIELDS(ctx3, ctx2, LONGTAIL_LOG_LEVEL_DEBUG)
                     err = entry_processor(context, full_search_path, asset_path, &properties);
                     if (err)
                     {
-                        LONGTAIL_LOG(ctx3, LONGTAIL_LOG_LEVEL_WARNING, "entry_processor() failed with %d",
-                            err)
+                        LONGTAIL_LOG(ctx2, LONGTAIL_LOG_LEVEL_WARNING, "entry_processor() failed with %d for `%s`",
+                            err, asset_path)
                         Longtail_Free(asset_path);
                         asset_path = 0;
                         break;
