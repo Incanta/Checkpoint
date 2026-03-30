@@ -62,17 +62,7 @@ export default function OrgMembersPage() {
     },
   });
 
-  const members = ((org as Record<string, unknown> | undefined)?.users ??
-    []) as Array<{
-    user: {
-      id: string;
-      name: string | null;
-      email: string;
-      image: string | null;
-    };
-    role: string;
-    userId: string;
-  }>;
+  const members = org?.users ?? [];
 
   // Build a lookup from userId → activity for the current month
   const activityByUser = new Map<
@@ -199,6 +189,7 @@ export default function OrgMembersPage() {
         <Card padding={false}>
           <div className="divide-y divide-[var(--color-border-default)]">
             {members.map((member) => {
+              console.log(member);
               const activity = activityByUser.get(member.user.id);
               return (
                 <div

@@ -25,8 +25,8 @@ export default function OrgSettingsPage() {
 
   if (org && !initialized) {
     setName(org.name);
-    setDefaultAccess((org as Record<string, unknown>).defaultRepoAccess as string ?? "NONE");
-    setDefaultCanCreate((org as Record<string, unknown>).defaultCanCreateRepos as boolean ?? true);
+    setDefaultAccess(org.defaultRepoAccess ?? "NONE");
+    setDefaultCanCreate(org.defaultCanCreateRepos ?? true);
     setInitialized(true);
   }
 
@@ -56,7 +56,8 @@ export default function OrgSettingsPage() {
     updateOrg.mutate({
       id: org.id,
       name: name.trim() || undefined,
-      defaultRepoAccess: (defaultAccess as "NONE" | "READ" | "WRITE" | "ADMIN") || undefined,
+      defaultRepoAccess:
+        (defaultAccess as "NONE" | "READ" | "WRITE" | "ADMIN") || undefined,
       defaultCanCreateRepos: defaultCanCreate,
     });
   };
@@ -67,7 +68,10 @@ export default function OrgSettingsPage() {
         title={`${orgName} settings`}
         breadcrumbs={
           <span>
-            <a href={`/${orgName}`} className="text-[var(--color-info)] hover:underline">
+            <a
+              href={`/${orgName}`}
+              className="text-[var(--color-info)] hover:underline"
+            >
               {orgName}
             </a>
             {" / Settings"}
@@ -121,16 +125,23 @@ export default function OrgSettingsPage() {
                 onChange={(e) => setDefaultCanCreate(e.target.checked)}
                 className="h-4 w-4 accent-[var(--color-accent)]"
               />
-              <label htmlFor="canCreate" className="text-sm text-[var(--color-text-primary)]">
+              <label
+                htmlFor="canCreate"
+                className="text-sm text-[var(--color-text-primary)]"
+              >
                 Members can create repositories by default
               </label>
             </div>
 
             {updateOrg.error && (
-              <p className="text-sm text-[var(--color-danger)]">{updateOrg.error.message}</p>
+              <p className="text-sm text-[var(--color-danger)]">
+                {updateOrg.error.message}
+              </p>
             )}
             {updateOrg.isSuccess && (
-              <p className="text-sm text-[var(--color-success)]">Settings saved.</p>
+              <p className="text-sm text-[var(--color-success)]">
+                Settings saved.
+              </p>
             )}
 
             <div className="flex justify-end">
@@ -147,13 +158,18 @@ export default function OrgSettingsPage() {
             Danger zone
           </h3>
           {!showDelete ? (
-            <Button variant="danger" size="sm" onClick={() => setShowDelete(true)}>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setShowDelete(true)}
+            >
               Delete this organization
             </Button>
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-[var(--color-text-secondary)]">
-                Type <strong>{orgName}</strong> to confirm deletion. This cannot be undone.
+                Type <strong>{orgName}</strong> to confirm deletion. This cannot
+                be undone.
               </p>
               <input
                 type="text"
@@ -171,7 +187,11 @@ export default function OrgSettingsPage() {
                 >
                   {deleteOrg.isPending ? "Deleting..." : "Delete organization"}
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => setShowDelete(false)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowDelete(false)}
+                >
                   Cancel
                 </Button>
               </div>
