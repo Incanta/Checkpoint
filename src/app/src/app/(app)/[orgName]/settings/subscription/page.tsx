@@ -46,7 +46,7 @@ export default function OrgSubscriptionPage() {
 
   // Check if user is admin/billing
   const { data: currentUser } = api.user.me.useQuery();
-  const orgUser = (org as any)?.users?.find?.((u: any) => u.userId === currentUser?.id);
+  const orgUser = ((org as Record<string, unknown> | undefined)?.users as Array<{ userId: string; role: string }> | undefined)?.find?.((u) => u.userId === currentUser?.id);
   const canManage = orgUser?.role === "ADMIN" || orgUser?.role === "BILLING";
 
   const updateSub = api.org.updateSubscription.useMutation({

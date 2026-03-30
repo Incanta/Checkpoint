@@ -63,7 +63,7 @@ export default function IssuesListPage() {
               className="rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-2 py-1.5 text-sm text-[var(--color-text-primary)] outline-none"
             >
               <option value="">All labels</option>
-              {labels.map((l: any) => (
+              {labels.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.name} ({l._count.issues})
                 </option>
@@ -82,7 +82,7 @@ export default function IssuesListPage() {
       ) : issues && issues.length > 0 ? (
         <Card padding={false}>
           <div className="divide-y divide-[var(--color-border-muted)]">
-            {issues.map((issue: any) => (
+            {issues.map((issue) => (
               <Link
                 key={issue.id}
                 href={`${basePath}/issues/${issue.number}`}
@@ -107,7 +107,7 @@ export default function IssuesListPage() {
                     <span className="text-sm font-medium text-[var(--color-text-primary)]">
                       {issue.title}
                     </span>
-                    {issue.labels?.map((ll: any) => (
+                    {issue.labels?.map((ll) => (
                       <span
                         key={ll.label.id}
                         className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none text-white"
@@ -131,7 +131,7 @@ export default function IssuesListPage() {
 
                 {issue.assignees?.length > 0 && (
                   <div className="flex -space-x-1">
-                    {issue.assignees.slice(0, 3).map((a: any) => (
+                    {issue.assignees.slice(0, 3).map((a) => (
                       <Avatar
                         key={a.user.id}
                         src={a.user.image}

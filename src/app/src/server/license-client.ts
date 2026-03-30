@@ -100,16 +100,18 @@ export async function initLicenseClient(): Promise<void> {
   console.log(`[License] Validated. Tier: ${cachedTier}`);
 
   // Periodic re-validation
-  validationTimer = setInterval(async () => {
-    cachedTier = await validateWithManager();
-    lastValidation = Date.now();
-    console.log(`[License] Re-validated. Tier: ${cachedTier}`);
+  validationTimer = setInterval(() => {
+    void (async () => {
+      cachedTier = await validateWithManager();
+      lastValidation = Date.now();
+      console.log(`[License] Re-validated. Tier: ${cachedTier}`);
 
-    // Report usage on the reporting day
-    const now = new Date();
-    if (now.getUTCDate() === REPORTING_DAY) {
-      await reportUsage();
-    }
+      // Report usage on the reporting day
+      const now = new Date();
+      if (now.getUTCDate() === REPORTING_DAY) {
+        await reportUsage();
+      }
+    })();
   }, VALIDATION_INTERVAL_MS);
 }
 

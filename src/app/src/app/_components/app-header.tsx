@@ -60,9 +60,12 @@ function timeAgo(dateStr: string) {
 
 export function AppHeader() {
   const { data: user } = api.user.me.useQuery();
-  const { data: unreadCount } = api.notification.countUnread.useQuery(undefined, {
-    refetchInterval: 30_000,
-  });
+  const { data: unreadCount } = api.notification.countUnread.useQuery(
+    undefined,
+    {
+      refetchInterval: 30_000,
+    },
+  );
   const { data: notifs } = api.notification.list.useQuery(
     { limit: 10 },
     { refetchInterval: 30_000 },
@@ -147,7 +150,7 @@ export function AppHeader() {
             <span className="relative flex h-8 w-8 items-center justify-center rounded-md text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-overlay)] hover:text-[var(--color-text-primary)]">
               <BellIcon />
               {(unreadCount ?? 0) > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-bold text-white">
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-bold text-white">
                   {unreadCount! > 99 ? "99+" : unreadCount}
                 </span>
               )}
@@ -156,7 +159,9 @@ export function AppHeader() {
         >
           <div className="w-80">
             <div className="flex items-center justify-between px-4 py-2">
-              <span className="text-sm font-semibold text-[var(--color-text-primary)]">Notifications</span>
+              <span className="text-sm font-semibold text-[var(--color-text-primary)]">
+                Notifications
+              </span>
               {(unreadCount ?? 0) > 0 && (
                 <button
                   type="button"
@@ -170,21 +175,30 @@ export function AppHeader() {
             <DropdownDivider />
             {notifs?.items && notifs.items.length > 0 ? (
               <div className="max-h-80 overflow-y-auto">
-                {notifs.items.map((n: any) => (
+                {notifs.items.map((n) => (
                   <DropdownItem
                     key={n.id}
                     href={n.link}
-                    onClick={() => { if (!n.read) markRead.mutate({ id: n.id }); }}
+                    onClick={() => {
+                      if (!n.read) markRead.mutate({ id: n.id });
+                    }}
                   >
                     <div className="flex gap-2">
                       {!n.read && (
                         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]" />
                       )}
                       <div className={!n.read ? "" : "pl-4"}>
-                        <div className="text-xs font-medium text-[var(--color-text-primary)] line-clamp-2">{n.title}</div>
-                        {n.body && <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)] line-clamp-1">{n.body}</div>}
+                        <div className="line-clamp-2 text-xs font-medium text-[var(--color-text-primary)]">
+                          {n.title}
+                        </div>
+                        {n.body && (
+                          <div className="mt-0.5 line-clamp-1 text-[11px] text-[var(--color-text-muted)]">
+                            {n.body}
+                          </div>
+                        )}
                         <div className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
-                          {n.actor?.name ?? n.actor?.email ?? ""} · {timeAgo(n.createdAt)}
+                          {n.actor?.name ?? n.actor?.email ?? ""} ·{" "}
+                          {timeAgo(n.createdAt.toString())}
                         </div>
                       </div>
                     </div>

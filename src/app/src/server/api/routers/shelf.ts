@@ -4,7 +4,7 @@ import config from "@incanta/config";
 import njwt from "njwt";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { FileChangeType, RepoAccess } from "@prisma/client";
+import { FileChangeType, type Prisma, type PrismaClient, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
 import { hasFeature, isLicenseManager, type LicenseTier } from "~/server/license-utils";
@@ -32,7 +32,7 @@ function isBinaryFile(filePath: string): boolean {
   return binaryExtensions.has(ext);
 }
 
-async function assertShelfFeature(orgId: string, db: any) {
+async function assertShelfFeature(orgId: string, db: PrismaClient) {
   if (isLicenseManager()) {
     const org = await db.org.findUnique({
       where: { id: orgId },
@@ -60,7 +60,7 @@ export const shelfRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
-      const where: any = { repoId: input.repoId };
+      const where: Prisma.ShelfWhereInput = { repoId: input.repoId };
       if (input.status) {
         where.status = input.status;
       } else {
@@ -237,7 +237,7 @@ export const shelfRouter = createTRPCRouter({
       }
 
       // Build updated stateTree
-      const stateTree: Record<string, number> = shelf.stateTree as any;
+      const stateTree: Record<string, number> = shelf.stateTree as Record<string, number>;
 
       for (const mod of input.modifications) {
         const modPath = mod.path.replaceAll("\\", "/");
@@ -302,7 +302,7 @@ export const shelfRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Active shelf not found" });
       }
 
-      const stateTree: Record<string, number> = { ...(shelf.stateTree as any) };
+      const stateTree: Record<string, number> = { ...(shelf.stateTree as Record<string, number>) };
       const normalizedPaths = input.filePaths.map((p) => p.replaceAll("\\", "/"));
 
       // Find files to remove
@@ -397,8 +397,8 @@ export const shelfRouter = createTRPCRouter({
       const nextNumber = (lastCl?.number ?? -1) + 1;
 
       // Merge shelf state into branch state
-      const branchState: Record<string, number> = { ...(branchHead.stateTree as any) };
-      const shelfState: Record<string, number> = shelf.stateTree as any;
+      const branchState: Record<string, number> = { ...(branchHead.stateTree as Record<string, number>) };
+      const shelfState: Record<string, number> = shelf.stateTree as Record<string, number>;
 
       for (const [fileId, clNum] of Object.entries(shelfState)) {
         branchState[fileId] = clNum;
@@ -425,7 +425,7 @@ export const shelfRouter = createTRPCRouter({
           repoId: input.repoId,
           fileId: fc.fileId,
           changelistNumber: nextNumber,
-          type: fc.type as any,
+          type: fc.type as FileChangeType,
         })),
       });
 
@@ -556,7 +556,7 @@ export const shelfRouter = createTRPCRouter({
           })),
       });
 
-      if (existingShelf && existingShelf.status === "ACTIVE") {
+      if (existingShelf?.status === "ACTIVE") {
         // Update existing shelf with new version index and state
         for (const mod of normalizedMods) {
           const fileId = fileIdsForPaths[mod.path];
@@ -601,7 +601,7 @@ export const shelfRouter = createTRPCRouter({
               .filter((mod) => fileIdsForPaths[mod.path] && !mod.delete)
               .map((mod) => ({
                 fileId: fileIdsForPaths[mod.path]!,
-                type: FileChangeType.ADD as any,
+                type: FileChangeType.ADD,
               })),
           },
         },
@@ -657,7 +657,7 @@ export const shelfRouter = createTRPCRouter({
         where: { repoId_name: { repoId: input.repoId, name: input.shelfName } },
       });
 
-      if (!shelf || shelf.status !== "ACTIVE") {
+      if (shelf?.status !== "ACTIVE") {
         throw new TRPCError({ code: "NOT_FOUND", message: "Active shelf not found" });
       }
 

@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
 
   let body: { key?: string; secret?: string };
   try {
-    body = await request.json();
+    body = await request.json() as { key?: string; secret?: string };
   } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }

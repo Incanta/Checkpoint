@@ -8,6 +8,7 @@ import {
   getUserAndRepoWithAccess,
 } from "../auth-utils";
 import { recordActivity } from "../activity";
+import type { InputJsonValue } from "@prisma/client/runtime/library";
 
 export const changelistRouter = createTRPCRouter({
   getChangelist: protectedProcedure
@@ -385,7 +386,7 @@ export const changelistRouter = createTRPCRouter({
           parentNumber: branch.headNumber,
           stateTree: stateTree,
           artifactVersionIndex: parentChangelist.artifactVersionIndex,
-          artifactStateTree: parentChangelist.artifactStateTree,
+          artifactStateTree: parentChangelist.artifactStateTree as InputJsonValue,
           repoId: input.repoId,
           userId: ctx.session.user.id,
         },

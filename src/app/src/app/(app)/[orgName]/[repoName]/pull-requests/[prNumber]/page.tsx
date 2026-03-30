@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api } from "~/trpc/react";
+import type { Options as MdOptions } from "react-markdown";
+import type RemarkGfm from "remark-gfm";
+import { api, type RouterOutputs } from "~/trpc/react";
 import { Button, Card, Badge, Avatar, EmptyState } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 import { useSession } from "~/lib/auth-client";
@@ -10,14 +12,16 @@ import { diffLines } from "diff";
 
 // ── Markdown renderer (lazy-loaded) ─────────────────────────────
 function MarkdownContent({ content }: { content: string }) {
-  const [Md, setMd] = useState<React.ComponentType<{ children: string; remarkPlugins?: any[] }> | null>(null);
-  const [remarkGfm, setRemarkGfm] = useState<any>(null);
+  const [Md, setMd] = useState<React.ComponentType<MdOptions> | null>(null);
+  const [remarkGfm, setRemarkGfm] = useState<typeof RemarkGfm | null>(null);
 
   useEffect(() => {
-    void Promise.all([import("react-markdown"), import("remark-gfm")]).then(([md, gfm]) => {
-      setMd(() => md.default);
-      setRemarkGfm(() => gfm.default);
-    });
+    void Promise.all([import("react-markdown"), import("remark-gfm")]).then(
+      ([md, gfm]) => {
+        setMd(() => md.default);
+        setRemarkGfm(() => gfm.default);
+      },
+    );
   }, []);
 
   if (!Md) return <span className="text-[var(--color-text-muted)]">…</span>;
@@ -39,7 +43,10 @@ function VirtualFileList({
   renderItem,
 }: {
   files: { path: string; type: string }[];
-  renderItem: (file: { path: string; type: string }, idx: number) => React.ReactNode;
+  renderItem: (
+    file: { path: string; type: string },
+    idx: number,
+  ) => React.ReactNode;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -55,7 +62,10 @@ function VirtualFileList({
   const totalHeight = files.length * ITEM_HEIGHT;
   const maxH = Math.min(VISIBLE_COUNT * ITEM_HEIGHT, 1400);
   const startIdx = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - BUFFER);
-  const endIdx = Math.min(files.length, Math.ceil((scrollTop + maxH) / ITEM_HEIGHT) + BUFFER);
+  const endIdx = Math.min(
+    files.length,
+    Math.ceil((scrollTop + maxH) / ITEM_HEIGHT) + BUFFER,
+  );
 
   return (
     <div>
@@ -68,8 +78,17 @@ function VirtualFileList({
         style={{ maxHeight: maxH, overflowY: "auto" }}
       >
         <div style={{ height: totalHeight, position: "relative" }}>
-          <div style={{ position: "absolute", top: startIdx * ITEM_HEIGHT, left: 0, right: 0 }}>
-            {files.slice(startIdx, endIdx).map((f, i) => renderItem(f, startIdx + i))}
+          <div
+            style={{
+              position: "absolute",
+              top: startIdx * ITEM_HEIGHT,
+              left: 0,
+              right: 0,
+            }}
+          >
+            {files
+              .slice(startIdx, endIdx)
+              .map((f, i) => renderItem(f, startIdx + i))}
           </div>
         </div>
       </div>
@@ -78,7 +97,10 @@ function VirtualFileList({
 }
 
 // ── Review state colors ────────────────────────────────────────
-const REVIEW_BADGE: Record<string, { variant: "success" | "danger" | "default"; label: string }> = {
+const REVIEW_BADGE: Record<
+  string,
+  { variant: "success" | "danger" | "default"; label: string }
+> = {
   APPROVED: { variant: "success", label: "Approved" },
   REQUEST_CHANGES: { variant: "danger", label: "Changes requested" },
   PENDING: { variant: "default", label: "Pending" },
@@ -92,7 +114,11 @@ const FILE_TYPE_COLOR: Record<string, "success" | "warning" | "danger"> = {
 
 // ── Main page ──────────────────────────────────────────────────
 export default function PullRequestDetailPage() {
-  const params = useParams<{ orgName: string; repoName: string; prNumber: string }>();
+  const params = useParams<{
+    orgName: string;
+    repoName: string;
+    prNumber: string;
+  }>();
   const orgName = decodeURIComponent(params.orgName);
   const repoName = decodeURIComponent(params.repoName);
   const prNumber = parseInt(params.prNumber, 10);
@@ -100,8 +126,13 @@ export default function PullRequestDetailPage() {
   const { data: session } = useSession();
   const utils = api.useUtils();
 
-  const { data: org } = api.org.getOrg.useQuery({ id: orgName, idIsName: true });
-  const repoData = org?.repos?.find((r: { name: string }) => r.name === repoName);
+  const { data: org } = api.org.getOrg.useQuery({
+    id: orgName,
+    idIsName: true,
+  });
+  const repoData = org?.repos?.find(
+    (r: { name: string }) => r.name === repoName,
+  );
 
   const { data: pr, isLoading } = api.pullRequest.get.useQuery(
     { repoId: repoData?.id ?? "", number: prNumber },
@@ -113,9 +144,15 @@ export default function PullRequestDetailPage() {
     { enabled: !!pr?.id },
   );
 
-  useDocumentTitle(pr ? `${pr.title} #${pr.number} · ${repoName} in ${orgName}` : `PR #${prNumber} · ${repoName}`);
+  useDocumentTitle(
+    pr
+      ? `${pr.title} #${pr.number} · ${repoName} in ${orgName}`
+      : `PR #${prNumber} · ${repoName}`,
+  );
 
-  const [activeTab, setActiveTab] = useState<"discussion" | "history" | "changes">("discussion");
+  const [activeTab, setActiveTab] = useState<
+    "discussion" | "history" | "changes"
+  >("discussion");
 
   const invalidatePr = () => {
     void utils.pullRequest.get.invalidate();
@@ -125,7 +162,9 @@ export default function PullRequestDetailPage() {
 
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const updatePr = api.pullRequest.update.useMutation({ onSuccess: invalidatePr });
+  const updatePr = api.pullRequest.update.useMutation({
+    onSuccess: invalidatePr,
+  });
   const subscribeMut = api.pullRequest.subscribe.useMutation({
     onSuccess: () => void utils.pullRequest.isSubscribed.invalidate(),
   });
@@ -135,10 +174,16 @@ export default function PullRequestDetailPage() {
   const isAuthor = session?.user?.id === pr?.authorId;
 
   if (isLoading) {
-    return <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">Loading…</div>;
+    return (
+      <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+        Loading…
+      </div>
+    );
   }
   if (!pr) {
-    return <EmptyState title="Not found" description="Pull request not found." />;
+    return (
+      <EmptyState title="Not found" description="Pull request not found." />
+    );
   }
 
   return (
@@ -155,7 +200,11 @@ export default function PullRequestDetailPage() {
                   onChange={(e) => setTitleDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && titleDraft.trim()) {
-                      updatePr.mutate({ repoId: repoData?.id ?? "", number: pr.number, title: titleDraft.trim() });
+                      updatePr.mutate({
+                        repoId: repoData?.id ?? "",
+                        number: pr.number,
+                        title: titleDraft.trim(),
+                      });
                       setEditingTitle(false);
                     }
                     if (e.key === "Escape") setEditingTitle(false);
@@ -167,23 +216,38 @@ export default function PullRequestDetailPage() {
                   disabled={!titleDraft.trim() || updatePr.isPending}
                   onClick={() => {
                     if (titleDraft.trim()) {
-                      updatePr.mutate({ repoId: repoData?.id ?? "", number: pr.number, title: titleDraft.trim() });
+                      updatePr.mutate({
+                        repoId: repoData?.id ?? "",
+                        number: pr.number,
+                        title: titleDraft.trim(),
+                      });
                       setEditingTitle(false);
                     }
                   }}
                 >
                   Save
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => setEditingTitle(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setEditingTitle(false)}
+                >
+                  Cancel
+                </Button>
               </div>
             ) : (
               <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
                 {pr.title}{" "}
-                <span className="font-normal text-[var(--color-text-muted)]">#{pr.number}</span>
+                <span className="font-normal text-[var(--color-text-muted)]">
+                  #{pr.number}
+                </span>
                 {isAuthor && (
                   <button
                     type="button"
-                    onClick={() => { setTitleDraft(pr.title); setEditingTitle(true); }}
+                    onClick={() => {
+                      setTitleDraft(pr.title);
+                      setEditingTitle(true);
+                    }}
                     className="ml-2 align-middle text-xs text-[var(--color-text-link)] hover:underline"
                   >
                     Edit
@@ -193,14 +257,24 @@ export default function PullRequestDetailPage() {
             )}
             <div className="mt-1 flex items-center gap-3 text-sm text-[var(--color-text-secondary)]">
               <Badge
-                variant={pr.status === "OPEN" ? "success" : pr.status === "MERGED" ? "accent" : "danger"}
+                variant={
+                  pr.status === "OPEN"
+                    ? "success"
+                    : pr.status === "MERGED"
+                      ? "accent"
+                      : "danger"
+                }
               >
                 {pr.status}
               </Badge>
               <span>{pr.author.name ?? pr.author.email} wants to merge</span>
-              <span className="font-medium text-[var(--color-text-primary)]">{pr.sourceBranchName}</span>
+              <span className="font-medium text-[var(--color-text-primary)]">
+                {pr.sourceBranchName}
+              </span>
               <span>into</span>
-              <span className="font-medium text-[var(--color-text-primary)]">{pr.targetBranchName}</span>
+              <span className="font-medium text-[var(--color-text-primary)]">
+                {pr.targetBranchName}
+              </span>
             </div>
           </div>
         </div>
@@ -258,9 +332,16 @@ function DiscussionTab({
   orgName,
   repoName,
 }: {
-  pr: any;
+  pr: NonNullable<RouterOutputs["pullRequest"]["get"]>;
   repoId: string;
-  session: any;
+  session: {
+    user?: {
+      id: string;
+      name?: string | null;
+      email?: string | null;
+      image?: string | null;
+    };
+  } | null;
   invalidatePr: () => void;
   router: ReturnType<typeof useRouter>;
   orgName: string;
@@ -274,16 +355,65 @@ function DiscussionTab({
   const [commentEditDraft, setCommentEditDraft] = useState("");
 
   // Get org members for reviewer picker
-  const { data: orgData } = api.org.getOrg.useQuery({ id: orgName, idIsName: true, includeUsers: true });
-  const members = (orgData as any)?.users ?? [];
+  const { data: orgData } = api.org.getOrg.useQuery({
+    id: orgName,
+    idIsName: true,
+    includeUsers: true,
+  });
+  const members = ((orgData as Record<string, unknown> | undefined)?.users ??
+    []) as Array<{
+    user: {
+      id: string;
+      name: string | null;
+      email: string;
+      image: string | null;
+    };
+  }>;
 
-  const addComment = api.pullRequest.addComment.useMutation({ onSuccess: () => { setCommentBody(""); invalidatePr(); } });
-  const deleteComment = api.pullRequest.deleteComment.useMutation({ onSuccess: invalidatePr });
-  const updateComment = api.pullRequest.updateComment.useMutation({ onSuccess: () => { setEditingCommentId(null); invalidatePr(); } });
-  const updatePr = api.pullRequest.update.useMutation({ onSuccess: () => { setEditingDesc(false); invalidatePr(); } });
-  const addReview = api.pullRequest.addReview.useMutation({ onSuccess: () => { setReviewerEmail(""); invalidatePr(); } });
-  const closePr = api.pullRequest.close.useMutation({ onSuccess: invalidatePr });
-  const reopenPr = api.pullRequest.reopen.useMutation({ onSuccess: invalidatePr });
+  const addComment = api.pullRequest.addComment.useMutation({
+    onSuccess: () => {
+      setCommentBody("");
+      invalidatePr();
+    },
+  });
+  const deleteComment = api.pullRequest.deleteComment.useMutation({
+    onSuccess: invalidatePr,
+  });
+  const updateComment = api.pullRequest.updateComment.useMutation({
+    onSuccess: () => {
+      setEditingCommentId(null);
+      invalidatePr();
+    },
+  });
+  const updatePr = api.pullRequest.update.useMutation({
+    onSuccess: () => {
+      setEditingDesc(false);
+      invalidatePr();
+    },
+  });
+  const addReview = api.pullRequest.addReview.useMutation({
+    onSuccess: () => {
+      setReviewerEmail("");
+      invalidatePr();
+    },
+  });
+  const closePr = api.pullRequest.close.useMutation({
+    onSuccess: invalidatePr,
+  });
+  const utils = api.useUtils();
+  const { data: isSubscribed } = api.pullRequest.isSubscribed.useQuery(
+    { pullRequestId: pr.id },
+    { enabled: !!pr.id },
+  );
+  const subscribeMut = api.pullRequest.subscribe.useMutation({
+    onSuccess: () => void utils.pullRequest.isSubscribed.invalidate(),
+  });
+  const unsubscribeMut = api.pullRequest.unsubscribe.useMutation({
+    onSuccess: () => void utils.pullRequest.isSubscribed.invalidate(),
+  });
+  const reopenPr = api.pullRequest.reopen.useMutation({
+    onSuccess: invalidatePr,
+  });
   const mergePr = api.pullRequest.merge.useMutation({
     onSuccess: () => {
       invalidatePr();
@@ -291,10 +421,15 @@ function DiscussionTab({
   });
 
   const currentUserId = session?.user?.id;
-  const approvedCount = pr.reviews.filter((r: any) => r.state === "APPROVED").length;
-  const hasRequestChanges = pr.reviews.some((r: any) => r.state === "REQUEST_CHANGES");
+  const approvedCount = pr.reviews.filter((r) => r.state === "APPROVED").length;
+  const hasRequestChanges = pr.reviews.some(
+    (r) => r.state === "REQUEST_CHANGES",
+  );
   const requiredReviews = pr.repo?.requiredReviews ?? 0;
-  const canMerge = pr.status === "OPEN" && !hasRequestChanges && approvedCount >= requiredReviews;
+  const canMerge =
+    pr.status === "OPEN" &&
+    !hasRequestChanges &&
+    approvedCount >= requiredReviews;
 
   return (
     <div className="space-y-4">
@@ -303,9 +438,14 @@ function DiscussionTab({
         {/* Description — left */}
         <div className="min-w-0 flex-1">
           <Card>
-            <div className="flex items-center justify-between mb-2">
+            <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Avatar src={pr.author.image} name={pr.author.name} email={pr.author.email} size="sm" />
+                <Avatar
+                  src={pr.author.image}
+                  name={pr.author.name}
+                  email={pr.author.email}
+                  size="sm"
+                />
                 <span className="text-sm font-medium text-[var(--color-text-primary)]">
                   {pr.author.name ?? pr.author.email}
                 </span>
@@ -316,7 +456,10 @@ function DiscussionTab({
               {currentUserId === pr.authorId && !editingDesc && (
                 <button
                   type="button"
-                  onClick={() => { setDescDraft(pr.description ?? ""); setEditingDesc(true); }}
+                  onClick={() => {
+                    setDescDraft(pr.description ?? "");
+                    setEditingDesc(true);
+                  }}
                   className="text-xs text-[var(--color-text-link)] hover:underline"
                 >
                   Edit
@@ -334,11 +477,23 @@ function DiscussionTab({
                   placeholder="Description (Markdown supported)"
                 />
                 <div className="mt-2 flex justify-end gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => setEditingDesc(false)}>Cancel</Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setEditingDesc(false)}
+                  >
+                    Cancel
+                  </Button>
                   <Button
                     size="sm"
                     disabled={updatePr.isPending}
-                    onClick={() => updatePr.mutate({ repoId, number: pr.number, description: descDraft })}
+                    onClick={() =>
+                      updatePr.mutate({
+                        repoId,
+                        number: pr.number,
+                        description: descDraft,
+                      })
+                    }
                   >
                     Save
                   </Button>
@@ -347,7 +502,9 @@ function DiscussionTab({
             ) : pr.description ? (
               <MarkdownContent content={pr.description} />
             ) : (
-              <p className="text-sm text-[var(--color-text-muted)] italic">No description provided.</p>
+              <p className="text-sm text-[var(--color-text-muted)] italic">
+                No description provided.
+              </p>
             )}
           </Card>
         </div>
@@ -356,30 +513,44 @@ function DiscussionTab({
         <div className="w-64 shrink-0 space-y-3">
           {/* Reviews list — always visible */}
           <Card>
-            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Reviewers</h4>
+            <h4 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
+              Reviewers
+            </h4>
             {pr.reviews.length > 0 ? (
               <div className="space-y-2">
-                {pr.reviews.map((review: any) => {
-                  const badge = REVIEW_BADGE[review.state as string] ?? REVIEW_BADGE.PENDING!;
+                {pr.reviews.map((review) => {
+                  const badge =
+                    REVIEW_BADGE[review.state as string] ??
+                    REVIEW_BADGE.PENDING!;
                   return (
-                    <div key={review.id} className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <Avatar src={review.reviewer.image} name={review.reviewer.name} email={review.reviewer.email} size="sm" />
+                    <div
+                      key={review.id}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <Avatar
+                          src={review.reviewer.image}
+                          name={review.reviewer.name}
+                          email={review.reviewer.email}
+                          size="sm"
+                        />
                         <span className="truncate text-xs text-[var(--color-text-primary)]">
                           {review.reviewer.name ?? review.reviewer.email}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <Badge variant={badge!.variant}>{badge!.label}</Badge>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Badge variant={badge.variant}>{badge.label}</Badge>
                         {pr.status === "OPEN" && review.state !== "PENDING" && (
                           <button
                             type="button"
-                            onClick={() => addReview.mutate({
-                              repoId,
-                              prNumber: pr.number,
-                              reviewerId: review.reviewerId,
-                              state: "PENDING",
-                            })}
+                            onClick={() =>
+                              addReview.mutate({
+                                repoId,
+                                prNumber: pr.number,
+                                reviewerId: review.reviewerId,
+                                state: "PENDING",
+                              })
+                            }
                             className="text-[10px] text-[var(--color-text-link)] hover:underline"
                           >
                             Re-request
@@ -391,14 +562,18 @@ function DiscussionTab({
                 })}
               </div>
             ) : (
-              <p className="text-xs text-[var(--color-text-muted)] italic">No reviewers yet.</p>
+              <p className="text-xs text-[var(--color-text-muted)] italic">
+                No reviewers yet.
+              </p>
             )}
           </Card>
 
           {/* Request review */}
           {pr.status === "OPEN" && (
             <Card>
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Request review</h4>
+              <h4 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
+                Request review
+              </h4>
               <select
                 value={reviewerEmail}
                 onChange={(e) => setReviewerEmail(e.target.value)}
@@ -406,9 +581,15 @@ function DiscussionTab({
               >
                 <option value="">Select member…</option>
                 {members
-                  .filter((m: any) => m.user.id !== pr.authorId)
-                  .filter((m: any) => !pr.reviews.some((r: any) => r.reviewerId === m.user.id && r.state === "PENDING"))
-                  .map((m: any) => (
+                  .filter((m) => m.user.id !== pr.authorId)
+                  .filter(
+                    (m) =>
+                      !pr.reviews.some(
+                        (r) =>
+                          r.reviewerId === m.user.id && r.state === "PENDING",
+                      ),
+                  )
+                  .map((m) => (
                     <option key={m.user.id} value={m.user.id}>
                       {m.user.name ?? m.user.email}
                     </option>
@@ -431,40 +612,62 @@ function DiscussionTab({
                 Request
               </Button>
               {addReview.error && (
-                <p className="mt-1 text-[10px] text-[var(--color-danger)]">{addReview.error.message}</p>
+                <p className="mt-1 text-[10px] text-[var(--color-danger)]">
+                  {addReview.error.message}
+                </p>
               )}
             </Card>
           )}
 
           {/* Submit your review */}
-          {pr.status === "OPEN" && currentUserId && currentUserId !== pr.authorId && (
-            <Card>
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Your review</h4>
-              <div className="flex flex-col gap-1.5">
-                <Button
-                  size="sm"
-                  className="w-full"
-                  onClick={() => addReview.mutate({ repoId, prNumber: pr.number, reviewerId: currentUserId, state: "APPROVED" })}
-                  disabled={addReview.isPending}
-                >
-                  ✓ Approve
-                </Button>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  className="w-full"
-                  onClick={() => addReview.mutate({ repoId, prNumber: pr.number, reviewerId: currentUserId, state: "REQUEST_CHANGES" })}
-                  disabled={addReview.isPending}
-                >
-                  ✗ Request changes
-                </Button>
-              </div>
-            </Card>
-          )}
+          {pr.status === "OPEN" &&
+            currentUserId &&
+            currentUserId !== pr.authorId && (
+              <Card>
+                <h4 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
+                  Your review
+                </h4>
+                <div className="flex flex-col gap-1.5">
+                  <Button
+                    size="sm"
+                    className="w-full"
+                    onClick={() =>
+                      addReview.mutate({
+                        repoId,
+                        prNumber: pr.number,
+                        reviewerId: currentUserId,
+                        state: "APPROVED",
+                      })
+                    }
+                    disabled={addReview.isPending}
+                  >
+                    ✓ Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    className="w-full"
+                    onClick={() =>
+                      addReview.mutate({
+                        repoId,
+                        prNumber: pr.number,
+                        reviewerId: currentUserId,
+                        state: "REQUEST_CHANGES",
+                      })
+                    }
+                    disabled={addReview.isPending}
+                  >
+                    ✗ Request changes
+                  </Button>
+                </div>
+              </Card>
+            )}
 
           {/* Subscription */}
           <Card>
-            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Notifications</h4>
+            <h4 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
+              Notifications
+            </h4>
             <button
               type="button"
               onClick={() => {
@@ -494,11 +697,16 @@ function DiscussionTab({
       </div>
 
       {/* Comments — full width below */}
-      {pr.comments.map((comment: any) => (
+      {pr.comments.map((comment) => (
         <Card key={comment.id}>
-          <div className="flex items-center justify-between mb-2">
+          <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Avatar src={comment.author.image} name={comment.author.name} email={comment.author.email} size="sm" />
+              <Avatar
+                src={comment.author.image}
+                name={comment.author.name}
+                email={comment.author.email}
+                size="sm"
+              />
               <span className="text-sm font-medium text-[var(--color-text-primary)]">
                 {comment.author.name ?? comment.author.email}
               </span>
@@ -511,7 +719,10 @@ function DiscussionTab({
                 {editingCommentId !== comment.id && (
                   <button
                     type="button"
-                    onClick={() => { setEditingCommentId(comment.id); setCommentEditDraft(comment.body); }}
+                    onClick={() => {
+                      setEditingCommentId(comment.id);
+                      setCommentEditDraft(comment.body);
+                    }}
                     className="text-xs text-[var(--color-text-link)] hover:underline"
                   >
                     Edit
@@ -520,7 +731,11 @@ function DiscussionTab({
                 <button
                   type="button"
                   onClick={() => {
-                    if (window.confirm("Are you sure you want to delete this comment?")) {
+                    if (
+                      window.confirm(
+                        "Are you sure you want to delete this comment?",
+                      )
+                    ) {
                       deleteComment.mutate({ commentId: comment.id });
                     }
                   }}
@@ -541,11 +756,22 @@ function DiscussionTab({
                 className="w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)]"
               />
               <div className="mt-2 flex justify-end gap-2">
-                <Button size="sm" variant="ghost" onClick={() => setEditingCommentId(null)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setEditingCommentId(null)}
+                >
+                  Cancel
+                </Button>
                 <Button
                   size="sm"
                   disabled={!commentEditDraft.trim() || updateComment.isPending}
-                  onClick={() => updateComment.mutate({ commentId: comment.id, body: commentEditDraft.trim() })}
+                  onClick={() =>
+                    updateComment.mutate({
+                      commentId: comment.id,
+                      body: commentEditDraft.trim(),
+                    })
+                  }
                 >
                   Save
                 </Button>
@@ -559,7 +785,9 @@ function DiscussionTab({
 
       {/* Add comment */}
       <Card>
-        <h4 className="mb-2 text-sm font-semibold text-[var(--color-text-primary)]">Add a comment</h4>
+        <h4 className="mb-2 text-sm font-semibold text-[var(--color-text-primary)]">
+          Add a comment
+        </h4>
         <textarea
           value={commentBody}
           onChange={(e) => setCommentBody(e.target.value)}
@@ -593,20 +821,32 @@ function DiscussionTab({
             disabled={!commentBody.trim() || addComment.isPending}
             onClick={() => {
               if (!commentBody.trim()) return;
-              addComment.mutate({ repoId, prNumber: pr.number, body: commentBody.trim() });
+              addComment.mutate({
+                repoId,
+                prNumber: pr.number,
+                body: commentBody.trim(),
+              });
             }}
           >
             Comment
           </Button>
         </div>
         {addComment.error && (
-          <p className="mt-1 text-xs text-[var(--color-danger)]">{addComment.error.message}</p>
+          <p className="mt-1 text-xs text-[var(--color-danger)]">
+            {addComment.error.message}
+          </p>
         )}
       </Card>
 
       {/* Merge area */}
       {pr.status === "OPEN" && (
-        <Card className={canMerge ? "border-[var(--color-success)]/30" : "border-[var(--color-border-default)]"}>
+        <Card
+          className={
+            canMerge
+              ? "border-[var(--color-success)]/30"
+              : "border-[var(--color-border-default)]"
+          }
+        >
           <div className="flex items-center justify-between">
             <div>
               <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -631,7 +871,9 @@ function DiscussionTab({
             </Button>
           </div>
           {mergePr.error && (
-            <p className="mt-2 text-xs text-[var(--color-danger)]">{mergePr.error.message}</p>
+            <p className="mt-2 text-xs text-[var(--color-danger)]">
+              {mergePr.error.message}
+            </p>
           )}
         </Card>
       )}
@@ -642,8 +884,9 @@ function DiscussionTab({
             This pull request was merged on{" "}
             <span className="font-medium text-[var(--color-text-primary)]">
               {pr.mergedAt ? new Date(pr.mergedAt).toLocaleString() : "unknown"}
-            </span>.
-            Branch <span className="font-medium">{pr.sourceBranchName}</span> has been deleted.
+            </span>
+            . Branch <span className="font-medium">{pr.sourceBranchName}</span>{" "}
+            has been deleted.
           </p>
         </Card>
       )}
@@ -652,20 +895,36 @@ function DiscussionTab({
 }
 
 // ── History Tab ───────────────────────────────────────────────
-function HistoryTab({ repoId, prNumber }: { repoId: string; prNumber: number }) {
-  const { data: changelists, isLoading } = api.pullRequest.getChangelists.useQuery(
-    { repoId, prNumber },
-    { enabled: !!repoId },
-  );
+function HistoryTab({
+  repoId,
+  prNumber,
+}: {
+  repoId: string;
+  prNumber: number;
+}) {
+  const { data: changelists, isLoading } =
+    api.pullRequest.getChangelists.useQuery(
+      { repoId, prNumber },
+      { enabled: !!repoId },
+    );
 
   const [expandedCl, setExpandedCl] = useState<number | null>(null);
 
   if (isLoading) {
-    return <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">Loading…</div>;
+    return (
+      <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+        Loading…
+      </div>
+    );
   }
 
   if (!changelists || changelists.length === 0) {
-    return <EmptyState title="No changelists" description="No changelists found for this pull request." />;
+    return (
+      <EmptyState
+        title="No changelists"
+        description="No changelists found for this pull request."
+      />
+    );
   }
 
   return (
@@ -675,7 +934,9 @@ function HistoryTab({ repoId, prNumber }: { repoId: string; prNumber: number }) 
           <div key={cl.id}>
             <button
               type="button"
-              onClick={() => setExpandedCl(expandedCl === cl.number ? null : cl.number)}
+              onClick={() =>
+                setExpandedCl(expandedCl === cl.number ? null : cl.number)
+              }
               className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-bg-surface)]"
             >
               <Badge variant="accent">CL #{cl.number}</Badge>
@@ -699,28 +960,47 @@ function HistoryTab({ repoId, prNumber }: { repoId: string; prNumber: number }) 
   );
 }
 
-function ExpandedClFiles({ repoId, changelistNumber }: { repoId: string; changelistNumber: number }) {
+function ExpandedClFiles({
+  repoId,
+  changelistNumber,
+}: {
+  repoId: string;
+  changelistNumber: number;
+}) {
   const { data: files, isLoading } = api.changelist.getChangelistFiles.useQuery(
     { repoId, changelistNumber },
     { enabled: !!repoId },
   );
 
   if (isLoading) {
-    return <div className="px-4 py-2 text-xs text-[var(--color-text-muted)]">Loading files…</div>;
+    return (
+      <div className="px-4 py-2 text-xs text-[var(--color-text-muted)]">
+        Loading files…
+      </div>
+    );
   }
 
   if (!files || files.length === 0) {
-    return <div className="px-4 py-2 text-xs text-[var(--color-text-muted)]">No file changes</div>;
+    return (
+      <div className="px-4 py-2 text-xs text-[var(--color-text-muted)]">
+        No file changes
+      </div>
+    );
   }
 
   return (
     <div className="border-t border-[var(--color-border-muted)] bg-[var(--color-bg-primary)]">
-      {files.map((fc: any) => (
+      {files.map((fc) => (
         <div key={fc.id} className="flex items-center gap-2 px-8 py-1">
-          <Badge variant={FILE_TYPE_COLOR[fc.type] ?? "default"} className="w-16 justify-center text-center">
-            {fc.type}
+          <Badge
+            variant={FILE_TYPE_COLOR[fc.changeType] ?? "default"}
+            className="w-16 justify-center text-center"
+          >
+            {fc.changeType}
           </Badge>
-          <span className="text-xs text-[var(--color-text-primary)]">{fc.file?.path ?? fc.fileId}</span>
+          <span className="text-xs text-[var(--color-text-primary)]">
+            {fc.path ?? fc.fileId}
+          </span>
         </div>
       ))}
     </div>
@@ -728,7 +1008,13 @@ function ExpandedClFiles({ repoId, changelistNumber }: { repoId: string; changel
 }
 
 // ── File Diff Viewer ─────────────────────────────────────────
-function FileDiff({ repoId, filePath, fileType, sourceHead, targetHead }: {
+function FileDiff({
+  repoId,
+  filePath,
+  fileType,
+  sourceHead,
+  targetHead,
+}: {
   repoId: string;
   filePath: string;
   fileType: string;
@@ -739,14 +1025,16 @@ function FileDiff({ repoId, filePath, fileType, sourceHead, targetHead }: {
   const fetchOld = fileType !== "ADD";
   const fetchNew = fileType !== "DELETE";
 
-  const { data: oldData, isLoading: oldLoading } = api.file.readFileContent.useQuery(
-    { repoId, changelistNumber: targetHead, filePath },
-    { enabled: fetchOld },
-  );
-  const { data: newData, isLoading: newLoading } = api.file.readFileContent.useQuery(
-    { repoId, changelistNumber: sourceHead, filePath },
-    { enabled: fetchNew },
-  );
+  const { data: oldData, isLoading: oldLoading } =
+    api.file.readFileContent.useQuery(
+      { repoId, changelistNumber: targetHead, filePath },
+      { enabled: fetchOld },
+    );
+  const { data: newData, isLoading: newLoading } =
+    api.file.readFileContent.useQuery(
+      { repoId, changelistNumber: sourceHead, filePath },
+      { enabled: fetchNew },
+    );
 
   const isLoading = (fetchOld && oldLoading) || (fetchNew && newLoading);
 
@@ -754,22 +1042,36 @@ function FileDiff({ repoId, filePath, fileType, sourceHead, targetHead }: {
     if (isLoading) return null;
     const oldContent = fetchOld ? (oldData?.content ?? "") : "";
     const newContent = fetchNew ? (newData?.content ?? "") : "";
-    if (oldData?.isBinary || newData?.isBinary) return { binary: true, lines: [] };
+    if (oldData?.isBinary || newData?.isBinary)
+      return { binary: true, lines: [] };
     return { binary: false, parts: diffLines(oldContent, newContent) };
   }, [isLoading, oldData, newData, fetchOld, fetchNew]);
 
   if (isLoading) {
-    return <div className="px-4 py-3 text-xs text-[var(--color-text-muted)]">Loading diff…</div>;
+    return (
+      <div className="px-4 py-3 text-xs text-[var(--color-text-muted)]">
+        Loading diff…
+      </div>
+    );
   }
 
   if (diffResult?.binary) {
-    return <div className="px-4 py-3 text-xs text-[var(--color-text-muted)] italic">Binary file — diff not available</div>;
+    return (
+      <div className="px-4 py-3 text-xs text-[var(--color-text-muted)] italic">
+        Binary file — diff not available
+      </div>
+    );
   }
 
   if (!diffResult?.parts) return null;
 
   // Build line-numbered diff lines
-  const lines: { type: "add" | "remove" | "context"; oldNum?: number; newNum?: number; text: string }[] = [];
+  const lines: {
+    type: "add" | "remove" | "context";
+    oldNum?: number;
+    newNum?: number;
+    text: string;
+  }[] = [];
   let oldLine = 1;
   let newLine = 1;
   for (const part of diffResult.parts) {
@@ -780,7 +1082,12 @@ function FileDiff({ repoId, filePath, fileType, sourceHead, targetHead }: {
       } else if (part.removed) {
         lines.push({ type: "remove", oldNum: oldLine++, text });
       } else {
-        lines.push({ type: "context", oldNum: oldLine++, newNum: newLine++, text });
+        lines.push({
+          type: "context",
+          oldNum: oldLine++,
+          newNum: newLine++,
+          text,
+        });
       }
     }
   }
@@ -790,7 +1097,11 @@ function FileDiff({ repoId, filePath, fileType, sourceHead, targetHead }: {
   const changeIndices = new Set<number>();
   lines.forEach((l, i) => {
     if (l.type !== "context") {
-      for (let j = Math.max(0, i - CONTEXT); j <= Math.min(lines.length - 1, i + CONTEXT); j++) {
+      for (
+        let j = Math.max(0, i - CONTEXT);
+        j <= Math.min(lines.length - 1, i + CONTEXT);
+        j++
+      ) {
         changeIndices.add(j);
       }
     }
@@ -802,30 +1113,38 @@ function FileDiff({ repoId, filePath, fileType, sourceHead, targetHead }: {
     if (!changeIndices.has(i)) continue;
     if (lastIdx !== -1 && i - lastIdx > 1) {
       rendered.push(
-        <div key={`sep-${i}`} className="flex border-y border-[var(--color-border-muted)] bg-[var(--color-bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]">
+        <div
+          key={`sep-${i}`}
+          className="flex border-y border-[var(--color-border-muted)] bg-[var(--color-bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+        >
           ⋯ {i - lastIdx - 1} lines hidden
         </div>,
       );
     }
     const line = lines[i]!;
-    const bg = line.type === "add"
-      ? "bg-[rgba(63,185,80,0.1)]"
-      : line.type === "remove"
-        ? "bg-[rgba(248,81,73,0.1)]"
-        : "";
+    const bg =
+      line.type === "add"
+        ? "bg-[rgba(63,185,80,0.1)]"
+        : line.type === "remove"
+          ? "bg-[rgba(248,81,73,0.1)]"
+          : "";
     const lineNumColor = "text-[var(--color-text-muted)]";
     rendered.push(
       <div key={i} className={`flex font-mono text-xs leading-5 ${bg}`}>
-        <span className={`w-10 shrink-0 select-none text-right pr-2 ${lineNumColor}`}>
+        <span
+          className={`w-10 shrink-0 pr-2 text-right select-none ${lineNumColor}`}
+        >
           {line.oldNum ?? ""}
         </span>
-        <span className={`w-10 shrink-0 select-none text-right pr-2 ${lineNumColor}`}>
+        <span
+          className={`w-10 shrink-0 pr-2 text-right select-none ${lineNumColor}`}
+        >
           {line.newNum ?? ""}
         </span>
-        <span className="w-4 shrink-0 select-none text-center text-[var(--color-text-muted)]">
+        <span className="w-4 shrink-0 text-center text-[var(--color-text-muted)] select-none">
           {line.type === "add" ? "+" : line.type === "remove" ? "−" : " "}
         </span>
-        <span className="min-w-0 whitespace-pre-wrap break-all pr-2 text-[var(--color-text-primary)]">
+        <span className="min-w-0 pr-2 break-all whitespace-pre-wrap text-[var(--color-text-primary)]">
           {line.text || " "}
         </span>
       </div>,
@@ -834,7 +1153,11 @@ function FileDiff({ repoId, filePath, fileType, sourceHead, targetHead }: {
   }
 
   if (rendered.length === 0) {
-    return <div className="px-4 py-3 text-xs text-[var(--color-text-muted)] italic">No differences</div>;
+    return (
+      <div className="px-4 py-3 text-xs text-[var(--color-text-muted)] italic">
+        No differences
+      </div>
+    );
   }
 
   return (
@@ -845,7 +1168,13 @@ function FileDiff({ repoId, filePath, fileType, sourceHead, targetHead }: {
 }
 
 // ── Changes Tab ──────────────────────────────────────────────
-function ChangesTab({ repoId, prNumber }: { repoId: string; prNumber: number }) {
+function ChangesTab({
+  repoId,
+  prNumber,
+}: {
+  repoId: string;
+  prNumber: number;
+}) {
   const { data, isLoading } = api.pullRequest.getChangedFiles.useQuery(
     { repoId, prNumber },
     { enabled: !!repoId },
@@ -853,11 +1182,20 @@ function ChangesTab({ repoId, prNumber }: { repoId: string; prNumber: number }) 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   if (isLoading) {
-    return <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">Loading…</div>;
+    return (
+      <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+        Loading…
+      </div>
+    );
   }
 
   if (!data || data.files.length === 0) {
-    return <EmptyState title="No changes" description="No file changes found for this pull request." />;
+    return (
+      <EmptyState
+        title="No changes"
+        description="No file changes found for this pull request."
+      />
+    );
   }
 
   const { files, sourceHead, targetHead } = data;
@@ -880,7 +1218,7 @@ function ChangesTab({ repoId, prNumber }: { repoId: string; prNumber: number }) 
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setExpanded(new Set(files.map((f: any) => f.path)))}
+            onClick={() => setExpanded(new Set(files.map((f) => f.path)))}
             className="text-xs text-[var(--color-text-link)] hover:underline"
           >
             Expand all
@@ -894,17 +1232,22 @@ function ChangesTab({ repoId, prNumber }: { repoId: string; prNumber: number }) 
           </button>
         </div>
       </div>
-      {files.map((file: any) => {
+      {files.map((file) => {
         const isExpanded = expanded.has(file.path);
         return (
           <Card key={file.path} padding={false}>
             <button
               type="button"
               onClick={() => toggleFile(file.path)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--color-bg-secondary)] transition-colors"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--color-bg-secondary)]"
             >
-              <span className="text-xs text-[var(--color-text-muted)]">{isExpanded ? "▼" : "▶"}</span>
-              <Badge variant={FILE_TYPE_COLOR[file.type] ?? "default"} className="w-16 justify-center text-center">
+              <span className="text-xs text-[var(--color-text-muted)]">
+                {isExpanded ? "▼" : "▶"}
+              </span>
+              <Badge
+                variant={FILE_TYPE_COLOR[file.type] ?? "default"}
+                className="w-16 justify-center text-center"
+              >
                 {file.type}
               </Badge>
               <span className="min-w-0 truncate text-sm text-[var(--color-text-primary)]">

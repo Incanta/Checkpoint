@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     aruCount?: number;
   };
   try {
-    body = await request.json();
+    body = await request.json() as typeof body;
   } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }

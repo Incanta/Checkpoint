@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { RepoAccess } from "@prisma/client";
+import { type Prisma, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
 import {
@@ -29,7 +29,7 @@ export const issueRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
-      const where: any = { repoId: input.repoId };
+      const where: Prisma.IssueWhereInput = { repoId: input.repoId };
       if (input.status !== "ALL") where.status = input.status;
       if (input.labelId) {
         where.labels = { some: { labelId: input.labelId } };

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "~/trpc/react";
-import { Card, Button, PageHeader } from "~/app/_components/ui";
+import { Card, Button } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 
 export default function NewIssuePage() {
@@ -16,7 +16,7 @@ export default function NewIssuePage() {
 
   const { data: org } = api.org.getOrg.useQuery({ id: orgName, idIsName: true, includeUsers: true });
   const repoData = org?.repos?.find((r: { name: string }) => r.name === repoName);
-  const members = (org as any)?.users ?? [];
+  const members = ((org as Record<string, unknown> | undefined)?.users ?? []) as Array<{ user: { id: string; name: string | null; email: string; image: string | null } }>;
 
   const { data: labels } = api.issue.listLabels.useQuery(
     { repoId: repoData?.id ?? "" },
@@ -144,7 +144,7 @@ export default function NewIssuePage() {
                 Labels
               </h3>
               <div className="space-y-1">
-                {labels.map((l: any) => (
+                {labels.map((l) => (
                   <button
                     key={l.id}
                     type="button"
@@ -176,7 +176,7 @@ export default function NewIssuePage() {
                 Assignees
               </h3>
               <div className="space-y-1">
-                {members.map((m: any) => (
+                {members.map((m) => (
                   <button
                     key={m.user.id}
                     type="button"

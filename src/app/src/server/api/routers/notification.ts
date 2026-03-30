@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 
@@ -12,7 +13,7 @@ export const notificationRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const where: any = { userId: ctx.session.user.id };
+      const where: Prisma.NotificationWhereInput = { userId: ctx.session.user.id };
       if (input.unreadOnly) where.read = false;
 
       const items = await ctx.db.notification.findMany({

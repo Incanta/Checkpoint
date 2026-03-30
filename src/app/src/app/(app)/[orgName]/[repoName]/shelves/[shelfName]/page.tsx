@@ -122,7 +122,7 @@ function ShikiCodeBlock({ content, filePath }: { content: string; filePath: stri
           setHtml(processed);
         }
       })
-      .catch(() => {});
+      .catch(() => { /* ignore */ });
     return () => { cancelled = true; };
   }, [content, filePath]);
 
@@ -224,7 +224,7 @@ export default function ShelfDetailPage() {
     return <EmptyState title="Shelf not found" description="This shelf doesn't exist or has been deleted." />;
   }
 
-  const files = shelf.fileChanges.map((fc: any) => ({
+  const files = shelf.fileChanges.map((fc) => ({
     id: fc.file.id,
     path: fc.file.path,
     type: fc.type,
@@ -333,8 +333,8 @@ export default function ShelfDetailPage() {
               >
                 <option value="">Select branch…</option>
                 {branches
-                  ?.filter((b: any) => !b.archivedAt)
-                  .map((b: any) => (
+                  ?.filter((b) => !b.archivedAt)
+                  .map((b) => (
                     <option key={b.id} value={b.name}>
                       {b.name}
                     </option>
@@ -418,7 +418,7 @@ export default function ShelfDetailPage() {
         </div>
         {files.length > 0 ? (
           <div className="divide-y divide-[var(--color-border-default)]">
-            {files.map((file: any) => (
+            {files.map((file) => (
               <button
                 key={file.id}
                 type="button"

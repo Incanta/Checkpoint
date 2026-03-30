@@ -2,13 +2,13 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { FileChangeType, RepoAccess } from "@prisma/client";
+import { type PrismaClient, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
 import { hasFeature, isLicenseManager, type LicenseTier } from "~/server/license-utils";
 import { getInstanceTier } from "~/server/license-client";
 
-async function assertArtifactFeature(orgId: string, db: any) {
+async function assertArtifactFeature(orgId: string, db: PrismaClient) {
   if (isLicenseManager()) {
     const org = await db.org.findUnique({
       where: { id: orgId },
@@ -69,7 +69,7 @@ export const artifactRouter = createTRPCRouter({
 
       const fileIdsForPaths: Record<string, string | undefined> = {};
       for (const mod of normalizedMods) {
-        let existingFile = existingFiles.find((f: any) => f.path === mod.path);
+        let existingFile = existingFiles.find((f) => f.path === mod.path);
 
         if (!existingFile && !mod.delete) {
           existingFile = await ctx.db.file.create({
@@ -170,7 +170,7 @@ export const artifactRouter = createTRPCRouter({
         orderBy: { file: { path: "asc" } },
       });
 
-      return artifacts.map((a: any) => ({
+      return artifacts.map((a) => ({
         id: a.id,
         fileId: a.file.id,
         path: a.file.path,
@@ -199,6 +199,6 @@ export const artifactRouter = createTRPCRouter({
         select: { number: true },
       });
 
-      return changelists.map((cl: any) => cl.number);
+      return changelists.map((cl) => cl.number);
     }),
 });

@@ -362,10 +362,8 @@ export const pullRequestRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Could not find branch head changelists" });
       }
 
-      /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-      const targetState: Record<string, number> = { ...(targetHead.stateTree as any) };
-      const incomingState: Record<string, number> = incomingHead.stateTree as any;
-      /* eslint-enable @typescript-eslint/no-unsafe-assignment */
+      const targetState: Record<string, number> = { ...(targetHead.stateTree as Record<string, number>) };
+      const incomingState: Record<string, number> = incomingHead.stateTree as Record<string, number>;
 
       for (const [fileId, clNum] of Object.entries(incomingState)) {
         targetState[fileId] = clNum;

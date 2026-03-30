@@ -109,8 +109,8 @@ export default function RepoSettingsPage() {
   if (repoData && !initialized) {
     setName(repoData.name);
     setIsPublic(repoData.public);
-    setRequiredReviews((repoData as any).requiredReviews ?? 0);
-    setMergePermissionsSame((repoData as any).mergePermissionsSame ?? true);
+    setRequiredReviews(repoData.requiredReviews ?? 0);
+    setMergePermissionsSame(repoData.mergePermissionsSame ?? true);
     setInitialized(true);
   }
 

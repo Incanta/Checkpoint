@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "~/trpc/react";
 import { Button, Card } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
+import type { Options as MdOptions } from "react-markdown";
+import type RemarkGfm from "remark-gfm";
 
 export default function NewPullRequestPage() {
   const params = useParams<{ orgName: string; repoName: string }>();
@@ -13,8 +15,13 @@ export default function NewPullRequestPage() {
   useDocumentTitle(`New Pull Request · ${repoName} in ${orgName}`);
   const router = useRouter();
 
-  const { data: org } = api.org.getOrg.useQuery({ id: orgName, idIsName: true });
-  const repoData = org?.repos?.find((r: { name: string }) => r.name === repoName);
+  const { data: org } = api.org.getOrg.useQuery({
+    id: orgName,
+    idIsName: true,
+  });
+  const repoData = org?.repos?.find(
+    (r: { name: string }) => r.name === repoName,
+  );
 
   const { data: branches } = api.branch.listBranches.useQuery(
     { repoId: repoData?.id ?? "" },
@@ -42,8 +49,10 @@ export default function NewPullRequestPage() {
     },
   });
 
-  const featureBranches = branches?.filter((b) => b.type === "FEATURE" && !b.archivedAt) ?? [];
-  const targetBranches = branches?.filter((b) => !b.archivedAt && b.name !== sourceBranch) ?? [];
+  const featureBranches =
+    branches?.filter((b) => b.type === "FEATURE" && !b.archivedAt) ?? [];
+  const targetBranches =
+    branches?.filter((b) => !b.archivedAt && b.name !== sourceBranch) ?? [];
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -55,7 +64,8 @@ export default function NewPullRequestPage() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (!repoData || !title.trim() || !sourceBranch || !targetBranch) return;
+            if (!repoData || !title.trim() || !sourceBranch || !targetBranch)
+              return;
             createPr.mutate({
               repoId: repoData.id,
               title: title.trim(),
@@ -78,7 +88,9 @@ export default function NewPullRequestPage() {
               >
                 <option value="">Select branch…</option>
                 {featureBranches.map((b) => (
-                  <option key={b.id} value={b.name}>{b.name}</option>
+                  <option key={b.id} value={b.name}>
+                    {b.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -93,7 +105,9 @@ export default function NewPullRequestPage() {
               >
                 <option value="">Select target…</option>
                 {targetBranches.map((b) => (
-                  <option key={b.id} value={b.name}>{b.name}</option>
+                  <option key={b.id} value={b.name}>
+                    {b.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -101,9 +115,13 @@ export default function NewPullRequestPage() {
 
           {sourceBranch && targetBranch && (
             <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-              <span className="font-medium text-[var(--color-text-primary)]">{sourceBranch}</span>
+              <span className="font-medium text-[var(--color-text-primary)]">
+                {sourceBranch}
+              </span>
               <span>→</span>
-              <span className="font-medium text-[var(--color-text-primary)]">{targetBranch}</span>
+              <span className="font-medium text-[var(--color-text-primary)]">
+                {targetBranch}
+              </span>
             </div>
           )}
 
@@ -139,7 +157,9 @@ export default function NewPullRequestPage() {
                 {description ? (
                   <MarkdownPreview content={description} />
                 ) : (
-                  <span className="text-[var(--color-text-muted)]">Nothing to preview</span>
+                  <span className="text-[var(--color-text-muted)]">
+                    Nothing to preview
+                  </span>
                 )}
               </div>
             ) : (
@@ -154,7 +174,9 @@ export default function NewPullRequestPage() {
           </div>
 
           {createPr.error && (
-            <p className="text-sm text-[var(--color-danger)]">{createPr.error.message}</p>
+            <p className="text-sm text-[var(--color-danger)]">
+              {createPr.error.message}
+            </p>
           )}
 
           <div className="flex justify-end gap-2">
@@ -169,7 +191,12 @@ export default function NewPullRequestPage() {
             <Button
               type="submit"
               size="sm"
-              disabled={!title.trim() || !sourceBranch || !targetBranch || createPr.isPending}
+              disabled={
+                !title.trim() ||
+                !sourceBranch ||
+                !targetBranch ||
+                createPr.isPending
+              }
             >
               {createPr.isPending ? "Creating…" : "Create pull request"}
             </Button>
@@ -182,20 +209,22 @@ export default function NewPullRequestPage() {
 
 function MarkdownPreview({ content }: { content: string }) {
   // Lazy-load react-markdown to keep bundle small
-  const [Md, setMd] = useState<React.ComponentType<{ children: string; remarkPlugins?: any[] }> | null>(null);
-  const [remarkGfm, setRemarkGfm] = useState<any>(null);
+  const [Md, setMd] = useState<React.ComponentType<MdOptions> | null>(null);
+  const [remarkGfm, setRemarkGfm] = useState<typeof RemarkGfm | null>(null);
 
   useEffect(() => {
-    void Promise.all([
-      import("react-markdown"),
-      import("remark-gfm"),
-    ]).then(([md, gfm]) => {
-      setMd(() => md.default);
-      setRemarkGfm(() => gfm.default);
-    });
+    void Promise.all([import("react-markdown"), import("remark-gfm")]).then(
+      ([md, gfm]) => {
+        setMd(() => md.default);
+        setRemarkGfm(() => gfm.default);
+      },
+    );
   }, []);
 
-  if (!Md) return <span className="text-[var(--color-text-muted)]">Loading preview…</span>;
+  if (!Md)
+    return (
+      <span className="text-[var(--color-text-muted)]">Loading preview…</span>
+    );
 
   return (
     <div className="prose prose-sm prose-invert max-w-none">
