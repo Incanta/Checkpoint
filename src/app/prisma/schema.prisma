@@ -31,8 +31,23 @@ model User {
   changelists       Changelist[]
   workspaces        Workspace[]
   apiTokens         ApiToken[]
-  createdBranches   Branch[]     @relation("BranchCreator")
+  createdBranches   Branch[]          @relation("BranchCreator")
   activity          OrgUserActivity[]
+
+  pullRequests     PullRequest[]
+  prComments       PullRequestComment[]
+  prReviews        PullRequestReview[]
+  mergePermissions MergePermission[]
+  shelves          Shelf[]
+
+  issues           Issue[]
+  issueComments    IssueComment[]
+  issueAssignments IssueAssignee[]
+
+  notifications      Notification[]            @relation("NotificationRecipient")
+  actedNotifications Notification[]            @relation("NotificationActor")
+  issueSubscriptions IssueSubscription[]
+  prSubscriptions    PullRequestSubscription[]
 
   // Auth
   accounts Account[]
@@ -82,10 +97,13 @@ model Org {
   defaultRepoAccess     RepoAccess @default(WRITE)
   defaultCanCreateRepos Boolean    @default(true)
 
+  subscriptionTier LicenseTier @default(BASIC)
+
   users      OrgUser[]
   repos      Repo[]
   workspaces Workspace[]
   activity   OrgUserActivity[]
+  license    License?
 }
 
 model OrgUser {
@@ -111,17 +129,27 @@ model Repo {
 
   public Boolean @default(false)
 
+  r2BucketName String?
+
   org   Org    @relation(fields: [orgId], references: [id])
   orgId String
 
   additionalRoles RepoRole[]
 
-  files         File[]
-  changelists   Changelist[]
-  branches      Branch[]          @relation("RepoBranch")
-  labels        ChangelistLabel[]
-  workspaces    Workspace[]
-  fileCheckouts FileCheckout[]
+  requiredReviews      Int     @default(0)
+  mergePermissionsSame Boolean @default(true)
+
+  files            File[]
+  changelists      Changelist[]
+  branches         Branch[]          @relation("RepoBranch")
+  labels           ChangelistLabel[]
+  workspaces       Workspace[]
+  fileCheckouts    FileCheckout[]
+  pullRequests     PullRequest[]
+  mergePermissions MergePermission[]
+  shelves          Shelf[]
+  issues           Issue[]
+  issueLabels      IssueLabel[]
 
   @@unique([orgId, name])
 }
@@ -182,6 +210,10 @@ model Changelist {
   versionIndex String
   stateTree    Json
 
+  // Artifact overlay (populated by CI after submit)
+  artifactVersionIndex String?
+  artifactStateTree    Json?
+
   repo   Repo   @relation(fields: [repoId], references: [id])
   repoId String
 
@@ -194,6 +226,7 @@ model Changelist {
 
   fileChanges FileChange[]
   labels      ChangelistLabel[]
+  artifacts   ArtifactFile[]
 
   @@unique([repoId, number])
 }
@@ -232,6 +265,23 @@ model FileChange {
   oldPath String?
 }
 
+model ArtifactFile {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  changelist       Changelist @relation(fields: [repoId, changelistNumber], references: [repoId, number])
+  repoId           String
+  changelistNumber Int
+
+  file   File   @relation(fields: [fileId], references: [id])
+  fileId String
+
+  size BigInt
+
+  @@unique([repoId, changelistNumber, fileId])
+  @@index([repoId, changelistNumber])
+}
+
 model File {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -241,8 +291,10 @@ model File {
   repo   Repo   @relation(fields: [repoId], references: [id])
   repoId String
 
-  changes   FileChange[]
-  checkouts FileCheckout[]
+  changes       FileChange[]
+  checkouts     FileCheckout[]
+  shelfChanges  ShelfFileChange[]
+  artifactFiles ArtifactFile[]
 
   @@index([repoId])
 }
@@ -319,6 +371,340 @@ model OrgUserActivity {
 
   @@unique([userId, orgId, year, month])
   @@index([orgId, year, month])
+}
+
+enum PullRequestStatus {
+  OPEN
+  MERGED
+  CLOSED
+}
+
+model PullRequest {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  number Int
+
+  title       String
+  description String @default("")
+
+  status   PullRequestStatus @default(OPEN)
+  mergedAt DateTime?
+  closedAt DateTime?
+
+  sourceBranchName String
+  targetBranchName String
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  comments      PullRequestComment[]
+  reviews       PullRequestReview[]
+  subscriptions PullRequestSubscription[]
+  notifications Notification[]
+
+  @@unique([repoId, number])
+  @@index([repoId, status])
+}
+
+model PullRequestComment {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  body String
+
+  pullRequest   PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  pullRequestId String
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+}
+
+enum ReviewState {
+  PENDING
+  REQUEST_CHANGES
+  APPROVED
+}
+
+model PullRequestReview {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  state ReviewState @default(PENDING)
+
+  pullRequest   PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  pullRequestId String
+
+  reviewer   User   @relation(fields: [reviewerId], references: [id])
+  reviewerId String
+
+  @@unique([pullRequestId, reviewerId])
+}
+
+enum LicenseTier {
+  BASIC
+  PRO
+  STUDIO
+  INCANTA
+}
+
+model License {
+  id         String      @id @default(cuid())
+  key        String      @unique
+  secretHash String
+  tier       LicenseTier @default(BASIC)
+  active     Boolean     @default(true)
+
+  // Cloud: links to an org on this instance
+  orgId String? @unique
+  org   Org?    @relation(fields: [orgId], references: [id])
+
+  // Self-hosted: metadata about the remote instance
+  instanceName String?
+  instanceUrl  String?
+
+  lastReportAt DateTime?
+
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  usageReports LicenseUsageReport[]
+}
+
+model LicenseUsageReport {
+  id        String  @id @default(cuid())
+  licenseId String
+  license   License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  year      Int
+  month     Int
+  awuCount  Int
+  aruCount  Int
+
+  reportedAt DateTime @default(now())
+
+  @@unique([licenseId, year, month])
+}
+
+enum MergePermissionType {
+  MAINLINE
+  RELEASE
+}
+
+model MergePermission {
+  id String @id @default(cuid())
+
+  type MergePermissionType
+
+  repo   Repo   @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  repoId String
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@unique([repoId, userId, type])
+}
+
+// Shelves — mutable dangling changelists (Pro+)
+
+enum ShelfStatus {
+  ACTIVE
+  SUBMITTED
+  DELETED
+}
+
+model Shelf {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name        String
+  description String @default("")
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  // Current longtail version index (all-inclusive of shelf files)
+  versionIndex String
+  stateTree    Json // {fileId → changelistNumber}
+
+  // Dangling changelist number (from repo sequence, not on any branch)
+  changelistNumber Int
+
+  status ShelfStatus @default(ACTIVE)
+
+  // Submitted metadata
+  submittedToBranch String?
+  submittedAt       DateTime?
+
+  fileChanges ShelfFileChange[]
+
+  @@unique([repoId, name])
+  @@index([repoId, status])
+}
+
+model ShelfFileChange {
+  id String @id @default(cuid())
+
+  shelf   Shelf  @relation(fields: [shelfId], references: [id], onDelete: Cascade)
+  shelfId String
+
+  file   File   @relation(fields: [fileId], references: [id])
+  fileId String
+
+  type String // ADD, MODIFY
+
+  @@unique([shelfId, fileId])
+}
+
+// ── Issues ──────────────────────────────────────────────────────
+
+enum IssueStatus {
+  OPEN
+  CLOSED
+}
+
+model Issue {
+  id     String @id @default(cuid())
+  number Int
+  title  String
+  body   String @default("")
+
+  status   IssueStatus @default(OPEN)
+  closedAt DateTime?
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  comments      IssueComment[]
+  labels        IssueLabelLink[]
+  assignees     IssueAssignee[]
+  subscriptions IssueSubscription[]
+  notifications Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repoId, number])
+  @@index([repoId, status])
+}
+
+model IssueComment {
+  id   String @id @default(cuid())
+  body String
+
+  issue   Issue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId String
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model IssueLabel {
+  id    String @id @default(cuid())
+  name  String
+  color String @default("#6366f1")
+
+  repo   Repo   @relation(fields: [repoId], references: [id])
+  repoId String
+
+  issues IssueLabelLink[]
+
+  @@unique([repoId, name])
+}
+
+model IssueLabelLink {
+  id String @id @default(cuid())
+
+  issue   Issue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId String
+
+  label   IssueLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  labelId String
+
+  @@unique([issueId, labelId])
+}
+
+model IssueAssignee {
+  id String @id @default(cuid())
+
+  issue   Issue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId String
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@unique([issueId, userId])
+}
+
+// ── Notifications & Subscriptions ────────────────────────────────
+
+model Notification {
+  id    String @id @default(cuid())
+  type  String // e.g. "issue_comment", "issue_mention", "pr_review", etc.
+  title String
+  body  String @default("")
+  link  String // relative URL to navigate to
+
+  read Boolean @default(false)
+
+  user   User   @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  actor   User?   @relation("NotificationActor", fields: [actorId], references: [id])
+  actorId String?
+
+  issue   Issue?  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId String?
+
+  pullRequest   PullRequest? @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  pullRequestId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+}
+
+model IssueSubscription {
+  id String @id @default(cuid())
+
+  issue   Issue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  createdAt DateTime @default(now())
+
+  @@unique([issueId, userId])
+}
+
+model PullRequestSubscription {
+  id String @id @default(cuid())
+
+  pullRequest   PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  pullRequestId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  createdAt DateTime @default(now())
+
+  @@unique([pullRequestId, userId])
 }
 
 // better-auth models
