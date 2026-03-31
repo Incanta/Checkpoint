@@ -52,7 +52,7 @@ export const storageRouter = createTRPCRouter({
       );
 
       return {
-        storageType: "seaweedfs" as const,
+        storageType: "seaweedfs" as "seaweedfs" | "r2",
         token: token.compact(),
         expiration:
           Math.floor(Date.now() / 1000) +

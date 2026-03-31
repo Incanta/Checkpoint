@@ -234,13 +234,12 @@ export async function pull(
 
   // ─── Artifact pull (optional) ──────────────────────────────────
   const newArtifactFiles: Record<string, WorkspaceStateFile> = {};
-  const wsConfig = await getWorkspaceConfig(workspace.localPath);
   const artifactStateTree = changelistResponse.artifactStateTree as Record<
     string,
     number
   > | null;
 
-  if (!errored && wsConfig?.includeArtifacts && artifactStateTree) {
+  if (!errored && artifactStateTree) {
     const artifactDiff = DiffState(
       workspaceState.artifactFiles ?? {},
       artifactStateTree,

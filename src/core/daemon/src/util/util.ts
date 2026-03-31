@@ -60,6 +60,7 @@ export async function exec(
 export interface WorkspaceState {
   changelistNumber: number;
   files: Record<string, WorkspaceStateFile>; // path -> file info
+  artifactFiles?: Record<string, WorkspaceStateFile>; // path -> artifact file info
   /** Relative paths of files explicitly marked for add */
   markedForAdd?: string[];
 }
