@@ -1718,8 +1718,8 @@ inline int cmdArtifactUpload(int changelistNumber, const std::vector<std::string
   }
 
   std::string submitMessage = message.empty()
-    ? ("Artifact upload for CL #" + std::to_string(changelistNumber))
-    : message;
+                                  ? ("Artifact upload for CL #" + std::to_string(changelistNumber))
+                                  : message;
 
   nlohmann::json input = {
       {"daemonId", ws.daemonId},
@@ -1752,41 +1752,6 @@ inline int cmdArtifactUpload(int changelistNumber, const std::vector<std::string
             << "Successfully uploaded " << files.size() << " artifact(s) for CL #"
             << changelistNumber << "."
             << color::reset() << std::endl;
-
-  return 0;
-}
-
-// ═════════════════════════════════════════════════════════════════
-//  COMMAND: config artifacts
-// ═════════════════════════════════════════════════════════════════
-
-inline int cmdConfigArtifacts(const std::string& value) {
-  auto ctx = getWorkspaceContext();
-  auto& client = ctx.client;
-  auto& ws = ctx.workspace;
-
-  bool enable;
-  if (value == "on" || value == "true" || value == "yes" || value == "1") {
-    enable = true;
-  } else if (value == "off" || value == "false" || value == "no" || value == "0") {
-    enable = false;
-  } else {
-    std::cerr << "Invalid value: " << value << std::endl;
-    std::cerr << color::dim() << "  Usage: chk config artifacts <on|off>"
-              << color::reset() << std::endl;
-    return 1;
-  }
-
-  nlohmann::json input = {
-      {"daemonId", ws.daemonId},
-      {"workspaceId", ws.id},
-      {"includeArtifacts", enable},
-  };
-
-  client.mutate("workspaces.artifacts.setPreference", input);
-
-  std::cout << "Artifact downloads " << (enable ? "enabled" : "disabled")
-            << " for this workspace." << std::endl;
 
   return 0;
 }

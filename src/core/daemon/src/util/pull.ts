@@ -14,12 +14,11 @@ import {
 } from "@checkpointvcs/longtail-addon";
 import {
   getWorkspaceState,
-  getWorkspaceConfig,
   saveWorkspaceState,
   type Workspace,
 } from "./util.js";
 import { isBinaryFile, readFileFromChangelist } from "./read-file.js";
-import { autoMergeText, type AutoMergeResult } from "./auto-merge.js";
+import { autoMergeText } from "./auto-merge.js";
 import { existsSync, promises as fs } from "fs";
 import path from "path";
 import { Logger } from "../logging.js";
@@ -66,9 +65,7 @@ export async function pull(
   } else {
     token = storageTokenResponse.token;
     const backendUrl = storageTokenResponse.backendUrl;
-    filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
-      res.text(),
-    );
+    filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) => res.text());
   }
 
   if (changelistNumber === null) {
@@ -236,23 +233,28 @@ export async function pull(
   }
 
   // ─── Artifact pull (optional) ──────────────────────────────────
-  let newArtifactFiles: Record<string, WorkspaceStateFile> = {};
-  const wsConfig = await getWorkspaceConfig(workspace.localPath);
-  const artifactStateTree = changelistResponse.artifactStateTree as Record<string, number> | null;
+  const newArtifactFiles: Record<string, WorkspaceStateFile> = {};
+  const artifactStateTree = changelistResponse.artifactStateTree as Record<
+    string,
+    number
+  > | null;
 
-  if (!errored && wsConfig?.includeArtifacts && artifactStateTree) {
+  if (!errored && artifactStateTree) {
     const artifactDiff = DiffState(
       workspaceState.artifactFiles ?? {},
       artifactStateTree,
     );
 
     if (artifactDiff.changelistsToPull.length > 0) {
-      const artifactCls = await client.changelist.getChangelistsWithNumbers.mutate({
-        repoId: workspace.repoId,
-        numbers: artifactDiff.changelistsToPull,
-      });
+      const artifactCls =
+        await client.changelist.getChangelistsWithNumbers.mutate({
+          repoId: workspace.repoId,
+          numbers: artifactDiff.changelistsToPull,
+        });
 
-      const sortedArtifactCls = artifactCls.sort((a: any, b: any) => a.number - b.number);
+      const sortedArtifactCls = artifactCls.sort(
+        (a: any, b: any) => a.number - b.number,
+      );
 
       for (const cl of sortedArtifactCls) {
         const artVersionIndex = (cl as any).artifactVersionIndex;
@@ -264,8 +266,12 @@ export async function pull(
 
         const handle = pullAsync({
           versionIndex: artVersionIndex,
-          enableMmapIndexing: config.get<boolean>("longtail.enable-mmap-indexing"),
-          enableMmapBlockStore: config.get<boolean>("longtail.enable-mmap-block-store"),
+          enableMmapIndexing: config.get<boolean>(
+            "longtail.enable-mmap-indexing",
+          ),
+          enableMmapBlockStore: config.get<boolean>(
+            "longtail.enable-mmap-block-store",
+          ),
           localRootPath: workspace.localPath,
           remoteBasePath: `/${orgId}/${workspace.repoId}`,
           filerUrl,
@@ -274,7 +280,8 @@ export async function pull(
           storageType: storageTokenResponse.storageType,
           ...(storageTokenResponse.r2Credentials && {
             r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
-            r2SecretAccessKey: storageTokenResponse.r2Credentials.secretAccessKey,
+            r2SecretAccessKey:
+              storageTokenResponse.r2Credentials.secretAccessKey,
             r2SessionToken: storageTokenResponse.r2Credentials.sessionToken,
             r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
             r2BucketName: storageTokenResponse.r2Credentials.bucket,
@@ -299,7 +306,9 @@ export async function pull(
         freeHandle(handle);
 
         if (status.error !== 0) {
-          Logger.error(`Artifact pull failed: ${status.error} ${status.currentStep}`);
+          Logger.error(
+            `Artifact pull failed: ${status.error} ${status.currentStep}`,
+          );
           break;
         }
       }

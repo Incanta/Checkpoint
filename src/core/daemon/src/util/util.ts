@@ -70,8 +70,6 @@ export interface WorkspaceConfig {
   repoId: string;
   branchName: string;
   workspaceName: string;
-  /** Whether to include artifacts when pulling */
-  includeArtifacts?: boolean;
   /**
    * Controls whether the "mark as resolved" confirmation dialog is suppressed.
    * - undefined/null: always show the confirmation

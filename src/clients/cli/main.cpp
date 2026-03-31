@@ -224,9 +224,9 @@ int main(int argc, char** argv) {
   argparse::ArgumentParser configCmd("config");
   configCmd.add_description("Manage workspace configuration");
   configCmd.add_argument("key")
-      .help("Config key (e.g. artifacts)");
+      .help("Config key");
   configCmd.add_argument("value")
-      .help("Config value (e.g. on, off)");
+      .help("Config value");
 
   // ─── Register sub-commands ─────────────────────────────────────
 
@@ -463,10 +463,10 @@ int main(int argc, char** argv) {
     if (program.is_subcommand_used(configCmd)) {
       auto key = configCmd.get<std::string>("key");
       auto value = configCmd.get<std::string>("value");
-      if (key == "artifacts") {
-        return checkpoint::cmdConfigArtifacts(value);
+      if (false /* TODO */) {
+        //
       } else {
-        std::cerr << "error: unknown config key '" << key << "'. Supported: artifacts" << std::endl;
+        std::cerr << "error: unknown config key '" << key << "'. Supported: TODO" << std::endl;
         return 1;
       }
     }
