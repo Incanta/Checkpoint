@@ -48,6 +48,7 @@ export default function RepoLayout({
         <Tab href={`${basePath}/history`}>History</Tab>
         <Tab href={`${basePath}/branches`}>Branches</Tab>
         <Tab href={`${basePath}/labels`}>Labels</Tab>
+        <Tab href={`${basePath}/checkouts`}>Checkouts</Tab>
         <Tab href={`${basePath}/settings`}>Settings</Tab>
       </Tabs>
 
