@@ -11,6 +11,8 @@ import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 import { workspaceRouter } from "./routers/workspace";
 import { versionRouter } from "./routers/version";
 import { labelRouter } from "./routers/label";
+import { shelfRouter } from "./routers/shelf";
+import { artifactRouter } from "./routers/artifact";
 import { emailRouter } from "./routers/email";
 
 /**
@@ -31,6 +33,8 @@ export const appRouter = createTRPCRouter({
   workspace: workspaceRouter,
   version: versionRouter,
   label: labelRouter,
+  shelf: shelfRouter,
+  artifact: artifactRouter,
   email: emailRouter,
 });
 

@@ -4,7 +4,6 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { submit } from "../../../util/submit.js";
 import { JobManager } from "../../../job-manager.js";
-import { saveWorkspaceConfig } from "../../../util/util.js";
 
 export const artifactsRouter = router({
   // Upload artifacts for an existing changelist
@@ -135,39 +134,5 @@ export const artifactsRouter = router({
         repoId: workspace.repoId,
         changelistNumber: input.changelistNumber,
       });
-    }),
-
-  // Toggle includeArtifacts preference for a workspace
-  setPreference: publicProcedure
-    .input(
-      z.object({
-        daemonId: z.string(),
-        workspaceId: z.string(),
-        includeArtifacts: z.boolean(),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const manager = ctx.manager;
-      const workspaces = manager.workspaces.get(input.daemonId);
-
-      if (!workspaces) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
-        });
-      }
-
-      const workspace = workspaces.find((w) => w.id === input.workspaceId);
-      if (!workspace) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: `Could not find workspace ID ${input.workspaceId}`,
-        });
-      }
-
-      workspace.includeArtifacts = input.includeArtifacts;
-      await saveWorkspaceConfig(workspace);
-
-      return { includeArtifacts: workspace.includeArtifacts };
     }),
 });
