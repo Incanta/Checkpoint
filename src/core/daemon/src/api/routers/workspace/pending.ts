@@ -459,7 +459,8 @@ export const pendingRouter = router({
             input.keepCheckedOut ?? false,
             undefined,
             (step) => jobManager.updateStep(job.id, step),
-            (step, done, total) => jobManager.updateProgress(job.id, done, total),
+            (step, done, total) =>
+              jobManager.updateProgress(job.id, done, total),
           );
 
           jobManager.updateStep(job.id, "Reloading workspace state");

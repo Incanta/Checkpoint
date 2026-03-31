@@ -143,7 +143,7 @@ export const conflictsRouter = router({
       // Build a lookup from the outdated files
       const outdatedByPath = new Map(
         syncStatus.outdatedFiles.map((f) => [
-          f.path.replace(/^[\/\\]/, "").replace(/\\/g, "/"),
+          f.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
           f,
         ]),
       );
@@ -152,7 +152,7 @@ export const conflictsRouter = router({
 
       for (const filePath of input.filePaths) {
         const normalizedPath = filePath
-          .replace(/^[\/\\]/, "")
+          .replace(/^[/\\]/, "")
           .replace(/\\/g, "/");
 
         const outdated = outdatedByPath.get(normalizedPath);
