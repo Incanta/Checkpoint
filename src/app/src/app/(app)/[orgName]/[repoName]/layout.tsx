@@ -25,6 +25,11 @@ export default function RepoLayout({
     (r: { name: string }) => r.name === repoName,
   );
 
+  const { data: access } = api.repo.getMyRepoAccess.useQuery(
+    { repoId: repoData?.id ?? "" },
+    { enabled: !!repoData?.id },
+  );
+
   const { hasFeature } = useLicenseTier(org?.id);
   const showPullRequests = hasFeature("pullRequests");
   const showShelves = hasFeature("shelves");
@@ -67,7 +72,9 @@ export default function RepoLayout({
             <span className="flex items-center gap-1.5">
               Pull Requests
               {!!openPrCount && openPrCount > 0 && (
-                <Badge variant="accent" className="ml-0.5">{openPrCount}</Badge>
+                <Badge variant="accent" className="ml-0.5">
+                  {openPrCount}
+                </Badge>
               )}
             </span>
           </Tab>
@@ -77,17 +84,20 @@ export default function RepoLayout({
             <span className="flex items-center gap-1.5">
               Issues
               {!!openIssueCount && openIssueCount > 0 && (
-                <Badge variant="accent" className="ml-0.5">{openIssueCount}</Badge>
+                <Badge variant="accent" className="ml-0.5">
+                  {openIssueCount}
+                </Badge>
               )}
             </span>
           </Tab>
         )}
-        {showShelves && (
-          <Tab href={`${basePath}/shelves`}>Shelves</Tab>
-        )}
+        {showShelves && <Tab href={`${basePath}/shelves`}>Shelves</Tab>}
         <Tab href={`${basePath}/branches`}>Branches</Tab>
         <Tab href={`${basePath}/labels`}>Labels</Tab>
-        <Tab href={`${basePath}/settings`}>Settings</Tab>
+        {access?.isMember && (
+          <Tab href={`${basePath}/checkouts`}>Checkouts</Tab>
+        )}
+        {access?.isAdmin && <Tab href={`${basePath}/settings`}>Settings</Tab>}
       </Tabs>
 
       {children}

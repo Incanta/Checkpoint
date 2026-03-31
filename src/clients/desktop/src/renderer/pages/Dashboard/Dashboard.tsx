@@ -124,7 +124,11 @@ export default function Dashboard(): React.ReactElement {
               label={
                 currentUser.details.image
                   ? undefined
-                  : (currentUser.details.name ?? currentUser.details.email ?? "?")
+                  : (
+                      currentUser.details.name ??
+                      currentUser.details.email ??
+                      "?"
+                    )
                       .charAt(0)
                       .toUpperCase()
               }

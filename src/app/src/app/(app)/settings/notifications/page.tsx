@@ -21,8 +21,7 @@ const CATEGORIES: PreferenceToggle[] = [
   {
     key: "orgActivity",
     label: "Organization Activity",
-    description:
-      "Member invitations, role changes, and organization updates.",
+    description: "Member invitations, role changes, and organization updates.",
   },
   {
     key: "repoActivity",
@@ -33,7 +32,8 @@ const CATEGORIES: PreferenceToggle[] = [
   {
     key: "mentions",
     label: "Mentions & Direct",
-    description: "When someone mentions you or sends you a direct notification.",
+    description:
+      "When someone mentions you or sends you a direct notification.",
   },
 ];
 
@@ -54,9 +54,7 @@ function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${
-        checked
-          ? "bg-[var(--color-accent)]"
-          : "bg-[var(--color-bg-tertiary)]"
+        checked ? "bg-[var(--color-accent)]" : "bg-[var(--color-bg-tertiary)]"
       }`}
     >
       <span
@@ -109,7 +107,7 @@ export default function NotificationsSettingsPage() {
       update[c.key] = value;
     }
     setLocal(update);
-    updatePrefs.mutate(update as any);
+    updatePrefs.mutate(update);
   };
 
   return (
@@ -129,7 +127,7 @@ export default function NotificationsSettingsPage() {
           <div className="mb-4 flex items-center gap-2">
             <Button
               size="sm"
-              variant={allOn ? "primary" : "default"}
+              variant={allOn ? "primary" : "secondary"}
               onClick={() => handleBulk(true)}
               disabled={allOn || updatePrefs.isPending}
             >
@@ -137,7 +135,7 @@ export default function NotificationsSettingsPage() {
             </Button>
             <Button
               size="sm"
-              variant={allOff ? "danger" : "default"}
+              variant={allOff ? "danger" : "secondary"}
               onClick={() => handleBulk(false)}
               disabled={allOff || updatePrefs.isPending}
             >

@@ -220,7 +220,11 @@ export const fileRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
       await assertWorkspaceOwnership(ctx, input.workspaceId);
 
       const normalizedPath = input.filePath.replaceAll("\\", "/");
@@ -252,6 +256,40 @@ export const fileRouter = createTRPCRouter({
       });
 
       if (existingCheckout) {
+        if (input.locked && !existingCheckout.locked) {
+          const existingLock = await ctx.db.fileCheckout.findFirst({
+            where: {
+              fileId: file.id,
+              removedAt: null,
+              locked: true,
+            },
+          });
+
+          if (existingLock) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "This file is already locked by another user",
+            });
+          }
+
+          await ctx.db.fileCheckout.update({
+            where: { id: existingCheckout.id },
+            data: { locked: true },
+          });
+
+          // Record write activity for billing (fire-and-forget)
+          void recordActivity(ctx.db, {
+            userId: ctx.session.user.id,
+            orgId: repo.orgId,
+            type: "write",
+          });
+
+          return {
+            ...existingCheckout,
+            locked: true,
+          };
+        }
+
         throw new TRPCError({
           code: "CONFLICT",
           message: "You already have an active checkout for this file",
@@ -341,6 +379,89 @@ export const fileRouter = createTRPCRouter({
       await ctx.db.fileCheckout.update({
         where: { id: checkout.id },
         data: { removedAt: new Date() },
+      });
+
+      return { success: true };
+    }),
+
+  getRepoCheckouts: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        lockedOnly: z.boolean().default(false),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
+
+      const where: Prisma.FileCheckoutWhereInput = {
+        repoId: input.repoId,
+        removedAt: null,
+        ...(input.lockedOnly && { locked: true }),
+      };
+
+      const checkouts = await ctx.db.fileCheckout.findMany({
+        where,
+        include: {
+          file: true,
+          workspace: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  name: true,
+                  username: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      return checkouts.map((c) => ({
+        id: c.id,
+        fileId: c.fileId,
+        filePath: c.file.path,
+        locked: c.locked,
+        createdAt: c.createdAt,
+        workspaceId: c.workspaceId,
+        workspaceName: c.workspace.name,
+        userId: c.workspace.userId,
+        user: c.workspace.user,
+      }));
+    }),
+
+  adminUnlockFile: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        checkoutId: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.ADMIN);
+
+      const checkout = await ctx.db.fileCheckout.findFirst({
+        where: {
+          id: input.checkoutId,
+          repoId: input.repoId,
+          removedAt: null,
+          locked: true,
+        },
+      });
+
+      if (!checkout) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "No active locked checkout found",
+        });
+      }
+
+      await ctx.db.fileCheckout.update({
+        where: { id: checkout.id },
+        data: { locked: false },
       });
 
       return { success: true };

@@ -5,6 +5,7 @@ import {
   type Workspace,
 } from "@checkpointvcs/daemon/types";
 
+// eslint-disable-next-line @typescript-eslint/no-namespace
 export namespace MockedData {
   export const availableUsers: number[] = [0];
 

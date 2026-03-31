@@ -10,6 +10,6 @@ const packages = {
 
 for (const [outFile, sourceEntry] of Object.entries(packages)) {
   await promisify(exec)(
-    `${buildPrefix} --outfile ./dist/${outFile} ${sourceEntry}`
+    `${buildPrefix} --outfile ./dist/${outFile} ${sourceEntry}`,
   );
 }

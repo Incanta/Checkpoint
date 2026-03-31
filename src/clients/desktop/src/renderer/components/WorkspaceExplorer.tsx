@@ -227,7 +227,7 @@ export default function WorkspaceExplorer() {
             .map((file) => {
               const relativePath = "/" + file.path.split("/").pop();
               const absolutePath =
-                currentWorkspace.localPath.split(/[/\\\/]/).join("/") +
+                currentWorkspace.localPath.split(/[/\\/]/).join("/") +
                 relativePath;
               let status =
                 file.type === FileType.Directory ? "" : FileStatus[file.status];
@@ -295,7 +295,7 @@ export default function WorkspaceExplorer() {
     const userSort = event.multiSortMeta?.find((meta) => meta.field !== "type");
 
     // Always prepend the mandatory sort criterion
-    let newSortMeta: TreeTableSortMeta[] = [{ field: "type", order: 1 }];
+    const newSortMeta: TreeTableSortMeta[] = [{ field: "type", order: 1 }];
 
     if (userSort) {
       // Add the user's sort field, unless it's already the 'type' field which is handled
@@ -486,7 +486,7 @@ export default function WorkspaceExplorer() {
                           file.path.split("/").pop();
                         const absolutePath =
                           currentWorkspace!.localPath
-                            .split(/[/\\\/]/)
+                            .split(/[/\\/]/)
                             .join("/") + relativePath;
                         let status =
                           file.type === FileType.Directory

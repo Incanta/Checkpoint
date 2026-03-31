@@ -114,7 +114,8 @@ export const syncRouter = router({
             input.filePaths,
             undefined,
             (step) => jobManager.updateStep(job.id, step),
-            (step, done, total) => jobManager.updateProgress(job.id, done, total),
+            (step, done, total) =>
+              jobManager.updateProgress(job.id, done, total),
           );
 
           Logger.debug(
@@ -129,7 +130,9 @@ export const syncRouter = router({
 
           jobManager.completeJob(job.id, mergeResult);
         } catch (e: any) {
-          Logger.error(`Pull failed for workspace ${workspace.name}: ${e.message}`);
+          Logger.error(
+            `Pull failed for workspace ${workspace.name}: ${e.message}`,
+          );
           jobManager.failJob(job.id, e.message ?? String(e));
         } finally {
           await manager.endVcsOperation(workspace.id);

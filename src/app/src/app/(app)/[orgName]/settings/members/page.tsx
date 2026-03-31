@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, notFound } from "next/navigation";
 import { api } from "~/trpc/react";
+import { useSession } from "~/lib/auth-client";
 import {
   Button,
   Card,
@@ -49,6 +50,14 @@ export default function OrgMembersPage() {
     idIsName: true,
     includeUsers: true,
   });
+
+  const { data: session } = useSession();
+  const currentOrgUser = org?.users?.find(
+    (u: { userId: string }) => u.userId === session?.user?.id,
+  );
+  if (org && (!currentOrgUser || currentOrgUser.role !== "ADMIN")) {
+    notFound();
+  }
 
   const { data: activityData } = api.org.getOrgActivity.useQuery(
     { orgId: org?.id ?? "" },

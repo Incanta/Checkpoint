@@ -5,10 +5,14 @@ import {
 } from "../../common/state/workspace";
 import { ipc } from "../pages/ipc";
 
-function formatEta(stepStartedAt: string | null, done: number, total: number): string {
+function formatEta(
+  stepStartedAt: string | null,
+  done: number,
+  total: number,
+): string {
   if (!stepStartedAt || done <= 0 || done >= total) return "";
   const elapsed = (Date.now() - new Date(stepStartedAt).getTime()) / 1000;
-  const remaining = elapsed * (total - done) / done;
+  const remaining = (elapsed * (total - done)) / done;
   if (remaining < 60) return `${Math.round(remaining)}s`;
   const m = Math.floor(remaining / 60);
   const s = Math.round(remaining % 60);
@@ -86,7 +90,9 @@ function ProgressBar() {
             />
           </div>
 
-          <span style={{ flexShrink: 0, whiteSpace: "nowrap", color: "#9CA3AF" }}>
+          <span
+            style={{ flexShrink: 0, whiteSpace: "nowrap", color: "#9CA3AF" }}
+          >
             {percent}%{eta ? ` (${eta})` : ""}
           </span>
         </>

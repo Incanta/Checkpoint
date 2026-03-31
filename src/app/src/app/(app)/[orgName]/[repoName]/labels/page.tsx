@@ -26,6 +26,11 @@ export default function RepoLabelsPage() {
   );
   const utils = api.useUtils();
 
+  const { data: access } = api.repo.getMyRepoAccess.useQuery(
+    { repoId: repoData?.id ?? "" },
+    { enabled: !!repoData?.id },
+  );
+
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newNumber, setNewNumber] = useState("");
@@ -46,9 +51,11 @@ export default function RepoLabelsPage() {
   return (
     <div>
       <div className="mb-4 flex justify-end">
-        <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-          New label
-        </Button>
+        {access?.canWrite && (
+          <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
+            New label
+          </Button>
+        )}
       </div>
 
       {showCreate && (
@@ -117,17 +124,19 @@ export default function RepoLabelsPage() {
                   </span>
                   <Badge variant="accent">CL #{label.number}</Badge>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    repoData &&
-                    deleteLabel.mutate({ repoId: repoData.id, id: label.id })
-                  }
-                  className="text-[var(--color-danger)] hover:text-[var(--color-danger)]"
-                >
-                  Delete
-                </Button>
+                {access?.canWrite && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      repoData &&
+                      deleteLabel.mutate({ repoId: repoData.id, id: label.id })
+                    }
+                    className="text-[var(--color-danger)] hover:text-[var(--color-danger)]"
+                  >
+                    Delete
+                  </Button>
+                )}
               </div>
             ))}
           </div>
@@ -137,9 +146,11 @@ export default function RepoLabelsPage() {
           title="No labels"
           description="Labels help you tag important versions like releases."
           action={
-            <Button size="sm" onClick={() => setShowCreate(true)}>
-              Create your first label
-            </Button>
+            access?.canWrite ? (
+              <Button size="sm" onClick={() => setShowCreate(true)}>
+                Create your first label
+              </Button>
+            ) : undefined
           }
         />
       )}

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, notFound } from "next/navigation";
 import { api } from "~/trpc/react";
+import { useSession } from "~/lib/auth-client";
 import { Button, Card, PageHeader, Tabs, Tab } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 
@@ -17,6 +18,14 @@ export default function OrgSettingsPage() {
     id: orgName,
     idIsName: true,
   });
+
+  const { data: session } = useSession();
+  const currentOrgUser = org?.users?.find(
+    (u: { userId: string }) => u.userId === session?.user?.id,
+  );
+  if (org && (!currentOrgUser || currentOrgUser.role !== "ADMIN")) {
+    notFound();
+  }
 
   const [name, setName] = useState("");
   const [defaultAccess, setDefaultAccess] = useState("");
