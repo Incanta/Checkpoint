@@ -31,23 +31,23 @@ model User {
   changelists       Changelist[]
   workspaces        Workspace[]
   apiTokens         ApiToken[]
-  createdBranches   Branch[]     @relation("BranchCreator")
+  createdBranches   Branch[]          @relation("BranchCreator")
   activity          OrgUserActivity[]
 
-  pullRequests       PullRequest[]
-  prComments         PullRequestComment[]
-  prReviews          PullRequestReview[]
-  mergePermissions   MergePermission[]
-  shelves            Shelf[]
+  pullRequests     PullRequest[]
+  prComments       PullRequestComment[]
+  prReviews        PullRequestReview[]
+  mergePermissions MergePermission[]
+  shelves          Shelf[]
 
-  issues             Issue[]
-  issueComments      IssueComment[]
-  issueAssignments   IssueAssignee[]
+  issues           Issue[]
+  issueComments    IssueComment[]
+  issueAssignments IssueAssignee[]
 
-  notifications         Notification[]       @relation("NotificationRecipient")
-  actedNotifications    Notification[]       @relation("NotificationActor")
-  issueSubscriptions    IssueSubscription[]
-  prSubscriptions       PullRequestSubscription[]
+  notifications      Notification[]            @relation("NotificationRecipient")
+  actedNotifications Notification[]            @relation("NotificationActor")
+  issueSubscriptions IssueSubscription[]
+  prSubscriptions    PullRequestSubscription[]
 
   // Auth
   accounts Account[]
@@ -291,9 +291,9 @@ model File {
   repo   Repo   @relation(fields: [repoId], references: [id])
   repoId String
 
-  changes   FileChange[]
-  checkouts FileCheckout[]
-  shelfChanges ShelfFileChange[]
+  changes       FileChange[]
+  checkouts     FileCheckout[]
+  shelfChanges  ShelfFileChange[]
   artifactFiles ArtifactFile[]
 
   @@index([repoId])
@@ -402,8 +402,8 @@ model PullRequest {
   author   User   @relation(fields: [authorId], references: [id])
   authorId String
 
-  comments PullRequestComment[]
-  reviews  PullRequestReview[]
+  comments      PullRequestComment[]
+  reviews       PullRequestReview[]
   subscriptions PullRequestSubscription[]
   notifications Notification[]
 
@@ -477,9 +477,9 @@ model License {
 }
 
 model LicenseUsageReport {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   licenseId String
-  license   License  @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  license   License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
   year      Int
   month     Int
   awuCount  Int
@@ -533,7 +533,7 @@ model Shelf {
 
   // Current longtail version index (all-inclusive of shelf files)
   versionIndex String
-  stateTree    Json   // {fileId → changelistNumber}
+  stateTree    Json // {fileId → changelistNumber}
 
   // Dangling changelist number (from repo sequence, not on any branch)
   changelistNumber Int
@@ -586,9 +586,9 @@ model Issue {
   author   User   @relation(fields: [authorId], references: [id])
   authorId String
 
-  comments  IssueComment[]
-  labels    IssueLabelLink[]
-  assignees IssueAssignee[]
+  comments      IssueComment[]
+  labels        IssueLabelLink[]
+  assignees     IssueAssignee[]
   subscriptions IssueSubscription[]
   notifications Notification[]
 
