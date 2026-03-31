@@ -24,6 +24,11 @@ export default function RepoLayout({
     (r: { name: string }) => r.name === repoName,
   );
 
+  const { data: access } = api.repo.getMyRepoAccess.useQuery(
+    { repoId: repoData?.id ?? "" },
+    { enabled: !!repoData?.id },
+  );
+
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
@@ -48,8 +53,12 @@ export default function RepoLayout({
         <Tab href={`${basePath}/history`}>History</Tab>
         <Tab href={`${basePath}/branches`}>Branches</Tab>
         <Tab href={`${basePath}/labels`}>Labels</Tab>
-        <Tab href={`${basePath}/checkouts`}>Checkouts</Tab>
-        <Tab href={`${basePath}/settings`}>Settings</Tab>
+        {access?.isMember && (
+          <Tab href={`${basePath}/checkouts`}>Checkouts</Tab>
+        )}
+        {access?.isAdmin && (
+          <Tab href={`${basePath}/settings`}>Settings</Tab>
+        )}
       </Tabs>
 
       {children}

@@ -38,6 +38,11 @@ export default function RepoBranchesPage() {
   const [parentBranch, setParentBranch] = useState("");
   const utils = api.useUtils();
 
+  const { data: access } = api.repo.getMyRepoAccess.useQuery(
+    { repoId: repoData?.id ?? "" },
+    { enabled: !!repoData?.id },
+  );
+
   const createBranch = api.branch.createBranch.useMutation({
     onSuccess: () => {
       setShowCreate(false);
@@ -64,9 +69,11 @@ export default function RepoBranchesPage() {
             Show archived
           </label>
         </div>
-        <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-          New branch
-        </Button>
+        {access?.canWrite && (
+          <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
+            New branch
+          </Button>
+        )}
       </div>
 
       {/* Create form */}
@@ -170,7 +177,7 @@ export default function RepoBranchesPage() {
                   <span className="text-xs text-[var(--color-text-muted)]">
                     CL #{branch.headNumber}
                   </span>
-                  {!branch.isDefault && !branch.archivedAt && (
+                  {access?.canWrite && !branch.isDefault && !branch.archivedAt && (
                     <Button
                       variant="ghost"
                       size="sm"

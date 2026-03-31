@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { api } from "~/trpc/react";
+import { useSession } from "~/lib/auth-client";
 import {
   Card,
   PageHeader,
@@ -49,6 +50,7 @@ export default function OrgPage() {
     { orgId: org?.id ?? "" },
     { enabled: !!org?.id },
   );
+  const { data: session } = useSession();
 
   if (isLoading) {
     return (
@@ -82,7 +84,14 @@ export default function OrgPage() {
 
   const orgUsers = org.users;
 
-  const isAdmin = orgUsers?.some((u: { role: string }) => u.role === "ADMIN");
+  const currentOrgUser = orgUsers?.find(
+    (u: { userId: string }) => u.userId === session?.user?.id,
+  );
+  const isMember = !!currentOrgUser;
+  const isAdmin = currentOrgUser?.role === "ADMIN";
+  const canCreateRepos =
+    isMember &&
+    (isAdmin || (currentOrgUser as { canCreateRepos?: boolean })?.canCreateRepos);
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -114,11 +123,13 @@ export default function OrgPage() {
                 </Button>
               </Link>
             )}
-            <Link href={`/new/repo?org=${orgName}`}>
-              <Button variant="primary" size="sm">
-                New repository
-              </Button>
-            </Link>
+            {canCreateRepos && (
+              <Link href={`/new/repo?org=${orgName}`}>
+                <Button variant="primary" size="sm">
+                  New repository
+                </Button>
+              </Link>
+            )}
           </div>
         }
       />
@@ -160,9 +171,11 @@ export default function OrgPage() {
           title="No repositories yet"
           description="Create your first repository to start tracking files."
           action={
-            <Link href={`/new/repo?org=${orgName}`}>
-              <Button variant="primary">New repository</Button>
-            </Link>
+            canCreateRepos ? (
+              <Link href={`/new/repo?org=${orgName}`}>
+                <Button variant="primary">New repository</Button>
+              </Link>
+            ) : undefined
           }
         />
       )}

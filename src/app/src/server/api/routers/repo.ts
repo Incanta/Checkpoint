@@ -23,6 +23,48 @@ export const repoRouter = createTRPCRouter({
       return repo;
     }),
 
+  getMyRepoAccess: protectedProcedure
+    .input(z.object({ repoId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id;
+
+      const repo = await ctx.db.repo.findUnique({
+        where: { id: input.repoId },
+        include: {
+          org: { include: { users: { where: { userId } } } },
+          additionalRoles: { where: { userId } },
+        },
+      });
+
+      if (!repo) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Repository not found",
+        });
+      }
+
+      const orgUser = repo.org.users[0];
+      const repoRole = repo.additionalRoles[0];
+
+      const isMember = !!orgUser;
+
+      const canWrite = !!(
+        orgUser &&
+        (repo.org.defaultRepoAccess === "WRITE" ||
+          repo.org.defaultRepoAccess === "ADMIN" ||
+          (repoRole &&
+            (repoRole.access === "WRITE" || repoRole.access === "ADMIN")))
+      );
+
+      const isAdmin = !!(
+        orgUser &&
+        (repo.org.defaultRepoAccess === "ADMIN" ||
+          repoRole?.access === "ADMIN")
+      );
+
+      return { isMember, canWrite, isAdmin };
+    }),
+
   createRepo: protectedProcedure
     .input(
       z.object({

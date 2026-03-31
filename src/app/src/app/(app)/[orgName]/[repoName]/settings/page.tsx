@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, notFound } from "next/navigation";
 import { api } from "~/trpc/react";
 import { Button, Card } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
@@ -21,6 +21,15 @@ export default function RepoSettingsPage() {
   const repoData = org?.repos?.find(
     (r: { name: string }) => r.name === repoName,
   );
+
+  const { data: access } = api.repo.getMyRepoAccess.useQuery(
+    { repoId: repoData?.id ?? "" },
+    { enabled: !!repoData?.id },
+  );
+
+  if (access && !access.isAdmin) {
+    notFound();
+  }
 
   const [name, setName] = useState("");
   const [isPublic, setIsPublic] = useState(false);

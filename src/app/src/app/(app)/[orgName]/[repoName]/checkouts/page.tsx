@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
+import { notFound } from "next/navigation";
 import { api } from "~/trpc/react";
 import { Card, Badge, Button, EmptyState } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
@@ -22,6 +23,15 @@ export default function RepoCheckoutsPage() {
 
   const [lockedOnly, setLockedOnly] = useState(false);
   const utils = api.useUtils();
+
+  const { data: access } = api.repo.getMyRepoAccess.useQuery(
+    { repoId: repoData?.id ?? "" },
+    { enabled: !!repoData?.id },
+  );
+
+  if (access && !access.isMember) {
+    notFound();
+  }
 
   const { data: checkouts } = api.file.getRepoCheckouts.useQuery(
     { repoId: repoData?.id ?? "", lockedOnly },
@@ -81,7 +91,7 @@ export default function RepoCheckoutsPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {checkout.locked && (
+                    {checkout.locked && access?.isAdmin && (
                       <Button
                         variant="ghost"
                         size="sm"
