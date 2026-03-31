@@ -82,7 +82,6 @@ export type Channels = {
   "workspace:submit": {
     message: string;
     modifications: Modification[];
-    shelved: boolean;
   };
   "workspace:submit:success": null;
   "workspace:submit:error": { message: string };

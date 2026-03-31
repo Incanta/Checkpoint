@@ -6,6 +6,8 @@
 
 int32_t SubmitSync(
     const char* BranchName,
+    const char* ShelfName,
+    int32_t ArtifactForChangelistNum,
     const char* Message,
     uint32_t TargetChunkSize,
     uint32_t TargetBlockSize,
@@ -514,6 +516,14 @@ int32_t SubmitSync(
       {"keepCheckedOut", KeepCheckedOut},
       {"workspaceId", std::string(WorkspaceId)}};
 
+  if (ShelfName != nullptr) {
+    payload["shelfName"] = std::string(ShelfName);
+  }
+
+  if (ArtifactForChangelistNum >= 0) {
+    payload["artifactForChangelistNum"] = ArtifactForChangelistNum;
+  }
+
   for (uint32_t i = 0; i < NumModifications; ++i) {
     payload["modifications"].push_back(json::object());
     payload["modifications"][i]["delete"] = Modifications[i].IsDelete;
@@ -645,6 +655,8 @@ int32_t SubmitSync(
 DLL_EXPORT WrapperAsyncHandle*
 SubmitAsync(
     const char* BranchName,
+    const char* ShelfName,
+    int32_t ArtifactForChangelistNum,
     const char* Message,
     uint32_t TargetChunkSize,
     uint32_t TargetBlockSize,
@@ -686,6 +698,8 @@ SubmitAsync(
   std::thread diff_thread([=]() {
     int32_t err = SubmitSync(
         BranchName,
+        ShelfName,
+        ArtifactForChangelistNum,
         Message,
         TargetChunkSize,
         TargetBlockSize,

@@ -724,7 +724,6 @@ export default function WorkspacePendingChanges() {
             ipc.sendMessage("workspace:submit", {
               message: commitMessage,
               modifications,
-              shelved: false,
             });
           }}
         />

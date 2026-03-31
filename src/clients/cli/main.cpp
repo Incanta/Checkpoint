@@ -21,6 +21,10 @@
  *   init [orgName/repoName]       Initialize a workspace in the current directory
  *   accounts                      List authenticated accounts
  *   login [--endpoint URL]        Authenticate with a Checkpoint server
+ *   shelve <name> [-m msg]        Shelve staged files to a named shelf
+ *   unshelve <name> [-b branch]   Submit a shelf to a branch
+ *   shelf [list|delete <name>]    Manage shelves
+ *   artifact upload <cl> <files>  Upload artifacts for a changelist
  */
 
 #include <algorithm>
@@ -168,6 +172,61 @@ int main(int argc, char** argv) {
       .help("Daemon ID for this credential (default: auto-generated)")
       .default_value(std::string(""));
 
+  // shelve
+  argparse::ArgumentParser shelveCmd("shelve");
+  shelveCmd.add_description("Shelve staged files to a named shelf");
+  shelveCmd.add_argument("name")
+      .help("Name of the shelf");
+  shelveCmd.add_argument("--message", "-m")
+      .help("Shelf message")
+      .default_value(std::string(""));
+
+  // unshelve
+  argparse::ArgumentParser unshelveCmd("unshelve");
+  unshelveCmd.add_description("Submit a shelf to a branch");
+  unshelveCmd.add_argument("name")
+      .help("Name of the shelf to submit");
+  unshelveCmd.add_argument("--branch", "-b")
+      .help("Target branch (defaults to current branch)")
+      .default_value(std::string(""));
+
+  // shelf (management subcommand)
+  argparse::ArgumentParser shelfCmd("shelf");
+  shelfCmd.add_description("Manage shelves");
+  shelfCmd.add_argument("action")
+      .help("Action: list, delete")
+      .default_value(std::string("list"))
+      .nargs(argparse::nargs_pattern::optional);
+  shelfCmd.add_argument("name")
+      .help("Shelf name (for delete)")
+      .default_value(std::string(""))
+      .nargs(argparse::nargs_pattern::optional);
+
+  // artifact (subcommand)
+  argparse::ArgumentParser artifactCmd("artifact");
+  artifactCmd.add_description("Manage artifacts");
+  artifactCmd.add_argument("action")
+      .help("Action: upload")
+      .default_value(std::string(""));
+  artifactCmd.add_argument("cl_number")
+      .help("Changelist number to attach artifacts to")
+      .default_value(std::string(""))
+      .nargs(argparse::nargs_pattern::optional);
+  artifactCmd.add_argument("files")
+      .help("Files to upload as artifacts")
+      .remaining();
+  artifactCmd.add_argument("--message", "-m")
+      .help("Upload message")
+      .default_value(std::string(""));
+
+  // config (subcommand)
+  argparse::ArgumentParser configCmd("config");
+  configCmd.add_description("Manage workspace configuration");
+  configCmd.add_argument("key")
+      .help("Config key");
+  configCmd.add_argument("value")
+      .help("Config value");
+
   // ─── Register sub-commands ─────────────────────────────────────
 
   program.add_subparser(statusCmd);
@@ -185,6 +244,11 @@ int main(int argc, char** argv) {
   program.add_subparser(initCmd);
   program.add_subparser(accountsCmd);
   program.add_subparser(loginCmd);
+  program.add_subparser(shelveCmd);
+  program.add_subparser(unshelveCmd);
+  program.add_subparser(shelfCmd);
+  program.add_subparser(artifactCmd);
+  program.add_subparser(configCmd);
 
   // ─── Parse arguments ──────────────────────────────────────────
 
@@ -227,6 +291,16 @@ int main(int argc, char** argv) {
         std::cerr << accountsCmd;
       } else if (cmd == "login") {
         std::cerr << loginCmd;
+      } else if (cmd == "shelve") {
+        std::cerr << shelveCmd;
+      } else if (cmd == "unshelve") {
+        std::cerr << unshelveCmd;
+      } else if (cmd == "shelf") {
+        std::cerr << shelfCmd;
+      } else if (cmd == "artifact") {
+        std::cerr << artifactCmd;
+      } else if (cmd == "config") {
+        std::cerr << configCmd;
       } else {
         std::cerr << program;
       }
@@ -324,6 +398,76 @@ int main(int argc, char** argv) {
         }
       }
       return checkpoint::cmdLogin(endpoint, daemonId);
+    }
+
+    if (program.is_subcommand_used(shelveCmd)) {
+      auto name = shelveCmd.get<std::string>("name");
+      auto msg = shelveCmd.get<std::string>("--message");
+      return checkpoint::cmdShelve(name, msg);
+    }
+
+    if (program.is_subcommand_used(unshelveCmd)) {
+      auto name = unshelveCmd.get<std::string>("name");
+      auto branch = unshelveCmd.get<std::string>("--branch");
+      return checkpoint::cmdUnshelve(name, branch);
+    }
+
+    if (program.is_subcommand_used(shelfCmd)) {
+      auto action = shelfCmd.get<std::string>("action");
+      auto name = shelfCmd.get<std::string>("name");
+      if (action == "list" || action.empty()) {
+        return checkpoint::cmdShelfList();
+      } else if (action == "delete") {
+        if (name.empty()) {
+          std::cerr << "error: shelf delete requires a shelf name." << std::endl;
+          return 1;
+        }
+        return checkpoint::cmdShelfDelete(name);
+      } else {
+        std::cerr << "error: unknown shelf action '" << action << "'. Use 'list' or 'delete'." << std::endl;
+        return 1;
+      }
+    }
+
+    if (program.is_subcommand_used(artifactCmd)) {
+      auto action = artifactCmd.get<std::string>("action");
+      if (action == "upload") {
+        auto clStr = artifactCmd.get<std::string>("cl_number");
+        if (clStr.empty()) {
+          std::cerr << "error: artifact upload requires a changelist number." << std::endl;
+          std::cerr << "  Usage: chk artifact upload <cl-number> <file1> [file2] ..." << std::endl;
+          return 1;
+        }
+        int clNum;
+        try {
+          clNum = std::stoi(clStr);
+        } catch (...) {
+          std::cerr << "error: invalid changelist number: " << clStr << std::endl;
+          return 1;
+        }
+        std::vector<std::string> files;
+        try {
+          files = artifactCmd.get<std::vector<std::string>>("files");
+        } catch (...) {
+          // no remaining files
+        }
+        auto msg = artifactCmd.get<std::string>("--message");
+        return checkpoint::cmdArtifactUpload(clNum, files, msg);
+      } else {
+        std::cerr << "error: unknown artifact action '" << action << "'. Use 'upload'." << std::endl;
+        return 1;
+      }
+    }
+
+    if (program.is_subcommand_used(configCmd)) {
+      auto key = configCmd.get<std::string>("key");
+      auto value = configCmd.get<std::string>("value");
+      if (false /* TODO */) {
+        // placeholder for future config options
+      } else {
+        std::cerr << "error: unknown config key '" << key << "'. Supported: artifacts" << std::endl;
+        return 1;
+      }
     }
 
     // No command specified — show help

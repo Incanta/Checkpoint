@@ -12,6 +12,7 @@ import {
   freeHandle,
   GetLogLevel,
   type LongtailLogLevel,
+  type SubmitAsyncOptions,
 } from "@checkpointvcs/longtail-addon";
 import {
   getWorkspaceState,
@@ -33,6 +34,8 @@ export async function submit(
   ),
   onStep?: (step: string) => void,
   onProgress?: (step: string, done: number, total: number) => void,
+  shelfName?: string,
+  artifactForChangelistNum?: number,
 ): Promise<void> {
   const user = await GetAuthConfigUser(workspace.daemonId);
 
@@ -70,6 +73,9 @@ export async function submit(
 
   console.log(`[submit] Calling SubmitAsync:`);
   console.log(`[submit]   branchName: ${workspace.branchName}`);
+  if (shelfName) {
+    console.log(`[submit]   shelfName: ${shelfName}`);
+  }
   console.log(`[submit]   message: ${message}`);
   console.log(`[submit]   localPath: ${workspace.localPath}`);
   console.log(`[submit]   remoteRoot: /${orgId}/${workspace.repoId}`);
@@ -79,7 +85,7 @@ export async function submit(
   console.log(`[submit]   workspaceId: ${workspaceId}`);
   console.log(`[submit]   modifications: ${modifications.length}`);
 
-  const handle = submitAsync({
+  const submitOptions: SubmitAsyncOptions = {
     branchName: workspace.branchName,
     message,
     targetChunkSize: config.get<number>("longtail.target-chunk-size"),
@@ -113,8 +119,17 @@ export async function submit(
     workspaceId,
     modifications,
     logLevel: GetLogLevel(logLevel),
-  });
+  };
 
+  if (shelfName) {
+    submitOptions.shelfName = shelfName;
+  }
+
+  if (artifactForChangelistNum != null && artifactForChangelistNum >= 0) {
+    submitOptions.artifactForChangelistNum = artifactForChangelistNum;
+  }
+
+  const handle = submitAsync(submitOptions);
   if (!handle) {
     throw new Error("Failed to create longtail handle");
   }

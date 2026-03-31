@@ -201,7 +201,6 @@ bool FCheckpointCheckInWorker::Execute(
         Settings.GetWorkspaceId(),
         Description,
         Modifications,
-        false, // not shelved
         bKeepCheckedOut,
         Error
       )) {

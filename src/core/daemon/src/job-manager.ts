@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 
-export type JobType = "submit" | "pull";
+export type JobType = "submit" | "pull" | "artifact-upload";
 export type JobStatus = "pending" | "running" | "completed" | "failed";
 
 export interface JobProgress {

@@ -462,6 +462,7 @@ export async function pull(
     await saveWorkspaceState(workspace, {
       changelistNumber: changelistResponse.number,
       files: newFiles,
+      artifactFiles: newArtifactFiles,
     });
 
     return mergeResult;

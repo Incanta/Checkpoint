@@ -429,7 +429,6 @@ bool FCheckpointDaemonClient::Submit(
   const FString &WorkspaceId,
   const FString &Message,
   const TArray<TSharedPtr<FJsonValue>> &Modifications,
-  bool bShelved,
   bool bKeepCheckedOut,
   FString &OutError
 ) {
@@ -438,7 +437,6 @@ bool FCheckpointDaemonClient::Submit(
   Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
   Input->SetStringField(TEXT("message"), Message);
   Input->SetArrayField(TEXT("modifications"), Modifications);
-  Input->SetBoolField(TEXT("shelved"), bShelved);
   Input->SetBoolField(TEXT("keepCheckedOut"), bKeepCheckedOut);
 
   TSharedPtr<FJsonObject> Result;
