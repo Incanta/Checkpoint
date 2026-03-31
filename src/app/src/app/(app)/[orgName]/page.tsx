@@ -80,9 +80,7 @@ export default function OrgPage() {
     );
   }
 
-  const orgUsers = (org as Record<string, unknown>).users as
-    | Array<{ userId: string; role: string }>
-    | undefined;
+  const orgUsers = org.users;
 
   const isAdmin = orgUsers?.some((u: { role: string }) => u.role === "ADMIN");
 

@@ -701,6 +701,60 @@ inline int cmdPull() {
 }
 
 // ═════════════════════════════════════════════════════════════════
+//  COMMAND: merge (merge a branch into the current branch)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdMerge(const std::string& incomingBranch) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  std::cout << "Merging " << color::cyan() << incomingBranch
+            << color::reset() << " into " << color::cyan() << ws.branchName
+            << color::reset() << "..." << std::endl;
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"incomingBranchName", incomingBranch},
+  };
+
+  auto result = client.mutate("workspaces.branches.merge", input);
+
+  // Display merge result
+  if (!result.is_null() && result.contains("mergeChangelist")) {
+    auto& mc = result["mergeChangelist"];
+    int clNumber = mc.value("number", -1);
+    std::string msg = mc.value("message", "");
+
+    // Show just the first line of the merge message
+    auto firstNewline = msg.find('\n');
+    if (firstNewline != std::string::npos) {
+      msg = msg.substr(0, firstNewline);
+    }
+
+    std::cout << color::green() << color::bold()
+              << "Merge complete." << color::reset() << std::endl;
+    std::cout << "Created changelist #" << clNumber;
+    if (!msg.empty()) {
+      std::cout << ": " << msg;
+    }
+    std::cout << std::endl;
+
+    if (result.contains("deletedBranch") && result["deletedBranch"].is_string()) {
+      std::cout << color::dim() << "Branch '"
+                << result["deletedBranch"].get<std::string>()
+                << "' has been deleted." << color::reset() << std::endl;
+    }
+  } else {
+    std::cout << color::green() << color::bold()
+              << "Merge complete." << color::reset() << std::endl;
+  }
+
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
 //  COMMAND: log (show history)
 // ═════════════════════════════════════════════════════════════════
 

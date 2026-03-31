@@ -63,7 +63,7 @@ export const branchRouter = createTRPCRouter({
       z.object({
         repoId: z.string(),
         name: z.string().min(1),
-        headNumber: z.number().default(0),
+        headNumber: z.number().default(-1),
         isDefault: z.boolean().default(false),
         type: z.enum(["MAINLINE", "RELEASE", "FEATURE"]).default("FEATURE"),
         parentBranchName: z.string().nullable().default(null),
@@ -114,6 +114,15 @@ export const branchRouter = createTRPCRouter({
               "Release branches can only be children of mainline branches",
           });
         }
+
+        if (input.headNumber === -1) {
+          input.headNumber = parentBranch.headNumber;
+        }
+      } else if (input.type !== "MAINLINE") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Only mainline branches can be created without a parent",
+        });
       }
 
       // Mainline branches have no parent (even if created from a CL on another branch)

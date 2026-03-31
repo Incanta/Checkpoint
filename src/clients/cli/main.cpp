@@ -13,7 +13,8 @@
  *   pull                          Sync changes from remote
  *   log                           Show version history
  *   branch                        List branches
- *   switch <branch>                Switch to a different branch
+ *   switch <branch>               Switch to a different branch
+ *   merge <branch>                Merge a branch into the current branch
  *   checkout <file>               Check out a controlled file
  *   revert <file...>              Revert files to head version
  *   diff <file>                   Show diff for a file
@@ -120,6 +121,12 @@ int main(int argc, char** argv) {
   switchCmd.add_description("Switch to a different branch");
   switchCmd.add_argument("branch")
       .help("Name of the branch to switch to");
+
+  // merge
+  argparse::ArgumentParser mergeCmd("merge");
+  mergeCmd.add_description("Merge a branch into the current branch");
+  mergeCmd.add_argument("branch")
+      .help("Branch to merge from");
 
   // checkout
   argparse::ArgumentParser checkoutCmd("checkout");
@@ -231,6 +238,7 @@ int main(int argc, char** argv) {
   program.add_subparser(logCmd);
   program.add_subparser(branchCmd);
   program.add_subparser(switchCmd);
+  program.add_subparser(mergeCmd);
   program.add_subparser(checkoutCmd);
   program.add_subparser(revertCmd);
   program.add_subparser(diffCmd);
@@ -268,6 +276,10 @@ int main(int argc, char** argv) {
         std::cerr << logCmd;
       } else if (cmd == "branch") {
         std::cerr << branchCmd;
+      } else if (cmd == "switch") {
+        std::cerr << switchCmd;
+      } else if (cmd == "merge") {
+        std::cerr << mergeCmd;
       } else if (cmd == "checkout") {
         std::cerr << checkoutCmd;
       } else if (cmd == "revert") {
@@ -339,6 +351,11 @@ int main(int argc, char** argv) {
     if (program.is_subcommand_used(switchCmd)) {
       auto branch = switchCmd.get<std::string>("branch");
       return checkpoint::cmdSwitch(branch);
+    }
+
+    if (program.is_subcommand_used(mergeCmd)) {
+      auto branch = mergeCmd.get<std::string>("branch");
+      return checkpoint::cmdMerge(branch);
     }
 
     if (program.is_subcommand_used(checkoutCmd)) {

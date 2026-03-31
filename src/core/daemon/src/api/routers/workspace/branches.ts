@@ -407,6 +407,7 @@ export const branchesRouter = router({
             repo.orgId,
             null,
             null,
+            "off",
           );
         } finally {
           await manager.endVcsOperation(workspace.id);

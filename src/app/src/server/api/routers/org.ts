@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { createOrgDirectory } from "~/server/storage-service";
+import { RepoAccess } from "@prisma/client";
 
 export const orgRouter = createTRPCRouter({
   myOrgs: protectedProcedure.query(async ({ ctx }) => {
@@ -41,9 +42,11 @@ export const orgRouter = createTRPCRouter({
       const org = await ctx.db.org.findFirst({
         where: input.idIsName ? { name: input.id } : { id: input.id },
         include: {
-          users: input.includeUsers
-            ? { include: { user: { select: { id: true, name: true, email: true, image: true } } } }
-            : false,
+          users: {
+            include: {
+              user: input.includeUsers,
+            },
+          },
           repos: {
             include: {
               additionalRoles: true,
@@ -68,7 +71,10 @@ export const orgRouter = createTRPCRouter({
         return {
           id: org.id,
           name: org.name,
+          defaultRepoAccess: RepoAccess.NONE,
+          defaultCanCreateRepos: false,
           repos: org.repos?.filter((repo) => repo.public) || [],
+          users: [],
         };
       }
 
@@ -296,17 +302,17 @@ export const orgRouter = createTRPCRouter({
             },
           },
         },
-        orderBy: [
-          { writeCount: "desc" },
-          { readCount: "desc" },
-        ],
+        orderBy: [{ writeCount: "desc" }, { readCount: "desc" }],
       });
 
       const summary = {
         year,
         month,
-        totalActiveWriteUsers: activities.filter((a) => a.writeCount > 0).length,
-        totalActiveReadUsers: activities.filter((a) => a.readCount > 0 && a.writeCount === 0).length,
+        totalActiveWriteUsers: activities.filter((a) => a.writeCount > 0)
+          .length,
+        totalActiveReadUsers: activities.filter(
+          (a) => a.readCount > 0 && a.writeCount === 0,
+        ).length,
         totalActiveUsers: activities.length,
       };
 
@@ -326,7 +332,8 @@ export const orgRouter = createTRPCRouter({
       if (!isLicenseManager()) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "Subscription changes are only available on the cloud instance",
+          message:
+            "Subscription changes are only available on the cloud instance",
         });
       }
 
@@ -338,10 +345,14 @@ export const orgRouter = createTRPCRouter({
         },
       });
 
-      if (!orgUser || (orgUser.role !== "ADMIN" && orgUser.role !== "BILLING")) {
+      if (
+        !orgUser ||
+        (orgUser.role !== "ADMIN" && orgUser.role !== "BILLING")
+      ) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "Only org admins or billing managers can change subscriptions",
+          message:
+            "Only org admins or billing managers can change subscriptions",
         });
       }
 
