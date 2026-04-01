@@ -8,5 +8,8 @@
   "type": "module",
   "scripts": {
     "build": "tsgo -p ."
+  },
+  "devDependencies": {
+    "@typescript/native-preview": "*"
   }
 }

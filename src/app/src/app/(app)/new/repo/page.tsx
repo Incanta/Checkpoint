@@ -1,12 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "~/trpc/react";
 import { Button, Card, PageHeader } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 
 export default function NewRepoPage() {
+  return (
+    <Suspense>
+      <NewRepoPageContent />
+    </Suspense>
+  );
+}
+
+function NewRepoPageContent() {
   useDocumentTitle("New Repository · Checkpoint VCS");
   const searchParams = useSearchParams();
   const preselectedOrg = searchParams.get("org") ?? "";
@@ -23,8 +31,7 @@ export default function NewRepoPage() {
     orgs?.find((o) => o.name === preselectedOrg)?.id ||
     orgs?.[0]?.id ||
     "";
-  const selectedOrgName =
-    orgs?.find((o) => o.id === resolvedOrgId)?.name ?? "";
+  const selectedOrgName = orgs?.find((o) => o.id === resolvedOrgId)?.name ?? "";
 
   const createRepo = api.repo.createRepo.useMutation({
     onSuccess: () => {

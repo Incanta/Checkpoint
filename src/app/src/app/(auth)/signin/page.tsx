@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { authClient } from "~/lib/auth-client";
 import { useSearchParams } from "next/navigation";
 import { useEffect } from "react";
@@ -21,6 +21,14 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 };
 
 export default function SignInPage() {
+  return (
+    <Suspense>
+      <SignInPageContent />
+    </Suspense>
+  );
+}
+
+function SignInPageContent() {
   useDocumentTitle("Sign In · Checkpoint VCS");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);

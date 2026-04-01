@@ -210,6 +210,7 @@ export const fileRouter = createTRPCRouter({
       }));
     }),
 
+  // TODO MIKE HERE: should we have a checkoutMany?
   checkout: protectedProcedure
     .input(
       z.object({
@@ -566,7 +567,8 @@ export const fileRouter = createTRPCRouter({
 
       const stateTree = changelist.stateTree as Record<string, number>;
       const artifactStateTree = input.includeArtifacts
-        ? (changelist.artifactStateTree as Record<string, number> | null) ?? {}
+        ? ((changelist.artifactStateTree as Record<string, number> | null) ??
+          {})
         : {};
       const aliveFileIds = new Set([
         ...Object.keys(stateTree),
@@ -589,7 +591,12 @@ export const fileRouter = createTRPCRouter({
             : input.folderPath + "/";
 
       const folders = new Set<string>();
-      const files: { name: string; path: string; lastCl: number; isArtifact: boolean }[] = [];
+      const files: {
+        name: string;
+        path: string;
+        lastCl: number;
+        isArtifact: boolean;
+      }[] = [];
       let totalFileCount = 0;
 
       for (const file of allFiles) {
