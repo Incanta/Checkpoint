@@ -4,10 +4,8 @@
 // Read more about both here:
 // https://www.prisma.io/docs/orm/prisma-migrate
 
-datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
-}
+// NOTE: The datasource block lives in prisma/datasource.prisma (generated from
+// config, gitignored). Run `npm run db:set-provider` to regenerate it.
 
 generator client {
   provider      = "prisma-client-js"
