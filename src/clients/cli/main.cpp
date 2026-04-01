@@ -465,7 +465,7 @@ int main(int argc, char** argv) {
       if (false /* TODO */) {
         // placeholder for future config options
       } else {
-        std::cerr << "error: unknown config key '" << key << "'. Supported: artifacts" << std::endl;
+        std::cerr << "error: unknown config key '" << key << "'. Supported: TODO" << std::endl;
         return 1;
       }
     }
