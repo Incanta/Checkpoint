@@ -22,6 +22,8 @@
 extern "C" {
 WrapperAsyncHandle* SubmitAsync(
     const char* BranchName,
+    const char* ShelfName,
+    int32_t ArtifactForChangelistNum,
     const char* Message,
     uint32_t TargetChunkSize,
     uint32_t TargetBlockSize,
