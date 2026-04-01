@@ -29,6 +29,13 @@ const isCI = process.env.CI === "true";
 // PID file location
 const pidFile = path.join(__dirname, "logs", ".dev.pid");
 
+// Handle command line arguments
+const args = process.argv.slice(2);
+const command = args.find((arg) => !arg.startsWith("-"));
+const backgroundMode = args.includes("--background") || args.includes("-b");
+const testMode = args.includes("--test") || args.includes("-t");
+const serverMode = args.includes("--server");
+
 // ANSI color codes
 const colors = {
   reset: "\x1b[0m",
@@ -45,12 +52,12 @@ const colors = {
 
 // Service configurations
 const allColor = colors.magenta;
-const services = [
+let services = [
   {
     name: "app",
     color: colors.cyan,
     command: process.platform === "win32" ? "yarn.cmd" : "yarn",
-    args: isCI ? ["dev:test"] : ["dev"],
+    args: serverMode ? ["start"] : isCI ? ["dev:test"] : ["dev"],
     cwd: path.join(__dirname, "src/app"),
     healthPattern: /\[healthy\]|Ready in/i,
   },
@@ -71,6 +78,11 @@ const services = [
     healthPattern: /\[healthy\]/i,
   },
 ];
+
+// If --server flag is provided, filter services to only server-related ones
+if (serverMode) {
+  services = services.filter((s) => s.name === "daemon" || s.name === "server");
+}
 
 // Track running processes and health status
 const processes = new Map();
@@ -435,18 +447,6 @@ async function waitForHealthy(timeout = 30000) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   return false;
-}
-
-// Handle command line arguments
-const args = process.argv.slice(2);
-const command = args.find((arg) => !arg.startsWith("-"));
-const backgroundMode = args.includes("--background") || args.includes("-b");
-const testMode = args.includes("--test") || args.includes("-t");
-const serverMode = args.includes("--server");
-
-// If --server flag is provided, filter services to only server-related ones
-if (serverMode) {
-  services = services.filter((s) => s.name === "app" || s.name === "server");
 }
 
 // In test mode, inject NODE_CONFIG_ENV=test into the app service
