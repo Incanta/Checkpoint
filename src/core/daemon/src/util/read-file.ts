@@ -9,62 +9,7 @@ import {
   type LongtailLogLevel,
 } from "@checkpointvcs/longtail-addon";
 import { DaemonConfig } from "../daemon-config.js";
-
-/** File extensions considered binary (not diffable as text). */
-const BINARY_EXTENSIONS = new Set([
-  ".uasset",
-  ".umap",
-  ".ubulk",
-  ".utxt",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".bmp",
-  ".tga",
-  ".exr",
-  ".hdr",
-  ".dds",
-  ".psd",
-  ".tif",
-  ".tiff",
-  ".gif",
-  ".ico",
-  ".svg",
-  ".mp3",
-  ".wav",
-  ".ogg",
-  ".mp4",
-  ".avi",
-  ".mov",
-  ".wmv",
-  ".fbx",
-  ".obj",
-  ".abc",
-  ".gltf",
-  ".glb",
-  ".blend",
-  ".3ds",
-  ".bnk",
-  ".wem",
-  ".zip",
-  ".rar",
-  ".7z",
-  ".tar",
-  ".gz",
-  ".dll",
-  ".so",
-  ".dylib",
-  ".exe",
-  ".bin",
-  ".dat",
-  ".db",
-  ".pdf",
-]);
-
-export function isBinaryFile(filePath: string): boolean {
-  const ext = path.extname(filePath).toLowerCase();
-  return BINARY_EXTENSIONS.has(ext);
-}
+import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 
 export interface ReadFileWorkspace {
   daemonId: string;
@@ -181,9 +126,14 @@ export async function readFileFromVersion(
     await fs.writeFile(cachePath, Buffer.alloc(0));
   }
 
+  const binaryExts = await getBinaryExtensions(
+    workspace.daemonId,
+    workspace.repoId,
+  );
+
   return {
     cachePath,
-    isBinary: isBinaryFile(filePath),
+    isBinary: isBinaryFile(filePath, binaryExts),
     size: size ?? 0,
   };
 }
@@ -215,9 +165,13 @@ export async function readFileFromChangelist(
   // Return cached file if it already exists
   if (existsSync(cachePath)) {
     const stat = await fs.stat(cachePath);
+    const binaryExts = await getBinaryExtensions(
+      workspace.daemonId,
+      workspace.repoId,
+    );
     return {
       cachePath,
-      isBinary: isBinaryFile(filePath),
+      isBinary: isBinaryFile(filePath, binaryExts),
       size: stat.size,
     };
   }

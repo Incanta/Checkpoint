@@ -16,7 +16,8 @@ import {
   saveWorkspaceState,
   type Workspace,
 } from "./util.js";
-import { isBinaryFile, readFileFromChangelist } from "./read-file.js";
+import { readFileFromChangelist } from "./read-file.js";
+import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 import { autoMergeText, type AutoMergeResult } from "./auto-merge.js";
 import { existsSync, promises as fs } from "fs";
 import path from "path";
@@ -47,6 +48,7 @@ export async function pull(
   const resolvedLogLevel =
     logLevel ?? (daemonConfig.longtail.logLevel as LongtailLogLevel);
   const client = await CreateApiClientAuth(workspace.daemonId);
+  const binaryExts = await getBinaryExtensions(workspace.daemonId, workspace.repoId);
 
   const storageTokenResponse = await client.storage.getToken.query({
     repoId: workspace.repoId,
@@ -146,7 +148,7 @@ export async function pull(
     if (!localFile || localFile.changelist === serverCl) continue; // Up to date
 
     // Only auto-merge text files
-    if (isBinaryFile(localPath)) continue;
+    if (isBinaryFile(localPath, binaryExts)) continue;
 
     const fullPath = path.join(workspace.localPath, localPath);
     if (!existsSync(fullPath)) continue; // Deleted locally — no merge
@@ -492,6 +494,7 @@ export async function pullTextFilesForSubmit(
   submitPaths: string[],
 ): Promise<PullMergeResult> {
   const client = await CreateApiClientAuth(workspace.daemonId);
+  const binaryExts = await getBinaryExtensions(workspace.daemonId, workspace.repoId);
   const workspaceState = await getWorkspaceState(workspace.localPath);
 
   // Get the remote branch head
@@ -555,7 +558,7 @@ export async function pullTextFilesForSubmit(
     if (!localFile || localFile.changelist === remoteCl) continue; // Up to date
 
     // Only text files
-    if (isBinaryFile(localPath)) continue;
+    if (isBinaryFile(localPath, binaryExts)) continue;
 
     const fullPath = path.join(workspace.localPath, localPath);
     if (!existsSync(fullPath)) continue; // Deleted locally

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { FileStatus } from "../../../types/index.js";
 import { DaemonConfig } from "../../../daemon-config.js";
 import {
+  getBinaryExtensions,
   isBinaryFile,
   pull,
   getWorkspaceConfig,
@@ -183,8 +184,9 @@ export const branchesRouter = router({
 
             if (conflictingPaths.length > 0) {
               // Check for binary files in conflicts
+              const binaryExts = await getBinaryExtensions(input.daemonId, workspace.repoId);
               const binaryConflicts = conflictingPaths.filter((p) =>
-                isBinaryFile(p),
+                isBinaryFile(p, binaryExts),
               );
 
               if (binaryConflicts.length > 0) {

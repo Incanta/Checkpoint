@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter, notFound } from "next/navigation";
 import { api } from "~/trpc/react";
 import { useSession } from "~/lib/auth-client";
@@ -161,6 +161,8 @@ export default function OrgSettingsPage() {
           </form>
         </Card>
 
+        {org && <BinaryExtensionsCard orgId={org.id} />}
+
         {/* Danger zone */}
         <Card className="border-[var(--color-danger)]/30">
           <h3 className="mb-3 text-lg font-semibold text-[var(--color-danger)]">
@@ -209,5 +211,137 @@ export default function OrgSettingsPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function BinaryExtensionsCard({ orgId }: { orgId: string }) {
+  const utils = api.useUtils();
+
+  const { data } = api.org.getBinaryExtensions.useQuery({ orgId });
+
+  const [newExt, setNewExt] = useState("");
+
+  const overrides = useMemo(() => {
+    if (!data?.overrides) return [] as { op: "+" | "-"; ext: string }[];
+    return data.overrides
+      .split(",")
+      .map((e) => e.trim())
+      .filter(Boolean)
+      .map((e) => ({
+        op: e[0] as "+" | "-",
+        ext: e.slice(1),
+      }));
+  }, [data?.overrides]);
+
+  const updateOrg = api.org.updateOrg.useMutation({
+    onSuccess: () => {
+      void utils.org.getBinaryExtensions.invalidate({ orgId });
+    },
+  });
+
+  const saveOverrides = (entries: { op: "+" | "-"; ext: string }[]) => {
+    const csv = entries.map((e) => `${e.op}${e.ext}`).join(",");
+    updateOrg.mutate({ id: orgId, binaryExtensions: csv });
+  };
+
+  const handleAdd = (ext: string, op: "+" | "-") => {
+    const normalized = ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`;
+    if (overrides.some((o) => o.ext === normalized && o.op === op)) return;
+    saveOverrides([...overrides, { op, ext: normalized }]);
+    setNewExt("");
+  };
+
+  const handleRemove = (index: number) => {
+    saveOverrides(overrides.filter((_, i) => i !== index));
+  };
+
+  if (!data) return null;
+
+  return (
+    <Card>
+      <h3 className="mb-1 text-lg font-semibold text-[var(--color-text-primary)]">
+        Binary file extensions
+      </h3>
+      <p className="mb-4 text-sm text-[var(--color-text-secondary)]">
+        Files with these extensions are treated as binary (no text diff or auto-merge).
+        Add or remove extensions to customize the list for this organization.
+      </p>
+
+      {overrides.length > 0 && (
+        <div className="mb-4 space-y-1">
+          <label className="block text-sm font-medium text-[var(--color-text-primary)]">
+            Overrides
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {overrides.map((o, i) => (
+              <span
+                key={i}
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                  o.op === "+"
+                    ? "bg-[var(--color-success)]/15 text-[var(--color-success)]"
+                    : "bg-[var(--color-danger)]/15 text-[var(--color-danger)]"
+                }`}
+              >
+                {o.op === "+" ? "+" : "\u2212"}{o.ext}
+                <button
+                  type="button"
+                  onClick={() => handleRemove(i)}
+                  className="ml-0.5 hover:opacity-70"
+                >
+                  &times;
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-4 flex gap-2">
+        <input
+          type="text"
+          value={newExt}
+          onChange={(e) => setNewExt(e.target.value)}
+          placeholder=".ext"
+          className="w-32 rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (newExt.trim()) handleAdd(newExt.trim(), "+");
+            }
+          }}
+        />
+        <Button
+          size="sm"
+          disabled={!newExt.trim() || updateOrg.isPending}
+          onClick={() => handleAdd(newExt.trim(), "+")}
+        >
+          Add binary ext
+        </Button>
+        <Button
+          size="sm"
+          variant="danger"
+          disabled={!newExt.trim() || updateOrg.isPending}
+          onClick={() => handleAdd(newExt.trim(), "-")}
+        >
+          Remove default ext
+        </Button>
+      </div>
+
+      <details className="text-sm">
+        <summary className="cursor-pointer text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]">
+          View resolved list ({data.resolved.length} extensions)
+        </summary>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {data.resolved.map((ext) => (
+            <span
+              key={ext}
+              className="rounded bg-[var(--color-bg-tertiary)] px-2 py-0.5 text-xs text-[var(--color-text-secondary)]"
+            >
+              {ext}
+            </span>
+          ))}
+        </div>
+      </details>
+    </Card>
   );
 }

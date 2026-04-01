@@ -41,7 +41,7 @@ import {
 } from "./file-status.js";
 import { checkSyncStatus, type SyncStatus } from "./util/sync-status.js";
 import { hasConflictMarkers } from "./util/auto-merge.js";
-import { isBinaryFile } from "./util/read-file.js";
+import { getBinaryExtensions, isBinaryFile } from "./util/binary-extensions.js";
 
 export class DaemonManager {
   private static instance: DaemonManager | null = null;
@@ -769,7 +769,7 @@ export class DaemonManager {
       status = markedForAdd.has(relativePath)
         ? FileStatus.Added
         : FileStatus.Local;
-    } else if (!isBinaryFile(relativePath)) {
+    } else if (!isBinaryFile(relativePath, await getBinaryExtensions(workspace.daemonId, workspace.repoId))) {
       const fullPath = path.join(workspace.localPath, relativePath);
       try {
         const content = await fs.readFile(fullPath, "utf-8");

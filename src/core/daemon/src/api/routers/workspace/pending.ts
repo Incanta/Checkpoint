@@ -5,6 +5,7 @@ import fs from "fs/promises";
 import path from "path";
 import { File, FileStatus, FileType } from "../../../types/index.js";
 import {
+  getBinaryExtensions,
   isBinaryFile,
   readFileFromChangelist,
   submit,
@@ -103,7 +104,7 @@ export const pendingRouter = router({
       let leftContent: string;
       let rightContent: string;
 
-      if (isBinaryFile(normalizedPath)) {
+      if (isBinaryFile(normalizedPath, await getBinaryExtensions(input.daemonId, workspace.repoId))) {
         return {
           left: "[Binary file]",
           right: "[Binary file]",

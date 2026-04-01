@@ -4,6 +4,10 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { createOrgDirectory } from "~/server/storage-service";
 import { RepoAccess } from "@prisma/client";
+import {
+  getDefaultBinaryExtensions,
+  resolveBinaryExtensions,
+} from "~/server/binary-extensions";
 
 export const orgRouter = createTRPCRouter({
   myOrgs: protectedProcedure.query(async ({ ctx }) => {
@@ -139,6 +143,7 @@ export const orgRouter = createTRPCRouter({
           .enum(["NONE", "READ", "WRITE", "ADMIN"])
           .optional(),
         defaultCanCreateRepos: z.boolean().optional(),
+        binaryExtensions: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -317,5 +322,48 @@ export const orgRouter = createTRPCRouter({
       };
 
       return { activities, summary };
+    }),
+
+  getBinaryExtensions: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const orgUser = await ctx.db.orgUser.findFirst({
+        where: {
+          orgId: input.orgId,
+          userId: ctx.session.user.id,
+        },
+      });
+
+      if (!orgUser) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You do not have access to this organization",
+        });
+      }
+
+      const org = await ctx.db.org.findUnique({
+        where: { id: input.orgId },
+        select: { binaryExtensions: true },
+      });
+
+      if (!org) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Organization not found",
+        });
+      }
+
+      const defaults = getDefaultBinaryExtensions();
+      const resolved = [...resolveBinaryExtensions(org.binaryExtensions)];
+
+      return {
+        defaults,
+        overrides: org.binaryExtensions,
+        resolved,
+      };
     }),
 });

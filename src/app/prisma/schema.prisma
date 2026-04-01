@@ -95,6 +95,8 @@ model Org {
   defaultRepoAccess     RepoAccess @default(WRITE)
   defaultCanCreateRepos Boolean    @default(true)
 
+  binaryExtensions String @default("")
+
   subscriptionTier LicenseTier @default(BASIC)
 
   users      OrgUser[]

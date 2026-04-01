@@ -1,6 +1,6 @@
 import { CreateApiClientAuth, DiffState } from "@checkpointvcs/common";
 import { getWorkspaceState, type Workspace } from "./util.js";
-import { isBinaryFile } from "./read-file.js";
+import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 
 /**
  * Represents a file that is outdated (remote has a newer version).
@@ -221,6 +221,8 @@ export async function checkConflicts(
     ),
   );
 
+  const binaryExts = await getBinaryExtensions(workspace.daemonId, workspace.repoId);
+
   const conflicts: ConflictedFile[] = [];
 
   // Check if any outdated files are also locally modified
@@ -229,7 +231,7 @@ export async function checkConflicts(
     const normalizedPath = outdated.path
       .replace(/^[/\\]/, "")
       .replace(/\\/g, "/");
-    if (modifiedSet.has(normalizedPath) && isBinaryFile(normalizedPath)) {
+    if (modifiedSet.has(normalizedPath) && isBinaryFile(normalizedPath, binaryExts)) {
       conflicts.push({
         fileId: outdated.fileId,
         path: normalizedPath,
