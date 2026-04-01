@@ -25,7 +25,6 @@
  *   unshelve <name> [-b branch]   Submit a shelf to a branch
  *   shelf [list|delete <name>]    Manage shelves
  *   artifact upload <cl> <files>  Upload artifacts for a changelist
- *   config artifacts <on|off>     Toggle artifact downloads
  */
 
 #include <algorithm>
@@ -464,7 +463,7 @@ int main(int argc, char** argv) {
       auto key = configCmd.get<std::string>("key");
       auto value = configCmd.get<std::string>("value");
       if (false /* TODO */) {
-        //
+        // placeholder for future config options
       } else {
         std::cerr << "error: unknown config key '" << key << "'. Supported: TODO" << std::endl;
         return 1;

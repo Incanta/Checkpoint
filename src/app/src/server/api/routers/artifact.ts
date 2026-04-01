@@ -25,16 +25,33 @@ export const artifactRouter = createTRPCRouter({
         ),
       }),
     )
+    .output(
+      z.object({
+        changelistNumber: z.number(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
       await assertFeature(repo.orgId, "artifacts", ctx.db);
 
       const changelist = await ctx.db.changelist.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: input.changelistNumber } },
+        where: {
+          repoId_number: {
+            repoId: input.repoId,
+            number: input.changelistNumber,
+          },
+        },
       });
 
       if (!changelist) {
-        throw new TRPCError({ code: "NOT_FOUND", message: `Changelist ${input.changelistNumber} not found` });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Changelist ${input.changelistNumber} not found`,
+        });
       }
 
       // Resolve file records for modifications
@@ -65,7 +82,7 @@ export const artifactRouter = createTRPCRouter({
 
       // Merge into existing artifact state tree (additive overwrite)
       const artifactStateTree: Record<string, number> = {
-        ...(changelist.artifactStateTree as Record<string, number> ?? {}),
+        ...((changelist.artifactStateTree as Record<string, number>) ?? {}),
       };
 
       for (const mod of normalizedMods) {
@@ -139,6 +156,17 @@ export const artifactRouter = createTRPCRouter({
         changelistNumber: z.number(),
       }),
     )
+    .output(
+      z.array(
+        z.object({
+          id: z.string(),
+          fileId: z.string(),
+          path: z.string(),
+          size: z.number(),
+          createdAt: z.date(),
+        }),
+      ),
+    )
     .query(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
@@ -170,6 +198,7 @@ export const artifactRouter = createTRPCRouter({
         changelistNumbers: z.array(z.number()),
       }),
     )
+    .output(z.array(z.number()))
     .query(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 

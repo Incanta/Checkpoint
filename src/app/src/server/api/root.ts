@@ -13,10 +13,10 @@ import { versionRouter } from "./routers/version";
 import { labelRouter } from "./routers/label";
 import { pullRequestRouter } from "./routers/pullRequest";
 import { licenseRouter } from "./routers/license";
-import { shelfRouter } from "./routers/shelf";
-import { artifactRouter } from "./routers/artifact";
 import { issueRouter } from "./routers/issue";
 import { notificationRouter } from "./routers/notification";
+import { shelfRouter } from "./routers/shelf";
+import { artifactRouter } from "./routers/artifact";
 import { emailRouter } from "./routers/email";
 
 /**
@@ -39,10 +39,10 @@ export const appRouter = createTRPCRouter({
   label: labelRouter,
   pullRequest: pullRequestRouter,
   license: licenseRouter,
-  shelf: shelfRouter,
-  artifact: artifactRouter,
   issue: issueRouter,
   notification: notificationRouter,
+  shelf: shelfRouter,
+  artifact: artifactRouter,
   email: emailRouter,
 });
 
