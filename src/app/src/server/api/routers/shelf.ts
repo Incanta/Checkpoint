@@ -4,7 +4,7 @@ import config from "@incanta/config";
 import njwt from "njwt";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { FileChangeType, type Prisma, RepoAccess } from "@prisma/client";
+import { FileChangeType, Prisma, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
 import { assertFeature } from "~/server/license-client";
@@ -275,18 +275,44 @@ export const shelfRouter = createTRPCRouter({
       const stateTree: Record<string, number> = {};
       const fileChangesData: { fileId: string; type: string }[] = [];
 
-      for (const mod of input.modifications) {
-        if (mod.delete) continue;
+      const nonDeleteMods = input.modifications.filter((mod) => !mod.delete);
+      const normalizedPaths = nonDeleteMods.map((mod) =>
+        mod.path.replaceAll("\\\\", "/"),
+      );
 
-        const modPath = mod.path.replaceAll("\\", "/");
-        let file = await ctx.db.file.findFirst({
-          where: { repoId: input.repoId, path: modPath },
+      const existingFiles = await ctx.db.file.findMany({
+        where: {
+          repoId: input.repoId,
+          path: { in: normalizedPaths },
+        },
+      });
+
+      const existingPathSet = new Set(existingFiles.map((f) => f.path));
+      const newFilePaths = normalizedPaths.filter(
+        (p) => !existingPathSet.has(p),
+      );
+
+      if (newFilePaths.length > 0) {
+        await ctx.db.file.createMany({
+          data: newFilePaths.map((path) => ({
+            repoId: input.repoId,
+            path,
+          })),
         });
-        if (!file) {
-          file = await ctx.db.file.create({
-            data: { repoId: input.repoId, path: modPath },
-          });
-        }
+
+        const newFiles = await ctx.db.file.findMany({
+          where: {
+            repoId: input.repoId,
+            path: { in: newFilePaths },
+          },
+        });
+        existingFiles.push(...newFiles);
+      }
+
+      for (const mod of nonDeleteMods) {
+        const modPath = mod.path.replaceAll("\\\\", "/");
+        const file = existingFiles.find((f) => f.path === modPath);
+        if (!file) continue;
 
         stateTree[file.id] = nextNumber;
         fileChangesData.push({ fileId: file.id, type: "ADD" });
@@ -382,25 +408,60 @@ export const shelfRouter = createTRPCRouter({
         number
       >;
 
-      for (const mod of input.modifications) {
-        const modPath = mod.path.replaceAll("\\", "/");
-        let file = await ctx.db.file.findFirst({
-          where: { repoId: input.repoId, path: modPath },
+      const normalizedPaths = input.modifications.map((mod) =>
+        mod.path.replaceAll("\\\\", "/"),
+      );
+
+      const existingFiles = await ctx.db.file.findMany({
+        where: {
+          repoId: input.repoId,
+          path: { in: normalizedPaths },
+        },
+      });
+
+      const existingPathSet = new Set(existingFiles.map((f) => f.path));
+      const newFilePaths = normalizedPaths.filter(
+        (p) => !existingPathSet.has(p),
+      );
+
+      if (newFilePaths.length > 0) {
+        await ctx.db.file.createMany({
+          data: newFilePaths.map((path) => ({
+            repoId: input.repoId,
+            path,
+          })),
         });
-        if (!file) {
-          file = await ctx.db.file.create({
-            data: { repoId: input.repoId, path: modPath },
-          });
-        }
+
+        const newFiles = await ctx.db.file.findMany({
+          where: {
+            repoId: input.repoId,
+            path: { in: newFilePaths },
+          },
+        });
+        existingFiles.push(...newFiles);
+      }
+
+      const upsertEntries: { fileId: string }[] = [];
+      for (const mod of input.modifications) {
+        const modPath = mod.path.replaceAll("\\\\", "/");
+        const file = existingFiles.find((f) => f.path === modPath);
+        if (!file) continue;
 
         stateTree[file.id] = shelf.changelistNumber;
+        upsertEntries.push({ fileId: file.id });
+      }
 
-        // Upsert file change
-        await ctx.db.shelfFileChange.upsert({
-          where: { shelfId_fileId: { shelfId: shelf.id, fileId: file.id } },
-          create: { shelfId: shelf.id, fileId: file.id, type: "ADD" },
-          update: { type: "MODIFY" },
+      if (upsertEntries.length > 0) {
+        const values = upsertEntries.map((entry) => {
+          const id = crypto.randomUUID();
+          return Prisma.sql`(${id}, ${shelf.id}, ${entry.fileId}, ${"ADD"})`;
         });
+
+        await ctx.db.$executeRaw`
+          INSERT INTO "ShelfFileChange" ("id", "shelfId", "fileId", "type")
+          VALUES ${Prisma.join(values)}
+          ON CONFLICT ("shelfId", "fileId") DO UPDATE SET "type" = ${"MODIFY"}
+        `;
       }
 
       // Update the shelf and its dangling CL with new version index
@@ -707,16 +768,32 @@ export const shelfRouter = createTRPCRouter({
         },
       });
 
+      const existingPathSet = new Set(existingFiles.map((f) => f.path));
+      const newFilePaths = normalizedMods
+        .filter((mod) => !mod.delete)
+        .map((mod) => mod.path)
+        .filter((p) => !existingPathSet.has(p));
+
+      if (newFilePaths.length > 0) {
+        await ctx.db.file.createMany({
+          data: newFilePaths.map((path) => ({
+            repoId: input.repoId,
+            path,
+          })),
+        });
+
+        const newFiles = await ctx.db.file.findMany({
+          where: {
+            repoId: input.repoId,
+            path: { in: newFilePaths },
+          },
+        });
+        existingFiles.push(...newFiles);
+      }
+
       const fileIdsForPaths: Record<string, string | undefined> = {};
       for (const mod of normalizedMods) {
-        let existingFile = existingFiles.find((f) => f.path === mod.path);
-
-        if (!existingFile && !mod.delete) {
-          existingFile = await ctx.db.file.create({
-            data: { repoId: input.repoId, path: mod.path },
-          });
-        }
-
+        const existingFile = existingFiles.find((f) => f.path === mod.path);
         fileIdsForPaths[mod.path] = existingFile?.id;
       }
 
@@ -769,18 +846,24 @@ export const shelfRouter = createTRPCRouter({
 
       if (existingShelf?.status === "ACTIVE") {
         // Update existing shelf with new version index and state
-        for (const mod of normalizedMods) {
-          const fileId = fileIdsForPaths[mod.path];
-          if (!fileId) continue;
-          await ctx.db.shelfFileChange.upsert({
-            where: { shelfId_fileId: { shelfId: existingShelf.id, fileId } },
-            create: {
-              shelfId: existingShelf.id,
-              fileId,
-              type: mod.delete ? "DELETE" : "MODIFY",
-            },
-            update: { type: mod.delete ? "DELETE" : "MODIFY" },
+        const upsertEntries = normalizedMods
+          .filter((mod) => fileIdsForPaths[mod.path])
+          .map((mod) => ({
+            fileId: fileIdsForPaths[mod.path]!,
+            type: mod.delete ? "DELETE" : "MODIFY",
+          }));
+
+        if (upsertEntries.length > 0) {
+          const values = upsertEntries.map((entry) => {
+            const id = crypto.randomUUID();
+            return Prisma.sql`(${id}, ${existingShelf.id}, ${entry.fileId}, ${entry.type})`;
           });
+
+          await ctx.db.$executeRaw`
+            INSERT INTO "ShelfFileChange" ("id", "shelfId", "fileId", "type")
+            VALUES ${Prisma.join(values)}
+            ON CONFLICT ("shelfId", "fileId") DO UPDATE SET "type" = excluded."type"
+          `;
         }
 
         await ctx.db.shelf.update({

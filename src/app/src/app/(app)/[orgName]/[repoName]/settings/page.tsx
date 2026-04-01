@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import { useParams, useRouter, notFound } from "next/navigation";
 import { api } from "~/trpc/react";

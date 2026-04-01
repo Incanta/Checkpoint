@@ -1,15 +1,7 @@
 "use client";
 
+import type { LicenseFeature } from "~/server/license-utils";
 import { api } from "~/trpc/react";
-
-export type LicenseFeature =
-  | "pullRequests"
-  | "reviews"
-  | "shelves"
-  | "hordeIntegration"
-  | "artifacts"
-  | "dataReplicas"
-  | "enterpriseSaml";
 
 export function useLicenseTier(orgId: string | undefined) {
   const { data, isLoading } = api.license.getEffectiveTier.useQuery(

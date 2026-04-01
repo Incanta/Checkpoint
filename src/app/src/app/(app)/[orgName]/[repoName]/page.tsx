@@ -38,7 +38,7 @@ function FileIcon() {
 function ArtifactBadge() {
   return (
     <span
-      className="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium leading-none"
+      className="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] leading-none font-medium"
       style={{
         backgroundColor: "var(--color-warning-bg, #332b00)",
         color: "var(--color-warning, #f0c000)",

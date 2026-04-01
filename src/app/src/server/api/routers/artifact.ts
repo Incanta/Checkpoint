@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { RepoAccess } from "@prisma/client";
+import { Prisma, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
 import { assertFeature } from "~/server/license-client";
@@ -67,16 +67,32 @@ export const artifactRouter = createTRPCRouter({
         },
       });
 
+      const existingPathSet = new Set(existingFiles.map((f) => f.path));
+      const newFilePaths = normalizedMods
+        .filter((mod) => !mod.delete)
+        .map((mod) => mod.path)
+        .filter((p) => !existingPathSet.has(p));
+
+      if (newFilePaths.length > 0) {
+        await ctx.db.file.createMany({
+          data: newFilePaths.map((path) => ({
+            repoId: input.repoId,
+            path,
+          })),
+        });
+
+        const newFiles = await ctx.db.file.findMany({
+          where: {
+            repoId: input.repoId,
+            path: { in: newFilePaths },
+          },
+        });
+        existingFiles.push(...newFiles);
+      }
+
       const fileIdsForPaths: Record<string, string | undefined> = {};
       for (const mod of normalizedMods) {
-        let existingFile = existingFiles.find((f) => f.path === mod.path);
-
-        if (!existingFile && !mod.delete) {
-          existingFile = await ctx.db.file.create({
-            data: { repoId: input.repoId, path: mod.path },
-          });
-        }
-
+        const existingFile = existingFiles.find((f) => f.path === mod.path);
         fileIdsForPaths[mod.path] = existingFile?.id;
       }
 
@@ -104,39 +120,38 @@ export const artifactRouter = createTRPCRouter({
         },
       });
 
-      // Upsert ArtifactFile records
-      for (const mod of normalizedMods) {
-        const fileId = fileIdsForPaths[mod.path];
-        if (!fileId) continue;
+      // Batch upsert/delete ArtifactFile records
+      const deleteFileIds = normalizedMods
+        .filter((mod) => mod.delete && fileIdsForPaths[mod.path])
+        .map((mod) => fileIdsForPaths[mod.path]!);
 
-        if (mod.delete) {
-          await ctx.db.artifactFile.deleteMany({
-            where: {
-              repoId: input.repoId,
-              changelistNumber: input.changelistNumber,
-              fileId,
-            },
-          });
-        } else {
-          await ctx.db.artifactFile.upsert({
-            where: {
-              repoId_changelistNumber_fileId: {
-                repoId: input.repoId,
-                changelistNumber: input.changelistNumber,
-                fileId,
-              },
-            },
-            create: {
-              repoId: input.repoId,
-              changelistNumber: input.changelistNumber,
-              fileId,
-              size: BigInt(0), // Size determined by longtail; updated if provided
-            },
-            update: {
-              size: BigInt(0),
-            },
-          });
-        }
+      if (deleteFileIds.length > 0) {
+        await ctx.db.artifactFile.deleteMany({
+          where: {
+            repoId: input.repoId,
+            changelistNumber: input.changelistNumber,
+            fileId: { in: deleteFileIds },
+          },
+        });
+      }
+
+      const upsertMods = normalizedMods.filter(
+        (mod) => !mod.delete && fileIdsForPaths[mod.path],
+      );
+
+      if (upsertMods.length > 0) {
+        const now = new Date().toISOString();
+        const values = upsertMods.map((mod) => {
+          const fileId = fileIdsForPaths[mod.path]!;
+          const id = crypto.randomUUID();
+          return Prisma.sql`(${id}, ${now}, ${input.repoId}, ${input.changelistNumber}, ${fileId}, ${BigInt(0)})`;
+        });
+
+        await ctx.db.$executeRaw`
+          INSERT INTO "ArtifactFile" ("id", "createdAt", "repoId", "changelistNumber", "fileId", "size")
+          VALUES ${Prisma.join(values)}
+          ON CONFLICT ("repoId", "changelistNumber", "fileId") DO UPDATE SET "size" = ${BigInt(0)}
+        `;
       }
 
       void recordActivity(ctx.db, {
