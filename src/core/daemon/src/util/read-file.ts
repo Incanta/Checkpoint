@@ -1,4 +1,3 @@
-import config from "@incanta/config";
 import { existsSync, promises as fs } from "fs";
 import path from "path";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
@@ -9,6 +8,7 @@ import {
   GetLogLevel,
   type LongtailLogLevel,
 } from "@checkpointvcs/longtail-addon";
+import { DaemonConfig } from "../daemon-config.js";
 
 /** File extensions considered binary (not diffable as text). */
 const BINARY_EXTENSIONS = new Set([
@@ -100,12 +100,13 @@ export interface ReadFileResult {
 export async function readFileFromVersion(
   options: ReadFileFromVersionOptions & { cachePath: string },
 ): Promise<ReadFileResult> {
+  const daemonConfig = await DaemonConfig.Get();
   const {
     workspace,
     filePath,
     versionIndexName,
     cachePath,
-    logLevel = config.get<LongtailLogLevel>("longtail.log-level"),
+    logLevel = daemonConfig.longtail.logLevel as LongtailLogLevel,
   } = options;
 
   const client = await CreateApiClientAuth(workspace.daemonId);

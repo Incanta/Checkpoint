@@ -1,11 +1,5 @@
 secret: "betterauthsecretthatsatleast32characterslong"
 
-api-tokens:
-  signing-key: "secret"
-
-jwt:
-  secret: "secret"
-
 dev:
   # WARNING: Never enable this in production!
   # This allows automated tests to create API tokens without OAuth flow

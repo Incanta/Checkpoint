@@ -1,9 +1,0 @@
-target-chunk-size: 32768 # 32KB
-target-block-size: 8388608 # 8MB
-max-chunks-per-block: 1024
-min-block-usage-percent: 80
-hashing-algo: "blake3"
-compression-algo: "zstd"
-enable-mmap-indexing: false
-enable-mmap-block-store: false
-log-level: "off"

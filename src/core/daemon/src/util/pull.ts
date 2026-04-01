@@ -1,4 +1,3 @@
-import config from "@incanta/config";
 import {
   DiffState,
   CreateApiClientAuth,
@@ -22,6 +21,7 @@ import { autoMergeText, type AutoMergeResult } from "./auto-merge.js";
 import { existsSync, promises as fs } from "fs";
 import path from "path";
 import { Logger } from "../logging.js";
+import { DaemonConfig } from "../daemon-config.js";
 
 /**
  * Files that were auto-merged during pull.
@@ -39,12 +39,13 @@ export async function pull(
   orgId: string,
   changelistNumber: number | null,
   filePaths: string[] | null = null, // TODO: implement partial pulls
-  logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
-    "longtail.log-level",
-  ),
+  logLevel?: LongtailLogLevel,
   onStep?: (step: string) => void,
   onProgress?: (step: string, done: number, total: number) => void,
 ): Promise<PullMergeResult> {
+  const daemonConfig = await DaemonConfig.Get();
+  const resolvedLogLevel =
+    logLevel ?? (daemonConfig.longtail.logLevel as LongtailLogLevel);
   const client = await CreateApiClientAuth(workspace.daemonId);
 
   const storageTokenResponse = await client.storage.getToken.query({
@@ -180,10 +181,8 @@ export async function pull(
 
     const handle = pullAsync({
       versionIndex,
-      enableMmapIndexing: config.get<boolean>("longtail.enable-mmap-indexing"),
-      enableMmapBlockStore: config.get<boolean>(
-        "longtail.enable-mmap-block-store",
-      ),
+      enableMmapIndexing: daemonConfig.longtail.enableMmapIndexing,
+      enableMmapBlockStore: daemonConfig.longtail.enableMmapBlockStore,
       localRootPath: workspace.localPath,
       remoteBasePath: `/${orgId}/${workspace.repoId}`,
       filerUrl,
@@ -197,7 +196,7 @@ export async function pull(
         r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
         r2BucketName: storageTokenResponse.r2Credentials.bucket,
       }),
-      logLevel: GetLogLevel(logLevel),
+      logLevel: GetLogLevel(resolvedLogLevel),
     });
 
     if (!handle) {
@@ -266,12 +265,8 @@ export async function pull(
 
         const handle = pullAsync({
           versionIndex: artVersionIndex,
-          enableMmapIndexing: config.get<boolean>(
-            "longtail.enable-mmap-indexing",
-          ),
-          enableMmapBlockStore: config.get<boolean>(
-            "longtail.enable-mmap-block-store",
-          ),
+          enableMmapIndexing: daemonConfig.longtail.enableMmapIndexing,
+          enableMmapBlockStore: daemonConfig.longtail.enableMmapBlockStore,
           localRootPath: workspace.localPath,
           remoteBasePath: `/${orgId}/${workspace.repoId}`,
           filerUrl,
@@ -286,7 +281,7 @@ export async function pull(
             r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
             r2BucketName: storageTokenResponse.r2Credentials.bucket,
           }),
-          logLevel: GetLogLevel(logLevel),
+          logLevel: GetLogLevel(resolvedLogLevel),
         });
 
         if (!handle) {
