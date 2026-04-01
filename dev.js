@@ -4,6 +4,7 @@
  * Development script to start all Checkpoint services
  * Usage:
  *   node dev.js              - Start all services
+ *   node dev.js --server     - Start only the server services
  *   node dev.js --background - Start all services in the background (detached)
  *   node dev.js -b           - Same as --background
  *   node dev.js --test       - Start with NODE_CONFIG_ENV=test for the app service
@@ -441,6 +442,12 @@ const args = process.argv.slice(2);
 const command = args.find((arg) => !arg.startsWith("-"));
 const backgroundMode = args.includes("--background") || args.includes("-b");
 const testMode = args.includes("--test") || args.includes("-t");
+const serverMode = args.includes("--server");
+
+// If --server flag is provided, filter services to only server-related ones
+if (serverMode) {
+  services = services.filter((s) => s.name === "app" || s.name === "server");
+}
 
 // In test mode, inject NODE_CONFIG_ENV=test into the app service
 if (testMode) {
