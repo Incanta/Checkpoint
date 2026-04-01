@@ -1,0 +1,18 @@
+#!/bin/bash
+# macOS .pkg preinstall — Stop existing daemon before upgrade
+set -e
+
+PLIST_NAME="com.checkpointvcs.daemon"
+CURRENT_USER="${USER}"
+
+if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
+    USER_HOME=$(eval echo "~$CURRENT_USER")
+    PLIST_PATH="$USER_HOME/Library/LaunchAgents/${PLIST_NAME}.plist"
+
+    if [ -f "$PLIST_PATH" ]; then
+        sudo -u "$CURRENT_USER" launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        echo "Stopped existing daemon service for upgrade"
+    fi
+fi
+
+exit 0

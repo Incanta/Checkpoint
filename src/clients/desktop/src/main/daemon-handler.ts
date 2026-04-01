@@ -33,6 +33,7 @@ import {
   dashboardOrgsAtom,
   dashboardReposAtom,
 } from "../common/state/dashboard";
+import { updateAtom } from "../common/state/update";
 import type { File, Workspace } from "@checkpointvcs/daemon";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -340,6 +341,9 @@ export default class DaemonHandler {
 
     // File context menu handlers
     this.initFileContextMenuHandlers();
+
+    // Auto-update handlers
+    this.initUpdateHandlers();
   }
 
   private async handleLogin(data: Channels["auth:login"]): Promise<void> {
@@ -2268,6 +2272,139 @@ export default class DaemonHandler {
       } catch (error) {
         console.error("Failed to delete:", error);
       }
+    });
+  }
+
+  private initUpdateHandlers(): void {
+    // Poll daemon for update status periodically
+    const pollUpdateStatus = async (): Promise<void> => {
+      try {
+        const client = await CreateDaemonClient();
+        const status = await client.updater.getStatus.query();
+
+        const current = store.get(updateAtom);
+        if (
+          current.dismissed &&
+          status.latestVersion === current.latestVersion
+        ) {
+          return; // User dismissed this version, don't re-show
+        }
+
+        const newStatus = status.updateAvailable ? "available" : "idle";
+        store.set(updateAtom, {
+          available: status.updateAvailable,
+          currentVersion: status.currentVersion,
+          latestVersion: status.latestVersion,
+          status: status.downloading
+            ? "downloading"
+            : status.downloadedInstallerPath
+              ? "ready"
+              : newStatus,
+          downloadProgress: status.downloadProgress,
+          errorMessage: status.lastError,
+          dismissed: current.dismissed,
+        });
+      } catch {
+        // Daemon might not be running yet
+      }
+    };
+
+    // Check every 30 minutes (daemon itself checks GitHub every 6 hours)
+    setInterval(() => void pollUpdateStatus(), 30 * 60 * 1000);
+    // Initial check after 10 seconds to let daemon start
+    setTimeout(() => void pollUpdateStatus(), 10_000);
+
+    ipcOn(this.ipcMain, "update:check", async () => {
+      try {
+        const client = await CreateDaemonClient();
+        const status = await client.updater.checkNow.mutate();
+        store.set(updateAtom, {
+          available: status.updateAvailable,
+          currentVersion: status.currentVersion,
+          latestVersion: status.latestVersion,
+          status: status.updateAvailable ? "available" : "idle",
+          downloadProgress: 0,
+          errorMessage: status.lastError,
+          dismissed: false,
+        });
+      } catch (err: any) {
+        const current = store.get(updateAtom);
+        store.set(updateAtom, {
+          ...current,
+          status: "error",
+          errorMessage: err?.message ?? "Update check failed",
+        });
+      }
+    });
+
+    ipcOn(this.ipcMain, "update:download", async () => {
+      try {
+        store.set(updateAtom, {
+          ...store.get(updateAtom),
+          status: "downloading",
+          downloadProgress: 0,
+        });
+
+        const client = await CreateDaemonClient();
+
+        // Poll download progress
+        const progressInterval = setInterval(async () => {
+          try {
+            const status = await client.updater.getStatus.query();
+            const current = store.get(updateAtom);
+            store.set(updateAtom, {
+              ...current,
+              downloadProgress: status.downloadProgress,
+            });
+          } catch {
+            // ignore polling errors
+          }
+        }, 1000);
+
+        const result = await client.updater.downloadUpdate.mutate();
+        clearInterval(progressInterval);
+
+        const current = store.get(updateAtom);
+        if (result.success) {
+          store.set(updateAtom, {
+            ...current,
+            status: "ready",
+            downloadProgress: 100,
+          });
+        } else {
+          store.set(updateAtom, {
+            ...current,
+            status: "error",
+            errorMessage: "Download failed",
+          });
+        }
+      } catch (err: any) {
+        const current = store.get(updateAtom);
+        store.set(updateAtom, {
+          ...current,
+          status: "error",
+          errorMessage: err?.message ?? "Download failed",
+        });
+      }
+    });
+
+    ipcOn(this.ipcMain, "update:apply", async () => {
+      try {
+        const client = await CreateDaemonClient();
+        await client.updater.applyUpdate.mutate();
+      } catch (err: any) {
+        const current = store.get(updateAtom);
+        store.set(updateAtom, {
+          ...current,
+          status: "error",
+          errorMessage: err?.message ?? "Failed to apply update",
+        });
+      }
+    });
+
+    ipcOn(this.ipcMain, "update:dismiss", async () => {
+      const current = store.get(updateAtom);
+      store.set(updateAtom, { ...current, dismissed: true });
     });
   }
 }

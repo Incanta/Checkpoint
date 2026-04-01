@@ -7,6 +7,7 @@ import { workspacesRouter } from "./routers/workspace/index.js";
 import { orgRouter } from "./routers/org.js";
 import { repoRouter } from "./routers/repo.js";
 import { jobsRouter } from "./routers/jobs.js";
+import { updaterRouter } from "./routers/updater.js";
 import net from "net";
 import path from "path";
 import { homedir } from "os";
@@ -38,6 +39,7 @@ const appRouter = router({
   orgs: orgRouter,
   repos: repoRouter,
   jobs: jobsRouter,
+  updater: updaterRouter,
 });
 
 // Export type router type signature,

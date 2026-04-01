@@ -1,21 +1,38 @@
 // @see - https://www.electron.build/configuration/configuration
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
-  "appId": "YourAppID",
+  "appId": "com.checkpointvcs.desktop",
   "asar": true,
-  "productName": "YourAppName",
+  "productName": "Checkpoint",
   "directories": {
     "output": "release/${version}"
   },
   "files": [
     "dist"
   ],
-  "mac": {
-    "target": [
-      "dmg"
-    ],
-    "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
-  },
+  "extraResources": [
+    {
+      "from": "../../core/daemon/dist-sea",
+      "to": "daemon",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "build-resources/cli",
+      "to": "cli",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../../../installer/service",
+      "to": "service",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
   "win": {
     "target": [
       {
@@ -25,18 +42,100 @@
         ]
       }
     ],
-    "artifactName": "${productName}-Windows-${version}-Setup.${ext}"
+    "artifactName": "Checkpoint-Windows-x64-${version}-Setup.${ext}",
+    "icon": "public/icon.ico",
+    "signingHashAlgorithms": [
+      "sha256"
+    ],
+    "certificateFile": "${env.WINDOWS_CERT_FILE}",
+    "certificatePassword": "${env.WINDOWS_CERT_PASSWORD}"
   },
   "nsis": {
     "oneClick": false,
-    "perMachine": false,
+    "perMachine": true,
     "allowToChangeInstallationDirectory": true,
-    "deleteAppDataOnUninstall": false
+    "deleteAppDataOnUninstall": false,
+    "include": "../../../installer/nsis/installer.nsh",
+    "installerIcon": "public/icon.ico",
+    "uninstallerIcon": "public/icon.ico",
+    "artifactName": "Checkpoint-Windows-x64-${version}-Setup.${ext}"
   },
+  "mac": {
+    "target": [
+      {
+        "target": "pkg",
+        "arch": [
+          "x64",
+          "arm64"
+        ]
+      }
+    ],
+    "artifactName": "Checkpoint-macOS-${arch}-${version}.${ext}",
+    "icon": "public/icon.icns",
+    "category": "public.app-category.developer-tools",
+    "identity": "${env.MACOS_SIGNING_IDENTITY}",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "../../../installer/macos/entitlements.plist",
+    "entitlementsInherit": "../../../installer/macos/entitlements.plist"
+  },
+  "pkg": {
+    "installLocation": "/Applications",
+    "allowAnywhere": true,
+    "allowCurrentUserHome": true,
+    "allowRootDirectory": false,
+    "scripts": "../../../installer/macos/scripts"
+  },
+  "afterSign": "../../../installer/macos/notarize.cjs",
   "linux": {
     "target": [
-      "AppImage"
+      {
+        "target": "deb",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "rpm",
+        "arch": [
+          "x64"
+        ]
+      }
     ],
-    "artifactName": "${productName}-Linux-${version}.${ext}"
+    "artifactName": "Checkpoint-Linux-amd64-${version}.${ext}",
+    "icon": "public/icons",
+    "category": "Development",
+    "desktop": {
+      "Name": "Checkpoint",
+      "Comment": "Checkpoint Version Control System",
+      "Categories": "Development;VersionControl;"
+    }
+  },
+  "deb": {
+    "depends": [
+      "libgtk-3-0",
+      "libnotify4",
+      "libnss3",
+      "libxss1",
+      "libxtst6",
+      "xdg-utils",
+      "libatspi2.0-0",
+      "libuuid1"
+    ],
+    "afterInstall": "../../../installer/scripts/postinstall-linux.sh",
+    "afterRemove": "../../../installer/scripts/preremove-linux.sh"
+  },
+  "rpm": {
+    "depends": [
+      "gtk3",
+      "libnotify",
+      "nss",
+      "libXScrnSaver",
+      "libXtst",
+      "xdg-utils",
+      "at-spi2-core"
+    ],
+    "afterInstall": "../../../installer/scripts/postinstall-linux.sh",
+    "afterRemove": "../../../installer/scripts/preremove-linux.sh"
   }
 }

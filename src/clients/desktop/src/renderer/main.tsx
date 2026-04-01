@@ -13,6 +13,7 @@ import Dashboard from "./pages/Dashboard/Dashboard";
 import Workspace from "./pages/Workspace/Workspace";
 import FileHistory from "./components/FileHistory";
 import ChangelistChanges from "./components/ChangelistChanges";
+import UpdateNotification from "./components/UpdateNotification";
 
 window.electron.ipcRenderer.on("set-renderer-url", (data: { url: string }) => {
   window.location.href = data.url;
@@ -49,6 +50,7 @@ if (popoutType === "file-history") {
             <Route path="/login" element={<Login />} />
             <Route path="/workspace" element={<Workspace />} />
           </Routes>
+          <UpdateNotification />
         </Router>
       </Provider>
     </React.StrictMode>,

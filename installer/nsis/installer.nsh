@@ -1,0 +1,73 @@
+; installer.nsh — NSIS custom script for Checkpoint installer
+; Handles daemon service registration, CLI PATH setup, and cleanup
+
+!include "MUI2.nsh"
+!include "nsDialogs.nsh"
+!include "LogicLib.nsh"
+
+; Custom variables
+Var DAEMON_EXE
+
+; ============================================================
+; Installation Sections
+; ============================================================
+
+Section "Daemon Service" SEC_DAEMON
+    ; Copy daemon files
+    SetOutPath "$INSTDIR\daemon"
+    File /r "${BUILD_RESOURCES_DIR}\daemon\*.*"
+
+    StrCpy $DAEMON_EXE "$INSTDIR\daemon\checkpoint-daemon.exe"
+
+    ; Stop existing service if running
+    nsExec::ExecToLog 'sc.exe stop CheckpointDaemon'
+    Sleep 2000
+    nsExec::ExecToLog 'sc.exe delete CheckpointDaemon'
+    Sleep 1000
+
+    ; Install as Windows Service running as current user
+    nsExec::ExecToLog 'sc.exe create CheckpointDaemon binPath= "$DAEMON_EXE" DisplayName= "Checkpoint VCS Daemon" start= auto'
+    nsExec::ExecToLog 'sc.exe description CheckpointDaemon "Checkpoint version control system daemon"'
+    nsExec::ExecToLog 'sc.exe failure CheckpointDaemon reset= 86400 actions= restart/5000/restart/10000/restart/30000'
+
+    ; Start the service
+    nsExec::ExecToLog 'sc.exe start CheckpointDaemon'
+SectionEnd
+
+Section "CLI Tools" SEC_CLI
+    ; Copy CLI binaries
+    SetOutPath "$INSTDIR\cli"
+    File "${BUILD_RESOURCES_DIR}\cli\checkpoint.exe"
+    File "${BUILD_RESOURCES_DIR}\cli\chk.exe"
+
+    ; Add CLI directory to user PATH
+    EnVar::AddValue "PATH" "$INSTDIR\cli"
+    Pop $0
+    ${If} $0 != 0
+        DetailPrint "Warning: Could not add CLI to PATH (error: $0)"
+    ${EndIf}
+SectionEnd
+
+; ============================================================
+; Uninstallation Sections
+; ============================================================
+
+Section "un.Daemon Service"
+    ; Stop and remove the Windows service
+    nsExec::ExecToLog 'sc.exe stop CheckpointDaemon'
+    Sleep 2000
+    nsExec::ExecToLog 'sc.exe delete CheckpointDaemon'
+
+    ; Remove daemon files
+    RMDir /r "$INSTDIR\daemon"
+SectionEnd
+
+Section "un.CLI Tools"
+    ; Remove CLI directory from PATH
+    EnVar::DeleteValue "PATH" "$INSTDIR\cli"
+
+    ; Remove CLI files
+    Delete "$INSTDIR\cli\checkpoint.exe"
+    Delete "$INSTDIR\cli\chk.exe"
+    RMDir "$INSTDIR\cli"
+SectionEnd
