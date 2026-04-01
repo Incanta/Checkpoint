@@ -13,7 +13,7 @@ interface EmailMessage {
 
 let _transporter: Transporter | null = null;
 
-function getTransporter(): Transporter | null {
+async function getTransporter(): Promise<Transporter | null> {
   if (_transporter) return _transporter;
 
   const enabled = config.get<boolean>("email.enabled");
@@ -23,7 +23,7 @@ function getTransporter(): Transporter | null {
   const port = config.get<number>("email.smtp.port");
   const secure = config.get<boolean>("email.smtp.secure");
   const user = config.get<string>("email.smtp.auth.user");
-  const pass = config.get<string>("email.smtp.auth.pass");
+  const pass = await config.getWithSecrets<string>("email.smtp.auth.pass");
 
   if (!host) return null;
 
@@ -45,7 +45,7 @@ function getFrom(): { name: string; address: string } {
 }
 
 export async function sendEmail(message: EmailMessage): Promise<boolean> {
-  const transporter = getTransporter();
+  const transporter = await getTransporter();
   if (!transporter) {
     console.warn("[email] Email is disabled or not configured — skipping send");
     return false;
