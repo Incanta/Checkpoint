@@ -5,9 +5,9 @@ name: CLI Integration Test
 
 on:
   push:
-    branches: [main]
+    branches: [main, premium]
   pull_request:
-    branches: [main]
+    branches: [main, premium]
   workflow_dispatch:
 
 jobs:
