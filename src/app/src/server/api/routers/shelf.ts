@@ -28,6 +28,17 @@ export const shelfRouter = createTRPCRouter({
           status: z.enum(["ACTIVE", "SUBMITTED", "DELETED"]),
           submittedToBranch: z.string().nullable(),
           submittedAt: z.date().nullable(),
+
+          author: z.object({
+            id: z.string(),
+            name: z.string().nullable(),
+            email: z.string(),
+            image: z.string().nullable(),
+          }),
+
+          _count: z.object({
+            fileChanges: z.number(),
+          }),
         }),
       ),
     )
@@ -61,6 +72,23 @@ export const shelfRouter = createTRPCRouter({
         status: z.enum(["ACTIVE", "SUBMITTED", "DELETED"]),
         submittedToBranch: z.string().nullable(),
         submittedAt: z.date().nullable(),
+
+        author: z.object({
+          id: z.string(),
+          name: z.string().nullable(),
+          email: z.string(),
+          image: z.string().nullable(),
+        }),
+
+        fileChanges: z.array(
+          z.object({
+            file: z.object({
+              id: z.string(),
+              path: z.string(),
+            }),
+            type: z.string(),
+          }),
+        ),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -101,6 +129,23 @@ export const shelfRouter = createTRPCRouter({
         status: z.enum(["ACTIVE", "SUBMITTED", "DELETED"]),
         submittedToBranch: z.string().nullable(),
         submittedAt: z.date().nullable(),
+
+        author: z.object({
+          id: z.string(),
+          name: z.string().nullable(),
+          email: z.string(),
+          image: z.string().nullable(),
+        }),
+
+        fileChanges: z.array(
+          z.object({
+            file: z.object({
+              id: z.string(),
+              path: z.string(),
+            }),
+            type: z.string(),
+          }),
+        ),
       }),
     )
     .mutation(async ({ ctx, input }) => {

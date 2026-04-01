@@ -81,7 +81,7 @@ let services = [
 
 // If --server flag is provided, filter services to only server-related ones
 if (serverMode) {
-  services = services.filter((s) => s.name === "daemon" || s.name === "server");
+  services = services.filter((s) => s.name === "app" || s.name === "server");
 }
 
 // Track running processes and health status

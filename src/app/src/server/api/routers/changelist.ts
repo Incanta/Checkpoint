@@ -8,6 +8,7 @@ import {
   getUserAndRepoWithAccess,
 } from "../auth-utils";
 import { recordActivity } from "../activity";
+import type { InputJsonValue } from "@prisma/client/runtime/library";
 
 export const changelistRouter = createTRPCRouter({
   getChangelist: protectedProcedure
@@ -355,20 +356,35 @@ export const changelistRouter = createTRPCRouter({
         },
       });
 
+      // Batch-create any new file entries that don't already exist
+      const existingPathSet = new Set(modifiedFiles.map((f) => f.path));
+      const newFilePaths = input.modifications
+        .filter((mod) => !mod.delete)
+        .map((mod) => mod.path.replaceAll("\\", "/"))
+        .filter((p) => !existingPathSet.has(p));
+
+      if (newFilePaths.length > 0) {
+        await ctx.db.file.createMany({
+          data: newFilePaths.map((path) => ({
+            repoId: input.repoId,
+            path,
+          })),
+        });
+
+        // Re-fetch to get the newly created file records with their IDs
+        const newFiles = await ctx.db.file.findMany({
+          where: {
+            repoId: input.repoId,
+            path: { in: newFilePaths },
+          },
+        });
+        modifiedFiles.push(...newFiles);
+      }
+
       const fileIdsForPaths: Record<string, string | undefined> = {};
       for (const mod of input.modifications) {
         const modPath = mod.path.replaceAll("\\", "/");
-        let existingFile = modifiedFiles.find((f) => f.path === modPath);
-
-        if (!existingFile && !mod.delete) {
-          // Create new file entry
-          existingFile = await ctx.db.file.create({
-            data: {
-              repoId: input.repoId,
-              path: modPath,
-            },
-          });
-        }
+        const existingFile = modifiedFiles.find((f) => f.path === modPath);
 
         fileIdsForPaths[mod.path] = existingFile?.id;
 
@@ -381,7 +397,7 @@ export const changelistRouter = createTRPCRouter({
         }
       }
 
-      // Create the changelist
+      // Create the changelist (inherit artifact state from parent)
       const changelist = await ctx.db.changelist.create({
         data: {
           number: nextNumber,
@@ -389,6 +405,9 @@ export const changelistRouter = createTRPCRouter({
           versionIndex: input.versionIndex,
           parentNumber: branch.headNumber,
           stateTree: stateTree,
+          artifactVersionIndex: parentChangelist.artifactVersionIndex,
+          artifactStateTree:
+            parentChangelist.artifactStateTree as InputJsonValue,
           repoId: input.repoId,
           userId: ctx.session.user.id,
         },

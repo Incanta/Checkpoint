@@ -51,5 +51,24 @@
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.27.0"
+  },
+  "resolutions": {
+    "@incanta/config": "^2.1.10",
+    "@trpc/client": "^11.11.0",
+    "@trpc/server": "^11.11.0",
+    "@types/node": "^25.3.3",
+    "@typescript/native-preview": "^7.0.0-dev.20260304.1",
+    "cross-env": "^10.0.0",
+    "eslint": "^9.34.0",
+    "njwt": "^2.0.1",
+    "pino": "^10.1.0",
+    "pino-pretty": "^13.1.2",
+    "prettier": "^3.6.2",
+    "pretty-bytes": "^7.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "superjson": "^2.2.6",
+    "typescript": "^5.9.3",
+    "zod": "^4.1.1"
   }
 }

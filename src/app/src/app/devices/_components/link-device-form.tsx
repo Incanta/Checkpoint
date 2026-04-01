@@ -1,10 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "~/trpc/react";
 
 export function LinkDeviceForm() {
+  return (
+    <Suspense>
+      <LinkDeviceFormContent />
+    </Suspense>
+  );
+}
+
+function LinkDeviceFormContent() {
   const [formData, setFormData] = useState({
     name: "",
     deviceCode: "",

@@ -210,6 +210,7 @@ export const fileRouter = createTRPCRouter({
       }));
     }),
 
+  // TODO MIKE HERE: should we have a checkoutMany?
   checkout: protectedProcedure
     .input(
       z.object({
@@ -541,6 +542,7 @@ export const fileRouter = createTRPCRouter({
         repoId: z.string(),
         changelistNumber: z.number(),
         folderPath: z.string().default(""),
+        includeArtifacts: z.boolean().default(false),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -553,7 +555,7 @@ export const fileRouter = createTRPCRouter({
             number: input.changelistNumber,
           },
         },
-        select: { stateTree: true },
+        select: { stateTree: true, artifactStateTree: true },
       });
 
       if (!changelist) {
@@ -564,7 +566,15 @@ export const fileRouter = createTRPCRouter({
       }
 
       const stateTree = changelist.stateTree as Record<string, number>;
-      const aliveFileIds = new Set(Object.keys(stateTree));
+      const artifactStateTree = input.includeArtifacts
+        ? ((changelist.artifactStateTree as Record<string, number> | null) ??
+          {})
+        : {};
+      const aliveFileIds = new Set([
+        ...Object.keys(stateTree),
+        ...Object.keys(artifactStateTree),
+      ]);
+      const artifactFileIds = new Set(Object.keys(artifactStateTree));
 
       // Get all files for this repo (only id + path for efficiency)
       const allFiles = await ctx.db.file.findMany({
@@ -581,7 +591,12 @@ export const fileRouter = createTRPCRouter({
             : input.folderPath + "/";
 
       const folders = new Set<string>();
-      const files: { name: string; path: string; lastCl: number }[] = [];
+      const files: {
+        name: string;
+        path: string;
+        lastCl: number;
+        isArtifact: boolean;
+      }[] = [];
       let totalFileCount = 0;
 
       for (const file of allFiles) {
@@ -596,10 +611,12 @@ export const fileRouter = createTRPCRouter({
 
         if (slashIndex === -1) {
           // Direct child file
+          const lastCl = stateTree[file.id] ?? artifactStateTree[file.id]!;
           files.push({
             name: remainder,
             path: file.path,
-            lastCl: stateTree[file.id]!,
+            lastCl,
+            isArtifact: artifactFileIds.has(file.id),
           });
         } else {
           // Subfolder — collect unique folder name

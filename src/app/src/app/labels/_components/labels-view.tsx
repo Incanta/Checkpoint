@@ -233,9 +233,24 @@ export function LabelsView({ repoId }: { repoId: string }) {
           x={contextMenu.x}
           y={contextMenu.y}
           label={contextMenu.label}
-          onDelete={handleDelete}
-          onRename={handleRename}
-          onChangeChangelist={handleChangeChangelist}
+          onDelete={({ id, name }) => {
+            const label = labels?.find(l => l.id === id) as Label | undefined;
+            if (label) {
+              handleDelete(label);
+            }
+          }}
+          onRename={({ id, name }) => {
+            const label = labels?.find(l => l.id === id) as Label | undefined;
+            if (label) {
+              handleRename(label);
+            }
+          }}
+          onChangeChangelist={({ id, name }) => {
+            const label = labels?.find(l => l.id === id) as Label | undefined;
+            if (label) {
+              handleChangeChangelist(label);
+            }
+          }}
           onClose={closeContextMenu}
         />
       )}

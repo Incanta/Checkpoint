@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "~/trpc/react";
@@ -82,6 +82,14 @@ function Breadcrumb({
 }
 
 export default function RepoFilesPage() {
+  return (
+    <Suspense>
+      <RepoFilesPageContent />
+    </Suspense>
+  );
+}
+
+function RepoFilesPageContent() {
   const params = useParams<{ orgName: string; repoName: string }>();
   const searchParams = useSearchParams();
   const orgName = decodeURIComponent(params.orgName);

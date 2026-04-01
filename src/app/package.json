@@ -17,19 +17,19 @@
     "build:lib": "tsgo --project tsconfig.lib.json && node scripts/resolve-prisma-enums.mjs",
     "check": "eslint . && tsgo --noEmit",
     "db:types": "prisma generate",
-    "db:migrate:dev": "../../node_modules/.bin/config-env --env=default prisma migrate dev",
+    "db:migrate:dev": "config-env --env=default prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "dev": "../../node_modules/.bin/config-env --env=default next dev --turbo",
-    "dev:test": "../../node_modules/.bin/config-env --env=test next dev --turbo",
+    "dev": "config-env --env=default next dev --turbo",
+    "dev:test": "config-env --env=test next dev --turbo",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mdx}\" --cache",
     "format:write": "prettier --write \"**/*.{ts,tsx,js,jsx,mdx}\" --cache",
     "postinstall": "prisma generate",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "preview": "next build && next start",
-    "start": "../../node_modules/.bin/config-env --env=default next start",
+    "start": "config-env --env=default next start",
     "typecheck": "tsgo --noEmit"
   },
   "peerDependencies": {
@@ -57,10 +57,14 @@
     "shiki": "^3.0.0"
   },
   "devDependencies": {
+    "@incanta/config": "*",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "*",
     "@types/nodemailer": "^7.0.11",
+    "@typescript/native-preview": "*",
+    "eslint": "*",
     "postcss": "^8.5.3",
+    "prettier": "*",
     "prettier-plugin-tailwindcss": "^0.6.11",
     "prisma": "^6.5.0",
     "tailwindcss": "^4.1.18"
