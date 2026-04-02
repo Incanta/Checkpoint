@@ -990,6 +990,7 @@ __metadata:
     "@types/nodemailer": "npm:^7.0.11"
     "@typescript/native-preview": "npm:*"
     better-auth: "npm:^1.5.3"
+    cross-env: "npm:*"
     eslint: "npm:*"
     javascript-obfuscator: "npm:^5.4.1"
     next: "npm:^16.1.7"
