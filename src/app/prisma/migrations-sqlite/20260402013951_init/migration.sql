@@ -559,3 +559,4 @@ CREATE UNIQUE INDEX "PullRequestSubscription_pullRequestId_userId_key" ON "PullR
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Session_token_key" ON "Session"("token");
+
