@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Checkpoint</title>
+    <organization>com.checkpointvcs</organization>
+    <domains enable_localSystem="false" enable_currentUserHome="true" enable_anywhere="true"/>
+
+    <options customize="never" require-scripts="true" hostArchitectures="x86_64,arm64"/>
+
+    <welcome file="welcome.html"/>
+    <license file="license.html"/>
+    <conclusion file="conclusion.html"/>
+
+    <choices-outline>
+        <line choice="checkpoint-app"/>
+        <line choice="checkpoint-cli"/>
+        <line choice="checkpoint-daemon"/>
+    </choices-outline>
+
+    <choice id="checkpoint-app"
+            visible="true"
+            title="Checkpoint Desktop App"
+            description="The Checkpoint desktop application.">
+        <pkg-ref id="com.checkpointvcs.app"/>
+    </choice>
+
+    <choice id="checkpoint-cli"
+            visible="true"
+            title="Checkpoint CLI"
+            description="Command-line tools (checkpoint, chk).">
+        <pkg-ref id="com.checkpointvcs.cli"/>
+    </choice>
+
+    <choice id="checkpoint-daemon"
+            visible="true"
+            title="Checkpoint Daemon"
+            description="Background service for workspace management and file sync.">
+        <pkg-ref id="com.checkpointvcs.daemon"/>
+    </choice>
+
+    <pkg-ref id="com.checkpointvcs.app"
+             version="0"
+             onConclusion="none">checkpoint-app.pkg</pkg-ref>
+
+    <pkg-ref id="com.checkpointvcs.cli"
+             version="0"
+             onConclusion="none">checkpoint-cli.pkg</pkg-ref>
+
+    <pkg-ref id="com.checkpointvcs.daemon"
+             version="0"
+             onConclusion="none">checkpoint-daemon.pkg</pkg-ref>
+</installer-gui-script>

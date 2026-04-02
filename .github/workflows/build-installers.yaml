@@ -1,0 +1,364 @@
+name: Build Installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_override:
+        description: "Version override (leave empty to use VERSION file)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  # ============================================================
+  # Phase 1: Read version and prepare build metadata
+  # ============================================================
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version_override }}" ]; then
+            echo "version=${{ inputs.version_override }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Print version
+        run: echo "Building version ${{ steps.version.outputs.version }}"
+
+  # ============================================================
+  # Phase 2: Build CLI (C++ binaries) for each platform
+  # ============================================================
+  build-cli:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32-x64
+            cli_binary: checkpoint.exe
+            cli_alias: chk.exe
+          - os: ubuntu-latest
+            platform: linux-x64
+            cli_binary: checkpoint
+            cli_alias: chk
+          - os: macos-15-intel
+            platform: darwin
+            cli_binary: checkpoint
+            cli_alias: chk
+          - os: macos-latest
+            platform: darwin
+            cli_binary: checkpoint
+            cli_alias: chk
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libcurl4-openssl-dev nlohmann-json3-dev
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake nlohmann-json curl
+
+      - name: Build CLI
+        shell: bash
+        run: |
+          cd src/clients/cli
+          mkdir -p build && cd build
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmake .. -G "Visual Studio 17 2022" -A x64
+            cmake --build . --config Release
+            cp Release/${{ matrix.cli_binary }} .
+            cp Release/${{ matrix.cli_alias }} .
+          else
+            cmake .. -DCMAKE_BUILD_TYPE=Release
+            cmake --build . --config Release
+          fi
+
+      - name: Upload CLI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.platform }}
+          path: |
+            src/clients/cli/build/${{ matrix.cli_binary }}
+            src/clients/cli/build/${{ matrix.cli_alias }}
+
+  # ============================================================
+  # Phase 3: Build Daemon SEA binary for each platform
+  # ============================================================
+  build-daemon:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32-x64
+            daemon_binary: checkpoint-daemon.exe
+            build_script: scripts/build-daemon-sea.ps1
+          - os: ubuntu-latest
+            platform: linux-x64
+            daemon_binary: checkpoint-daemon
+            build_script: scripts/build-daemon-sea.sh
+          - os: macos-15-intel
+            platform: darwin
+            daemon_binary: checkpoint-daemon
+            build_script: scripts/build-daemon-sea.sh
+          - os: macos-latest
+            platform: darwin
+            daemon_binary: checkpoint-daemon
+            build_script: scripts/build-daemon-sea.sh
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Install esbuild and postject
+        run: |
+          npm install -g esbuild postject
+
+      - name: Build Daemon SEA (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x ${{ matrix.build_script }}
+          ./${{ matrix.build_script }}
+
+      - name: Build Daemon SEA (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\${{ matrix.build_script }}
+
+      - name: Upload Daemon artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-${{ matrix.platform }}
+          path: src/core/daemon/dist-sea/
+
+  # ============================================================
+  # Phase 4: Build installers for each platform
+  # ============================================================
+  build-installers:
+    needs: [prepare, build-cli, build-daemon]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32-x64
+            electron_arch: x64
+          - os: ubuntu-latest
+            platform: linux-x64
+            electron_arch: x64
+          - os: macos-15-intel
+            platform: darwin
+            electron_arch: x64
+          - os: macos-latest
+            platform: darwin
+            electron_arch: arm64
+
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-${{ matrix.platform }}
+          path: src/clients/desktop/build-resources/cli/
+
+      - name: Download Daemon artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: daemon-${{ matrix.platform }}
+          path: src/clients/desktop/build-resources/daemon/
+
+      - name: Make binaries executable (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          chmod +x src/clients/desktop/build-resources/cli/* || true
+          chmod +x src/clients/desktop/build-resources/daemon/* || true
+
+      - name: Set version in package.json
+        shell: bash
+        run: |
+          cd src/clients/desktop
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+            pkg.version = '${{ env.VERSION }}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+
+      # ---- Code Signing Setup ----
+
+      - name: Import Windows signing certificate
+        if: runner.os == 'Windows' && env.WINDOWS_CERT_BASE64 != ''
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $certBytes = [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64)
+          $certPath = Join-Path $env:RUNNER_TEMP "signing-cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
+          echo "WINDOWS_CERT_FILE=$certPath" >> $env:GITHUB_ENV
+
+      - name: Import macOS signing certificate
+        if: runner.os == 'macOS' && env.MACOS_CERT_BASE64 != ''
+        env:
+          MACOS_CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          CERT_PATH=$RUNNER_TEMP/signing-cert.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          echo "$MACOS_CERT_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Install @electron/notarize
+        if: runner.os == 'macOS'
+        run: |
+          cd src/clients/desktop
+          yarn add --dev @electron/notarize
+
+      # ---- Build TypeScript + Vite + Electron ----
+
+      - name: Build app
+        run: |
+          cd src/clients/desktop
+          npx tsc
+          npx vite build
+
+      - name: Package installer (Windows)
+        if: runner.os == 'Windows'
+        env:
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          cd src/clients/desktop
+          npx electron-builder --win --x64 --publish never
+
+      - name: Package installer (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd src/clients/desktop
+          npx electron-builder --linux deb rpm --x64 --publish never
+
+      - name: Package installer (macOS)
+        if: runner.os == 'macOS'
+        env:
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          cd src/clients/desktop
+          npx electron-builder --mac pkg --${{ matrix.electron_arch }} --publish never
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.platform }}
+          path: |
+            src/clients/desktop/release/${{ env.VERSION }}/*.exe
+            src/clients/desktop/release/${{ env.VERSION }}/*.deb
+            src/clients/desktop/release/${{ env.VERSION }}/*.rpm
+            src/clients/desktop/release/${{ env.VERSION }}/*.pkg
+            src/clients/desktop/release/${{ env.VERSION }}/*.dmg
+          if-no-files-found: error
+
+  # ============================================================
+  # Phase 5: Create GitHub Release with all installers
+  # ============================================================
+  create-release:
+    needs: [prepare, build-installers]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all installer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: release-assets/
+          merge-multiple: true
+
+      - name: List release assets
+        run: find release-assets/ -type f | sort
+
+      - name: Create GitHub Release (draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Checkpoint v${{ env.VERSION }}
+          draft: true
+          generate_release_notes: true
+          files: |
+            release-assets/**/*.exe
+            release-assets/**/*.deb
+            release-assets/**/*.rpm
+            release-assets/**/*.pkg
+            release-assets/**/*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

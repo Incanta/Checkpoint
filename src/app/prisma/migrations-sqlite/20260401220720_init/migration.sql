@@ -32,6 +32,7 @@ CREATE TABLE "Org" (
     "name" TEXT NOT NULL,
     "defaultRepoAccess" TEXT NOT NULL DEFAULT 'WRITE',
     "defaultCanCreateRepos" BOOLEAN NOT NULL DEFAULT true,
+    "binaryExtensions" TEXT NOT NULL DEFAULT '',
     "subscriptionTier" TEXT NOT NULL DEFAULT 'BASIC'
 );
 

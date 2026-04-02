@@ -1,0 +1,37 @@
+#!/bin/bash
+# macOS .pkg postinstall — Configure daemon service and PATH
+set -e
+
+INSTALL_DIR="/Applications/Checkpoint.app/Contents/Resources"
+BIN_DIR="/usr/local/bin"
+PLIST_NAME="com.checkpointvcs.daemon"
+PLIST_SRC="$INSTALL_DIR/service/${PLIST_NAME}.plist"
+
+# Create /usr/local/bin if needed
+mkdir -p "$BIN_DIR"
+
+# Symlink CLI and daemon binaries
+ln -sf "$INSTALL_DIR/cli/checkpoint" "$BIN_DIR/checkpoint"
+ln -sf "$INSTALL_DIR/cli/chk" "$BIN_DIR/chk"
+ln -sf "$INSTALL_DIR/daemon/checkpoint-daemon" "$BIN_DIR/checkpoint-daemon"
+
+# Install and load launchd agent for the installing user
+CURRENT_USER="${USER}"
+if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
+    USER_HOME=$(eval echo "~$CURRENT_USER")
+    LAUNCH_AGENTS_DIR="$USER_HOME/Library/LaunchAgents"
+    PLIST_PATH="$LAUNCH_AGENTS_DIR/${PLIST_NAME}.plist"
+
+    mkdir -p "$LAUNCH_AGENTS_DIR"
+
+    if [ -f "$PLIST_SRC" ]; then
+        cp "$PLIST_SRC" "$PLIST_PATH"
+    else
+        echo "WARNING: Plist template not found at $PLIST_SRC"
+    fi
+
+    chown "$CURRENT_USER" "$PLIST_PATH"
+    sudo -u "$CURRENT_USER" launchctl load "$PLIST_PATH" 2>/dev/null || true
+fi
+
+exit 0

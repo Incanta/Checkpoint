@@ -169,6 +169,12 @@ export type Channels = {
   "workspace:set-resolve-confirm-suppressed": {
     duration: "today" | "workspace";
   };
+
+  // Auto-update
+  "update:check": null;
+  "update:download": null;
+  "update:apply": null;
+  "update:dismiss": null;
 };
 
 export type InvokeChannels = {

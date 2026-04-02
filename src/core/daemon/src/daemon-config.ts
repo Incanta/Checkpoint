@@ -26,6 +26,17 @@ export interface DaemonConfigType {
       maxArchivedFiles: number;
     };
   };
+  longtail: {
+    targetChunkSize: number;
+    targetBlockSize: number;
+    maxChunksPerBlock: number;
+    minBlockUsagePercent: number;
+    hashingAlgo: string;
+    compressionAlgo: string;
+    enableMmapIndexing: boolean;
+    enableMmapBlockStore: boolean;
+    logLevel: string;
+  };
 }
 
 export class DaemonConfig {
@@ -64,6 +75,17 @@ export class DaemonConfig {
           path: "logs/daemon.log",
           maxArchivedFiles: 10,
         },
+      },
+      longtail: {
+        targetChunkSize: 32768,
+        targetBlockSize: 8388608,
+        maxChunksPerBlock: 1024,
+        minBlockUsagePercent: 80,
+        hashingAlgo: "blake3",
+        compressionAlgo: "zstd",
+        enableMmapIndexing: false,
+        enableMmapBlockStore: false,
+        logLevel: "off",
       },
     };
   }

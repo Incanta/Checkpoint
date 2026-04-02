@@ -2,7 +2,6 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import config from "@incanta/config";
 import njwt from "njwt";
-import path from "path";
 import {
   readFileFromVersionAsync,
   pollReadFileHandle,
@@ -17,60 +16,7 @@ import {
   getUserAndRepoWithAccess,
 } from "../auth-utils";
 import { recordActivity } from "../activity";
-
-const BINARY_EXTENSIONS = new Set([
-  ".uasset",
-  ".umap",
-  ".ubulk",
-  ".utxt",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".bmp",
-  ".tga",
-  ".exr",
-  ".hdr",
-  ".dds",
-  ".psd",
-  ".tif",
-  ".tiff",
-  ".gif",
-  ".ico",
-  ".svg",
-  ".mp3",
-  ".wav",
-  ".ogg",
-  ".mp4",
-  ".avi",
-  ".mov",
-  ".wmv",
-  ".fbx",
-  ".obj",
-  ".abc",
-  ".gltf",
-  ".glb",
-  ".blend",
-  ".3ds",
-  ".bnk",
-  ".wem",
-  ".zip",
-  ".rar",
-  ".7z",
-  ".tar",
-  ".gz",
-  ".dll",
-  ".so",
-  ".dylib",
-  ".exe",
-  ".bin",
-  ".dat",
-  ".db",
-  ".pdf",
-]);
-
-function isBinaryFile(filePath: string): boolean {
-  return BINARY_EXTENSIONS.has(path.extname(filePath).toLowerCase());
-}
+import { resolveBinaryExtensions, isBinaryFile } from "~/server/binary-extensions";
 
 const MAX_TEXT_SIZE = 5 * 1024 * 1024; // 5 MB text limit
 
@@ -679,7 +625,8 @@ export const fileRouter = createTRPCRouter({
         });
       }
 
-      const binary = isBinaryFile(input.filePath);
+      const binaryExts = resolveBinaryExtensions(repo.org.binaryExtensions);
+      const binary = isBinaryFile(input.filePath, binaryExts);
 
       // For binary files, return metadata only (no content)
       if (binary) {

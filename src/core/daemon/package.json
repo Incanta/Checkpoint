@@ -18,6 +18,8 @@
   },
   "scripts": {
     "build": "tsgo --project tsconfig.json",
+    "build:bundle": "node esbuild.config.mjs",
+    "build:sea": "yarn build && yarn build:bundle",
     "start": "yarn build && node --inspect=0.0.0.0:9231 lib/bin.js"
   },
   "peerDependencies": {

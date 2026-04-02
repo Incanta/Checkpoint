@@ -1,4 +1,3 @@
-import config from "@incanta/config";
 import {
   type Modification,
   CreateApiClientAuth,
@@ -21,6 +20,7 @@ import {
 } from "./util.js";
 import path from "path";
 import { promises as fs } from "fs";
+import { DaemonConfig } from "../daemon-config.js";
 
 export async function submit(
   workspace: Workspace,
@@ -29,14 +29,15 @@ export async function submit(
   modifications: Modification[],
   workspaceId: string,
   keepCheckedOut: boolean = false,
-  logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
-    "longtail.log-level",
-  ),
+  logLevel?: LongtailLogLevel,
   onStep?: (step: string) => void,
   onProgress?: (step: string, done: number, total: number) => void,
   shelfName?: string,
   artifactForChangelistNum?: number,
 ): Promise<void> {
+  const daemonConfig = await DaemonConfig.Get();
+  const resolvedLogLevel =
+    logLevel ?? (daemonConfig.longtail.logLevel as LongtailLogLevel);
   const user = await GetAuthConfigUser(workspace.daemonId);
 
   if (!user) {
@@ -88,18 +89,14 @@ export async function submit(
   const submitOptions: SubmitAsyncOptions = {
     branchName: workspace.branchName,
     message,
-    targetChunkSize: config.get<number>("longtail.target-chunk-size"),
-    targetBlockSize: config.get<number>("longtail.target-block-size"),
-    maxChunksPerBlock: config.get<number>("longtail.max-chunks-per-block"),
-    minBlockUsagePercent: config.get<number>(
-      "longtail.min-block-usage-percent",
-    ),
-    hashingAlgo: config.get<string>("longtail.hashing-algo"),
-    compressionAlgo: config.get<string>("longtail.compression-algo"),
-    enableMmapIndexing: config.get<boolean>("longtail.enable-mmap-indexing"),
-    enableMmapBlockStore: config.get<boolean>(
-      "longtail.enable-mmap-block-store",
-    ),
+    targetChunkSize: daemonConfig.longtail.targetChunkSize,
+    targetBlockSize: daemonConfig.longtail.targetBlockSize,
+    maxChunksPerBlock: daemonConfig.longtail.maxChunksPerBlock,
+    minBlockUsagePercent: daemonConfig.longtail.minBlockUsagePercent,
+    hashingAlgo: daemonConfig.longtail.hashingAlgo,
+    compressionAlgo: daemonConfig.longtail.compressionAlgo,
+    enableMmapIndexing: daemonConfig.longtail.enableMmapIndexing,
+    enableMmapBlockStore: daemonConfig.longtail.enableMmapBlockStore,
     localRootPath: workspace.localPath,
     remoteBasePath: `/${orgId}/${workspace.repoId}`,
     filerUrl,
@@ -118,7 +115,7 @@ export async function submit(
     keepCheckedOut,
     workspaceId,
     modifications,
-    logLevel: GetLogLevel(logLevel),
+    logLevel: GetLogLevel(resolvedLogLevel),
   };
 
   if (shelfName) {

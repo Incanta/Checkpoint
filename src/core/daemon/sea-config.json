@@ -1,0 +1,10 @@
+{
+  "main": "daemon-bundle.cjs",
+  "output": "daemon-sea.blob",
+  "disableExperimentalSEAWarning": true,
+  "useSnapshot": false,
+  "useCodeCache": true,
+  "assets": {
+    "version.txt": "../../VERSION"
+  }
+}

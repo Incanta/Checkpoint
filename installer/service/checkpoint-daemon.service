@@ -1,0 +1,19 @@
+[Unit]
+Description=Checkpoint VCS Daemon for %i
+Documentation=https://github.com/Incanta/Checkpoint
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+ExecStart=/opt/Checkpoint/resources/daemon/checkpoint-daemon
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+WorkingDirectory=/home/%i
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=checkpoint-daemon
+
+[Install]
+WantedBy=multi-user.target

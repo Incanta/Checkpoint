@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Checkpoint
+Comment=Checkpoint Version Control System
+Exec=/opt/checkpoint/checkpoint-desktop %U
+Icon=checkpoint
+Type=Application
+Categories=Development;VersionControl;
+Terminal=false
+StartupNotify=true
+MimeType=x-scheme-handler/checkpoint;

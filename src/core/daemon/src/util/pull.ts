@@ -1,4 +1,3 @@
-import config from "@incanta/config";
 import {
   DiffState,
   CreateApiClientAuth,
@@ -17,11 +16,13 @@ import {
   saveWorkspaceState,
   type Workspace,
 } from "./util.js";
-import { isBinaryFile, readFileFromChangelist } from "./read-file.js";
+import { readFileFromChangelist } from "./read-file.js";
+import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 import { autoMergeText } from "./auto-merge.js";
 import { existsSync, promises as fs } from "fs";
 import path from "path";
 import { Logger } from "../logging.js";
+import { DaemonConfig } from "../daemon-config.js";
 
 /**
  * Files that were auto-merged during pull.
@@ -39,13 +40,18 @@ export async function pull(
   orgId: string,
   changelistNumber: number | null,
   filePaths: string[] | null = null, // TODO: implement partial pulls
-  logLevel: LongtailLogLevel = config.get<LongtailLogLevel>(
-    "longtail.log-level",
-  ),
+  logLevel?: LongtailLogLevel,
   onStep?: (step: string) => void,
   onProgress?: (step: string, done: number, total: number) => void,
 ): Promise<PullMergeResult> {
+  const daemonConfig = await DaemonConfig.Get();
+  const resolvedLogLevel =
+    logLevel ?? (daemonConfig.longtail.logLevel as LongtailLogLevel);
   const client = await CreateApiClientAuth(workspace.daemonId);
+  const binaryExts = await getBinaryExtensions(
+    workspace.daemonId,
+    workspace.repoId,
+  );
 
   const storageTokenResponse = await client.storage.getToken.query({
     repoId: workspace.repoId,
@@ -145,7 +151,7 @@ export async function pull(
     if (!localFile || localFile.changelist === serverCl) continue; // Up to date
 
     // Only auto-merge text files
-    if (isBinaryFile(localPath)) continue;
+    if (isBinaryFile(localPath, binaryExts)) continue;
 
     const fullPath = path.join(workspace.localPath, localPath);
     if (!existsSync(fullPath)) continue; // Deleted locally — no merge
@@ -180,10 +186,8 @@ export async function pull(
 
     const handle = pullAsync({
       versionIndex,
-      enableMmapIndexing: config.get<boolean>("longtail.enable-mmap-indexing"),
-      enableMmapBlockStore: config.get<boolean>(
-        "longtail.enable-mmap-block-store",
-      ),
+      enableMmapIndexing: daemonConfig.longtail.enableMmapIndexing,
+      enableMmapBlockStore: daemonConfig.longtail.enableMmapBlockStore,
       localRootPath: workspace.localPath,
       remoteBasePath: `/${orgId}/${workspace.repoId}`,
       filerUrl,
@@ -197,7 +201,7 @@ export async function pull(
         r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
         r2BucketName: storageTokenResponse.r2Credentials.bucket,
       }),
-      logLevel: GetLogLevel(logLevel),
+      logLevel: GetLogLevel(resolvedLogLevel),
     });
 
     if (!handle) {
@@ -266,12 +270,8 @@ export async function pull(
 
         const handle = pullAsync({
           versionIndex: artVersionIndex,
-          enableMmapIndexing: config.get<boolean>(
-            "longtail.enable-mmap-indexing",
-          ),
-          enableMmapBlockStore: config.get<boolean>(
-            "longtail.enable-mmap-block-store",
-          ),
+          enableMmapIndexing: daemonConfig.longtail.enableMmapIndexing,
+          enableMmapBlockStore: daemonConfig.longtail.enableMmapBlockStore,
           localRootPath: workspace.localPath,
           remoteBasePath: `/${orgId}/${workspace.repoId}`,
           filerUrl,
@@ -286,7 +286,7 @@ export async function pull(
             r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
             r2BucketName: storageTokenResponse.r2Credentials.bucket,
           }),
-          logLevel: GetLogLevel(logLevel),
+          logLevel: GetLogLevel(resolvedLogLevel),
         });
 
         if (!handle) {
@@ -497,6 +497,10 @@ export async function pullTextFilesForSubmit(
   submitPaths: string[],
 ): Promise<PullMergeResult> {
   const client = await CreateApiClientAuth(workspace.daemonId);
+  const binaryExts = await getBinaryExtensions(
+    workspace.daemonId,
+    workspace.repoId,
+  );
   const workspaceState = await getWorkspaceState(workspace.localPath);
 
   // Get the remote branch head
@@ -560,7 +564,7 @@ export async function pullTextFilesForSubmit(
     if (!localFile || localFile.changelist === remoteCl) continue; // Up to date
 
     // Only text files
-    if (isBinaryFile(localPath)) continue;
+    if (isBinaryFile(localPath, binaryExts)) continue;
 
     const fullPath = path.join(workspace.localPath, localPath);
     if (!existsSync(fullPath)) continue; // Deleted locally

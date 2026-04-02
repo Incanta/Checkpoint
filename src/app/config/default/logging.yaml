@@ -28,7 +28,7 @@ log-file:
 
   # Set this to an absolute path or a relative one (relative to the current process working directory)
   # to log to also a file.
-  path: "logs/redwood-backend.log"
+  path: "logs/checkpoint.log"
 
   # The number of files to keep in the directory; older files will be deleted. Set to -1 to keep all files.
   max-archived-files: 10

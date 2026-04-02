@@ -4,14 +4,12 @@
 // Read more about both here:
 // https://www.prisma.io/docs/orm/prisma-migrate
 
-datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
-}
+// NOTE: The datasource block lives in prisma/datasource.prisma (generated from
+// config, gitignored). Run `npm run db:set-provider` to regenerate it.
 
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = "native"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 model User {
@@ -96,6 +94,8 @@ model Org {
 
   defaultRepoAccess     RepoAccess @default(WRITE)
   defaultCanCreateRepos Boolean    @default(true)
+
+  binaryExtensions String @default("")
 
   subscriptionTier LicenseTier @default(BASIC)
 

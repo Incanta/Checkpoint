@@ -1,5 +1,5 @@
 import { diff3Merge } from "node-diff3";
-import { isBinaryFile } from "./read-file.js";
+import { isBinaryFile } from "./binary-extensions.js";
 
 /** Git-style conflict markers used in merged output. */
 export const CONFLICT_MARKER_START = "<<<<<<<";
@@ -78,6 +78,6 @@ export function hasConflictMarkers(content: string): boolean {
 /**
  * Whether a file path is eligible for auto-merge (i.e. it is a text file).
  */
-export function canAutoMerge(filePath: string): boolean {
-  return !isBinaryFile(filePath);
+export function canAutoMerge(filePath: string, extensions: Set<string>): boolean {
+  return !isBinaryFile(filePath, extensions);
 }
