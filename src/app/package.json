@@ -65,6 +65,7 @@
     "@types/nodemailer": "^7.0.11",
     "@typescript/native-preview": "*",
     "eslint": "*",
+    "javascript-obfuscator": "^5.4.1",
     "postcss": "^8.5.3",
     "prettier": "*",
     "prettier-plugin-tailwindcss": "^0.6.11",
