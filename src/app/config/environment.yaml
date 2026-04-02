@@ -1,3 +1,4 @@
 DB_PROVIDER: "db.provider"
 DATABASE_URL: "db.url"
-PORT: "server.port"
+PORT: "server.listen-port"
+NEXT_PUBLIC_EXTERNAL_URL: "server.external-url"

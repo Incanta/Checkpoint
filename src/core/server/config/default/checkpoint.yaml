@@ -1,2 +1,4 @@
 api:
-  url: "http://localhost:13000"
+  url:
+    internal: "http://localhost:13000"
+    external: "http://localhost:13000"

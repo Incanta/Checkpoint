@@ -4,7 +4,8 @@ import njwt from "njwt";
 import multer from "multer";
 import fs from "fs/promises";
 import path from "path";
-import { createReadStream } from "fs";
+import { createReadStream, createWriteStream } from "fs";
+import { pipeline } from "stream/promises";
 
 // ============================================================================
 // Types matching the SeaweedFS filer JSON API
@@ -391,18 +392,21 @@ async function handlePost(
       // Append mode: used by Longtail_WriteStoredBlock which writes
       // a block in two passes — first the block index, then the chunk data.
       // The C++ wrapper adds ?op=append for offset > 0 writes.
-      await fs.appendFile(fullPath, file.buffer);
+      const src = createReadStream(file.path);
+      const dest = createWriteStream(fullPath, { flags: "a" });
+      await pipeline(src, dest);
+      await fs.unlink(file.path).catch(() => {});
     } else {
-      // Normal write: create/replace the file atomically.
-      // Write to a temp file first, then rename for atomicity.
-      // This prevents partial reads from concurrent downloaders.
-      const tmpPath = `${fullPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;
-      await fs.writeFile(tmpPath, file.buffer);
-      await renameWithRetry(tmpPath, fullPath);
+      // Normal write: rename the temp upload file into place atomically.
+      await renameWithRetry(file.path, fullPath);
     }
 
     res.status(201).json({ size: file.size });
   } catch (err) {
+    // Clean up the temp upload file on error
+    if (file.path) {
+      await fs.unlink(file.path).catch(() => {});
+    }
     console.error("Stub filer: write error:", err);
     res.status(500).send("Internal server error");
   }
@@ -476,14 +480,26 @@ async function handleDelete(
  */
 export function routeStubFiler(): Router {
   const router = Router();
-  const upload = multer({ storage: multer.memoryStorage() });
 
   // Ensure the storage directory exists on startup
   const storagePath = getStoragePath();
+  const uploadTmpDir = path.join(storagePath, ".uploads-tmp");
   fs.mkdir(storagePath, { recursive: true }).catch((err) => {
     console.error("Stub filer: failed to create storage directory:", err);
   });
+  fs.mkdir(uploadTmpDir, { recursive: true }).catch((err) => {
+    console.error("Stub filer: failed to create upload tmp directory:", err);
+  });
   console.log(`Stub filer: serving files from ${storagePath}`);
+
+  // Use disk storage instead of memory storage to avoid OOM on large uploads
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, uploadTmpDir),
+      filename: (_req, _file, cb) =>
+        cb(null, `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`),
+    }),
+  });
 
   // Shared auth + dispatch helper
   async function dispatch(req: Request, res: Response): Promise<void> {

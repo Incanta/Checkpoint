@@ -11,12 +11,31 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  APP_IMAGE: ${{ github.repository_owner }}/checkpoint-app
-  SERVER_IMAGE: ${{ github.repository_owner }}/checkpoint-server
 
 jobs:
-  build-app:
+  setup:
     runs-on: ubuntu-latest
+    outputs:
+      app_image: ${{ steps.vars.outputs.app_image }}
+      server_image: ${{ steps.vars.outputs.server_image }}
+    steps:
+      - name: Set lowercase image names
+        id: vars
+        run: |
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "app_image=${OWNER}/checkpoint-app" >> "$GITHUB_OUTPUT"
+          echo "server_image=${OWNER}/checkpoint-server" >> "$GITHUB_OUTPUT"
+
+  build-app:
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - db_provider: postgresql
+            tag: postgres
+          - db_provider: sqlite
+            tag: sqlite
     permissions:
       contents: read
       packages: write
@@ -40,14 +59,17 @@ jobs:
           context: .
           file: src/app/Dockerfile
           push: true
+          build-args: |
+            DB_PROVIDER=${{ matrix.db_provider }}
           tags: |
-            ${{ env.REGISTRY }}/${{ env.APP_IMAGE }}:${{ inputs.version }}
-            ${{ env.REGISTRY }}/${{ env.APP_IMAGE }}:latest
+            ${{ env.REGISTRY }}/${{ needs.setup.outputs.app_image }}:${{ inputs.version }}-${{ matrix.tag }}
+            ${{ env.REGISTRY }}/${{ needs.setup.outputs.app_image }}:latest-${{ matrix.tag }}
           platforms: linux/amd64
-          cache-from: type=gha,scope=app
-          cache-to: type=gha,mode=max,scope=app
+          cache-from: type=gha,scope=app-${{ matrix.tag }}
+          cache-to: type=gha,mode=max,scope=app-${{ matrix.tag }}
 
   build-server:
+    needs: setup
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -73,8 +95,8 @@ jobs:
           file: src/core/server/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.SERVER_IMAGE }}:${{ inputs.version }}
-            ${{ env.REGISTRY }}/${{ env.SERVER_IMAGE }}:latest
+            ${{ env.REGISTRY }}/${{ needs.setup.outputs.server_image }}:${{ inputs.version }}
+            ${{ env.REGISTRY }}/${{ needs.setup.outputs.server_image }}:latest
           platforms: linux/amd64
           cache-from: type=gha,scope=server
           cache-to: type=gha,mode=max,scope=server

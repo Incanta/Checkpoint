@@ -5,7 +5,9 @@ signing-keys:
 
 token-expiration-seconds: 600
 
-backend-url: "http://localhost:13001"
+backend-url:
+  internal: "http://localhost:13001"
+  external: "http://localhost:13001"
 
 filer-ui-enabled: false
 filer-url: "http://localhost"

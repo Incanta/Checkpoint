@@ -35,7 +35,7 @@ export function createSystemToken(action: string, path: string): string {
  * Used during org and repo creation to set up the directory structure.
  */
 export async function createStorageDirectory(path: string): Promise<void> {
-  const backendUrl = config.get<string>("storage.backend-url");
+  const backendUrl = config.get<string>("storage.backend-url.internal");
   const token = createSystemToken("mkdir", path);
 
   let response: Response;

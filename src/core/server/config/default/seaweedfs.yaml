@@ -1,6 +1,7 @@
 stub:
   enabled: true
   storage-path: "./data/filer"
+  external-url: "localhost:13001"
 
 connection:
   master:

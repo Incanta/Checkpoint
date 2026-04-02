@@ -16,7 +16,10 @@ import {
   getUserAndRepoWithAccess,
 } from "../auth-utils";
 import { recordActivity } from "../activity";
-import { resolveBinaryExtensions, isBinaryFile } from "~/server/binary-extensions";
+import {
+  resolveBinaryExtensions,
+  isBinaryFile,
+} from "~/server/binary-extensions";
 
 const MAX_TEXT_SIZE = 5 * 1024 * 1024; // 5 MB text limit
 
@@ -655,7 +658,7 @@ export const fileRouter = createTRPCRouter({
       const jwt = readToken.compact();
       const jwtExpirationMs = Date.now() + expirationSeconds * 1000;
 
-      const backendUrl = config.get<string>("storage.backend-url");
+      const backendUrl = config.get<string>("storage.backend-url.internal");
       const filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
         res.text(),
       );
