@@ -18,7 +18,7 @@
     "check": "eslint . && tsgo --noEmit",
     "db:set-provider": "yarn db:set-provider:sqlite",
     "db:set-provider:sqlite": "cross-env DB_PROVIDER=sqlite node scripts/set-db-provider.mjs",
-    "db:set-provider:postgres": "cross-env DB_PROVIDER=postgresql node scripts/set-db-provider.mjs",
+    "db:set-provider:postgresql": "cross-env DB_PROVIDER=postgresql node scripts/set-db-provider.mjs",
     "db:types": "prisma generate",
     "db:migrate:dev": "config-env --env=default prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
