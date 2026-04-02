@@ -1,3 +1,5 @@
+// @obfuscate
+
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import type { Changelist } from "@prisma/client";
@@ -6,10 +8,7 @@ import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { FileChangeType, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
-import {
-  subscribeToPR,
-  notifyPRSubscribers,
-} from "~/server/notifications";
+import { subscribeToPR, notifyPRSubscribers } from "~/server/notifications";
 
 function prLink(orgName: string, repoName: string, number: number) {
   return `/${orgName}/${repoName}/pull-requests/${number}`;
@@ -32,10 +31,14 @@ export const pullRequestRouter = createTRPCRouter({
           ...(input.status !== "ALL" ? { status: input.status } : {}),
         },
         include: {
-          author: { select: { id: true, name: true, email: true, image: true } },
+          author: {
+            select: { id: true, name: true, email: true, image: true },
+          },
           reviews: {
             include: {
-              reviewer: { select: { id: true, name: true, email: true, image: true } },
+              reviewer: {
+                select: { id: true, name: true, email: true, image: true },
+              },
             },
           },
           _count: { select: { comments: true } },
@@ -62,16 +65,22 @@ export const pullRequestRouter = createTRPCRouter({
           },
         },
         include: {
-          author: { select: { id: true, name: true, email: true, image: true } },
+          author: {
+            select: { id: true, name: true, email: true, image: true },
+          },
           comments: {
             include: {
-              author: { select: { id: true, name: true, email: true, image: true } },
+              author: {
+                select: { id: true, name: true, email: true, image: true },
+              },
             },
             orderBy: { createdAt: "asc" },
           },
           reviews: {
             include: {
-              reviewer: { select: { id: true, name: true, email: true, image: true } },
+              reviewer: {
+                select: { id: true, name: true, email: true, image: true },
+              },
             },
           },
           repo: {
@@ -101,29 +110,49 @@ export const pullRequestRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
 
       // Validate branches exist
       const sourceBranch = await ctx.db.branch.findUnique({
-        where: { repoId_name: { repoId: input.repoId, name: input.sourceBranchName } },
+        where: {
+          repoId_name: { repoId: input.repoId, name: input.sourceBranchName },
+        },
       });
       if (!sourceBranch) {
-        throw new TRPCError({ code: "NOT_FOUND", message: `Source branch "${input.sourceBranchName}" not found` });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Source branch "${input.sourceBranchName}" not found`,
+        });
       }
 
       const targetBranch = await ctx.db.branch.findUnique({
-        where: { repoId_name: { repoId: input.repoId, name: input.targetBranchName } },
+        where: {
+          repoId_name: { repoId: input.repoId, name: input.targetBranchName },
+        },
       });
       if (!targetBranch) {
-        throw new TRPCError({ code: "NOT_FOUND", message: `Target branch "${input.targetBranchName}" not found` });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Target branch "${input.targetBranchName}" not found`,
+        });
       }
 
       // Validate source is a feature branch merging into its parent
       if (sourceBranch.type !== "FEATURE") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Only feature branches can be used as PR source" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Only feature branches can be used as PR source",
+        });
       }
       if (sourceBranch.parentBranchName !== targetBranch.name) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Source branch must target its parent branch" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Source branch must target its parent branch",
+        });
       }
 
       // Check no existing open PR for same source branch
@@ -135,7 +164,10 @@ export const pullRequestRouter = createTRPCRouter({
         },
       });
       if (existing) {
-        throw new TRPCError({ code: "CONFLICT", message: "An open pull request already exists for this branch" });
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "An open pull request already exists for this branch",
+        });
       }
 
       // Get next PR number
@@ -157,7 +189,11 @@ export const pullRequestRouter = createTRPCRouter({
         },
       });
 
-      void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "write" });
+      void recordActivity(ctx.db, {
+        userId: ctx.session.user.id,
+        orgId: repo.orgId,
+        type: "write",
+      });
 
       // Auto-subscribe author
       await subscribeToPR(ctx.db, pr.id, ctx.session.user.id);
@@ -186,25 +222,44 @@ export const pullRequestRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
 
       const pr = await ctx.db.pullRequest.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: input.number } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.number },
+        },
       });
-      if (!pr) throw new TRPCError({ code: "NOT_FOUND", message: "Pull request not found" });
+      if (!pr)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Pull request not found",
+        });
       if (pr.authorId !== ctx.session.user.id) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only the author can edit this pull request" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only the author can edit this pull request",
+        });
       }
 
       const updated = await ctx.db.pullRequest.update({
         where: { id: pr.id },
         data: {
           ...(input.title !== undefined ? { title: input.title } : {}),
-          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
         },
       });
 
-      void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "write" });
+      void recordActivity(ctx.db, {
+        userId: ctx.session.user.id,
+        orgId: repo.orgId,
+        type: "write",
+      });
 
       return updated;
     }),
@@ -212,20 +267,38 @@ export const pullRequestRouter = createTRPCRouter({
   close: protectedProcedure
     .input(z.object({ repoId: z.string(), number: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
 
       const pr = await ctx.db.pullRequest.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: input.number } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.number },
+        },
       });
-      if (!pr) throw new TRPCError({ code: "NOT_FOUND", message: "Pull request not found" });
-      if (pr.status !== "OPEN") throw new TRPCError({ code: "BAD_REQUEST", message: "Only open PRs can be closed" });
+      if (!pr)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Pull request not found",
+        });
+      if (pr.status !== "OPEN")
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Only open PRs can be closed",
+        });
 
       const updated = await ctx.db.pullRequest.update({
         where: { id: pr.id },
         data: { status: "CLOSED", closedAt: new Date() },
       });
 
-      void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "write" });
+      void recordActivity(ctx.db, {
+        userId: ctx.session.user.id,
+        orgId: repo.orgId,
+        type: "write",
+      });
 
       void notifyPRSubscribers({
         db: ctx.db,
@@ -242,20 +315,38 @@ export const pullRequestRouter = createTRPCRouter({
   reopen: protectedProcedure
     .input(z.object({ repoId: z.string(), number: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
 
       const pr = await ctx.db.pullRequest.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: input.number } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.number },
+        },
       });
-      if (!pr) throw new TRPCError({ code: "NOT_FOUND", message: "Pull request not found" });
-      if (pr.status !== "CLOSED") throw new TRPCError({ code: "BAD_REQUEST", message: "Only closed PRs can be reopened" });
+      if (!pr)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Pull request not found",
+        });
+      if (pr.status !== "CLOSED")
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Only closed PRs can be reopened",
+        });
 
       const updated = await ctx.db.pullRequest.update({
         where: { id: pr.id },
         data: { status: "OPEN", closedAt: null },
       });
 
-      void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "write" });
+      void recordActivity(ctx.db, {
+        userId: ctx.session.user.id,
+        orgId: repo.orgId,
+        type: "write",
+      });
 
       void notifyPRSubscribers({
         db: ctx.db,
@@ -272,20 +363,46 @@ export const pullRequestRouter = createTRPCRouter({
   merge: protectedProcedure
     .input(z.object({ repoId: z.string(), number: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
 
       const pr = await ctx.db.pullRequest.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: input.number } },
-        include: { reviews: true, repo: { select: { requiredReviews: true, mergePermissionsSame: true } } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.number },
+        },
+        include: {
+          reviews: true,
+          repo: {
+            select: { requiredReviews: true, mergePermissionsSame: true },
+          },
+        },
       });
-      if (!pr) throw new TRPCError({ code: "NOT_FOUND", message: "Pull request not found" });
-      if (pr.status !== "OPEN") throw new TRPCError({ code: "BAD_REQUEST", message: "Only open PRs can be merged" });
+      if (!pr)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Pull request not found",
+        });
+      if (pr.status !== "OPEN")
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Only open PRs can be merged",
+        });
 
       // Check required reviews
-      const approvedCount = pr.reviews.filter((r) => r.state === "APPROVED").length;
-      const hasRequestChanges = pr.reviews.some((r) => r.state === "REQUEST_CHANGES");
+      const approvedCount = pr.reviews.filter(
+        (r) => r.state === "APPROVED",
+      ).length;
+      const hasRequestChanges = pr.reviews.some(
+        (r) => r.state === "REQUEST_CHANGES",
+      );
       if (hasRequestChanges) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot merge: there are outstanding change requests" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Cannot merge: there are outstanding change requests",
+        });
       }
       if (approvedCount < pr.repo.requiredReviews) {
         throw new TRPCError({
@@ -296,10 +413,15 @@ export const pullRequestRouter = createTRPCRouter({
 
       // Check merge permissions
       const targetBranch = await ctx.db.branch.findUnique({
-        where: { repoId_name: { repoId: input.repoId, name: pr.targetBranchName } },
+        where: {
+          repoId_name: { repoId: input.repoId, name: pr.targetBranchName },
+        },
       });
       if (!targetBranch) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Target branch no longer exists" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Target branch no longer exists",
+        });
       }
 
       const permType = pr.repo.mergePermissionsSame
@@ -314,56 +436,95 @@ export const pullRequestRouter = createTRPCRouter({
 
       // Empty list = all authorized
       if (permissions.length > 0) {
-        const authorized = permissions.some((p) => p.userId === ctx.session.user.id);
+        const authorized = permissions.some(
+          (p) => p.userId === ctx.session.user.id,
+        );
         if (!authorized) {
-          throw new TRPCError({ code: "FORBIDDEN", message: "You are not authorized to merge into this branch" });
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "You are not authorized to merge into this branch",
+          });
         }
       }
 
       // Validate source branch still exists
       const sourceBranch = await ctx.db.branch.findUnique({
-        where: { repoId_name: { repoId: input.repoId, name: pr.sourceBranchName } },
+        where: {
+          repoId_name: { repoId: input.repoId, name: pr.sourceBranchName },
+        },
       });
       if (!sourceBranch) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Source branch no longer exists" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Source branch no longer exists",
+        });
       }
 
       // Execute merge (replicated from branch.mergeBranch logic)
       // Collect all CLs on the incoming branch
-      const incomingCls: (Changelist & { user: { email: string } | null })[] = [];
+      const incomingCls: (Changelist & { user: { email: string } | null })[] =
+        [];
       let currentNumber: number | null = sourceBranch.headNumber;
       while (currentNumber !== null) {
-        const cl: (Changelist & { user: { email: string } | null }) | null = await ctx.db.changelist.findUnique({
-          where: { repoId_number: { repoId: input.repoId, number: currentNumber } },
-          include: { user: { select: { email: true } } },
-        });
+        const cl: (Changelist & { user: { email: string } | null }) | null =
+          await ctx.db.changelist.findUnique({
+            where: {
+              repoId_number: { repoId: input.repoId, number: currentNumber },
+            },
+            include: { user: { select: { email: true } } },
+          });
         if (!cl) break;
         incomingCls.push(cl);
         currentNumber = cl.parentNumber;
-        if (cl.parentNumber !== null && cl.parentNumber <= targetBranch.headNumber) break;
+        if (
+          cl.parentNumber !== null &&
+          cl.parentNumber <= targetBranch.headNumber
+        )
+          break;
       }
 
       if (incomingCls.length === 0) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "No changelists to merge" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No changelists to merge",
+        });
       }
 
       const firstLine = `Merged ${pr.sourceBranchName} into ${pr.targetBranchName}`;
-      const clMessages = incomingCls.map((cl) => `#${cl.number} ${cl.message}`).join("\n");
+      const clMessages = incomingCls
+        .map((cl) => `#${cl.number} ${cl.message}`)
+        .join("\n");
       const mergeMessage = `${firstLine}\n\n${clMessages}`;
 
       const incomingHead = await ctx.db.changelist.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: sourceBranch.headNumber } },
+        where: {
+          repoId_number: {
+            repoId: input.repoId,
+            number: sourceBranch.headNumber,
+          },
+        },
       });
       const targetHead = await ctx.db.changelist.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: targetBranch.headNumber } },
+        where: {
+          repoId_number: {
+            repoId: input.repoId,
+            number: targetBranch.headNumber,
+          },
+        },
       });
 
       if (!incomingHead || !targetHead) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Could not find branch head changelists" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Could not find branch head changelists",
+        });
       }
 
-      const targetState: Record<string, number> = { ...(targetHead.stateTree as Record<string, number>) };
-      const incomingState: Record<string, number> = incomingHead.stateTree as Record<string, number>;
+      const targetState: Record<string, number> = {
+        ...(targetHead.stateTree as Record<string, number>),
+      };
+      const incomingState: Record<string, number> =
+        incomingHead.stateTree as Record<string, number>;
 
       for (const [fileId, clNum] of Object.entries(incomingState)) {
         targetState[fileId] = clNum;
@@ -371,7 +532,10 @@ export const pullRequestRouter = createTRPCRouter({
 
       const incomingClNumbers = incomingCls.map((cl) => cl.number);
       const fileChanges = await ctx.db.fileChange.findMany({
-        where: { repoId: input.repoId, changelistNumber: { in: incomingClNumbers } },
+        where: {
+          repoId: input.repoId,
+          changelistNumber: { in: incomingClNumbers },
+        },
         include: { file: true },
       });
 
@@ -400,19 +564,29 @@ export const pullRequestRouter = createTRPCRouter({
       });
 
       // Create de-duplicated file change records
-      const latestFileChanges = new Map<string, { type: FileChangeType; oldPath: string | null }>();
-      for (const fc of fileChanges.sort((a, b) => a.changelistNumber - b.changelistNumber)) {
-        latestFileChanges.set(fc.fileId, { type: fc.type, oldPath: fc.oldPath });
+      const latestFileChanges = new Map<
+        string,
+        { type: FileChangeType; oldPath: string | null }
+      >();
+      for (const fc of fileChanges.sort(
+        (a, b) => a.changelistNumber - b.changelistNumber,
+      )) {
+        latestFileChanges.set(fc.fileId, {
+          type: fc.type,
+          oldPath: fc.oldPath,
+        });
       }
       if (latestFileChanges.size > 0) {
         await ctx.db.fileChange.createMany({
-          data: Array.from(latestFileChanges.entries()).map(([fileId, change]) => ({
-            repoId: input.repoId,
-            fileId,
-            changelistNumber: nextNumber,
-            type: change.type,
-            oldPath: change.oldPath,
-          })),
+          data: Array.from(latestFileChanges.entries()).map(
+            ([fileId, change]) => ({
+              repoId: input.repoId,
+              fileId,
+              changelistNumber: nextNumber,
+              type: change.type,
+              oldPath: change.oldPath,
+            }),
+          ),
         });
       }
 
@@ -433,7 +607,11 @@ export const pullRequestRouter = createTRPCRouter({
         data: { status: "MERGED", mergedAt: new Date() },
       });
 
-      void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "write" });
+      void recordActivity(ctx.db, {
+        userId: ctx.session.user.id,
+        orgId: repo.orgId,
+        type: "write",
+      });
 
       void notifyPRSubscribers({
         db: ctx.db,
@@ -459,12 +637,22 @@ export const pullRequestRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.READ,
+      );
 
       const pr = await ctx.db.pullRequest.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: input.prNumber } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.prNumber },
+        },
       });
-      if (!pr) throw new TRPCError({ code: "NOT_FOUND", message: "Pull request not found" });
+      if (!pr)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Pull request not found",
+        });
 
       const comment = await ctx.db.pullRequestComment.create({
         data: {
@@ -473,11 +661,17 @@ export const pullRequestRouter = createTRPCRouter({
           authorId: ctx.session.user.id,
         },
         include: {
-          author: { select: { id: true, name: true, email: true, image: true } },
+          author: {
+            select: { id: true, name: true, email: true, image: true },
+          },
         },
       });
 
-      void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "read" });
+      void recordActivity(ctx.db, {
+        userId: ctx.session.user.id,
+        orgId: repo.orgId,
+        type: "read",
+      });
 
       // Auto-subscribe commenter
       await subscribeToPR(ctx.db, pr.id, ctx.session.user.id);
@@ -503,12 +697,21 @@ export const pullRequestRouter = createTRPCRouter({
         where: { id: input.commentId },
         include: { pullRequest: { select: { repoId: true } } },
       });
-      if (!comment) throw new TRPCError({ code: "NOT_FOUND", message: "Comment not found" });
+      if (!comment)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Comment not found",
+        });
       if (comment.authorId !== ctx.session.user.id) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "You can only delete your own comments" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You can only delete your own comments",
+        });
       }
 
-      await ctx.db.pullRequestComment.delete({ where: { id: input.commentId } });
+      await ctx.db.pullRequestComment.delete({
+        where: { id: input.commentId },
+      });
       return { success: true };
     }),
 
@@ -518,9 +721,16 @@ export const pullRequestRouter = createTRPCRouter({
       const comment = await ctx.db.pullRequestComment.findUnique({
         where: { id: input.commentId },
       });
-      if (!comment) throw new TRPCError({ code: "NOT_FOUND", message: "Comment not found" });
+      if (!comment)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Comment not found",
+        });
       if (comment.authorId !== ctx.session.user.id) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "You can only edit your own comments" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You can only edit your own comments",
+        });
       }
 
       return ctx.db.pullRequestComment.update({
@@ -535,27 +745,52 @@ export const pullRequestRouter = createTRPCRouter({
         repoId: z.string(),
         prNumber: z.number(),
         reviewerId: z.string(),
-        state: z.enum(["PENDING", "REQUEST_CHANGES", "APPROVED"]).default("PENDING"),
+        state: z
+          .enum(["PENDING", "REQUEST_CHANGES", "APPROVED"])
+          .default("PENDING"),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
 
       const pr = await ctx.db.pullRequest.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: input.prNumber } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.prNumber },
+        },
       });
-      if (!pr) throw new TRPCError({ code: "NOT_FOUND", message: "Pull request not found" });
-      if (pr.status !== "OPEN") throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot review a non-open PR" });
+      if (!pr)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Pull request not found",
+        });
+      if (pr.status !== "OPEN")
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Cannot review a non-open PR",
+        });
 
       // Can't review your own PR
       if (input.reviewerId === pr.authorId && input.state !== "PENDING") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot approve or request changes on your own PR" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Cannot approve or request changes on your own PR",
+        });
       }
 
       // Only the reviewer themselves can set APPROVED or REQUEST_CHANGES
       // Anyone with write access can set PENDING (requesting a review)
-      if (input.state !== "PENDING" && input.reviewerId !== ctx.session.user.id) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only the reviewer can approve or request changes" });
+      if (
+        input.state !== "PENDING" &&
+        input.reviewerId !== ctx.session.user.id
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only the reviewer can approve or request changes",
+        });
       }
 
       const review = await ctx.db.pullRequestReview.upsert({
@@ -574,11 +809,17 @@ export const pullRequestRouter = createTRPCRouter({
           state: input.state,
         },
         include: {
-          reviewer: { select: { id: true, name: true, email: true, image: true } },
+          reviewer: {
+            select: { id: true, name: true, email: true, image: true },
+          },
         },
       });
 
-      void recordActivity(ctx.db, { userId: ctx.session.user.id, orgId: repo.orgId, type: "write" });
+      void recordActivity(ctx.db, {
+        userId: ctx.session.user.id,
+        orgId: repo.orgId,
+        type: "write",
+      });
 
       // Auto-subscribe reviewer
       await subscribeToPR(ctx.db, pr.id, input.reviewerId);
@@ -600,12 +841,14 @@ export const pullRequestRouter = createTRPCRouter({
         }
       } else {
         // Approved or changes requested — notify all subscribers
-        const stateLabel = input.state === "APPROVED" ? "approved" : "requested changes on";
+        const stateLabel =
+          input.state === "APPROVED" ? "approved" : "requested changes on";
         void notifyPRSubscribers({
           db: ctx.db,
           actorId: ctx.session.user.id,
           pullRequestId: pr.id,
-          type: input.state === "APPROVED" ? "pr_approved" : "pr_changes_requested",
+          type:
+            input.state === "APPROVED" ? "pr_approved" : "pr_changes_requested",
           title: `${review.reviewer.name ?? review.reviewer.email} ${stateLabel} PR #${pr.number}`,
           link,
         });
@@ -626,31 +869,49 @@ export const pullRequestRouter = createTRPCRouter({
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       const pr = await ctx.db.pullRequest.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: input.prNumber } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.prNumber },
+        },
       });
-      if (!pr) throw new TRPCError({ code: "NOT_FOUND", message: "Pull request not found" });
+      if (!pr)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Pull request not found",
+        });
 
       const sourceBranch = await ctx.db.branch.findUnique({
-        where: { repoId_name: { repoId: input.repoId, name: pr.sourceBranchName } },
+        where: {
+          repoId_name: { repoId: input.repoId, name: pr.sourceBranchName },
+        },
       });
       const targetBranch = await ctx.db.branch.findUnique({
-        where: { repoId_name: { repoId: input.repoId, name: pr.targetBranchName } },
+        where: {
+          repoId_name: { repoId: input.repoId, name: pr.targetBranchName },
+        },
       });
 
       if (!sourceBranch || !targetBranch) return [];
 
       // Walk source branch from head back to common ancestor
-      const changelists: (Changelist & { user: { email: string } | null })[] = [];
+      const changelists: (Changelist & { user: { email: string } | null })[] =
+        [];
       let currentNumber: number | null = sourceBranch.headNumber;
       while (currentNumber !== null) {
-        const cl: (Changelist & { user: { email: string } | null }) | null = await ctx.db.changelist.findUnique({
-          where: { repoId_number: { repoId: input.repoId, number: currentNumber } },
-          include: { user: { select: { email: true } } },
-        });
+        const cl: (Changelist & { user: { email: string } | null }) | null =
+          await ctx.db.changelist.findUnique({
+            where: {
+              repoId_number: { repoId: input.repoId, number: currentNumber },
+            },
+            include: { user: { select: { email: true } } },
+          });
         if (!cl) break;
         changelists.push(cl);
         currentNumber = cl.parentNumber;
-        if (cl.parentNumber !== null && cl.parentNumber <= targetBranch.headNumber) break;
+        if (
+          cl.parentNumber !== null &&
+          cl.parentNumber <= targetBranch.headNumber
+        )
+          break;
       }
 
       return changelists;
@@ -668,34 +929,57 @@ export const pullRequestRouter = createTRPCRouter({
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       const pr = await ctx.db.pullRequest.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: input.prNumber } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.prNumber },
+        },
       });
-      if (!pr) throw new TRPCError({ code: "NOT_FOUND", message: "Pull request not found" });
+      if (!pr)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Pull request not found",
+        });
 
       const sourceBranch = await ctx.db.branch.findUnique({
-        where: { repoId_name: { repoId: input.repoId, name: pr.sourceBranchName } },
+        where: {
+          repoId_name: { repoId: input.repoId, name: pr.sourceBranchName },
+        },
       });
       const targetBranch = await ctx.db.branch.findUnique({
-        where: { repoId_name: { repoId: input.repoId, name: pr.targetBranchName } },
+        where: {
+          repoId_name: { repoId: input.repoId, name: pr.targetBranchName },
+        },
       });
 
-      if (!sourceBranch || !targetBranch) return { files: [], sourceHead: 0, targetHead: 0 };
+      if (!sourceBranch || !targetBranch)
+        return { files: [], sourceHead: 0, targetHead: 0 };
 
       // Collect CL numbers on source branch
       const clNumbers: number[] = [];
       let currentNumber: number | null = sourceBranch.headNumber;
       while (currentNumber !== null) {
         clNumbers.push(currentNumber);
-        const cl: { parentNumber: number | null } | null = await ctx.db.changelist.findUnique({
-          where: { repoId_number: { repoId: input.repoId, number: currentNumber } },
-          select: { parentNumber: true },
-        });
+        const cl: { parentNumber: number | null } | null =
+          await ctx.db.changelist.findUnique({
+            where: {
+              repoId_number: { repoId: input.repoId, number: currentNumber },
+            },
+            select: { parentNumber: true },
+          });
         if (!cl) break;
         currentNumber = cl.parentNumber;
-        if (cl.parentNumber !== null && cl.parentNumber <= targetBranch.headNumber) break;
+        if (
+          cl.parentNumber !== null &&
+          cl.parentNumber <= targetBranch.headNumber
+        )
+          break;
       }
 
-      if (clNumbers.length === 0) return { files: [], sourceHead: sourceBranch.headNumber, targetHead: targetBranch.headNumber };
+      if (clNumbers.length === 0)
+        return {
+          files: [],
+          sourceHead: sourceBranch.headNumber,
+          targetHead: targetBranch.headNumber,
+        };
 
       const fileChanges = await ctx.db.fileChange.findMany({
         where: {
@@ -707,12 +991,16 @@ export const pullRequestRouter = createTRPCRouter({
 
       // De-duplicate: keep latest change type per file path
       const byPath = new Map<string, { path: string; type: FileChangeType }>();
-      for (const fc of fileChanges.sort((a, b) => a.changelistNumber - b.changelistNumber)) {
+      for (const fc of fileChanges.sort(
+        (a, b) => a.changelistNumber - b.changelistNumber,
+      )) {
         byPath.set(fc.file.path, { path: fc.file.path, type: fc.type });
       }
 
       return {
-        files: Array.from(byPath.values()).sort((a, b) => a.path.localeCompare(b.path)),
+        files: Array.from(byPath.values()).sort((a, b) =>
+          a.path.localeCompare(b.path),
+        ),
         sourceHead: sourceBranch.headNumber,
         targetHead: targetBranch.headNumber,
       };
@@ -735,7 +1023,10 @@ export const pullRequestRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const sub = await ctx.db.pullRequestSubscription.findUnique({
         where: {
-          pullRequestId_userId: { pullRequestId: input.pullRequestId, userId: ctx.session.user.id },
+          pullRequestId_userId: {
+            pullRequestId: input.pullRequestId,
+            userId: ctx.session.user.id,
+          },
         },
       });
       return !!sub;
@@ -748,7 +1039,11 @@ export const pullRequestRouter = createTRPCRouter({
         where: { id: input.pullRequestId },
         select: { repoId: true },
       });
-      if (!pr) throw new TRPCError({ code: "NOT_FOUND", message: "Pull request not found" });
+      if (!pr)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Pull request not found",
+        });
       await getUserAndRepoWithAccess(ctx, pr.repoId, RepoAccess.READ);
       await subscribeToPR(ctx.db, input.pullRequestId, ctx.session.user.id);
       return { subscribed: true };
@@ -758,7 +1053,10 @@ export const pullRequestRouter = createTRPCRouter({
     .input(z.object({ pullRequestId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db.pullRequestSubscription.deleteMany({
-        where: { pullRequestId: input.pullRequestId, userId: ctx.session.user.id },
+        where: {
+          pullRequestId: input.pullRequestId,
+          userId: ctx.session.user.id,
+        },
       });
       return { subscribed: false };
     }),

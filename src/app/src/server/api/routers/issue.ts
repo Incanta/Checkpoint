@@ -1,3 +1,5 @@
+// @obfuscate
+
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
@@ -41,10 +43,16 @@ export const issueRouter = createTRPCRouter({
       return ctx.db.issue.findMany({
         where,
         include: {
-          author: { select: { id: true, name: true, email: true, image: true } },
+          author: {
+            select: { id: true, name: true, email: true, image: true },
+          },
           labels: { include: { label: true } },
           assignees: {
-            include: { user: { select: { id: true, name: true, email: true, image: true } } },
+            include: {
+              user: {
+                select: { id: true, name: true, email: true, image: true },
+              },
+            },
           },
           _count: { select: { comments: true } },
         },
@@ -58,18 +66,28 @@ export const issueRouter = createTRPCRouter({
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
       const issue = await ctx.db.issue.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: input.number } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.number },
+        },
         include: {
-          author: { select: { id: true, name: true, email: true, image: true } },
+          author: {
+            select: { id: true, name: true, email: true, image: true },
+          },
           comments: {
             include: {
-              author: { select: { id: true, name: true, email: true, image: true } },
+              author: {
+                select: { id: true, name: true, email: true, image: true },
+              },
             },
             orderBy: { createdAt: "asc" },
           },
           labels: { include: { label: true } },
           assignees: {
-            include: { user: { select: { id: true, name: true, email: true, image: true } } },
+            include: {
+              user: {
+                select: { id: true, name: true, email: true, image: true },
+              },
+            },
           },
         },
       });
@@ -107,7 +125,10 @@ export const issueRouter = createTRPCRouter({
       z.object({
         repoId: z.string(),
         name: z.string().min(1).max(50),
-        color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#6366f1"),
+        color: z
+          .string()
+          .regex(/^#[0-9a-fA-F]{6}$/)
+          .default("#6366f1"),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -122,24 +143,36 @@ export const issueRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         name: z.string().min(1).max(50).optional(),
-        color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+        color: z
+          .string()
+          .regex(/^#[0-9a-fA-F]{6}$/)
+          .optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const label = await ctx.db.issueLabel.findUnique({ where: { id: input.id } });
-      if (!label) throw new TRPCError({ code: "NOT_FOUND", message: "Label not found" });
+      const label = await ctx.db.issueLabel.findUnique({
+        where: { id: input.id },
+      });
+      if (!label)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Label not found" });
       await getUserAndRepoWithAccess(ctx, label.repoId, RepoAccess.WRITE);
       return ctx.db.issueLabel.update({
         where: { id: input.id },
-        data: { ...(input.name && { name: input.name }), ...(input.color && { color: input.color }) },
+        data: {
+          ...(input.name && { name: input.name }),
+          ...(input.color && { color: input.color }),
+        },
       });
     }),
 
   deleteLabel: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const label = await ctx.db.issueLabel.findUnique({ where: { id: input.id } });
-      if (!label) throw new TRPCError({ code: "NOT_FOUND", message: "Label not found" });
+      const label = await ctx.db.issueLabel.findUnique({
+        where: { id: input.id },
+      });
+      if (!label)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Label not found" });
       await getUserAndRepoWithAccess(ctx, label.repoId, RepoAccess.WRITE);
       await ctx.db.issueLabel.delete({ where: { id: input.id } });
       return { success: true };
@@ -158,7 +191,11 @@ export const issueRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
 
       // Auto-increment issue number per repo
       const lastIssue = await ctx.db.issue.findFirst({
@@ -175,18 +212,26 @@ export const issueRouter = createTRPCRouter({
           title: input.title,
           body: input.body,
           authorId: ctx.session.user.id,
-          labels: input.labelIds.length > 0
-            ? { create: input.labelIds.map((labelId) => ({ labelId })) }
-            : undefined,
-          assignees: input.assigneeIds.length > 0
-            ? { create: input.assigneeIds.map((userId) => ({ userId })) }
-            : undefined,
+          labels:
+            input.labelIds.length > 0
+              ? { create: input.labelIds.map((labelId) => ({ labelId })) }
+              : undefined,
+          assignees:
+            input.assigneeIds.length > 0
+              ? { create: input.assigneeIds.map((userId) => ({ userId })) }
+              : undefined,
         },
         include: {
-          author: { select: { id: true, name: true, email: true, image: true } },
+          author: {
+            select: { id: true, name: true, email: true, image: true },
+          },
           labels: { include: { label: true } },
           assignees: {
-            include: { user: { select: { id: true, name: true, email: true, image: true } } },
+            include: {
+              user: {
+                select: { id: true, name: true, email: true, image: true },
+              },
+            },
           },
         },
       });
@@ -231,12 +276,18 @@ export const issueRouter = createTRPCRouter({
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
 
       const issue = await ctx.db.issue.findUnique({
-        where: { repoId_number: { repoId: input.repoId, number: input.number } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.number },
+        },
       });
 
-      if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
+      if (!issue)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
       if (issue.authorId !== ctx.session.user.id) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only the author can edit this issue" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only the author can edit this issue",
+        });
       }
 
       return ctx.db.issue.update({
@@ -251,9 +302,15 @@ export const issueRouter = createTRPCRouter({
   close: protectedProcedure
     .input(z.object({ repoId: z.string(), number: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
       const issue = await ctx.db.issue.update({
-        where: { repoId_number: { repoId: input.repoId, number: input.number } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.number },
+        },
         data: { status: "CLOSED", closedAt: new Date() },
       });
 
@@ -272,9 +329,15 @@ export const issueRouter = createTRPCRouter({
   reopen: protectedProcedure
     .input(z.object({ repoId: z.string(), number: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const { repo } = await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
       const issue = await ctx.db.issue.update({
-        where: { repoId_number: { repoId: input.repoId, number: input.number } },
+        where: {
+          repoId_number: { repoId: input.repoId, number: input.number },
+        },
         data: { status: "OPEN", closedAt: null },
       });
 
@@ -297,9 +360,22 @@ export const issueRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const issue = await ctx.db.issue.findUnique({
         where: { id: input.issueId },
-        select: { id: true, number: true, title: true, repoId: true, repo: { select: { name: true, orgId: true, org: { select: { name: true } } } } },
+        select: {
+          id: true,
+          number: true,
+          title: true,
+          repoId: true,
+          repo: {
+            select: {
+              name: true,
+              orgId: true,
+              org: { select: { name: true } },
+            },
+          },
+        },
       });
-      if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
+      if (!issue)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
       await getUserAndRepoWithAccess(ctx, issue.repoId, RepoAccess.READ);
 
       const comment = await ctx.db.issueComment.create({
@@ -309,7 +385,9 @@ export const issueRouter = createTRPCRouter({
           authorId: ctx.session.user.id,
         },
         include: {
-          author: { select: { id: true, name: true, email: true, image: true } },
+          author: {
+            select: { id: true, name: true, email: true, image: true },
+          },
         },
       });
 
@@ -339,16 +417,27 @@ export const issueRouter = createTRPCRouter({
   updateComment: protectedProcedure
     .input(z.object({ commentId: z.string(), body: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const comment = await ctx.db.issueComment.findUnique({ where: { id: input.commentId } });
-      if (!comment) throw new TRPCError({ code: "NOT_FOUND", message: "Comment not found" });
+      const comment = await ctx.db.issueComment.findUnique({
+        where: { id: input.commentId },
+      });
+      if (!comment)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Comment not found",
+        });
       if (comment.authorId !== ctx.session.user.id) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only the author can edit this comment" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only the author can edit this comment",
+        });
       }
       return ctx.db.issueComment.update({
         where: { id: input.commentId },
         data: { body: input.body },
         include: {
-          author: { select: { id: true, name: true, email: true, image: true } },
+          author: {
+            select: { id: true, name: true, email: true, image: true },
+          },
         },
       });
     }),
@@ -356,10 +445,19 @@ export const issueRouter = createTRPCRouter({
   deleteComment: protectedProcedure
     .input(z.object({ commentId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const comment = await ctx.db.issueComment.findUnique({ where: { id: input.commentId } });
-      if (!comment) throw new TRPCError({ code: "NOT_FOUND", message: "Comment not found" });
+      const comment = await ctx.db.issueComment.findUnique({
+        where: { id: input.commentId },
+      });
+      if (!comment)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Comment not found",
+        });
       if (comment.authorId !== ctx.session.user.id) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only the author can delete this comment" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only the author can delete this comment",
+        });
       }
       await ctx.db.issueComment.delete({ where: { id: input.commentId } });
       return { success: true };
@@ -370,8 +468,12 @@ export const issueRouter = createTRPCRouter({
   addLabelToIssue: protectedProcedure
     .input(z.object({ issueId: z.string(), labelId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const issue = await ctx.db.issue.findUnique({ where: { id: input.issueId }, select: { repoId: true } });
-      if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
+      const issue = await ctx.db.issue.findUnique({
+        where: { id: input.issueId },
+        select: { repoId: true },
+      });
+      if (!issue)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
       await getUserAndRepoWithAccess(ctx, issue.repoId, RepoAccess.WRITE);
       return ctx.db.issueLabelLink.create({
         data: { issueId: input.issueId, labelId: input.labelId },
@@ -382,11 +484,17 @@ export const issueRouter = createTRPCRouter({
   removeLabelFromIssue: protectedProcedure
     .input(z.object({ issueId: z.string(), labelId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const issue = await ctx.db.issue.findUnique({ where: { id: input.issueId }, select: { repoId: true } });
-      if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
+      const issue = await ctx.db.issue.findUnique({
+        where: { id: input.issueId },
+        select: { repoId: true },
+      });
+      if (!issue)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
       await getUserAndRepoWithAccess(ctx, issue.repoId, RepoAccess.WRITE);
       await ctx.db.issueLabelLink.delete({
-        where: { issueId_labelId: { issueId: input.issueId, labelId: input.labelId } },
+        where: {
+          issueId_labelId: { issueId: input.issueId, labelId: input.labelId },
+        },
       });
       return { success: true };
     }),
@@ -398,14 +506,23 @@ export const issueRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const issue = await ctx.db.issue.findUnique({
         where: { id: input.issueId },
-        select: { id: true, number: true, title: true, repoId: true, repo: { select: { name: true, org: { select: { name: true } } } } },
+        select: {
+          id: true,
+          number: true,
+          title: true,
+          repoId: true,
+          repo: { select: { name: true, org: { select: { name: true } } } },
+        },
       });
-      if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
+      if (!issue)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
       await getUserAndRepoWithAccess(ctx, issue.repoId, RepoAccess.WRITE);
 
       const result = await ctx.db.issueAssignee.create({
         data: { issueId: input.issueId, userId: input.userId },
-        include: { user: { select: { id: true, name: true, email: true, image: true } } },
+        include: {
+          user: { select: { id: true, name: true, email: true, image: true } },
+        },
       });
 
       // Auto-subscribe assignee
@@ -431,11 +548,17 @@ export const issueRouter = createTRPCRouter({
   removeAssignee: protectedProcedure
     .input(z.object({ issueId: z.string(), userId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const issue = await ctx.db.issue.findUnique({ where: { id: input.issueId }, select: { repoId: true } });
-      if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
+      const issue = await ctx.db.issue.findUnique({
+        where: { id: input.issueId },
+        select: { repoId: true },
+      });
+      if (!issue)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
       await getUserAndRepoWithAccess(ctx, issue.repoId, RepoAccess.WRITE);
       await ctx.db.issueAssignee.delete({
-        where: { issueId_userId: { issueId: input.issueId, userId: input.userId } },
+        where: {
+          issueId_userId: { issueId: input.issueId, userId: input.userId },
+        },
       });
       return { success: true };
     }),
@@ -446,7 +569,12 @@ export const issueRouter = createTRPCRouter({
     .input(z.object({ issueId: z.string() }))
     .query(async ({ ctx, input }) => {
       const sub = await ctx.db.issueSubscription.findUnique({
-        where: { issueId_userId: { issueId: input.issueId, userId: ctx.session.user.id } },
+        where: {
+          issueId_userId: {
+            issueId: input.issueId,
+            userId: ctx.session.user.id,
+          },
+        },
       });
       return !!sub;
     }),
@@ -454,8 +582,12 @@ export const issueRouter = createTRPCRouter({
   subscribe: protectedProcedure
     .input(z.object({ issueId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const issue = await ctx.db.issue.findUnique({ where: { id: input.issueId }, select: { repoId: true } });
-      if (!issue) throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
+      const issue = await ctx.db.issue.findUnique({
+        where: { id: input.issueId },
+        select: { repoId: true },
+      });
+      if (!issue)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
       await getUserAndRepoWithAccess(ctx, issue.repoId, RepoAccess.READ);
       await subscribeToIssue(ctx.db, input.issueId, ctx.session.user.id);
       return { subscribed: true };

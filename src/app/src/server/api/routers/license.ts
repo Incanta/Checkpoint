@@ -1,8 +1,14 @@
+// @obfuscate
+
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import crypto from "crypto";
 
-import { createTRPCRouter, protectedProcedure, publicProcedure } from "~/server/api/trpc";
+import {
+  createTRPCRouter,
+  protectedProcedure,
+  publicProcedure,
+} from "~/server/api/trpc";
 import {
   isLicenseManager,
   hasFeature,
@@ -17,16 +23,23 @@ export const licenseRouter = createTRPCRouter({
   // Admin: list all licenses (license manager only)
   list: protectedProcedure
     .input(
-      z.object({
-        includeInactive: z.boolean().default(false),
-      }).optional(),
+      z
+        .object({
+          includeInactive: z.boolean().default(false),
+        })
+        .optional(),
     )
     .query(async ({ ctx, input }) => {
       if (!isLicenseManager()) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not a license manager instance" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Not a license manager instance",
+        });
       }
 
-      const user = await ctx.db.user.findUnique({ where: { id: ctx.session.user.id } });
+      const user = await ctx.db.user.findUnique({
+        where: { id: ctx.session.user.id },
+      });
       if (!user?.checkpointAdmin) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
       }
@@ -46,10 +59,15 @@ export const licenseRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       if (!isLicenseManager()) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not a license manager instance" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Not a license manager instance",
+        });
       }
 
-      const user = await ctx.db.user.findUnique({ where: { id: ctx.session.user.id } });
+      const user = await ctx.db.user.findUnique({
+        where: { id: ctx.session.user.id },
+      });
       if (!user?.checkpointAdmin) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
       }
@@ -58,7 +76,10 @@ export const licenseRouter = createTRPCRouter({
         where: { id: input.id },
         include: {
           org: { select: { id: true, name: true } },
-          usageReports: { orderBy: [{ year: "desc" }, { month: "desc" }], take: 12 },
+          usageReports: {
+            orderBy: [{ year: "desc" }, { month: "desc" }],
+            take: 12,
+          },
         },
       });
     }),
@@ -75,17 +96,25 @@ export const licenseRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       if (!isLicenseManager()) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not a license manager instance" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Not a license manager instance",
+        });
       }
 
-      const user = await ctx.db.user.findUnique({ where: { id: ctx.session.user.id } });
+      const user = await ctx.db.user.findUnique({
+        where: { id: ctx.session.user.id },
+      });
       if (!user?.checkpointAdmin) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
       }
 
       const key = "lic_" + crypto.randomBytes(16).toString("hex");
       const secret = "sec_" + crypto.randomBytes(32).toString("hex");
-      const secretHash = crypto.createHash("sha256").update(secret).digest("hex");
+      const secretHash = crypto
+        .createHash("sha256")
+        .update(secret)
+        .digest("hex");
 
       const license = await ctx.db.license.create({
         data: {
@@ -123,10 +152,15 @@ export const licenseRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       if (!isLicenseManager()) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not a license manager instance" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Not a license manager instance",
+        });
       }
 
-      const user = await ctx.db.user.findUnique({ where: { id: ctx.session.user.id } });
+      const user = await ctx.db.user.findUnique({
+        where: { id: ctx.session.user.id },
+      });
       if (!user?.checkpointAdmin) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
       }
@@ -154,10 +188,15 @@ export const licenseRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       if (!isLicenseManager()) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not a license manager instance" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Not a license manager instance",
+        });
       }
 
-      const user = await ctx.db.user.findUnique({ where: { id: ctx.session.user.id } });
+      const user = await ctx.db.user.findUnique({
+        where: { id: ctx.session.user.id },
+      });
       if (!user?.checkpointAdmin) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
       }
@@ -178,10 +217,15 @@ export const licenseRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       if (!isLicenseManager()) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not a license manager instance" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Not a license manager instance",
+        });
       }
 
-      const user = await ctx.db.user.findUnique({ where: { id: ctx.session.user.id } });
+      const user = await ctx.db.user.findUnique({
+        where: { id: ctx.session.user.id },
+      });
       if (!user?.checkpointAdmin) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
       }
@@ -196,10 +240,15 @@ export const licenseRouter = createTRPCRouter({
   // Public: get the effective tier for an org
   getEffectiveTier: protectedProcedure
     .input(z.object({ orgId: z.string() }))
-    .query(async ({ ctx, input }): Promise<{ tier: LicenseTier; features: LicenseFeature[] }> => {
-      const tier = await getEffectiveTierHelper(input.orgId, ctx.db);
-      return { tier, features: getFeaturesForTier(tier) };
-    }),
+    .query(
+      async ({
+        ctx,
+        input,
+      }): Promise<{ tier: LicenseTier; features: LicenseFeature[] }> => {
+        const tier = await getEffectiveTierHelper(input.orgId, ctx.db);
+        return { tier, features: getFeaturesForTier(tier) };
+      },
+    ),
 
   // Public: check if a specific feature is available
   checkFeature: publicProcedure

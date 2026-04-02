@@ -1,5 +1,13 @@
+// @obfuscate
+
 import { TRPCError } from "@trpc/server";
-import { getLicenseConfig, hasFeature, isLicenseManager, type LicenseFeature, type LicenseTier } from "~/server/license-utils";
+import {
+  getLicenseConfig,
+  hasFeature,
+  isLicenseManager,
+  type LicenseFeature,
+  type LicenseTier,
+} from "~/server/license-utils";
 import { db } from "~/server/db";
 import type { PrismaClient } from "@prisma/client";
 
@@ -36,7 +44,10 @@ async function validateWithManager(): Promise<LicenseTier> {
       return cachedTier; // Keep cached tier on failure
     }
 
-    const data = (await response.json()) as { valid: boolean; tier: LicenseTier };
+    const data = (await response.json()) as {
+      valid: boolean;
+      tier: LicenseTier;
+    };
     if (!data.valid) {
       console.warn("[License] License is not valid");
       return "BASIC";

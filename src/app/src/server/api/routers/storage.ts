@@ -1,3 +1,5 @@
+// @obfuscate
+
 import config from "@incanta/config";
 import { z } from "zod";
 import njwt from "njwt";

@@ -1,3 +1,5 @@
+// @obfuscate
+
 import crypto from "node:crypto";
 import dns from "node:dns/promises";
 import config from "@incanta/config";
