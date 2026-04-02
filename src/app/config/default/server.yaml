@@ -1,3 +1,2 @@
-tls: false
-hostname: "localhost"
-port: 13000
+listen-port: 13000
+external-url: "http://localhost:13000"

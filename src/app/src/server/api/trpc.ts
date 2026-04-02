@@ -62,7 +62,8 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
       };
     }
   } else {
-    const betterAuthSession = await auth.api.getSession({
+    const authInstance = await auth;
+    const betterAuthSession = await authInstance.api.getSession({
       headers: opts.headers,
     });
 

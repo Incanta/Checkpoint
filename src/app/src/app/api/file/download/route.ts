@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
   const jwt = readToken.compact();
   const jwtExpirationMs = Date.now() + expirationSeconds * 1000;
 
-  const backendUrl = config.get<string>("storage.backend-url");
+  const backendUrl = config.get<string>("storage.backend-url.internal");
   const filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
     res.text(),
   );

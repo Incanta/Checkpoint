@@ -7,7 +7,13 @@ import "./src/env.js";
 /** @type {import("next").NextConfig} */
 const config = {
   output: "standalone",
-  serverExternalPackages: ["@checkpointvcs/longtail-addon"],
+  serverExternalPackages: ["@incanta/config", "@checkpointvcs/longtail-addon"],
+  outputFileTracingIncludes: {
+    "/**": [
+      "../../node_modules/@incanta/config/lib/config-env.js",
+      "../../node_modules/@checkpointvcs/longtail-addon/**/*",
+    ],
+  },
 };
 
 export default config;

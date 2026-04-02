@@ -21,7 +21,7 @@
     "db:set-provider:postgresql": "cross-env DB_PROVIDER=postgresql node scripts/set-db-provider.mjs",
     "db:types": "prisma generate",
     "db:migrate:dev": "config-env --env=default prisma migrate dev",
-    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:deploy": "config-env --env=default prisma migrate deploy",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:migrate-to-postgres": "node scripts/migrate-sqlite-to-postgres.mjs",

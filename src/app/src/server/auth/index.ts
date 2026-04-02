@@ -9,7 +9,8 @@ import type { Session } from "./config";
  * Returns a normalized Session object compatible with the rest of the app.
  */
 const getSessionUncached = async (): Promise<Session | null> => {
-  const session = await auth.api.getSession({
+  const authInstance = await auth;
+  const session = await authInstance.api.getSession({
     headers: await headers(),
   });
 

@@ -11,11 +11,7 @@ export function getFilerUrl(): string {
   const useStub = config.get<boolean>("seaweedfs.stub.enabled");
 
   if (useStub) {
-    return `http${
-      config.get<boolean>("server.tls") ? "s" : ""
-    }://${config.get<string>(
-      "server.host",
-    )}:${config.get<number>("server.port")}/filer`;
+    return `http://${config.get<string>("seaweedfs.stub.external-url")}/filer`;
   }
 
   return `http${

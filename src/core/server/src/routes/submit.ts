@@ -280,7 +280,7 @@ export function routeSubmit(): Router {
     }
 
     const client = await CreateApiClientAuthManual(
-      config.get<string>("checkpoint.api.url"),
+      config.get<string>("checkpoint.api.url.internal"),
       payload.apiToken,
     );
 
@@ -304,8 +304,9 @@ export function routeSubmit(): Router {
       res.status(200).json(responseMessage);
 
       // Fire and forget — recalculate and persist total repo size
-      const size = await calculateRepoSize(filerUrl, basePath, token);
-      await writeRepoSize(filerUrl, basePath, token, size);
+      calculateRepoSize(filerUrl, basePath, token)
+        .then((size) => writeRepoSize(filerUrl, basePath, token, size))
+        .catch((e) => console.error("Failed to update repo size:", e.message));
     } catch (e: any) {
       console.error(e.message);
       res.status(500).send(e.message);

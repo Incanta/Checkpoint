@@ -57,7 +57,7 @@ export const storageRouter = createTRPCRouter({
         expiration:
           Math.floor(Date.now() / 1000) +
           config.get<number>("storage.token-expiration-seconds"),
-        backendUrl: config.get<string>("storage.backend-url"),
+        backendUrl: config.get<string>("storage.backend-url.external"),
         r2Credentials: null as {
           accessKeyId: string;
           secretAccessKey: string;
@@ -126,7 +126,7 @@ export const storageRouter = createTRPCRouter({
           config.get<number>("storage.token-expiration-seconds") * 1000,
       );
 
-      const backendUrl = config.get<string>("storage.backend-url");
+      const backendUrl = config.get<string>("storage.backend-url.internal");
 
       const response = await fetch(`${backendUrl}/repo-size`, {
         method: "GET",

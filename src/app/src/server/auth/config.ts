@@ -89,18 +89,22 @@ export const enabledProviderIds = (() => {
   return ids;
 })();
 
-export const auth = betterAuth({
-  baseURL: `http${config.get<boolean>("server.tls") ? "s" : ""}://${config.get<string>("server.hostname")}:${config.get<number>("server.port")}`,
-  database: prismaAdapter(db, {
-    provider: "sqlite",
-  }),
-  secret: config.get<string>("auth.secret"),
-  trustedOrigins: ["*"],
-  emailAndPassword: {
-    enabled: config.get<boolean>("auth.email-password.enabled"),
-  },
-  socialProviders: buildSocialProviders(),
-  pages: {
-    signIn: "/signin",
-  },
-});
+async function getAuth() {
+  return betterAuth({
+    baseURL: config.get<string>("server.external-url"),
+    database: prismaAdapter(db, {
+      provider: config.get<"sqlite" | "postgresql">("db.provider"),
+    }),
+    secret: await config.getWithSecrets<string>("auth.secret"),
+    trustedOrigins: ["*"],
+    emailAndPassword: {
+      enabled: config.get<boolean>("auth.email-password.enabled"),
+    },
+    socialProviders: buildSocialProviders(),
+    pages: {
+      signIn: "/signin",
+    },
+  });
+}
+
+export const auth = getAuth();
