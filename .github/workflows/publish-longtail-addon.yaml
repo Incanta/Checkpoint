@@ -210,5 +210,4 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ""
         run: |
-          npm --version
-          npm publish --access public
+          npx npm@latest publish --access public
