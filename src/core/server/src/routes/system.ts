@@ -102,7 +102,7 @@ export function routeSystem(): Router {
     }
 
     // Create directory in filer (SeaweedFS or local stub)
-    const filerUrl = getFilerUrl();
+    const filerUrl = getFilerUrl(true);
 
     const filerToken = njwt.create(
       {
