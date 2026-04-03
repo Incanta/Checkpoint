@@ -42,7 +42,7 @@
     "@types/path-browserify": "^1.0.3",
     "@vitejs/plugin-react": "^4.2.1",
     "cross-env": "*",
-    "electron": "^39.2.7",
+    "electron": "^39.8.3",
     "electron-builder": "^24.13.3",
     "eslint": "*",
     "eslint-plugin-react": "^7.37.5",
