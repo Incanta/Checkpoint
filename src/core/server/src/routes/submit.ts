@@ -214,7 +214,7 @@ export function routeSubmit(): Router {
 
     const claims: JWTClaims = verifiedToken.body.toJSON() as any;
 
-    const filerUrl = getFilerUrl();
+    const filerUrl = getFilerUrl(true);
 
     const basePath = `/${claims.orgId}/${claims.repoId}`;
 
