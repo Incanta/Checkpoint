@@ -33,6 +33,32 @@ if [ -n "$SUDO_USER_NAME" ] && [ "$SUDO_USER_NAME" != "root" ]; then
     echo "Daemon service enabled for user: $SUDO_USER_NAME"
 fi
 
+# Install tray auto-start for the installing user
+TRAY_BIN="$RESOURCES_DIR/tray/checkpoint-tray"
+TRAY_DESKTOP_SRC="$RESOURCES_DIR/tray/checkpoint-tray.desktop"
+if [ -n "$SUDO_USER_NAME" ] && [ "$SUDO_USER_NAME" != "root" ]; then
+    USER_HOME=$(eval echo "~$SUDO_USER_NAME")
+    AUTOSTART_DIR="$USER_HOME/.config/autostart"
+    mkdir -p "$AUTOSTART_DIR"
+    if [ -f "$TRAY_DESKTOP_SRC" ]; then
+        cp "$TRAY_DESKTOP_SRC" "$AUTOSTART_DIR/checkpoint-tray.desktop"
+    else
+        # Generate from installed binary path
+        cat > "$AUTOSTART_DIR/checkpoint-tray.desktop" <<TRAYEOF
+[Desktop Entry]
+Type=Application
+Name=Checkpoint Tray
+Exec=$TRAY_BIN
+Icon=checkpoint
+X-GNOME-Autostart-enabled=true
+Hidden=false
+NoDisplay=true
+TRAYEOF
+    fi
+    chown -R "$SUDO_USER_NAME" "$AUTOSTART_DIR/checkpoint-tray.desktop"
+fi
+
 echo "Checkpoint installation complete."
 echo "  CLI:    $BIN_DIR/chk"
 echo "  Daemon: $RESOURCES_DIR/daemon/checkpoint-daemon"
+echo "  Tray:   $TRAY_BIN"

@@ -31,6 +31,13 @@
       "filter": [
         "**/*"
       ]
+    },
+    {
+      "from": "build-resources/tray",
+      "to": "tray",
+      "filter": [
+        "**/*"
+      ]
     }
   ],
   "win": {
