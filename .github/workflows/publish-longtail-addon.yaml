@@ -18,7 +18,7 @@ jobs:
           - os: windows-latest
             platform: win32
             arch: x64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             platform: linux
             arch: x64
           - os: macos-15-intel
@@ -205,13 +205,9 @@ jobs:
           git commit -m "chore: release @checkpointvcs/longtail-addon v${{ inputs.version }}"
           git push
 
-      - name: Update npm
-        run: npm install -g npm
-
       - name: Publish to npm
         working-directory: src/longtail/addon
         env:
           NODE_AUTH_TOKEN: ""
         run: |
-          npm --version
-          npm publish --access public
+          npx npm@latest publish --access public
