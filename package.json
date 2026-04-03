@@ -10,13 +10,14 @@
     "src/clients/desktop"
   ],
   "scripts": {
-    "postinstall": "cd src/app && yarn db:types && yarn db:migrate:dev",
+    "postinstall": "cd src/app && yarn db:set-provider && yarn db:types && yarn db:migrate:dev",
     "lint": "eslint src/app src/core src/clients/desktop",
     "lint:fix": "eslint src/app src/core src/clients/desktop --fix",
     "build": "cd src/app && yarn build:lib && cd ../core && yarn build",
     "dev": "node dev.js",
     "dev:agent": "node dev-agent.js",
-    "desktop": "cd src/clients/desktop && yarn dev"
+    "desktop": "cd src/clients/desktop && yarn dev",
+    "migrate": "node scripts/migrate.js"
   },
   "dependencies": {
     "@incanta/config": "^2.1.10",
@@ -39,6 +40,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@typescript/native-preview": "^7.0.0-dev.20260304.1",
+    "commander": "^14.0.3",
     "cross-env": "^10.0.0",
     "eslint": "^9.34.0",
     "eslint-config-next": "^15.2.3",
