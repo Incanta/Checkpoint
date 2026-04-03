@@ -205,9 +205,6 @@ jobs:
           git commit -m "chore: release @checkpointvcs/longtail-addon v${{ inputs.version }}"
           git push
 
-      - name: Update npm
-        run: npm install -g npm
-
       - name: Publish to npm
         working-directory: src/longtail/addon
         env:
