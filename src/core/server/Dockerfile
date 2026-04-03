@@ -11,12 +11,24 @@ RUN corepack enable && corepack prepare yarn@4.13.0
 FROM base AS builder
 WORKDIR /app
 
+# Install build tools needed for native addon compilation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    python3 \
+    libssl-dev \
+    git \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY . .
 
 RUN yarn install --immutable
 RUN yarn build
 
 RUN cd src/core/server && yarn build
+
+# Verify the longtail addon prebuilds exist
+RUN ls -la node_modules/@checkpointvcs/longtail-addon/prebuilds/linux-x64/longtail_addon.node
 
 # --------------- runner ---------------
 FROM node:24-slim AS runner
