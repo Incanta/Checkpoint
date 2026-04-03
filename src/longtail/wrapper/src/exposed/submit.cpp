@@ -4,6 +4,10 @@
 #include "../util/progress.h"
 #include "main.h"
 
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 int32_t SubmitSync(
     const char* BranchName,
     const char* ShelfName,
@@ -138,10 +142,35 @@ int32_t SubmitSync(
   p += sizeof(uint16_t) * NumModifications;
   file_infos->m_PathData = p;
 
-  uint32_t offset = 0;
-  uint32_t file_infos_num = 0;
+  // Collect file sizes via directory enumeration instead of per-file
+  // OpenReadFile. On Windows, FindFirstFile/FindNextFile returns sizes
+  // from cached WIN32_FIND_DATAW — zero extra syscalls and no CreateFileW
+  // retry loops (Sleep(1)×10) that made the old approach extremely slow.
+
+  // Group non-delete modifications by parent directory
+  struct ModEntry {
+    uint32_t mod_index;
+    std::string filename;
+    uint64_t size;
+    bool found;
+  };
+  std::unordered_map<std::string, std::vector<ModEntry>> dir_to_files;
+
   for (uint32_t i = 0; i < NumModifications; ++i) {
+    if (Modifications[i].IsDelete) {
+      continue;
+    }
+    std::string path(Modifications[i].Path);
+    size_t last_sep = path.find_last_of('/');
+    std::string dir = (last_sep != std::string::npos) ? path.substr(0, last_sep) : "";
+    std::string file = (last_sep != std::string::npos) ? path.substr(last_sep + 1) : path;
+    dir_to_files[dir].push_back({i, std::move(file), 0, false});
+  }
+
+  // For each unique parent directory, enumerate to get file sizes
+  for (auto& [dir, entries] : dir_to_files) {
     if (IsHandleCanceled(handle)) {
+      Longtail_Free(file_infos);
       Longtail_Free(source_version_index);
       SAFE_DISPOSE_API(chunker_api);
       SAFE_DISPOSE_API(store_block_store_api);
@@ -154,24 +183,63 @@ int32_t SubmitSync(
       return ECANCELED;
     }
 
-    if (Modifications[i].IsDelete) {
-      continue;
+    // Build lookup: filename -> index into entries vector
+    std::unordered_map<std::string, size_t> name_lookup;
+    for (size_t j = 0; j < entries.size(); ++j) {
+      name_lookup[entries[j].filename] = j;
     }
 
-    uint32_t length = (uint32_t)strlen(Modifications[i].Path) + 1;
+    char* search_path;
+    if (dir.empty()) {
+      search_path = Longtail_Strdup(LocalRootPath);
+    } else {
+      search_path = file_storage_api->ConcatPath(file_storage_api, LocalRootPath, dir.c_str());
+    }
 
-    HLongtail_OpenFile file_handle;
-    char* filePath = Longtail_ConcatPath(LocalRootPath, Modifications[i].Path);
-    Longtail_OpenReadFile(filePath, &file_handle);
-    Longtail_GetFileSize(file_handle, &file_infos->m_Sizes[file_infos_num]);
-    Longtail_CloseFile(file_handle);
-    Longtail_Free(filePath);
+    uint32_t remaining = (uint32_t)entries.size();
+    Longtail_StorageAPI_HIterator iterator = 0;
+    int find_err = file_storage_api->StartFind(file_storage_api, search_path, &iterator);
+    if (find_err == 0) {
+      while (find_err == 0 && remaining > 0) {
+        struct Longtail_StorageAPI_EntryProperties props;
+        find_err = file_storage_api->GetEntryProperties(file_storage_api, iterator, &props);
+        if (find_err != 0) {
+          break;
+        }
+        if (!props.m_IsDir) {
+          auto it = name_lookup.find(props.m_Name);
+          if (it != name_lookup.end() && !entries[it->second].found) {
+            entries[it->second].size = props.m_Size;
+            entries[it->second].found = true;
+            --remaining;
+          }
+        }
+        find_err = file_storage_api->FindNext(file_storage_api, iterator);
+        if (find_err == ENOENT) {
+          find_err = 0;
+          break;
+        }
+      }
+      file_storage_api->CloseFind(file_storage_api, iterator);
+    }
+    Longtail_Free(search_path);
+  }
 
-    file_infos->m_Permissions[file_infos_num] = 0644;  // should never be a directory
-    file_infos->m_PathStartOffsets[file_infos_num] = offset;
-    memmove(&file_infos->m_PathData[offset], Modifications[i].Path, length);
-    offset += length;
-    file_infos_num++;
+  // Assemble file_infos in original modification order
+  uint32_t offset = 0;
+  uint32_t file_infos_num = 0;
+  for (auto& [dir, entries] : dir_to_files) {
+    for (auto& entry : entries) {
+      uint32_t i = entry.mod_index;
+      uint32_t length = (uint32_t)strlen(Modifications[i].Path) + 1;
+
+      file_infos->m_Sizes[file_infos_num] = entry.size;
+      file_infos->m_Permissions[file_infos_num] = 0644;
+      file_infos->m_PathStartOffsets[file_infos_num] = offset;
+      memmove(&file_infos->m_PathData[offset], Modifications[i].Path, length);
+      offset += length;
+      file_infos_num++;
+    }
   }
   file_infos->m_PathDataSize = offset;
   file_infos->m_Count = file_infos_num;
