@@ -34,6 +34,19 @@ Section "Daemon Service" SEC_DAEMON
     nsExec::ExecToLog 'sc.exe start CheckpointDaemon'
 SectionEnd
 
+Section "Tray Application" SEC_TRAY
+    ; Copy tray binary
+    SetOutPath "$INSTDIR\tray"
+    File "${BUILD_RESOURCES_DIR}\tray\checkpoint-tray.exe"
+
+    ; Register tray auto-start on login
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" \
+        "CheckpointTray" '"$INSTDIR\tray\checkpoint-tray.exe"'
+
+    ; Launch tray now
+    Exec '"$INSTDIR\tray\checkpoint-tray.exe"'
+SectionEnd
+
 Section "CLI Tools" SEC_CLI
     ; Copy CLI binaries
     SetOutPath "$INSTDIR\cli"
@@ -60,6 +73,19 @@ Section "un.Daemon Service"
 
     ; Remove daemon files
     RMDir /r "$INSTDIR\daemon"
+SectionEnd
+
+Section "un.Tray Application"
+    ; Kill running tray process
+    nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
+    Sleep 500
+
+    ; Remove auto-start registry entry
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "CheckpointTray"
+
+    ; Remove tray files
+    Delete "$INSTDIR\tray\checkpoint-tray.exe"
+    RMDir "$INSTDIR\tray"
 SectionEnd
 
 Section "un.CLI Tools"

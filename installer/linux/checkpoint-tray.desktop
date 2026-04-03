@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Checkpoint Tray
+Exec=/opt/Checkpoint/resources/tray/checkpoint-tray
+Icon=checkpoint
+Comment=Checkpoint VCS system tray
+X-GNOME-Autostart-enabled=true
+Hidden=false
+NoDisplay=true

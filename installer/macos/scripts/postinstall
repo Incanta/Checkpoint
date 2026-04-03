@@ -32,6 +32,15 @@ if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
 
     chown "$CURRENT_USER" "$PLIST_PATH"
     sudo -u "$CURRENT_USER" launchctl load "$PLIST_PATH" 2>/dev/null || true
+
+    # Install and load tray LaunchAgent
+    TRAY_PLIST_SRC="$INSTALL_DIR/service/com.checkpointvcs.tray.plist"
+    TRAY_PLIST_PATH="$LAUNCH_AGENTS_DIR/com.checkpointvcs.tray.plist"
+    if [ -f "$TRAY_PLIST_SRC" ]; then
+        cp "$TRAY_PLIST_SRC" "$TRAY_PLIST_PATH"
+        chown "$CURRENT_USER" "$TRAY_PLIST_PATH"
+        sudo -u "$CURRENT_USER" launchctl load "$TRAY_PLIST_PATH" 2>/dev/null || true
+    fi
 fi
 
 exit 0
