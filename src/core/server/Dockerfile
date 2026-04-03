@@ -4,7 +4,7 @@
 # ============================================================
 
 # --------------- base ---------------
-FROM node:24-alpine AS base
+FROM node:24-slim AS base
 RUN corepack enable && corepack prepare yarn@4.13.0
 
 # --------------- builder ---------------
@@ -19,16 +19,19 @@ RUN yarn build
 RUN cd src/core/server && yarn build
 
 # --------------- runner ---------------
-FROM node:24-alpine AS runner
+FROM node:24-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 
 # Install runtime native dependencies for longtail addon
-RUN apk add --no-cache libssl3 libpsl
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
-RUN addgroup --system --gid 1001 appgroup && \
-    adduser --system --uid 1001 appuser
+RUN groupadd --system --gid 1001 appgroup && \
+    useradd --system --uid 1001 --gid appgroup appuser
 
 # Copy built output
 COPY --from=builder /app/src/core/common/lib ./src/core/common/lib
