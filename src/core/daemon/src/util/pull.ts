@@ -48,7 +48,10 @@ export async function pull(
   const resolvedLogLevel =
     logLevel ?? (daemonConfig.longtail.logLevel as LongtailLogLevel);
   const client = await CreateApiClientAuth(workspace.daemonId);
-  const binaryExts = await getBinaryExtensions(workspace.daemonId, workspace.repoId);
+  const binaryExts = await getBinaryExtensions(
+    workspace.daemonId,
+    workspace.repoId,
+  );
 
   const storageTokenResponse = await client.storage.getToken.query({
     repoId: workspace.repoId,
@@ -494,7 +497,10 @@ export async function pullTextFilesForSubmit(
   submitPaths: string[],
 ): Promise<PullMergeResult> {
   const client = await CreateApiClientAuth(workspace.daemonId);
-  const binaryExts = await getBinaryExtensions(workspace.daemonId, workspace.repoId);
+  const binaryExts = await getBinaryExtensions(
+    workspace.daemonId,
+    workspace.repoId,
+  );
   const workspaceState = await getWorkspaceState(workspace.localPath);
 
   // Get the remote branch head
