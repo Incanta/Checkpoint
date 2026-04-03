@@ -5962,7 +5962,7 @@ __metadata:
     "@types/path-browserify": "npm:^1.0.3"
     "@vitejs/plugin-react": "npm:^4.2.1"
     cross-env: "npm:*"
-    electron: "npm:^39.2.7"
+    electron: "npm:^39.8.4"
     electron-builder: "npm:^24.13.3"
     eslint: "npm:*"
     eslint-plugin-react: "npm:^7.37.5"
@@ -6230,16 +6230,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"electron@npm:^39.2.7":
-  version: 39.8.0
-  resolution: "electron@npm:39.8.0"
+"electron@npm:^39.8.4":
+  version: 39.8.6
+  resolution: "electron@npm:39.8.6"
   dependencies:
     "@electron/get": "npm:^2.0.0"
     "@types/node": "npm:^22.7.7"
     extract-zip: "npm:^2.0.1"
   bin:
     electron: cli.js
-  checksum: 10c0/02a5287e34ac6ce8ac91a6db17012e376121dfaa22ec1f0946cf002a60d272132668fcf9a66f61ca0278b715c884e8eb09f1c5a043552d71ea8003510c357030
+  checksum: 10c0/6b86d4ee2fab2daa89792ce62c48b8d4cda46a2d1aead2fd9150b796eb5aada334b7d4cae666ce6ded3b322d16b31996fd019dcc1ac4bba3174eff8801ed2a9f
   languageName: node
   linkType: hard
 
