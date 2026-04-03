@@ -4,6 +4,7 @@ import { homedir } from "os";
 import type { Workspace } from "./types/index.js";
 
 export interface DaemonConfigType {
+  daemonPort: number;
   workspaces: Workspace[];
   logging: {
     level: string;
@@ -54,6 +55,7 @@ export class DaemonConfig {
   private constructor() {
     this.vars = {
       // defaults go here
+      daemonPort: 13010,
       workspaces: [],
       logging: {
         level: "info",
