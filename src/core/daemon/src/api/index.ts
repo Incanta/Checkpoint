@@ -2,7 +2,6 @@ import { router } from "./trpc.js";
 import type { TRPCContext } from "./trpc.js";
 import { authRouter } from "./routers/auth.js";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
-import { GetDaemonListenPort } from "../index.js";
 import { workspacesRouter } from "./routers/workspace/index.js";
 import { orgRouter } from "./routers/org.js";
 import { repoRouter } from "./routers/repo.js";
@@ -13,6 +12,7 @@ import path from "path";
 import { homedir } from "os";
 import { promises as fs } from "fs";
 import { DaemonManager } from "../daemon-manager.js";
+import { DaemonConfig } from "../daemon-config.js";
 
 function tryListen(port: number, host: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -54,7 +54,7 @@ export async function InitApi(): Promise<void> {
     }),
   });
 
-  let listenPort = await GetDaemonListenPort();
+  let listenPort = (await DaemonConfig.Get()).daemonPort;
 
   const maxAttempts = 100;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -72,28 +72,8 @@ export async function InitApi(): Promise<void> {
 
   await new Promise<void>((resolve) => server.listen(listenPort, resolve));
 
-  const configFilePath = path.join(homedir(), ".checkpoint", "daemon.json");
-
-  let daemonConfig: any = {};
-  try {
-    const configStr = await fs.readFile(configFilePath, "utf-8");
-    daemonConfig = JSON.parse(configStr);
-  } catch (e: any) {
-    //
-  }
-
-  daemonConfig.daemonPort = listenPort;
-
-  try {
-    await fs.mkdir(path.dirname(configFilePath), { recursive: true });
-    await fs.writeFile(
-      configFilePath,
-      JSON.stringify(daemonConfig, null, 2),
-      "utf-8",
-    );
-  } catch (e: any) {
-    console.error("Failed to write daemon config file:", e);
-  }
+  DaemonConfig.Ensure().vars.daemonPort = listenPort;
+  await DaemonConfig.Save();
 
   console.log(`Daemon server listening on port ${listenPort}`);
   console.log("[healthy] Daemon is ready");

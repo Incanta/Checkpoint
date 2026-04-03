@@ -6,6 +6,7 @@ import * as path from "node:path";
 
 import { Workspace } from "../../../types/index.js";
 import { DaemonConfig } from "../../../daemon-config.js";
+import { saveWorkspaceConfig } from "../../../util/util.js";
 
 export const opsRouter = router({
   list: {
@@ -65,23 +66,14 @@ export const opsRouter = router({
       await DaemonConfig.Save();
 
       // Write .checkpoint/workspace.json so CLI and other tools can discover the workspace
-      const configDir = path.join(newWorkspace.localPath, ".checkpoint");
-      await fs.mkdir(configDir, { recursive: true });
-      await fs.writeFile(
-        path.join(configDir, "workspace.json"),
-        JSON.stringify(
-          {
-            id: newWorkspace.id,
-            repoId: newWorkspace.repoId,
-            branchName: newWorkspace.branchName,
-            workspaceName: newWorkspace.name,
-            localPath: newWorkspace.localPath,
-            daemonId: newWorkspace.daemonId,
-          },
-          null,
-          2,
-        ),
-      );
+      await saveWorkspaceConfig({
+        id: newWorkspace.id,
+        repoId: newWorkspace.repoId,
+        branchName: newWorkspace.branchName,
+        workspaceName: newWorkspace.name,
+        localPath: newWorkspace.localPath,
+        daemonId: newWorkspace.daemonId,
+      });
 
       const manager = ctx.manager;
       const existingWorkspaces = manager.workspaces.get(input.daemonId) || [];

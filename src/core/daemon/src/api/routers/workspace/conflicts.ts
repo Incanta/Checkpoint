@@ -200,10 +200,11 @@ export const conflictsRouter = router({
       const workspace = workspaces.find((w) => w.id === input.workspaceId);
       if (!workspace) return { suppressed: false };
 
-      const config = await getWorkspaceConfig(workspace.localPath);
-      if (!config?.suppressResolveConfirmUntil) return { suppressed: false };
+      const workspaceConfig = await getWorkspaceConfig(workspace.localPath);
+      if (!workspaceConfig?.suppressResolveConfirmUntil)
+        return { suppressed: false };
 
-      const value = config.suppressResolveConfirmUntil;
+      const value = workspaceConfig.suppressResolveConfirmUntil;
 
       // "workspace" means permanently suppressed for this workspace
       if (value === "workspace") return { suppressed: true };
@@ -220,9 +221,9 @@ export const conflictsRouter = router({
       }
 
       // Expired — clear it
-      if (config) {
-        config.suppressResolveConfirmUntil = null;
-        await saveWorkspaceConfig(config);
+      if (workspaceConfig) {
+        workspaceConfig.suppressResolveConfirmUntil = null;
+        await saveWorkspaceConfig(workspaceConfig);
       }
       return { suppressed: false };
     }),
@@ -255,8 +256,8 @@ export const conflictsRouter = router({
         });
       }
 
-      const config = await getWorkspaceConfig(workspace.localPath);
-      const workspaceConfig: UtilWorkspace = config ?? {
+      const workspaceConfig = await getWorkspaceConfig(workspace.localPath);
+      const workspaceConfigToSave: UtilWorkspace = workspaceConfig ?? {
         id: workspace.id,
         repoId: workspace.repoId,
         branchName: workspace.branchName,
@@ -266,13 +267,14 @@ export const conflictsRouter = router({
       };
 
       if (input.duration === "workspace") {
-        workspaceConfig.suppressResolveConfirmUntil = "workspace";
+        workspaceConfigToSave.suppressResolveConfirmUntil = "workspace";
       } else {
         // "today" — store today's date in ISO format
-        workspaceConfig.suppressResolveConfirmUntil = new Date().toISOString();
+        workspaceConfigToSave.suppressResolveConfirmUntil =
+          new Date().toISOString();
       }
 
-      await saveWorkspaceConfig(workspaceConfig);
+      await saveWorkspaceConfig(workspaceConfigToSave);
       return { success: true };
     }),
 });

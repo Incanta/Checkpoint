@@ -184,7 +184,10 @@ export const branchesRouter = router({
 
             if (conflictingPaths.length > 0) {
               // Check for binary files in conflicts
-              const binaryExts = await getBinaryExtensions(input.daemonId, workspace.repoId);
+              const binaryExts = await getBinaryExtensions(
+                input.daemonId,
+                workspace.repoId,
+              );
               const binaryConflicts = conflictingPaths.filter((p) =>
                 isBinaryFile(p, binaryExts),
               );
@@ -214,8 +217,8 @@ export const branchesRouter = router({
       await DaemonConfig.Save();
 
       // Save workspace config to disk
-      const config = await getWorkspaceConfig(workspace.localPath);
-      const workspaceConfigToSave: UtilWorkspace = config ?? {
+      const workspaceConfig = await getWorkspaceConfig(workspace.localPath);
+      const workspaceConfigToSave: UtilWorkspace = workspaceConfig ?? {
         id: workspace.id,
         repoId: workspace.repoId,
         branchName: input.branchName,
