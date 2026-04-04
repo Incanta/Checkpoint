@@ -5988,9 +5988,9 @@ __metadata:
   linkType: hard
 
 "defu@npm:^6.1.4":
-  version: 6.1.4
-  resolution: "defu@npm:6.1.4"
-  checksum: 10c0/2d6cc366262dc0cb8096e429368e44052fdf43ed48e53ad84cc7c9407f890301aa5fcb80d0995abaaf842b3949f154d060be4160f7a46cb2bc2f7726c81526f5
+  version: 6.1.6
+  resolution: "defu@npm:6.1.6"
+  checksum: 10c0/6755a914d4d1b40346d582cadf3af0c4efb1b89c462631f4c8a20c933da88d5da674344dd0856426d611d5fc0c65a3ffa82388519127b06f1a688dc103ddf5ba
   languageName: node
   linkType: hard
 
@@ -6030,7 +6030,7 @@ __metadata:
     "@types/path-browserify": "npm:^1.0.3"
     "@vitejs/plugin-react": "npm:^4.2.1"
     cross-env: "npm:*"
-    electron: "npm:^39.2.7"
+    electron: "npm:^39.8.5"
     electron-builder: "npm:^24.13.3"
     eslint: "npm:*"
     eslint-plugin-react: "npm:^7.37.5"
@@ -6305,16 +6305,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"electron@npm:^39.2.7":
-  version: 39.8.0
-  resolution: "electron@npm:39.8.0"
+"electron@npm:^39.8.5":
+  version: 39.8.6
+  resolution: "electron@npm:39.8.6"
   dependencies:
     "@electron/get": "npm:^2.0.0"
     "@types/node": "npm:^22.7.7"
     extract-zip: "npm:^2.0.1"
   bin:
     electron: cli.js
-  checksum: 10c0/02a5287e34ac6ce8ac91a6db17012e376121dfaa22ec1f0946cf002a60d272132668fcf9a66f61ca0278b715c884e8eb09f1c5a043552d71ea8003510c357030
+  checksum: 10c0/6b86d4ee2fab2daa89792ce62c48b8d4cda46a2d1aead2fd9150b796eb5aada334b7d4cae666ce6ded3b322d16b31996fd019dcc1ac4bba3174eff8801ed2a9f
   languageName: node
   linkType: hard
 
