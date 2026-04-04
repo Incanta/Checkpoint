@@ -580,60 +580,106 @@ export class DaemonManager {
       oldPath?: string;
     }> = [];
 
-    for (const mod of modifications) {
-      const normalizedPath = mod.path.replace(/^[/\\]/, "").replace(/\\/g, "/");
-      const fullPath = path.join(workspace.localPath, normalizedPath);
+    // Classify modifications into files vs directories in parallel batches
+    const CONCURRENCY = 256;
+    type ClassifiedMod = {
+      mod: { delete: boolean; path: string; oldPath?: string };
+      normalizedPath: string;
+      isDir: boolean;
+      exists: boolean;
+    };
 
-      // Check if path is a directory
-      let isDir = false;
-      try {
-        const stat = await fs.stat(fullPath);
-        isDir = stat.isDirectory();
-      } catch {
-        // Path doesn't exist on disk — could be a deleted file, pass through
-        result.push(mod);
-        continue;
-      }
-
-      if (!isDir) {
-        result.push(mod);
-        continue;
-      }
-
-      // Recursively walk the directory, collecting non-ignored files
-      const walkDir = async (dir: string): Promise<void> => {
-        const dirFull = path.join(workspace.localPath, dir);
-        let entries: Dirent[];
-        try {
-          entries = await fs.readdir(dirFull, { withFileTypes: true });
-        } catch {
-          return;
-        }
-        for (const entry of entries) {
-          const childRelative = dir ? `${dir}/${entry.name}` : entry.name;
-          if (childRelative.startsWith(".checkpoint")) continue;
-          if (ignoreCache.ignore.ignores(childRelative)) continue;
-          if (ignoreCache.hidden.ignores(childRelative)) continue;
-
-          if (entry.isDirectory()) {
-            await walkDir(childRelative);
-          } else {
-            result.push({ delete: false, path: childRelative });
+    const classified: ClassifiedMod[] = [];
+    for (let i = 0; i < modifications.length; i += CONCURRENCY) {
+      const batch = modifications.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(
+        batch.map(async (mod) => {
+          const normalizedPath = mod.path
+            .replace(/^[/\\]/, "")
+            .replace(/\\/g, "/");
+          const fullPath = path.join(workspace.localPath, normalizedPath);
+          try {
+            const stat = await fs.stat(fullPath);
+            return {
+              mod,
+              normalizedPath,
+              isDir: stat.isDirectory(),
+              exists: true,
+            };
+          } catch {
+            return { mod, normalizedPath, isDir: false, exists: false };
           }
+        }),
+      );
+      for (const r of results) classified.push(r);
+    }
+
+    // Process non-directory modifications (the vast majority)
+    for (const { mod, isDir, exists } of classified) {
+      if (!isDir) {
+        if (!exists) {
+          // Path doesn't exist on disk — could be a deleted file, pass through
+          result.push(mod);
+        } else {
+          result.push(mod);
         }
-      };
+      }
+    }
+
+    // Process directory modifications
+    const walkDir = async (dir: string): Promise<void> => {
+      const dirFull = path.join(workspace.localPath, dir);
+      let entries: Dirent[];
+      try {
+        entries = await fs.readdir(dirFull, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      const subdirs: string[] = [];
+      for (const entry of entries) {
+        const childRelative = dir ? `${dir}/${entry.name}` : entry.name;
+        if (childRelative.startsWith(".checkpoint")) continue;
+        if (ignoreCache.ignore.ignores(childRelative)) continue;
+        if (ignoreCache.hidden.ignores(childRelative)) continue;
+
+        if (entry.isDirectory()) {
+          subdirs.push(childRelative);
+        } else {
+          result.push({ delete: false, path: childRelative });
+        }
+      }
+      // Walk subdirectories in parallel
+      await Promise.all(subdirs.map((sub) => walkDir(sub)));
+    };
+
+    for (const { normalizedPath, isDir } of classified) {
+      if (!isDir) continue;
 
       await walkDir(normalizedPath);
 
       // Also check for deleted files (in state.json but not on disk)
       if (workspaceState) {
         const statePrefix = normalizedPath + "/";
+        const deletedChecks: Array<{ normalized: string; fileFull: string }> =
+          [];
         for (const filePath of Object.keys(workspaceState.files)) {
           const normalized = filePath.replace(/^\//, "");
           if (normalized.startsWith(statePrefix)) {
-            const fileFull = path.join(workspace.localPath, normalized);
-            if (!existsSync(fileFull)) {
-              result.push({ delete: true, path: normalized });
+            deletedChecks.push({
+              normalized,
+              fileFull: path.join(workspace.localPath, normalized),
+            });
+          }
+        }
+        // Check existence in parallel batches
+        for (let i = 0; i < deletedChecks.length; i += CONCURRENCY) {
+          const batch = deletedChecks.slice(i, i + CONCURRENCY);
+          const exists = await Promise.all(
+            batch.map(async ({ fileFull }) => existsSync(fileFull)),
+          );
+          for (let j = 0; j < batch.length; j++) {
+            if (!exists[j]) {
+              result.push({ delete: true, path: batch[j].normalized });
             }
           }
         }
@@ -769,7 +815,12 @@ export class DaemonManager {
       status = markedForAdd.has(relativePath)
         ? FileStatus.Added
         : FileStatus.Local;
-    } else if (!isBinaryFile(relativePath, await getBinaryExtensions(workspace.daemonId, workspace.repoId))) {
+    } else if (
+      !isBinaryFile(
+        relativePath,
+        await getBinaryExtensions(workspace.daemonId, workspace.repoId),
+      )
+    ) {
       const fullPath = path.join(workspace.localPath, relativePath);
       try {
         const content = await fs.readFile(fullPath, "utf-8");

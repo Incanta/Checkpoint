@@ -258,29 +258,36 @@ export const changelistRouter = createTRPCRouter({
         mod.path.replaceAll("\\", "/"),
       );
 
-      const lockedCheckouts = await ctx.db.fileCheckout.findMany({
-        where: {
-          repoId: input.repoId,
-          removedAt: null,
-          locked: true,
-          file: {
-            path: { in: normalizedPaths },
+      const BATCH_SIZE = 20000;
+
+      const lockedCheckouts: any[] = [];
+      for (let i = 0; i < normalizedPaths.length; i += BATCH_SIZE) {
+        const batch = normalizedPaths.slice(i, i + BATCH_SIZE);
+        const results = await ctx.db.fileCheckout.findMany({
+          where: {
+            repoId: input.repoId,
+            removedAt: null,
+            locked: true,
+            file: {
+              path: { in: batch },
+            },
+            workspace: {
+              userId: { not: ctx.session.user.id },
+            },
           },
-          workspace: {
-            userId: { not: ctx.session.user.id },
-          },
-        },
-        include: {
-          file: true,
-          workspace: {
-            include: {
-              user: {
-                select: { email: true, name: true, username: true },
+          include: {
+            file: true,
+            workspace: {
+              include: {
+                user: {
+                  select: { email: true, name: true, username: true },
+                },
               },
             },
           },
-        },
-      });
+        });
+        for (const r of results) lockedCheckouts.push(r);
+      }
 
       if (lockedCheckouts.length > 0) {
         const lockedFiles = lockedCheckouts.map((c) => {
@@ -345,16 +352,23 @@ export const changelistRouter = createTRPCRouter({
         parentChangelist.stateTree as Record<string, number>;
 
       // Apply modifications to state tree
-      const modifiedFiles = await ctx.db.file.findMany({
-        where: {
-          repoId: input.repoId,
-          path: {
-            in: input.modifications.map((mod) =>
-              mod.path.replaceAll("\\", "/"),
-            ),
+      // Batch queries in chunks to avoid exceeding DB parameter limits
+      const allPaths = input.modifications.map((mod) =>
+        mod.path.replaceAll("\\", "/"),
+      );
+
+      const modifiedFiles: Awaited<ReturnType<typeof ctx.db.file.findMany>> =
+        [];
+      for (let i = 0; i < allPaths.length; i += BATCH_SIZE) {
+        const batch = allPaths.slice(i, i + BATCH_SIZE);
+        const results = await ctx.db.file.findMany({
+          where: {
+            repoId: input.repoId,
+            path: { in: batch },
           },
-        },
-      });
+        });
+        for (const r of results) modifiedFiles.push(r);
+      }
 
       // Batch-create any new file entries that don't already exist
       const existingPathSet = new Set(modifiedFiles.map((f) => f.path));
@@ -364,27 +378,35 @@ export const changelistRouter = createTRPCRouter({
         .filter((p) => !existingPathSet.has(p));
 
       if (newFilePaths.length > 0) {
-        await ctx.db.file.createMany({
-          data: newFilePaths.map((path) => ({
-            repoId: input.repoId,
-            path,
-          })),
-        });
+        for (let i = 0; i < newFilePaths.length; i += BATCH_SIZE) {
+          const batch = newFilePaths.slice(i, i + BATCH_SIZE);
+          await ctx.db.file.createMany({
+            data: batch.map((path) => ({
+              repoId: input.repoId,
+              path,
+            })),
+          });
+        }
 
         // Re-fetch to get the newly created file records with their IDs
-        const newFiles = await ctx.db.file.findMany({
-          where: {
-            repoId: input.repoId,
-            path: { in: newFilePaths },
-          },
-        });
-        modifiedFiles.push(...newFiles);
+        for (let i = 0; i < newFilePaths.length; i += BATCH_SIZE) {
+          const batch = newFilePaths.slice(i, i + BATCH_SIZE);
+          const newFiles = await ctx.db.file.findMany({
+            where: {
+              repoId: input.repoId,
+              path: { in: batch },
+            },
+          });
+          for (const f of newFiles) modifiedFiles.push(f);
+        }
       }
 
+      // Build a path→file map for O(1) lookups instead of O(n) find()
+      const filesByPath = new Map(modifiedFiles.map((f) => [f.path, f]));
       const fileIdsForPaths: Record<string, string | undefined> = {};
       for (const mod of input.modifications) {
         const modPath = mod.path.replaceAll("\\", "/");
-        const existingFile = modifiedFiles.find((f) => f.path === modPath);
+        const existingFile = filesByPath.get(modPath);
 
         fileIdsForPaths[mod.path] = existingFile?.id;
 

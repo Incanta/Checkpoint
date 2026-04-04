@@ -104,7 +104,12 @@ export const pendingRouter = router({
       let leftContent: string;
       let rightContent: string;
 
-      if (isBinaryFile(normalizedPath, await getBinaryExtensions(input.daemonId, workspace.repoId))) {
+      if (
+        isBinaryFile(
+          normalizedPath,
+          await getBinaryExtensions(input.daemonId, workspace.repoId),
+        )
+      ) {
         return {
           left: "[Binary file]",
           right: "[Binary file]",
