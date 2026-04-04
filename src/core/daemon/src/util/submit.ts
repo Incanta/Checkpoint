@@ -80,9 +80,15 @@ export async function submit(
   console.log(`[submit]   message: ${message}`);
   console.log(`[submit]   localPath: ${workspace.localPath}`);
   console.log(`[submit]   remoteRoot: /${orgId}/${workspace.repoId}`);
-  console.log(`[submit]   filerUrl: ${filerUrl}`);
-  console.log(`[submit]   jwt token: ${token}`);
-  console.log(`[submit]   backendUrl: ${backendUrl}`);
+  if (storageTokenResponse.storageType === "r2") {
+    console.log(
+      `[submit]   Using R2 storage with endpoint: ${storageTokenResponse.r2Credentials?.endpoint}`,
+    );
+  } else {
+    console.log(`[submit]   filerUrl: ${filerUrl}`);
+    console.log(`[submit]   jwt token: ${token}`);
+    console.log(`[submit]   backendUrl: ${backendUrl}`);
+  }
   console.log(`[submit]   workspaceId: ${workspaceId}`);
   console.log(`[submit]   modifications: ${modifications.length}`);
 

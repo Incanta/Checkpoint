@@ -3,7 +3,7 @@ signing-keys:
   write: "secret"
   system: "system-secret"
 
-token-expiration-seconds: 600
+token-expiration-seconds: 3600
 
 backend-url:
   internal: "http://localhost:13001"
