@@ -11,6 +11,7 @@ import {
   type Workspace as UtilWorkspace,
 } from "../../../util/index.js";
 import { TRPCError } from "@trpc/server";
+import { DaemonConfig } from "../../../daemon-config.js";
 
 export const conflictsRouter = router({
   check: publicProcedure
@@ -138,7 +139,12 @@ export const conflictsRouter = router({
       }
 
       // Get the current workspace state
-      const state = await getWorkspaceState(workspace.localPath);
+      const daemonConfig = await DaemonConfig.Get();
+      const conflictBackend = daemonConfig.stateBackend;
+      const state = await getWorkspaceState(
+        workspace.localPath,
+        conflictBackend,
+      );
 
       // Build a lookup from the outdated files
       const outdatedByPath = new Map(
@@ -173,7 +179,7 @@ export const conflictsRouter = router({
           localPath: workspace.localPath,
           daemonId: workspace.daemonId,
         };
-        await saveWorkspaceState(utilWorkspace, state);
+        await saveWorkspaceState(utilWorkspace, state, conflictBackend);
 
         // Reload cached state in the daemon manager
         await manager.reloadWorkspaceState(workspace);

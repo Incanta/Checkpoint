@@ -6,6 +6,8 @@ import type { Workspace } from "./types/index.js";
 export interface DaemonConfigType {
   daemonPort: number;
   workspaces: Workspace[];
+  /** "json" (default) keeps state.json; "sqlite" uses a WAL-mode SQLite DB */
+  stateBackend: "json" | "sqlite";
   logging: {
     level: string;
     prettify: {
@@ -36,6 +38,7 @@ export interface DaemonConfigType {
     compressionAlgo: string;
     enableMmapIndexing: boolean;
     enableMmapBlockStore: boolean;
+    enableBlockCache: boolean;
     logLevel: string;
   };
 }
@@ -57,6 +60,7 @@ export class DaemonConfig {
       // defaults go here
       daemonPort: 13010,
       workspaces: [],
+      stateBackend: "sqlite",
       logging: {
         level: "info",
         prettify: {
@@ -87,6 +91,7 @@ export class DaemonConfig {
         compressionAlgo: "zstd",
         enableMmapIndexing: false,
         enableMmapBlockStore: false,
+        enableBlockCache: true,
         logLevel: "off",
       },
     };

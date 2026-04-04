@@ -3,6 +3,7 @@ import {
   CreateApiClientAuth,
   type WorkspaceStateFile,
   hashFile,
+  hashFilesParallel,
 } from "@checkpointvcs/common";
 import {
   pullAsync,
@@ -21,6 +22,7 @@ import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 import { autoMergeText, type AutoMergeResult } from "./auto-merge.js";
 import { existsSync, promises as fs } from "fs";
 import path from "path";
+import { homedir } from "os";
 import { Logger } from "../logging.js";
 import { DaemonConfig } from "../daemon-config.js";
 
@@ -47,6 +49,7 @@ export async function pull(
   const daemonConfig = await DaemonConfig.Get();
   const resolvedLogLevel =
     logLevel ?? (daemonConfig.longtail.logLevel as LongtailLogLevel);
+  const stateBackend = daemonConfig.stateBackend;
   const client = await CreateApiClientAuth(workspace.daemonId);
   const binaryExts = await getBinaryExtensions(
     workspace.daemonId,
@@ -96,7 +99,10 @@ export async function pull(
     throw new Error("Could not get changelist information");
   }
 
-  const workspaceState = await getWorkspaceState(workspace.localPath);
+  const workspaceState = await getWorkspaceState(
+    workspace.localPath,
+    stateBackend,
+  );
 
   const diff = DiffState(
     workspaceState.files,
@@ -173,6 +179,10 @@ export async function pull(
   }
 
   // ─── Longtail pull ────────────────────────────────────────────────
+  const blockCachePath =
+    (daemonConfig.longtail.enableBlockCache ?? true)
+      ? path.join(homedir(), ".checkpoint", "cache", "blocks")
+      : undefined;
   let errored = false;
   let lastStep = "";
   for (const versionIndex of versionsToPull) {
@@ -193,6 +203,7 @@ export async function pull(
       filerUrl,
       jwt: token,
       jwtExpirationMs: tokenExpirationMs,
+      cachePath: blockCachePath,
       storageType: storageTokenResponse.storageType,
       ...(storageTokenResponse.r2Credentials && {
         r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
@@ -277,6 +288,7 @@ export async function pull(
           filerUrl,
           jwt: token,
           jwtExpirationMs: tokenExpirationMs,
+          cachePath: blockCachePath,
           storageType: storageTokenResponse.storageType,
           ...(storageTokenResponse.r2Credentials && {
             r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
@@ -314,15 +326,25 @@ export async function pull(
       }
     }
 
+    // Batch-fetch all artifact file info in one API call
+    const artFileIds = Object.keys(artifactStateTree);
+    const artAllIds = [...new Set([...artifactDiff.deletions, ...artFileIds])];
+    const artAllFilesResponse =
+      artAllIds.length > 0
+        ? await client.file.getFiles.mutate({
+            ids: artAllIds,
+            repoId: workspace.repoId,
+          })
+        : [];
+    const artFilesById = new Map(
+      artAllFilesResponse.map((f: any) => [f.id, f]),
+    );
+
     // Handle artifact deletions
     if (artifactDiff.deletions.length > 0) {
-      const artFilesResponse = await client.file.getFiles.mutate({
-        ids: artifactDiff.deletions,
-        repoId: workspace.repoId,
-      });
-
-      for (const file of artFilesResponse) {
-        if (file.path) {
+      for (const delId of artifactDiff.deletions) {
+        const file = artFilesById.get(delId);
+        if (file?.path) {
           const filePath = path.join(workspace.localPath, file.path);
           if (existsSync(filePath)) {
             await fs.rm(filePath, { force: true });
@@ -332,62 +354,113 @@ export async function pull(
     }
 
     // Build artifact file state
-    const artFileIds = Object.keys(artifactStateTree);
     if (artFileIds.length > 0) {
       onStep?.("Updating artifact state");
-      const artFilesResponse = await client.file.getFiles.mutate({
-        ids: artFileIds,
-        repoId: workspace.repoId,
-      });
+      const artFilesResponse = artFileIds
+        .map((id) => artFilesById.get(id))
+        .filter(Boolean);
 
-      let artProcessed = 0;
-      const artTotal = artFilesResponse.length;
-      onProgress?.("Updating artifact state", 0, artTotal);
+      // Collect artifact files that need hashing
+      const oldArtFileIdToEntry = new Map<
+        string,
+        { path: string; file: WorkspaceStateFile }
+      >();
+      if (workspaceState.artifactFiles) {
+        for (const [fp, f] of Object.entries(workspaceState.artifactFiles)) {
+          oldArtFileIdToEntry.set(f.fileId, { path: fp, file: f });
+        }
+      }
+
+      const artFilesToHash: {
+        normalizedPath: string;
+        fullPath: string;
+        fileId: string;
+        changelist: number;
+      }[] = [];
 
       for (const file of artFilesResponse) {
-        if (!file.path) {
-          artProcessed++;
-          onProgress?.("Updating artifact state", artProcessed, artTotal);
-          continue;
-        }
+        if (!file.path) continue;
         const normalizedPath = file.path.replace(/^\//, "").replace(/\\/g, "/");
         const filePath = path.join(workspace.localPath, normalizedPath);
         const changelist = artifactStateTree[file.id];
 
-        if (existsSync(filePath)) {
-          const stat = await fs.stat(filePath);
-          const hash = await hashFile(filePath);
+        if (!existsSync(filePath)) continue;
 
-          newArtifactFiles[normalizedPath] = {
-            fileId: file.id,
-            changelist: changelist,
-            hash: hash,
+        const oldEntry = oldArtFileIdToEntry.get(file.id);
+        if (
+          oldEntry &&
+          oldEntry.file.changelist === changelist &&
+          oldEntry.path === normalizedPath
+        ) {
+          newArtifactFiles[normalizedPath] = { ...oldEntry.file };
+          continue;
+        }
+
+        artFilesToHash.push({
+          normalizedPath,
+          fullPath: filePath,
+          fileId: file.id,
+          changelist,
+        });
+      }
+
+      const artTotal = artFilesToHash.length;
+      onProgress?.("Updating artifact state", 0, artTotal);
+
+      if (artFilesToHash.length > 0) {
+        const artHashMap = await hashFilesParallel(
+          artFilesToHash.map((f) => f.fullPath),
+          8,
+        );
+
+        for (let i = 0; i < artFilesToHash.length; i++) {
+          const entry = artFilesToHash[i]!;
+          const stat = await fs.stat(entry.fullPath);
+          const hash =
+            artHashMap.get(entry.fullPath) ?? (await hashFile(entry.fullPath));
+
+          newArtifactFiles[entry.normalizedPath] = {
+            fileId: entry.fileId,
+            changelist: entry.changelist,
+            hash,
             size: stat.size,
             mtime: stat.mtimeMs,
           };
-        }
 
-        artProcessed++;
-        onProgress?.("Updating artifact state", artProcessed, artTotal);
+          onProgress?.("Updating artifact state", i + 1, artTotal);
+        }
       }
     }
   }
 
   if (!errored) {
-    // Handle deletions
-    const filesResponse = await client.file.getFiles.mutate({
-      ids: diff.deletions,
-      repoId: workspace.repoId,
-    });
+    // Batch-fetch all main file info in one API call
+    const allFileIds = Object.keys(serverStateTree);
+    const mainAllIds = [...new Set([...diff.deletions, ...allFileIds])];
+    const mainAllFilesResponse =
+      mainAllIds.length > 0
+        ? await client.file.getFiles.mutate({
+            ids: mainAllIds,
+            repoId: workspace.repoId,
+          })
+        : [];
+    const mainFilesById = new Map(
+      mainAllFilesResponse.map((f: any) => [f.id, f]),
+    );
 
-    if (filesResponse.length > 0) {
+    // Handle deletions
+    const delFiles = diff.deletions
+      .map((id) => mainFilesById.get(id))
+      .filter(Boolean);
+
+    if (delFiles.length > 0) {
       onStep?.("Deleting removed files");
       let deletedCount = 0;
-      const deleteTotal = filesResponse.length;
+      const deleteTotal = delFiles.length;
       onProgress?.("Deleting removed files", 0, deleteTotal);
 
-      for (const file of filesResponse) {
-        if (file.path) {
+      for (const file of delFiles) {
+        if (file?.path) {
           const filePath = path.join(workspace.localPath, file.path);
 
           if (existsSync(filePath)) {
@@ -414,9 +487,10 @@ export async function pull(
       const mergeTotal = mergeCandidates.length;
       onProgress?.("Merging text files", 0, mergeTotal);
 
-      for (const candidate of mergeCandidates) {
+      const MERGE_CONCURRENCY = 8;
+
+      const processMerge = async (candidate: MergeCandidate) => {
         try {
-          // Read the base version (the common ancestor for 3-way merge)
           const baseResult = await readFileFromChangelist({
             workspace,
             filePath: candidate.relativePath,
@@ -424,21 +498,18 @@ export async function pull(
           });
           const baseContent = await fs.readFile(baseResult.cachePath, "utf-8");
 
-          // Read the incoming version (now on disk after Longtail pull)
           const incomingPath = path.join(
             workspace.localPath,
             candidate.relativePath,
           );
           const incomingContent = await fs.readFile(incomingPath, "utf-8");
 
-          // 3-way merge: base (ancestor), current (local), incoming (remote)
           const merged = autoMergeText(
             baseContent,
             candidate.currentContent,
             incomingContent,
           );
 
-          // Write the merged result back to disk
           await fs.writeFile(incomingPath, merged.content, "utf-8");
 
           if (merged.clean) {
@@ -447,7 +518,6 @@ export async function pull(
             mergeResult.conflictMerges.push(candidate.relativePath);
           }
         } catch (err) {
-          // If merge fails for any reason, leave the file as-is (remote version)
           Logger.error(
             `Auto-merge failed for ${candidate.relativePath}: ${err}`,
           );
@@ -455,61 +525,121 @@ export async function pull(
 
         mergedCount++;
         onProgress?.("Merging text files", mergedCount, mergeTotal);
-      }
+      };
+
+      // Worker pool: run up to MERGE_CONCURRENCY merges at a time
+      let idx = 0;
+      const next = async (): Promise<void> => {
+        while (idx < mergeCandidates.length) {
+          const candidate = mergeCandidates[idx++]!;
+          await processMerge(candidate);
+        }
+      };
+      const workers = Array.from(
+        { length: Math.min(MERGE_CONCURRENCY, mergeCandidates.length) },
+        () => next(),
+      );
+      await Promise.all(workers);
     }
 
-    // Build new state.json with path keys and file info
-    const allFileIds = Object.keys(serverStateTree);
-
-    // Get all file info from server
-    const allFilesResponse = await client.file.getFiles.mutate({
-      ids: allFileIds,
-      repoId: workspace.repoId,
-    });
+    // Build new state with path keys and file info
+    const allFilesResponse = allFileIds
+      .map((id) => mainFilesById.get(id))
+      .filter(Boolean);
 
     onStep?.("Updating workspace state");
 
-    // Build the new state format: Record<path, WorkspaceStateFile>
+    // Build lookup: fileId → old state entry (for skipping unchanged files)
+    const oldFileIdToEntry = new Map<
+      string,
+      { path: string; file: WorkspaceStateFile }
+    >();
+    for (const [filePath, file] of Object.entries(workspaceState.files)) {
+      oldFileIdToEntry.set(file.fileId, { path: filePath, file });
+    }
+
+    // Build set of merged file paths (these must be re-hashed even if CL matches)
+    const mergedPaths = new Set<string>(
+      mergeResult.cleanMerges.concat(mergeResult.conflictMerges),
+    );
+
+    // Partition files into changed (need hash) vs unchanged (copy old state)
     const newFiles: Record<string, WorkspaceStateFile> = {};
-    let stateProcessed = 0;
-    const stateTotal = allFilesResponse.length;
-    onProgress?.("Updating workspace state", 0, stateTotal);
+    const filesToHash: {
+      normalizedPath: string;
+      fullPath: string;
+      fileId: string;
+      changelist: number;
+    }[] = [];
 
     for (const file of allFilesResponse) {
-      if (!file.path) {
-        stateProcessed++;
-        onProgress?.("Updating workspace state", stateProcessed, stateTotal);
+      if (!file.path) continue;
+
+      const normalizedPath = file.path.replace(/^\//, "").replace(/\\/g, "/");
+      const fullPath = path.join(workspace.localPath, normalizedPath);
+      const changelist = serverStateTree[file.id];
+
+      if (!existsSync(fullPath)) continue;
+
+      const oldEntry = oldFileIdToEntry.get(file.id);
+      const wasMerged = mergedPaths.has(normalizedPath);
+
+      // Unchanged: same fileId, same changelist, not merged, and old path matches
+      if (
+        oldEntry &&
+        oldEntry.file.changelist === changelist &&
+        !wasMerged &&
+        oldEntry.path === normalizedPath
+      ) {
+        newFiles[normalizedPath] = { ...oldEntry.file };
         continue;
       }
 
-      // Normalize path: strip leading slash and use forward slashes
-      const normalizedPath = file.path.replace(/^\//, "").replace(/\\/g, "/");
-      const filePath = path.join(workspace.localPath, normalizedPath);
-      const changelist = serverStateTree[file.id];
+      filesToHash.push({
+        normalizedPath,
+        fullPath,
+        fileId: file.id,
+        changelist,
+      });
+    }
 
-      if (existsSync(filePath)) {
-        // Re-hash after potential merge overwrites
-        const stat = await fs.stat(filePath);
-        const hash = await hashFile(filePath);
+    // Hash only the changed files in parallel
+    const stateTotal = filesToHash.length;
+    onProgress?.("Updating workspace state", 0, stateTotal);
 
-        newFiles[normalizedPath] = {
-          fileId: file.id,
-          changelist: changelist,
-          hash: hash,
+    if (filesToHash.length > 0) {
+      const hashMap = await hashFilesParallel(
+        filesToHash.map((f) => f.fullPath),
+        8,
+      );
+
+      for (let i = 0; i < filesToHash.length; i++) {
+        const entry = filesToHash[i]!;
+        const stat = await fs.stat(entry.fullPath);
+        const hash =
+          hashMap.get(entry.fullPath) ?? (await hashFile(entry.fullPath));
+
+        newFiles[entry.normalizedPath] = {
+          fileId: entry.fileId,
+          changelist: entry.changelist,
+          hash,
           size: stat.size,
           mtime: stat.mtimeMs,
         };
-      }
 
-      stateProcessed++;
-      onProgress?.("Updating workspace state", stateProcessed, stateTotal);
+        onProgress?.("Updating workspace state", i + 1, stateTotal);
+      }
     }
 
-    await saveWorkspaceState(workspace, {
-      changelistNumber: changelistResponse.number,
-      files: newFiles,
-      artifactFiles: newArtifactFiles,
-    });
+    await saveWorkspaceState(
+      workspace,
+      {
+        changelistNumber: changelistResponse.number,
+        files: newFiles,
+        artifactFiles: newArtifactFiles,
+      },
+      stateBackend,
+    );
 
     return mergeResult;
   }
@@ -547,7 +677,12 @@ export async function pullTextFilesForSubmit(
     workspace.daemonId,
     workspace.repoId,
   );
-  const workspaceState = await getWorkspaceState(workspace.localPath);
+  const daemonCfg = await DaemonConfig.Get();
+  const textPullBackend = daemonCfg.stateBackend;
+  const workspaceState = await getWorkspaceState(
+    workspace.localPath,
+    textPullBackend,
+  );
 
   // Get the remote branch head
   const branchResponse = await client.branch.getBranch.query({
@@ -697,7 +832,7 @@ export async function pullTextFilesForSubmit(
   }
 
   // Save workspace state with patched file entries — head CL is NOT changed
-  await saveWorkspaceState(workspace, workspaceState);
+  await saveWorkspaceState(workspace, workspaceState, textPullBackend);
 
   return mergeResult;
 }

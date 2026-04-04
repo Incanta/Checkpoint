@@ -83,6 +83,7 @@ WrapperAsyncHandle* PullAsync(
     const char* R2AccessKeyId,
     const char* R2SecretAccessKey,
     const char* R2SessionToken,
+    const char* CachePath,
     int LogLevel);
 
 ReadFileAsyncHandle* ReadFileFromVersionAsync(
@@ -356,6 +357,13 @@ static Napi::Value NapiPullAsync(const Napi::CallbackInfo& info) {
     }
   }
   int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
+  const char* cachePath = nullptr;
+  {
+    Napi::Value val = opts.Get("cachePath");
+    if (val.IsString()) {
+      cachePath = StoreString(ctx, val.As<Napi::String>().Utf8Value());
+    }
+  }
 
   WrapperAsyncHandle* handle = ::PullAsync(
       versionIndex,
@@ -363,6 +371,7 @@ static Napi::Value NapiPullAsync(const Napi::CallbackInfo& info) {
       localRootPath, remoteBasePath, filerUrl, jwt,
       jwtExpirationMs,
       storageType, r2Endpoint, r2BucketName, r2AccessKeyId, r2SecretAccessKey, r2SessionToken,
+      cachePath,
       logLevel);
 
   if (!handle) {

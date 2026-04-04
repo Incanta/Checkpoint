@@ -38,6 +38,7 @@ export async function submit(
   const daemonConfig = await DaemonConfig.Get();
   const resolvedLogLevel =
     logLevel ?? (daemonConfig.longtail.logLevel as LongtailLogLevel);
+  const stateBackend = daemonConfig.stateBackend;
   const user = await GetAuthConfigUser(workspace.daemonId);
 
   if (!user) {
@@ -157,7 +158,10 @@ export async function submit(
 
   if (status.error === 0 && result) {
     onStep?.("Updating workspace state");
-    const workspaceState = await getWorkspaceState(workspace.localPath);
+    const workspaceState = await getWorkspaceState(
+      workspace.localPath,
+      stateBackend,
+    );
 
     workspaceState.changelistNumber = result.changelistNumber;
 
@@ -213,7 +217,7 @@ export async function submit(
     // because they may need to sync other changes. we don't
     // auto pull during a push.
 
-    await saveWorkspaceState(workspace, workspaceState);
+    await saveWorkspaceState(workspace, workspaceState, stateBackend);
   }
 
   if (status.error !== 0) {

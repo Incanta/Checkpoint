@@ -131,6 +131,7 @@ export interface PullAsyncOptions {
   jwt: string;
   jwtExpirationMs: number;
   logLevel: number;
+  cachePath?: string;
   storageType?: "seaweedfs" | "r2";
   r2AccessKeyId?: string;
   r2SecretAccessKey?: string;
