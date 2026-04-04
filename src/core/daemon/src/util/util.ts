@@ -6,6 +6,8 @@ import {
   CreateApiClientAuth,
   type WorkspaceStateFile,
 } from "@checkpointvcs/common";
+import { getStateStore } from "./state-store.js";
+import { DaemonConfigType } from "../daemon-config.js";
 
 export function relativePath(from: string, to: string): string {
   return path.relative(from, to).replace(/\\/g, "/");
@@ -120,34 +122,23 @@ export async function saveWorkspaceConfig(workspace: Workspace): Promise<void> {
 
 export async function getWorkspaceState(
   localPath: string,
+  backend?: DaemonConfigType["stateBackend"],
 ): Promise<WorkspaceState> {
-  const workspaceConfigDir = path.join(localPath, ".checkpoint");
-
-  const statePath = path.join(workspaceConfigDir, "state.json");
-  try {
-    const state = await fs.readFile(statePath, "utf-8");
-    return JSON.parse(state);
-  } catch (e) {
-    return {
-      changelistNumber: 0,
-      files: {},
-      markedForAdd: [],
-    };
-  }
+  const store = getStateStore(localPath, backend);
+  return store.load();
 }
 
 export async function saveWorkspaceState(
   workspace: Workspace,
   state: WorkspaceState,
+  backend?: DaemonConfigType["stateBackend"],
 ): Promise<void> {
   const workspaceConfigDir = path.join(workspace.localPath, ".checkpoint");
 
   try {
     await fs.mkdir(workspaceConfigDir, { recursive: true });
-    await fs.writeFile(
-      path.join(workspaceConfigDir, "state.json"),
-      JSON.stringify(state, null, 2),
-    );
+    const store = getStateStore(workspace.localPath, backend);
+    await store.save(state);
 
     await saveWorkspaceConfig(workspace);
   } catch (e) {

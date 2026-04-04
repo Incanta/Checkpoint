@@ -1,5 +1,5 @@
 import path from "path";
-import { DaemonConfig } from "./daemon-config.js";
+import { DaemonConfig, DaemonConfigType } from "./daemon-config.js";
 import { InitLogger, Logger } from "./logging.js";
 import {
   FileStatus,
@@ -26,6 +26,7 @@ import {
   saveWorkspaceState,
   getWorkspaceConfig,
   saveWorkspaceConfig,
+  closeAllStateStores,
   type WorkspaceState,
 } from "./util/index.js";
 import {
@@ -58,6 +59,9 @@ export class DaemonManager {
   /** Cached pending changes, keyed by workspace.id */
   public workspacePendingChanges: Map<string, WorkspacePendingChanges> =
     new Map();
+
+  /** Resolved state backend from daemon config (set during init) */
+  private stateBackend: DaemonConfigType["stateBackend"] = "json";
 
   private watchers: Map<string, FSWatcher> = new Map();
 
@@ -115,6 +119,7 @@ export class DaemonManager {
     await DaemonConfig.Load();
 
     const config = await DaemonConfig.Get();
+    this.stateBackend = config.stateBackend;
     for (const workspace of config.workspaces) {
       const existing = this.workspaces.get(workspace.daemonId) || [];
       existing.push(workspace);
@@ -139,13 +144,17 @@ export class DaemonManager {
     this.stopSyncPolling();
     this.watchers.forEach((watcher) => watcher.close());
     this.watchers.clear();
+    closeAllStateStores();
   }
 
   /**
    * Loads the workspace state from state.json and caches it.
    */
   private async loadWorkspaceState(workspace: Workspace): Promise<void> {
-    const state = await getWorkspaceState(workspace.localPath);
+    const state = await getWorkspaceState(
+      workspace.localPath,
+      this.stateBackend,
+    );
     this.workspaceStates.set(workspace.id, state);
     this.dirtyFiles.set(workspace.id, new Set());
     this.trackedDirSets.delete(workspace.id);
@@ -1485,7 +1494,7 @@ export class DaemonManager {
     workspace: Workspace,
     state: WorkspaceState,
   ): Promise<void> {
-    await saveWorkspaceState(workspace as any, state);
+    await saveWorkspaceState(workspace as any, state, this.stateBackend);
   }
 
   // ─── VCS Operation Guard ─────────────────────────────────────────

@@ -1,5 +1,6 @@
 #include <lrublockstore/longtail_lrublockstore.h>
 #include <shareblockstore/longtail_shareblockstore.h>
+#include <cacheblockstore/longtail_cacheblockstore.h>
 
 #include "../util/existing-content.h"
 #include "../util/progress.h"
@@ -20,6 +21,7 @@ int PullSync(
     const char* R2AccessKeyId,
     const char* R2SecretAccessKey,
     const char* R2SessionToken,
+    const char* CachePath,
     WrapperAsyncHandle* handle) {
   struct Longtail_HashRegistryAPI* hash_registry = Longtail_CreateFullHashRegistry();
   struct Longtail_JobAPI* job_api = Longtail_CreateBikeshedJobAPI(Longtail_GetCPUCount(), 0);
@@ -40,10 +42,29 @@ int PullSync(
       0,
       EnableMmapBlockStore);
 
-  // TODO handle cache path/caching?
+  // Persistent block cache — stores compressed blocks locally to avoid re-downloads
+  struct Longtail_StorageAPI* cache_storage_api = 0;
+  struct Longtail_BlockStoreAPI* local_cache_store_api = 0;
+  struct Longtail_BlockStoreAPI* cache_block_store_api = 0;
+  struct Longtail_BlockStoreAPI* block_source_api = store_block_remotestore_api;
+
+  if (CachePath && CachePath[0] != '\0') {
+    cache_storage_api = Longtail_CreateFSStorageAPI();
+    local_cache_store_api = Longtail_CreateFSBlockStoreAPI(
+        job_api,
+        cache_storage_api,
+        CachePath,
+        0,
+        EnableMmapBlockStore);
+    cache_block_store_api = Longtail_CreateCacheBlockStoreAPI(
+        job_api,
+        local_cache_store_api,
+        store_block_remotestore_api);
+    block_source_api = cache_block_store_api;
+  }
 
   struct Longtail_BlockStoreAPI* compress_block_store_api = Longtail_CreateCompressBlockStoreAPI(
-      store_block_remotestore_api,
+      block_source_api,
       compression_registry);
 
   struct Longtail_BlockStoreAPI* lru_block_store_api = Longtail_CreateLRUBlockStoreAPI(compress_block_store_api, 32);
@@ -64,8 +85,9 @@ int PullSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
-    // SAFE_DISPOSE_API(store_block_cachestore_api);
-    // SAFE_DISPOSE_API(store_block_localstore_api);
+    SAFE_DISPOSE_API(cache_block_store_api);
+    SAFE_DISPOSE_API(local_cache_store_api);
+    SAFE_DISPOSE_API(cache_storage_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
     SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
@@ -86,8 +108,9 @@ int PullSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
-    // SAFE_DISPOSE_API(store_block_cachestore_api);
-    // SAFE_DISPOSE_API(store_block_localstore_api);
+    SAFE_DISPOSE_API(cache_block_store_api);
+    SAFE_DISPOSE_API(local_cache_store_api);
+    SAFE_DISPOSE_API(cache_storage_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
     SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
@@ -106,8 +129,9 @@ int PullSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
-    // SAFE_DISPOSE_API(store_block_cachestore_api);
-    // SAFE_DISPOSE_API(store_block_localstore_api);
+    SAFE_DISPOSE_API(cache_block_store_api);
+    SAFE_DISPOSE_API(local_cache_store_api);
+    SAFE_DISPOSE_API(cache_storage_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
     SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
@@ -140,8 +164,9 @@ int PullSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
-    // SAFE_DISPOSE_API(store_block_cachestore_api);
-    // SAFE_DISPOSE_API(store_block_localstore_api);
+    SAFE_DISPOSE_API(cache_block_store_api);
+    SAFE_DISPOSE_API(local_cache_store_api);
+    SAFE_DISPOSE_API(cache_storage_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
     SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
@@ -188,8 +213,9 @@ int PullSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
-    // SAFE_DISPOSE_API(store_block_cachestore_api);
-    // SAFE_DISPOSE_API(store_block_localstore_api);
+    SAFE_DISPOSE_API(cache_block_store_api);
+    SAFE_DISPOSE_API(local_cache_store_api);
+    SAFE_DISPOSE_API(cache_storage_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
     SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
@@ -217,8 +243,9 @@ int PullSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
-    // SAFE_DISPOSE_API(store_block_cachestore_api);
-    // SAFE_DISPOSE_API(store_block_localstore_api);
+    SAFE_DISPOSE_API(cache_block_store_api);
+    SAFE_DISPOSE_API(local_cache_store_api);
+    SAFE_DISPOSE_API(cache_storage_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
     SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
@@ -246,8 +273,9 @@ int PullSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
-    // SAFE_DISPOSE_API(store_block_cachestore_api);
-    // SAFE_DISPOSE_API(store_block_localstore_api);
+    SAFE_DISPOSE_API(cache_block_store_api);
+    SAFE_DISPOSE_API(local_cache_store_api);
+    SAFE_DISPOSE_API(cache_storage_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
     SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
@@ -276,8 +304,9 @@ int PullSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
-    // SAFE_DISPOSE_API(store_block_cachestore_api);
-    // SAFE_DISPOSE_API(store_block_localstore_api);
+    SAFE_DISPOSE_API(cache_block_store_api);
+    SAFE_DISPOSE_API(local_cache_store_api);
+    SAFE_DISPOSE_API(cache_storage_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
     SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
@@ -306,8 +335,9 @@ int PullSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
-    // SAFE_DISPOSE_API(store_block_cachestore_api);
-    // SAFE_DISPOSE_API(store_block_localstore_api);
+    SAFE_DISPOSE_API(cache_block_store_api);
+    SAFE_DISPOSE_API(local_cache_store_api);
+    SAFE_DISPOSE_API(cache_storage_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
     SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
@@ -352,8 +382,9 @@ int PullSync(
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
-    // SAFE_DISPOSE_API(store_block_cachestore_api);
-    // SAFE_DISPOSE_API(store_block_localstore_api);
+    SAFE_DISPOSE_API(cache_block_store_api);
+    SAFE_DISPOSE_API(local_cache_store_api);
+    SAFE_DISPOSE_API(cache_storage_api);
     SAFE_DISPOSE_API(store_block_remotestore_api);
     SAFE_DISPOSE_API(remote_storage_api);
     SAFE_DISPOSE_API(file_storage_api);
@@ -377,7 +408,10 @@ int PullSync(
   SAFE_DISPOSE_API(compress_block_store_api);
   // SAFE_DISPOSE_API(store_block_cachestore_api);
   // SAFE_DISPOSE_API(store_block_localstore_api);
-  SAFE_DISPOSE_API(store_block_remotestore_api);
+  SAFE_DISPOSE_API(cache_block_store_api);
+    SAFE_DISPOSE_API(local_cache_store_api);
+    SAFE_DISPOSE_API(cache_storage_api);
+    SAFE_DISPOSE_API(store_block_remotestore_api);
   SAFE_DISPOSE_API(remote_storage_api);
   SAFE_DISPOSE_API(file_storage_api);
   SAFE_DISPOSE_API(compression_registry);
@@ -402,6 +436,7 @@ PullAsync(
     const char* R2AccessKeyId,
     const char* R2SecretAccessKey,
     const char* R2SessionToken,
+    const char* CachePath,
     int LogLevel = 4) {
   SetLogging(LogLevel);
 
@@ -430,6 +465,7 @@ PullAsync(
         R2AccessKeyId,
         R2SecretAccessKey,
         R2SessionToken,
+        CachePath,
         handle);
 
     if (err) {

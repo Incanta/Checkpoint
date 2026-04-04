@@ -1,6 +1,7 @@
 import { CreateApiClientAuth, DiffState } from "@checkpointvcs/common";
 import { getWorkspaceState, type Workspace } from "./util.js";
 import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
+import { DaemonConfig } from "../daemon-config.js";
 
 /**
  * Represents a file that is outdated (remote has a newer version).
@@ -74,7 +75,11 @@ export async function checkSyncStatus(
   workspace: Workspace,
 ): Promise<SyncStatus> {
   const client = await CreateApiClientAuth(workspace.daemonId);
-  const workspaceState = await getWorkspaceState(workspace.localPath);
+  const daemonConfig = await DaemonConfig.Get();
+  const workspaceState = await getWorkspaceState(
+    workspace.localPath,
+    daemonConfig.stateBackend,
+  );
 
   // Get branch head info
   const branchResponse = await client.branch.getBranch.query({
@@ -221,7 +226,10 @@ export async function checkConflicts(
     ),
   );
 
-  const binaryExts = await getBinaryExtensions(workspace.daemonId, workspace.repoId);
+  const binaryExts = await getBinaryExtensions(
+    workspace.daemonId,
+    workspace.repoId,
+  );
 
   const conflicts: ConflictedFile[] = [];
 
@@ -231,7 +239,10 @@ export async function checkConflicts(
     const normalizedPath = outdated.path
       .replace(/^[/\\]/, "")
       .replace(/\\/g, "/");
-    if (modifiedSet.has(normalizedPath) && isBinaryFile(normalizedPath, binaryExts)) {
+    if (
+      modifiedSet.has(normalizedPath) &&
+      isBinaryFile(normalizedPath, binaryExts)
+    ) {
       conflicts.push({
         fileId: outdated.fileId,
         path: normalizedPath,

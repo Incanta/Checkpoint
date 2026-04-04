@@ -6,3 +6,4 @@ export * from "./read-file.js";
 export * from "./sync-status.js";
 export * from "./auto-merge.js";
 export * from "./binary-extensions.js";
+export * from "./state-store.js";

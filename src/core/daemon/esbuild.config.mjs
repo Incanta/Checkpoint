@@ -20,7 +20,7 @@ await build({
   minify: false,
   // Native .node addons cannot be bundled into a single JS file.
   // They must be shipped alongside the SEA binary and loaded at runtime.
-  external: ["*.node"],
+  external: ["*.node", "better-sqlite3"],
   banner: {
     js: [
       `// Checkpoint Daemon v${version} — Single Executable Application bundle`,
