@@ -398,7 +398,7 @@ int32_t SubmitSync(
     return err;
   }
 
-  SetHandleStep(handle, "Flushing compression block store");
+  SetHandleStep(handle, "Flushing uploads");
 
   struct SyncFlush flushCB;
   err = SyncFlush_Init(&flushCB);
@@ -458,7 +458,7 @@ int32_t SubmitSync(
     }
   }
 
-  SetHandleStep(handle, "Flushing fs block store");
+  // Continue flushing — fs block store (same logical phase)
 
   err = SyncFlush_Init(&flushCB);
   if (err) {
@@ -528,7 +528,7 @@ int32_t SubmitSync(
   version_index_stream << std::string(RemoteBasePath) << std::string("/versions/") << version_file_stream.str();
   std::string target_version_index_path = version_index_stream.str().c_str();
 
-  SetHandleStep(handle, "Writing version index");
+  SetHandleStep(handle, "Finalizing version data");
 
   err = Longtail_WriteVersionIndex(
       remote_storage_api,
@@ -553,7 +553,7 @@ int32_t SubmitSync(
     return err;
   }
 
-  SetHandleStep(handle, "Writing missing store index to buffer");
+  // Write store index to buffer (same logical phase as writing version index)
 
   err = Longtail_WriteStoreIndexToBuffer(remote_missing_store_index, &missing_store_index_buffer, &missing_store_index_size);
 
@@ -602,7 +602,7 @@ int32_t SubmitSync(
     }
   }
 
-  SetHandleStep(handle, "Submitting to backend");
+  SetHandleStep(handle, "Uploading to server");
 
   // Use libcurl directly for the multipart POST
   CURL* curl = curl_easy_init();
@@ -632,6 +632,17 @@ int32_t SubmitSync(
     return realsize;
   };
 
+  // Curl upload progress callback — reports bytes uploaded to the handle
+  auto progress_callback = [](void* clientp, curl_off_t dltotal, curl_off_t dlnow,
+                               curl_off_t ultotal, curl_off_t ulnow) -> int {
+    WrapperAsyncHandle* h = static_cast<WrapperAsyncHandle*>(clientp);
+    if (ultotal > 0) {
+      h->progressTotal = (uint32_t)(ultotal / 1024);
+      h->progressDone = (uint32_t)(ulnow / 1024);
+    }
+    return h->canceled ? 1 : 0;
+  };
+
   struct curl_slist* headers = nullptr;
   std::string authHeader = std::string("Authorization: Bearer ") + JWT;
   headers = curl_slist_append(headers, authHeader.c_str());
@@ -647,7 +658,6 @@ int32_t SubmitSync(
 
   // Add storeIndex part if available
   if (missing_store_index_buffer != 0) {
-    SetHandleStep(handle, "Adding storeIndex file to multipart upload");
     curl_mimepart* store_part = curl_mime_addpart(mime);
     curl_mime_name(store_part, "storeIndex");
     curl_mime_data(store_part, static_cast<const char*>(missing_store_index_buffer), missing_store_index_size);
@@ -663,6 +673,9 @@ int32_t SubmitSync(
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, +progress_callback);
+  curl_easy_setopt(curl, CURLOPT_XFERINFODATA, handle);
+  curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
 
   CURLcode res = curl_easy_perform(curl);
   long http_status_code = 0;

@@ -90,6 +90,8 @@ void SetHandleStep(WrapperAsyncHandle* handle, const char* step) {
     return;
   }
   handle->changingStep = 1;
+  handle->progressDone = 0;
+  handle->progressTotal = 0;
   memset(handle->currentStep, 0, sizeof(handle->currentStep));
   strcpy(handle->currentStep, step);
   handle->changingStep = 0;
