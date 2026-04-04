@@ -156,6 +156,7 @@ export async function submit(
   freeHandle(handle);
 
   if (status.error === 0 && result) {
+    onStep?.("Updating workspace state");
     const workspaceState = await getWorkspaceState(workspace.localPath);
 
     workspaceState.changelistNumber = result.changelistNumber;
@@ -164,6 +165,10 @@ export async function submit(
       repoId: workspace.repoId,
       paths: modifications.map((mod) => mod.path),
     });
+
+    let processed = 0;
+    const total = modifications.length;
+    onProgress?.("Updating workspace state", 0, total);
 
     for (const modification of modifications) {
       // Normalize the path (use forward slashes, no leading slash)
@@ -175,6 +180,8 @@ export async function submit(
       )?.id;
 
       if (!fileId) {
+        processed++;
+        onProgress?.("Updating workspace state", processed, total);
         continue;
       }
 
@@ -197,6 +204,9 @@ export async function submit(
 
         workspaceState.files[normalizedPath] = stateFile;
       }
+
+      processed++;
+      onProgress?.("Updating workspace state", processed, total);
     }
 
     // we do not update the workspace state changelist number here

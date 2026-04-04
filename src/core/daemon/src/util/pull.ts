@@ -334,13 +334,22 @@ export async function pull(
     // Build artifact file state
     const artFileIds = Object.keys(artifactStateTree);
     if (artFileIds.length > 0) {
+      onStep?.("Updating artifact state");
       const artFilesResponse = await client.file.getFiles.mutate({
         ids: artFileIds,
         repoId: workspace.repoId,
       });
 
+      let artProcessed = 0;
+      const artTotal = artFilesResponse.length;
+      onProgress?.("Updating artifact state", 0, artTotal);
+
       for (const file of artFilesResponse) {
-        if (!file.path) continue;
+        if (!file.path) {
+          artProcessed++;
+          onProgress?.("Updating artifact state", artProcessed, artTotal);
+          continue;
+        }
         const normalizedPath = file.path.replace(/^\//, "").replace(/\\/g, "/");
         const filePath = path.join(workspace.localPath, normalizedPath);
         const changelist = artifactStateTree[file.id];
@@ -357,6 +366,9 @@ export async function pull(
             mtime: stat.mtimeMs,
           };
         }
+
+        artProcessed++;
+        onProgress?.("Updating artifact state", artProcessed, artTotal);
       }
     }
   }
@@ -368,15 +380,25 @@ export async function pull(
       repoId: workspace.repoId,
     });
 
-    for (const file of filesResponse) {
-      if (file.path) {
-        const filePath = path.join(workspace.localPath, file.path);
+    if (filesResponse.length > 0) {
+      onStep?.("Deleting removed files");
+      let deletedCount = 0;
+      const deleteTotal = filesResponse.length;
+      onProgress?.("Deleting removed files", 0, deleteTotal);
 
-        if (existsSync(filePath)) {
-          await fs.rm(filePath, {
-            force: true,
-          });
+      for (const file of filesResponse) {
+        if (file.path) {
+          const filePath = path.join(workspace.localPath, file.path);
+
+          if (existsSync(filePath)) {
+            await fs.rm(filePath, {
+              force: true,
+            });
+          }
         }
+
+        deletedCount++;
+        onProgress?.("Deleting removed files", deletedCount, deleteTotal);
       }
     }
 
@@ -386,41 +408,53 @@ export async function pull(
       conflictMerges: [],
     };
 
-    for (const candidate of mergeCandidates) {
-      try {
-        // Read the base version (the common ancestor for 3-way merge)
-        const baseResult = await readFileFromChangelist({
-          workspace,
-          filePath: candidate.relativePath,
-          changelistNumber: candidate.baseCl,
-        });
-        const baseContent = await fs.readFile(baseResult.cachePath, "utf-8");
+    if (mergeCandidates.length > 0) {
+      onStep?.("Merging text files");
+      let mergedCount = 0;
+      const mergeTotal = mergeCandidates.length;
+      onProgress?.("Merging text files", 0, mergeTotal);
 
-        // Read the incoming version (now on disk after Longtail pull)
-        const incomingPath = path.join(
-          workspace.localPath,
-          candidate.relativePath,
-        );
-        const incomingContent = await fs.readFile(incomingPath, "utf-8");
+      for (const candidate of mergeCandidates) {
+        try {
+          // Read the base version (the common ancestor for 3-way merge)
+          const baseResult = await readFileFromChangelist({
+            workspace,
+            filePath: candidate.relativePath,
+            changelistNumber: candidate.baseCl,
+          });
+          const baseContent = await fs.readFile(baseResult.cachePath, "utf-8");
 
-        // 3-way merge: base (ancestor), current (local), incoming (remote)
-        const merged = autoMergeText(
-          baseContent,
-          candidate.currentContent,
-          incomingContent,
-        );
+          // Read the incoming version (now on disk after Longtail pull)
+          const incomingPath = path.join(
+            workspace.localPath,
+            candidate.relativePath,
+          );
+          const incomingContent = await fs.readFile(incomingPath, "utf-8");
 
-        // Write the merged result back to disk
-        await fs.writeFile(incomingPath, merged.content, "utf-8");
+          // 3-way merge: base (ancestor), current (local), incoming (remote)
+          const merged = autoMergeText(
+            baseContent,
+            candidate.currentContent,
+            incomingContent,
+          );
 
-        if (merged.clean) {
-          mergeResult.cleanMerges.push(candidate.relativePath);
-        } else {
-          mergeResult.conflictMerges.push(candidate.relativePath);
+          // Write the merged result back to disk
+          await fs.writeFile(incomingPath, merged.content, "utf-8");
+
+          if (merged.clean) {
+            mergeResult.cleanMerges.push(candidate.relativePath);
+          } else {
+            mergeResult.conflictMerges.push(candidate.relativePath);
+          }
+        } catch (err) {
+          // If merge fails for any reason, leave the file as-is (remote version)
+          Logger.error(
+            `Auto-merge failed for ${candidate.relativePath}: ${err}`,
+          );
         }
-      } catch (err) {
-        // If merge fails for any reason, leave the file as-is (remote version)
-        Logger.error(`Auto-merge failed for ${candidate.relativePath}: ${err}`);
+
+        mergedCount++;
+        onProgress?.("Merging text files", mergedCount, mergeTotal);
       }
     }
 
@@ -433,11 +467,20 @@ export async function pull(
       repoId: workspace.repoId,
     });
 
+    onStep?.("Updating workspace state");
+
     // Build the new state format: Record<path, WorkspaceStateFile>
     const newFiles: Record<string, WorkspaceStateFile> = {};
+    let stateProcessed = 0;
+    const stateTotal = allFilesResponse.length;
+    onProgress?.("Updating workspace state", 0, stateTotal);
 
     for (const file of allFilesResponse) {
-      if (!file.path) continue;
+      if (!file.path) {
+        stateProcessed++;
+        onProgress?.("Updating workspace state", stateProcessed, stateTotal);
+        continue;
+      }
 
       // Normalize path: strip leading slash and use forward slashes
       const normalizedPath = file.path.replace(/^\//, "").replace(/\\/g, "/");
@@ -457,6 +500,9 @@ export async function pull(
           mtime: stat.mtimeMs,
         };
       }
+
+      stateProcessed++;
+      onProgress?.("Updating workspace state", stateProcessed, stateTotal);
     }
 
     await saveWorkspaceState(workspace, {

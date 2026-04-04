@@ -53,6 +53,8 @@ int PullSync(
   version_index_stream << std::string(RemoteBasePath) << std::string("/versions/") << VersionIndex;
   std::string remote_version_index_path = version_index_stream.str().c_str();
 
+  SetHandleStep(handle, "Fetching version data");
+
   struct Longtail_VersionIndex* remote_version_index = 0;
   int err = Longtail_ReadVersionIndex(remote_storage_api, remote_version_index_path.c_str(), &remote_version_index);
   if (err) {
@@ -118,6 +120,8 @@ int PullSync(
   struct Longtail_VersionIndex* local_version_index = 0;
   uint32_t target_chunk_size = *remote_version_index->m_TargetChunkSize;
 
+  SetHandleStep(handle, "Scanning local files");
+
   struct Longtail_FileInfos* file_infos;
   err = Longtail_GetFilesFilteredByVersionIndex(
       file_storage_api,
@@ -152,7 +156,7 @@ int PullSync(
     tags[i] = 0;
   }
 
-  struct Longtail_ProgressAPI* progress = MakeProgressAPI("Indexing version", handle);
+  struct Longtail_ProgressAPI* progress = MakeProgressAPI("Indexing local files", handle);
   if (progress) {
     err = Longtail_CreateVersionIndex(
         file_storage_api,
@@ -194,6 +198,8 @@ int PullSync(
     SAFE_DISPOSE_API(job_api);
     return err;
   }
+
+  SetHandleStep(handle, "Comparing versions");
 
   struct Longtail_VersionDiff* version_diff;
   err = Longtail_CreateVersionDiff(
@@ -313,7 +319,7 @@ int PullSync(
 
   Longtail_Free(required_chunk_hashes);
 
-  progress = MakeProgressAPI("Updating version", handle);
+  progress = MakeProgressAPI("Downloading files", handle);
   if (progress) {
     err = Longtail_ChangeVersion(
         store_block_store_api,
