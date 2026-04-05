@@ -48,9 +48,6 @@ $NodeBin = (Get-Command node).Source
 
 Copy-Item $NodeBin (Join-Path $OutputDir $BinaryName) -Force
 
-# Remove the Node.js signature (required before injection on Windows)
-& signtool remove /s (Join-Path $OutputDir $BinaryName) 2>$null
-
 # Inject the SEA blob
 $BlobPath = Join-Path $DaemonDir "daemon-sea.blob"
 npx postject (Join-Path $OutputDir $BinaryName) NODE_SEA_BLOB $BlobPath `
