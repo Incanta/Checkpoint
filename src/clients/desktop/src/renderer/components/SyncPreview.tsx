@@ -21,17 +21,6 @@ import {
   collectDirPaths,
 } from "./build-file-tree";
 
-interface FileTreeNode {
-  name: string;
-  path: string;
-  isDirectory: boolean;
-  changeType?: "ADD" | "DELETE" | "MODIFY";
-  /** Which CLs this file was changed in */
-  changelists?: number[];
-  children: FileTreeNode[];
-  expanded?: boolean;
-}
-
 /**
  * Aggregates file changes across all incoming changelists into a single
  * deduplicated list. If a file is modified in multiple CLs, we show it
