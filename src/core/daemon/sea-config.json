@@ -5,6 +5,6 @@
   "useSnapshot": false,
   "useCodeCache": true,
   "assets": {
-    "version.txt": "../../VERSION"
+    "version.txt": "../../../VERSION"
   }
 }
