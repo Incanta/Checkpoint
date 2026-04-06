@@ -2,7 +2,6 @@ import {
   type Modification,
   CreateApiClientAuth,
   GetAuthConfigUser,
-  hashFile,
   type WorkspaceStateFile,
 } from "@checkpointvcs/common";
 import {
@@ -193,15 +192,14 @@ export async function submit(
         // Remove the file entry using the path key
         delete workspaceState.files[normalizedPath];
       } else {
-        // Add/update the file entry with full info
+        // Add/update the file entry — hash deferred until change detection
         const fullPath = path.join(workspace.localPath, modification.path);
         const stat = await fs.stat(fullPath);
-        const hash = await hashFile(fullPath);
 
         const stateFile: WorkspaceStateFile = {
           fileId: fileId,
           changelist: result.changelistNumber,
-          hash: hash,
+          md5: "",
           size: stat.size,
           mtime: stat.mtimeMs,
         };

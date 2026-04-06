@@ -18,7 +18,7 @@ import {
 } from "fs";
 import {
   CreateApiClientAuth,
-  hashFile,
+  hashFileMD5,
   type WorkspaceStateFile,
 } from "@checkpointvcs/common";
 import {
@@ -809,8 +809,15 @@ export class DaemonManager {
       const fullPath = path
         .join(workspace.localPath, relativePath)
         .replace(/\\/g, "/");
-      const currentHash = await hashFile(fullPath);
-      hasChanged = currentHash !== baselineFile.hash;
+      if (baselineFile.md5 === "") {
+        // Hash was deferred after pull. Compute and cache it as the baseline
+        // so subsequent checks have a real hash to compare against.
+        baselineFile.md5 = await hashFileMD5(fullPath);
+        baselineFile.mtime = stat.mtimeMs;
+      } else {
+        const currentHash = await hashFileMD5(fullPath);
+        hasChanged = currentHash !== baselineFile.md5;
+      }
     }
 
     if (!hasChanged) return null;

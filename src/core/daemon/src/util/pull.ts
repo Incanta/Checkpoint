@@ -2,8 +2,7 @@ import {
   DiffState,
   CreateApiClientAuth,
   type WorkspaceStateFile,
-  hashFile,
-  hashFilesParallel,
+  hashFileMD5,
 } from "@checkpointvcs/common";
 import {
   pullAsync,
@@ -162,10 +161,18 @@ export async function pull(
     const fullPath = path.join(workspace.localPath, localPath);
     if (!existsSync(fullPath)) continue; // Deleted locally — no merge
 
-    // Check if the file has been modified locally by comparing hash
+    // Check if the file has been modified locally
     try {
-      const currentHash = await hashFile(fullPath);
-      if (currentHash === localFile.hash) continue; // Not modified locally
+      if (localFile.md5 === "") {
+        // Hash was deferred (post-pull optimisation). Fall back to mtime+size.
+        const stat = await fs.stat(fullPath);
+        if (stat.mtimeMs === localFile.mtime && stat.size === localFile.size) {
+          continue; // Not modified locally
+        }
+      } else {
+        const currentHash = await hashFileMD5(fullPath);
+        if (currentHash === localFile.md5) continue; // Not modified locally
+      }
 
       const currentContent = await fs.readFile(fullPath, "utf-8");
       mergeCandidates.push({
@@ -408,21 +415,22 @@ export async function pull(
       onProgress?.("Updating artifact state", 0, artTotal);
 
       if (artFilesToHash.length > 0) {
-        const artHashMap = await hashFilesParallel(
-          artFilesToHash.map((f) => f.fullPath),
-          8,
+        // Stat files in parallel — hashes are deferred until change detection
+        // actually needs them (size+mtime baseline is sufficient).
+        const artStatResults = await Promise.all(
+          artFilesToHash.map(async (entry) => {
+            const stat = await fs.stat(entry.fullPath);
+            return { entry, stat };
+          }),
         );
 
-        for (let i = 0; i < artFilesToHash.length; i++) {
-          const entry = artFilesToHash[i]!;
-          const stat = await fs.stat(entry.fullPath);
-          const hash =
-            artHashMap.get(entry.fullPath) ?? (await hashFile(entry.fullPath));
+        for (let i = 0; i < artStatResults.length; i++) {
+          const { entry, stat } = artStatResults[i]!;
 
           newArtifactFiles[entry.normalizedPath] = {
             fileId: entry.fileId,
             changelist: entry.changelist,
-            hash,
+            md5: "",
             size: stat.size,
             mtime: stat.mtimeMs,
           };
@@ -603,26 +611,26 @@ export async function pull(
       });
     }
 
-    // Hash only the changed files in parallel
+    // Stat files in parallel — hashes are deferred until change detection
+    // actually needs them (size+mtime baseline is sufficient after pull).
     const stateTotal = filesToHash.length;
     onProgress?.("Updating workspace state", 0, stateTotal);
 
     if (filesToHash.length > 0) {
-      const hashMap = await hashFilesParallel(
-        filesToHash.map((f) => f.fullPath),
-        8,
+      const statResults = await Promise.all(
+        filesToHash.map(async (entry) => {
+          const stat = await fs.stat(entry.fullPath);
+          return { entry, stat };
+        }),
       );
 
-      for (let i = 0; i < filesToHash.length; i++) {
-        const entry = filesToHash[i]!;
-        const stat = await fs.stat(entry.fullPath);
-        const hash =
-          hashMap.get(entry.fullPath) ?? (await hashFile(entry.fullPath));
+      for (let i = 0; i < statResults.length; i++) {
+        const { entry, stat } = statResults[i]!;
 
         newFiles[entry.normalizedPath] = {
           fileId: entry.fileId,
           changelist: entry.changelist,
-          hash,
+          md5: "",
           size: stat.size,
           mtime: stat.mtimeMs,
         };
@@ -814,12 +822,12 @@ export async function pullTextFilesForSubmit(
 
       // Patch just this file's entry in workspace state (advance its CL, update hash)
       const stat = await fs.stat(fullPath);
-      const hash = await hashFile(fullPath);
+      const hash = await hashFileMD5(fullPath);
 
       workspaceState.files[candidate.relativePath] = {
         fileId: candidate.fileId,
         changelist: candidate.remoteCl,
-        hash,
+        md5: hash,
         size: stat.size,
         mtime: stat.mtimeMs,
       };

@@ -1,7 +1,7 @@
 export interface WorkspaceStateFile {
   fileId: string;
   changelist: number;
-  hash: string;
+  md5: string;
   size: number;
   mtime?: number;
 }
