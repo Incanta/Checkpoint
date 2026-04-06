@@ -12,10 +12,22 @@ interface EmailMessage {
   text: string;
 }
 
-let _transporter: Transporter | null = null;
+const TRANSPORTER_KEY = Symbol.for("checkpoint.email.transporter");
+
+const globalForEmail = globalThis as unknown as {
+  [TRANSPORTER_KEY]?: Transporter | null;
+};
+
+function getCachedTransporter(): Transporter | null {
+  return globalForEmail[TRANSPORTER_KEY] ?? null;
+}
+function setCachedTransporter(t: Transporter | null) {
+  globalForEmail[TRANSPORTER_KEY] = t;
+}
 
 async function getTransporter(): Promise<Transporter | null> {
-  if (_transporter) return _transporter;
+  const cached = getCachedTransporter();
+  if (cached) return cached;
 
   const enabled = config.get<boolean>("email.enabled");
   if (!enabled) return null;
@@ -28,14 +40,15 @@ async function getTransporter(): Promise<Transporter | null> {
 
   if (!host) return null;
 
-  _transporter = nodemailer.createTransport({
+  const transporter = nodemailer.createTransport({
     host,
     port,
     secure,
     ...(user && pass ? { auth: { user, pass } } : {}),
   });
 
-  return _transporter;
+  setCachedTransporter(transporter);
+  return transporter;
 }
 
 function getFrom(): { name: string; address: string } {
@@ -77,5 +90,5 @@ export function isEmailEnabled(): boolean {
 
 /** Reset cached transporter (useful if config changes at runtime). */
 export function resetTransporter(): void {
-  _transporter = null;
+  setCachedTransporter(null);
 }
