@@ -150,23 +150,29 @@ export const repoRouter = createTRPCRouter({
               where: { id: repo.id },
               data: { r2BucketName: bucketName },
             });
-          } catch (error) {
-            console.error("Failed to create R2 bucket:", error);
+          } catch (error: any) {
+            Logger.error(
+              `Failed to create R2 bucket: ${JSON.stringify(error)}`,
+            );
           }
         } else {
           // Org/instance doesn't have R2 feature, fall back to SeaweedFS
           try {
             await createRepoDirectory(input.orgId, repo.id);
-          } catch (error) {
-            console.error("Failed to create repo directory in storage:", error);
+          } catch (error: any) {
+            Logger.error(
+              `Failed to create repo directory in storage: ${JSON.stringify(error)}`,
+            );
           }
         }
       } else {
         // R2 not enabled, use SeaweedFS
         try {
           await createRepoDirectory(input.orgId, repo.id);
-        } catch (error) {
-          console.error("Failed to create repo directory in storage:", error);
+        } catch (error: any) {
+          Logger.error(
+            `Failed to create repo directory in storage: ${JSON.stringify(error)}`,
+          );
         }
       }
 

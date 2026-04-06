@@ -3,6 +3,7 @@
 import crypto from "node:crypto";
 import dns from "node:dns/promises";
 import config from "@incanta/config";
+import { Logger } from "./logging";
 
 export const LICENSE_TIERS = ["BASIC", "PRO", "STUDIO", "INCANTA"] as const;
 export type LicenseTier = (typeof LICENSE_TIERS)[number];
@@ -47,6 +48,9 @@ export async function verifyLicenseManagerKey(): Promise<boolean> {
   const privateKeyBase64Source = config.tryGet<string>("licensing.incanta-key");
 
   if (!privateKeyBase64Source) {
+    Logger.debug(
+      "[License] No private key configured for license manager; running in non-license-manager mode",
+    );
     licenseManagerVerified = false;
     return false;
   }
@@ -54,6 +58,9 @@ export async function verifyLicenseManagerKey(): Promise<boolean> {
   const privateKeyBase64 = await config.processSecrets(privateKeyBase64Source);
 
   if (!privateKeyBase64) {
+    Logger.debug(
+      "[License] Failed to process private key for license manager; running in non-license-manager mode",
+    );
     licenseManagerVerified = false;
     return false;
   }
@@ -66,16 +73,15 @@ export async function verifyLicenseManagerKey(): Promise<boolean> {
       .map((chunks) => chunks.join(""))
       .join("")
       .trim();
-  } catch (err) {
-    console.error(
-      `[License] Fatal: failed to resolve DNS TXT record for ${LICENSE_MANAGER_DNS_HOST}:`,
-      err,
+  } catch (err: any) {
+    Logger.error(
+      `[License] Fatal: failed to resolve DNS TXT record for ${LICENSE_MANAGER_DNS_HOST}: ${JSON.stringify(err)}`,
     );
     process.exit(1);
   }
 
   if (!publicKeyBase64) {
-    console.error(
+    Logger.error(
       `[License] Fatal: DNS TXT record for ${LICENSE_MANAGER_DNS_HOST} is empty`,
     );
     process.exit(1);
@@ -99,7 +105,7 @@ export async function verifyLicenseManagerKey(): Promise<boolean> {
     const expectedPublicDer = Buffer.from(publicKeyBase64, "base64");
 
     if (!crypto.timingSafeEqual(derivedPublicDer, expectedPublicDer)) {
-      console.error(
+      Logger.error(
         "[License] Fatal: configured private key does not match the public key from DNS",
       );
       process.exit(1);
@@ -107,10 +113,9 @@ export async function verifyLicenseManagerKey(): Promise<boolean> {
 
     licenseManagerVerified = true;
     return true;
-  } catch (err) {
-    console.error(
-      "[License] Fatal: failed to verify license manager key:",
-      err,
+  } catch (err: any) {
+    Logger.error(
+      `[License] Fatal: failed to verify license manager key: ${JSON.stringify(err)}`,
     );
     process.exit(1);
   }

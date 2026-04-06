@@ -10,6 +10,7 @@ import {
 } from "~/server/license-utils";
 import { db } from "~/server/db";
 import type { PrismaClient } from "@prisma/client";
+import { Logger } from "./logging";
 
 let cachedTier: LicenseTier = "BASIC";
 let lastValidation = 0;
@@ -40,7 +41,7 @@ async function validateWithManager(): Promise<LicenseTier> {
     });
 
     if (!response.ok) {
-      console.warn(`[License] Validation failed: ${response.status}`);
+      Logger.warn(`[License] Validation failed: ${response.status}`);
       return cachedTier; // Keep cached tier on failure
     }
 
@@ -49,13 +50,15 @@ async function validateWithManager(): Promise<LicenseTier> {
       tier: LicenseTier;
     };
     if (!data.valid) {
-      console.warn("[License] License is not valid");
+      Logger.warn("[License] License is not valid");
       return "BASIC";
     }
 
     return data.tier;
-  } catch (error) {
-    console.warn("[License] Failed to reach license manager:", error);
+  } catch (error: any) {
+    Logger.warn(
+      `[License] Failed to reach license manager: ${JSON.stringify(error)}`,
+    );
     return cachedTier; // Keep cached tier on network failure
   }
 }
@@ -99,8 +102,8 @@ async function reportUsage(): Promise<void> {
         aruCount: readUsers.size,
       }),
     });
-  } catch (error) {
-    console.warn("[License] Failed to report usage:", error);
+  } catch (error: any) {
+    Logger.warn(`[License] Failed to report usage: ${JSON.stringify(error)}`);
   }
 }
 
@@ -110,14 +113,14 @@ export async function initLicenseClient(): Promise<void> {
   // Validate on startup
   cachedTier = await validateWithManager();
   lastValidation = Date.now();
-  console.log(`[License] Validated. Tier: ${cachedTier}`);
+  Logger.info(`[License] Validated. Tier: ${cachedTier}`);
 
   // Periodic re-validation
   validationTimer = setInterval(() => {
     void (async () => {
       cachedTier = await validateWithManager();
       lastValidation = Date.now();
-      console.log(`[License] Re-validated. Tier: ${cachedTier}`);
+      Logger.info(`[License] Re-validated. Tier: ${cachedTier}`);
 
       // Report usage on the reporting day
       const now = new Date();
