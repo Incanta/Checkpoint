@@ -82,6 +82,9 @@ export async function createR2Bucket(bucketName: string): Promise<void> {
   const accountId = config.get<string>("storage.r2.account-id");
   const apiToken = await config.getWithSecrets<string>("storage.r2.api-token");
 
+  const locationHint =
+    config.tryGet<string>("storage.r2.location-override") || undefined;
+
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets`,
     {
@@ -92,6 +95,8 @@ export async function createR2Bucket(bucketName: string): Promise<void> {
       },
       body: JSON.stringify({
         name: bucketName,
+        locationHint,
+        storageClass: "Standard",
       }),
     },
   );
