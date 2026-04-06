@@ -15,6 +15,8 @@
 
 struct R2StorageAPI_OpenFile {
   char* m_Path;
+  std::string m_WriteBuffer;
+  int m_IsWriteMode;
 };
 
 // ============================================================================
@@ -109,6 +111,8 @@ static CurlResponse R2HttpHead(const std::string& url,
                                const std::string& accessKeyId,
                                const std::string& secretAccessKey,
                                const std::string& sessionToken) {
+  struct Longtail_LogContextFmt_Private* ctx = 0;
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpHead: url=%s", url.c_str())
   CurlResponse response;
   response.status_code = 0;
 
@@ -138,6 +142,7 @@ static CurlResponse R2HttpHead(const std::string& url,
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
   }
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpHead: status=%ld, error=%s", response.status_code, response.error.c_str())
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
 
@@ -149,6 +154,8 @@ static CurlResponse R2HttpGet(const std::string& url,
                               const std::string& accessKeyId,
                               const std::string& secretAccessKey,
                               const std::string& sessionToken) {
+  struct Longtail_LogContextFmt_Private* ctx = 0;
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpGet: url=%s", url.c_str())
   CurlResponse response;
   response.status_code = 0;
 
@@ -179,6 +186,7 @@ static CurlResponse R2HttpGet(const std::string& url,
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
   }
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpGet: status=%ld, body_size=%zu, error=%s", response.status_code, response.body.size(), response.error.c_str())
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
 
@@ -193,6 +201,7 @@ static CurlResponse R2HttpPut(const std::string& url,
                               const void* data,
                               size_t dataSize) {
   struct Longtail_LogContextFmt_Private* ctx = 0;
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpPut: url=%s, dataSize=%zu", url.c_str(), dataSize)
   CurlResponse response;
   response.status_code = 0;
 
@@ -234,6 +243,7 @@ static CurlResponse R2HttpPut(const std::string& url,
     }
   }
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpPut: status=%ld, error=%s", response.status_code, response.error.c_str())
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
 
@@ -245,6 +255,8 @@ static CurlResponse R2HttpDelete(const std::string& url,
                                  const std::string& accessKeyId,
                                  const std::string& secretAccessKey,
                                  const std::string& sessionToken) {
+  struct Longtail_LogContextFmt_Private* ctx = 0;
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpDelete: url=%s", url.c_str())
   CurlResponse response;
   response.status_code = 0;
 
@@ -274,6 +286,7 @@ static CurlResponse R2HttpDelete(const std::string& url,
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
   }
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpDelete: status=%ld, error=%s", response.status_code, response.error.c_str())
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
 
@@ -311,6 +324,8 @@ static int R2StorageAPI_OpenReadFile(
   LONGTAIL_VALIDATE_INPUT(ctx, path != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, out_open_file != 0, return EINVAL);
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_OpenReadFile: path=%s", path)
+
   R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)Longtail_Alloc(
       "R2StorageAPI_OpenFile",
       sizeof(struct R2StorageAPI_OpenFile));
@@ -319,8 +334,9 @@ static int R2StorageAPI_OpenReadFile(
     return ENOMEM;
   }
 
-  memset(open_file, 0, sizeof(struct R2StorageAPI_OpenFile));
+  new (open_file) R2StorageAPI_OpenFile();
   open_file->m_Path = Longtail_Strdup(path);
+  open_file->m_IsWriteMode = 0;
   *out_open_file = (Longtail_StorageAPI_HOpenFile)open_file;
 
   return 0;
@@ -339,6 +355,8 @@ static int R2StorageAPI_GetSize(
   struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
   R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_GetSize: path=%s", open_file->m_Path)
+
   std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
   CurlResponse r = R2HttpHead(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
 
@@ -346,11 +364,14 @@ static int R2StorageAPI_GetSize(
     auto it = r.headers.find("content-length");
     if (it != r.headers.end()) {
       *out_size = std::stoull(it->second);
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_GetSize: path=%s, size=%" PRIu64, open_file->m_Path, *out_size)
       return 0;
     }
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_GetSize: path=%s, no content-length header", open_file->m_Path)
     return ENOENT;
   }
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_GetSize: path=%s, status=%ld", open_file->m_Path, r.status_code)
   if (r.status_code == 404) return ENOENT;
   return r.status_code > 0 ? EIO : EIO;
 }
@@ -370,11 +391,14 @@ static int R2StorageAPI_Read(
   struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
   R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Read: path=%s, offset=%" PRIu64 ", length=%" PRIu64, open_file->m_Path, offset, length)
+
   std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
   CurlResponse r = R2HttpGet(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
 
   if (r.status_code >= 200 && r.status_code < 300) {
     if (offset > r.body.length()) {
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Read: path=%s, offset %" PRIu64 " > body size %zu", open_file->m_Path, offset, r.body.length())
       return EIO;
     }
 
@@ -384,9 +408,11 @@ static int R2StorageAPI_Read(
     }
 
     memcpy(output, r.body.c_str() + offset, adjustedLength);
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Read: path=%s, read %" PRIu64 " bytes", open_file->m_Path, adjustedLength)
     return 0;
   }
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Read: path=%s, failed status=%ld", open_file->m_Path, r.status_code)
   if (r.status_code == 404) return ENOENT;
   return EIO;
 }
@@ -412,9 +438,12 @@ static int R2StorageAPI_OpenWriteFile(
     return ENOMEM;
   }
 
-  memset(open_file, 0, sizeof(struct R2StorageAPI_OpenFile));
+  new (open_file) R2StorageAPI_OpenFile();
   open_file->m_Path = Longtail_Strdup(path);
+  open_file->m_IsWriteMode = 1;
   *out_open_file = (Longtail_StorageAPI_HOpenFile)open_file;
+
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_OpenWriteFile: path=%s, initial_size=%" PRIu64, path, initial_size)
 
   r2_api->m_NumAddedBlocks++;
 
@@ -433,51 +462,36 @@ static int R2StorageAPI_Write(
   LONGTAIL_VALIDATE_INPUT(ctx, f != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, input != 0, return EINVAL);
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
   R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Write: path=%s, offset=%" PRIu64 ", length=%" PRIu64 ", buffer_size=%zu",
+               open_file->m_Path, offset, length, open_file->m_WriteBuffer.size())
+
+  // Buffer writes in memory and upload the complete buffer each time.
+  // R2/S3 doesn't support partial writes or appends, so we accumulate all
+  // data and PUT the entire object on each Write() call. This ensures errors
+  // propagate back to the caller (CloseFile is void and can't return errors).
+  size_t required = (size_t)offset + (size_t)length;
+  if (required > open_file->m_WriteBuffer.size()) {
+    open_file->m_WriteBuffer.resize(required, '\0');
+  }
+  memcpy(&open_file->m_WriteBuffer[(size_t)offset], input, (size_t)length);
+
+  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
   std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
 
-  // R2/S3 doesn't support append — for offset > 0 we need to read-modify-write.
-  // However, in longtail's usage pattern, blocks are written as single whole objects
-  // (Write is called once per OpenWriteFile), so offset is always 0 for block writes.
-  // For the store index (store.lsi), it may be rewritten entirely.
-  // We handle both cases: offset == 0 is a simple PUT; offset > 0 reads existing, appends, and PUTs.
-  if (offset > 0) {
-    // Read existing data
-    CurlResponse existing = R2HttpGet(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
-    if (existing.status_code >= 200 && existing.status_code < 300) {
-      // Extend the existing data
-      std::string combined = existing.body;
-      if (offset > combined.size()) {
-        combined.resize((size_t)offset, '\0');
-      }
-      combined.resize((size_t)offset);
-      combined.append(static_cast<const char*>(input), (size_t)length);
-
-      CurlResponse r = R2HttpPut(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken,
-                                 combined.data(), combined.size());
-      return (r.status_code >= 200 && r.status_code < 300) ? 0 : EIO;
-    } else if (existing.status_code == 404) {
-      // File doesn't exist yet, write with padding
-      std::string padded((size_t)offset, '\0');
-      padded.append(static_cast<const char*>(input), (size_t)length);
-
-      CurlResponse r = R2HttpPut(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken,
-                                 padded.data(), padded.size());
-      return (r.status_code >= 200 && r.status_code < 300) ? 0 : EIO;
-    }
-    return EIO;
-  }
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Write: uploading %zu bytes to %s", open_file->m_WriteBuffer.size(), open_file->m_Path)
 
   CurlResponse r = R2HttpPut(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken,
-                             input, (size_t)length);
+                             open_file->m_WriteBuffer.data(), open_file->m_WriteBuffer.size());
 
   if (r.status_code < 200 || r.status_code >= 300) {
     LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2StorageAPI_Write failed: HTTP %ld, curl_error: %s, response: %s, path: %s",
                  r.status_code, r.error.c_str(), r.body.c_str(), open_file->m_Path)
     return EIO;
   }
+
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Write: success, path=%s, total_size=%zu", open_file->m_Path, open_file->m_WriteBuffer.size())
   return 0;
 }
 
@@ -517,7 +531,10 @@ static void R2StorageAPI_CloseFile(struct Longtail_StorageAPI* storage_api, Long
   LONGTAIL_VALIDATE_INPUT(ctx, f != 0, return);
 
   R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_CloseFile: path=%s, is_write=%d, buffer_size=%zu",
+               open_file->m_Path, open_file->m_IsWriteMode, open_file->m_WriteBuffer.size())
   Longtail_Free(open_file->m_Path);
+  open_file->~R2StorageAPI_OpenFile();
   Longtail_Free(open_file);
 }
 
@@ -534,6 +551,8 @@ static int R2StorageAPI_RenameFile(struct Longtail_StorageAPI* storage_api, cons
   LONGTAIL_VALIDATE_INPUT(ctx, target_path != 0, return EINVAL);
 
   struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_RenameFile: source=%s, target=%s", source_path, target_path)
 
   // R2/S3 doesn't have native rename — copy then delete
   // First, read the source object
@@ -596,7 +615,9 @@ static int R2StorageAPI_IsFile(struct Longtail_StorageAPI* storage_api, const ch
   std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, path);
   CurlResponse r = R2HttpHead(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
 
-  return (r.status_code >= 200 && r.status_code < 300) ? 1 : 0;
+  int result = (r.status_code >= 200 && r.status_code < 300) ? 1 : 0;
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_IsFile: path=%s, result=%d, status=%ld", path, result, r.status_code)
+  return result;
 }
 
 static int R2StorageAPI_RemoveDir(struct Longtail_StorageAPI* storage_api, const char* path) {
@@ -612,9 +633,12 @@ static int R2StorageAPI_RemoveFile(struct Longtail_StorageAPI* storage_api, cons
 
   struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_RemoveFile: path=%s", path)
+
   std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, path);
   CurlResponse r = R2HttpDelete(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
 
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_RemoveFile: path=%s, status=%ld", path, r.status_code)
   if (r.status_code >= 200 && r.status_code < 300) return 0;
   if (r.status_code == 404) return 0;  // Already deleted
   return EIO;
