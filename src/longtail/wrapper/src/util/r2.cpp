@@ -203,7 +203,6 @@ static CurlResponse R2HttpPut(const std::string& url,
   }
 
   struct curl_slist* headers = nullptr;
-  headers = curl_slist_append(headers, "Connection: close");
   headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
   R2SetupAuth(curl, &headers, accessKeyId, secretAccessKey, sessionToken);
 
