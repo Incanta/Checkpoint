@@ -12,9 +12,35 @@ import { db } from "~/server/db";
 import type { PrismaClient } from "@prisma/client";
 import { Logger } from "./logging";
 
-let cachedTier: LicenseTier = "BASIC";
-let lastValidation = 0;
-let validationTimer: ReturnType<typeof setInterval> | null = null;
+const CACHED_TIER_KEY = Symbol.for("checkpoint.licenseClient.cachedTier");
+const LAST_VALIDATION_KEY = Symbol.for(
+  "checkpoint.licenseClient.lastValidation",
+);
+const VALIDATION_TIMER_KEY = Symbol.for(
+  "checkpoint.licenseClient.validationTimer",
+);
+
+const globalForLicenseClient = globalThis as unknown as {
+  [CACHED_TIER_KEY]?: LicenseTier;
+  [LAST_VALIDATION_KEY]?: number;
+  [VALIDATION_TIMER_KEY]?: ReturnType<typeof setInterval> | null;
+};
+
+function getCachedTier(): LicenseTier {
+  return globalForLicenseClient[CACHED_TIER_KEY] ?? "BASIC";
+}
+function setCachedTier(tier: LicenseTier) {
+  globalForLicenseClient[CACHED_TIER_KEY] = tier;
+}
+function setLastValidation(value: number) {
+  globalForLicenseClient[LAST_VALIDATION_KEY] = value;
+}
+function getValidationTimer(): ReturnType<typeof setInterval> | null {
+  return globalForLicenseClient[VALIDATION_TIMER_KEY] ?? null;
+}
+function setValidationTimer(timer: ReturnType<typeof setInterval> | null) {
+  globalForLicenseClient[VALIDATION_TIMER_KEY] = timer;
+}
 
 const VALIDATION_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const REPORTING_DAY = 2; // 2nd day of month
@@ -24,7 +50,7 @@ export function getInstanceTier(): LicenseTier {
     // License manager always returns INCANTA for itself (unrestricted)
     return "INCANTA";
   }
-  return cachedTier;
+  return getCachedTier();
 }
 
 async function validateWithManager(): Promise<LicenseTier> {
@@ -42,7 +68,7 @@ async function validateWithManager(): Promise<LicenseTier> {
 
     if (!response.ok) {
       Logger.warn(`[License] Validation failed: ${response.status}`);
-      return cachedTier; // Keep cached tier on failure
+      return getCachedTier(); // Keep cached tier on failure
     }
 
     const data = (await response.json()) as {
@@ -59,7 +85,7 @@ async function validateWithManager(): Promise<LicenseTier> {
     Logger.warn(
       `[License] Failed to reach license manager: ${JSON.stringify(error)}`,
     );
-    return cachedTier; // Keep cached tier on network failure
+    return getCachedTier(); // Keep cached tier on network failure
   }
 }
 
@@ -111,30 +137,33 @@ export async function initLicenseClient(): Promise<void> {
   if (isLicenseManager()) return;
 
   // Validate on startup
-  cachedTier = await validateWithManager();
-  lastValidation = Date.now();
-  Logger.info(`[License] Validated. Tier: ${cachedTier}`);
+  setCachedTier(await validateWithManager());
+  setLastValidation(Date.now());
+  Logger.info(`[License] Validated. Tier: ${getCachedTier()}`);
 
   // Periodic re-validation
-  validationTimer = setInterval(() => {
-    void (async () => {
-      cachedTier = await validateWithManager();
-      lastValidation = Date.now();
-      Logger.info(`[License] Re-validated. Tier: ${cachedTier}`);
+  setValidationTimer(
+    setInterval(() => {
+      void (async () => {
+        setCachedTier(await validateWithManager());
+        setLastValidation(Date.now());
+        Logger.info(`[License] Re-validated. Tier: ${getCachedTier()}`);
 
-      // Report usage on the reporting day
-      const now = new Date();
-      if (now.getUTCDate() === REPORTING_DAY) {
-        await reportUsage();
-      }
-    })();
-  }, VALIDATION_INTERVAL_MS);
+        // Report usage on the reporting day
+        const now = new Date();
+        if (now.getUTCDate() === REPORTING_DAY) {
+          await reportUsage();
+        }
+      })();
+    }, VALIDATION_INTERVAL_MS),
+  );
 }
 
 export function stopLicenseClient(): void {
-  if (validationTimer) {
-    clearInterval(validationTimer);
-    validationTimer = null;
+  const timer = getValidationTimer();
+  if (timer) {
+    clearInterval(timer);
+    setValidationTimer(null);
   }
 }
 

@@ -37,7 +37,19 @@ const FEATURE_MIN_TIER: Record<LicenseFeature, LicenseTier> = {
 
 const LICENSE_MANAGER_DNS_HOST = "key.checkpointvcs.com";
 
-let licenseManagerVerified: boolean | null = null;
+const LICENSE_MANAGER_KEY = Symbol.for("checkpoint.licenseManagerVerified");
+
+const globalForLicenseManager = globalThis as unknown as {
+  [LICENSE_MANAGER_KEY]?: boolean;
+};
+
+function getLicenseManagerVerified(): boolean | null {
+  return globalForLicenseManager[LICENSE_MANAGER_KEY] ?? null;
+}
+
+function setLicenseManagerVerified(value: boolean) {
+  globalForLicenseManager[LICENSE_MANAGER_KEY] = value;
+}
 
 /**
  * Fetches the Ed25519 public key from the DNS TXT record at key.checkpointvcs.com,
@@ -53,7 +65,7 @@ export async function verifyLicenseManagerKey(): Promise<boolean> {
     Logger.debug(
       "[License] No private key configured for license manager; running in non-license-manager mode",
     );
-    licenseManagerVerified = false;
+    setLicenseManagerVerified(false);
     return false;
   }
 
@@ -63,7 +75,7 @@ export async function verifyLicenseManagerKey(): Promise<boolean> {
     Logger.debug(
       "[License] Failed to process private key for license manager; running in non-license-manager mode",
     );
-    licenseManagerVerified = false;
+    setLicenseManagerVerified(false);
     return false;
   }
 
@@ -121,7 +133,7 @@ export async function verifyLicenseManagerKey(): Promise<boolean> {
     }
 
     Logger.info("[License] Successfully verified license manager key");
-    licenseManagerVerified = true;
+    setLicenseManagerVerified(true);
     return true;
   } catch (err: any) {
     Logger.error(
@@ -154,17 +166,17 @@ export function getFeaturesForTier(tier: LicenseTier): LicenseFeature[] {
 }
 
 export function isLicenseManager(): boolean {
+  const verified = getLicenseManagerVerified();
   Logger.debug(
-    `[License] Checking if this instance is a license manager: ${licenseManagerVerified}`,
+    `[License] Checking if this instance is a license manager: ${verified}`,
   );
-  console.trace();
-  return licenseManagerVerified === true;
+  return verified === true;
 }
 
 export function getLicenseConfig() {
   try {
     return {
-      isLicenseManager: licenseManagerVerified === true,
+      isLicenseManager: getLicenseManagerVerified() === true,
       key: config.get<string>("licensing.key"),
       secret: config.get<string>("licensing.secret"),
       managerUrl: config.get<string>("licensing.manager-url"),
