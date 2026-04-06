@@ -11,6 +11,7 @@ export interface DaemonConfigType {
   logging: {
     level: string;
     prettify: {
+      enabled: boolean;
       include: string[];
       colorize: boolean;
       colorizeObjects: boolean;
@@ -64,6 +65,7 @@ export class DaemonConfig {
       logging: {
         level: "info",
         prettify: {
+          enabled: true,
           include: [],
           colorize: true,
           colorizeObjects: true,

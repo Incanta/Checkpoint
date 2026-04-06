@@ -49,6 +49,7 @@ export const CustomColors: Record<string, string> = {
 interface LoggingConfig {
   level: string;
   prettify: {
+    enabled: boolean;
     include: string[];
     colorize: boolean;
     colorizeObjects: boolean;
@@ -82,7 +83,7 @@ export async function InitLogger(): Promise<void> {
   const streams: (pino.DestinationStream | pino.StreamEntry<LevelNames>)[] = [
     {
       level: loggingConfig.level as LevelNames,
-      stream: loggingConfig.prettify.include
+      stream: loggingConfig.prettify.enabled
         ? pretty({
             colorize: loggingConfig.prettify.colorize,
             colorizeObjects: loggingConfig.prettify.colorizeObjects,

@@ -60,7 +60,7 @@ export async function InitLogger(): Promise<void> {
   const streams: (pino.DestinationStream | pino.StreamEntry<LevelNames>)[] = [
     {
       level: config.logging.level as LevelNames,
-      stream: config.logging.prettify.include
+      stream: config.logging.prettify.enabled
         ? pretty({
             colorize: config.logging.prettify.colorize,
             colorizeObjects: config.logging.prettify.colorizeObjects,
