@@ -141,8 +141,12 @@ export const repoRouter = createTRPCRouter({
 
       // Create storage for the repo (R2 bucket or SeaweedFS directory)
       if (isR2Enabled()) {
+        Logger.debug(
+          `R2 is enabled, checking if org/instance has R2 feature...`,
+        );
         const tier = await getEffectiveTier(input.orgId, ctx.db);
         if (isLicenseManager() || hasFeature(tier, "r2Storage")) {
+          Logger.debug(`Org/instance has R2 feature, creating R2 bucket...`);
           const bucketName = `checkpoint-${repo.id}`;
           try {
             await createR2Bucket(bucketName);
@@ -157,6 +161,7 @@ export const repoRouter = createTRPCRouter({
           }
         } else {
           // Org/instance doesn't have R2 feature, fall back to SeaweedFS
+          Logger.debug(`Org/instance doesn't have R2 feature, using Filer...`);
           try {
             await createRepoDirectory(input.orgId, repo.id);
           } catch (error: any) {
@@ -167,6 +172,7 @@ export const repoRouter = createTRPCRouter({
         }
       } else {
         // R2 not enabled, use SeaweedFS
+        Logger.debug(`R2 not enabled, using Filer...`);
         try {
           await createRepoDirectory(input.orgId, repo.id);
         } catch (error: any) {
