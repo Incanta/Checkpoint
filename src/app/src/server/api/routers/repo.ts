@@ -5,6 +5,7 @@ import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { createRepoDirectory } from "~/server/storage-service";
 import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
+import { Logger } from "~/server/logging";
 
 export const repoRouter = createTRPCRouter({
   getRepo: protectedProcedure
@@ -58,8 +59,7 @@ export const repoRouter = createTRPCRouter({
 
       const isAdmin = !!(
         orgUser &&
-        (repo.org.defaultRepoAccess === "ADMIN" ||
-          repoRole?.access === "ADMIN")
+        (repo.org.defaultRepoAccess === "ADMIN" || repoRole?.access === "ADMIN")
       );
 
       return { isMember, canWrite, isAdmin };
@@ -139,8 +139,10 @@ export const repoRouter = createTRPCRouter({
       // Create the repo directory in storage
       try {
         await createRepoDirectory(input.orgId, repo.id);
-      } catch (error) {
-        console.error("Failed to create repo directory in storage:", error);
+      } catch (error: any) {
+        Logger.error(
+          `Failed to create repo directory in storage: ${JSON.stringify(error)}`,
+        );
         // Note: We don't fail the repo creation here since the DB record is created
         // The directory can be created later if needed
       }

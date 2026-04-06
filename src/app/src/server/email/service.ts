@@ -3,6 +3,7 @@ import "server-only";
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import config from "@incanta/config";
+import { Logger } from "../logging";
 
 interface EmailMessage {
   to: string;
@@ -47,7 +48,7 @@ function getFrom(): { name: string; address: string } {
 export async function sendEmail(message: EmailMessage): Promise<boolean> {
   const transporter = await getTransporter();
   if (!transporter) {
-    console.warn("[email] Email is disabled or not configured — skipping send");
+    Logger.warn("[email] Email is disabled or not configured — skipping send");
     return false;
   }
 
@@ -60,8 +61,8 @@ export async function sendEmail(message: EmailMessage): Promise<boolean> {
       text: message.text,
     });
     return true;
-  } catch (err) {
-    console.error("[email] Failed to send email:", err);
+  } catch (err: any) {
+    Logger.error(`[email] Failed to send email: ${JSON.stringify(err)}`);
     return false;
   }
 }
