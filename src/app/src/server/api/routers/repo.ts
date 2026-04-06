@@ -8,6 +8,7 @@ import { getEffectiveTier } from "~/server/license-client";
 import { hasFeature } from "~/server/license-utils";
 import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
+import { Logger } from "~/server/logging";
 
 export const repoRouter = createTRPCRouter({
   getRepo: protectedProcedure
@@ -61,8 +62,7 @@ export const repoRouter = createTRPCRouter({
 
       const isAdmin = !!(
         orgUser &&
-        (repo.org.defaultRepoAccess === "ADMIN" ||
-          repoRole?.access === "ADMIN")
+        (repo.org.defaultRepoAccess === "ADMIN" || repoRole?.access === "ADMIN")
       );
 
       return { isMember, canWrite, isAdmin };

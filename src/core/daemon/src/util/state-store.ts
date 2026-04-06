@@ -202,7 +202,7 @@ class SqliteStateStore implements StateStore {
       files[r.path] = {
         fileId: r.file_id,
         changelist: r.changelist,
-        hash: r.hash,
+        md5: r.hash,
         size: r.size,
         ...(r.mtime != null && { mtime: r.mtime }),
       };
@@ -221,7 +221,7 @@ class SqliteStateStore implements StateStore {
       artifactFiles[r.path] = {
         fileId: r.file_id,
         changelist: r.changelist,
-        hash: r.hash,
+        md5: r.hash,
         size: r.size,
         ...(r.mtime != null && { mtime: r.mtime }),
       };
@@ -269,7 +269,7 @@ class SqliteStateStore implements StateStore {
           p,
           f.fileId,
           f.changelist,
-          f.hash,
+          f.md5,
           f.size,
           f.mtime ?? null,
         );
@@ -282,7 +282,7 @@ class SqliteStateStore implements StateStore {
             p,
             f.fileId,
             f.changelist,
-            f.hash,
+            f.md5,
             f.size,
             f.mtime ?? null,
           );

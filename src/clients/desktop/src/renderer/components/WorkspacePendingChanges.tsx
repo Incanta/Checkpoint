@@ -294,7 +294,7 @@ export default function WorkspacePendingChanges() {
 
   useEffect(() => {
     if (monacoEl?.current && workspaceDiff) {
-      setEditor((editor) => {
+      setEditor((editor: any) => {
         if (editor) {
           editor.dispose();
           monacoEl.current!.innerHTML = "";

@@ -20,6 +20,7 @@ import {
   resolveBinaryExtensions,
   isBinaryFile,
 } from "~/server/binary-extensions";
+import { Logger } from "~/server/logging";
 
 const MAX_TEXT_SIZE = 5 * 1024 * 1024; // 5 MB text limit
 
@@ -430,7 +431,6 @@ export const fileRouter = createTRPCRouter({
 
       // Normalize the file path
       const normalizedPath = input.filePath.replaceAll("\\", "/");
-      console.log("Getting file history for:", normalizedPath);
 
       // Find the file by path
       const file = await ctx.db.file.findFirst({

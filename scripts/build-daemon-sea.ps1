@@ -48,9 +48,6 @@ $NodeBin = (Get-Command node).Source
 
 Copy-Item $NodeBin (Join-Path $OutputDir $BinaryName) -Force
 
-# Remove the Node.js signature (required before injection on Windows)
-& signtool remove /s (Join-Path $OutputDir $BinaryName) 2>$null
-
 # Inject the SEA blob
 $BlobPath = Join-Path $DaemonDir "daemon-sea.blob"
 npx postject (Join-Path $OutputDir $BinaryName) NODE_SEA_BLOB $BlobPath `
@@ -58,8 +55,8 @@ npx postject (Join-Path $OutputDir $BinaryName) NODE_SEA_BLOB $BlobPath `
 
 # Step 5: Copy longtail addon
 Write-Host "[5/5] Copying longtail native addon..." -ForegroundColor Yellow
-$AddonDir = Join-Path $RootDir "src\longtail\addon"
-$PrebuiltSrc = Join-Path $AddonDir "prebuilds\win32-x64\longtail_addon.node"
+$AddonPkgDir = node -e "console.log(require('path').dirname(require.resolve('@checkpointvcs/longtail-addon/package.json')))"
+$PrebuiltSrc = Join-Path $AddonPkgDir "prebuilds\win32-x64\longtail_addon.node"
 
 $LibDir = Join-Path $OutputDir "lib"
 New-Item -ItemType Directory -Path $LibDir -Force | Out-Null

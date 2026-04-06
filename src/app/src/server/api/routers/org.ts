@@ -8,6 +8,7 @@ import {
   getDefaultBinaryExtensions,
   resolveBinaryExtensions,
 } from "~/server/binary-extensions";
+import { Logger } from "~/server/logging";
 
 export const orgRouter = createTRPCRouter({
   myOrgs: protectedProcedure.query(async ({ ctx }) => {
@@ -125,8 +126,10 @@ export const orgRouter = createTRPCRouter({
       // Create the org directory in storage
       try {
         await createOrgDirectory(org.id);
-      } catch (error) {
-        console.error("Failed to create org directory in storage:", error);
+      } catch (error: any) {
+        Logger.error(
+          `Failed to create org directory in storage: ${JSON.stringify(error)}`,
+        );
         // Note: We don't fail the org creation here since the DB record is created
         // The directory can be created later if needed
       }

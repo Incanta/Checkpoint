@@ -1,9 +1,5 @@
 import { User } from "./state/auth";
-import {
-  FileStatus,
-  FileType,
-  type Workspace,
-} from "@checkpointvcs/daemon/types";
+import { type Workspace } from "@checkpointvcs/daemon/types";
 
 // eslint-disable-next-line @typescript-eslint/no-namespace
 export namespace MockedData {
@@ -36,31 +32,6 @@ export namespace MockedData {
       localPath: "E:/epic/engine/UE_Redwood",
       daemonId: "daemon-1",
       branchName: "main",
-      pendingChanges: {
-        numChanges: 3,
-        files: [
-          {
-            path: "E:/epic/engine/UE_Redwood/.gitignore",
-            type: FileType.Text,
-            size: 150,
-            modifiedAt: Date.now() - 100000,
-
-            status: FileStatus.ChangedCheckedOut,
-            id: "file-1",
-            changelist: 2,
-          },
-          {
-            path: "E:/epic/engine/UE_Redwood/.gitignore2",
-            type: FileType.Text,
-            size: 150,
-            modifiedAt: Date.now() - 100000,
-
-            status: FileStatus.ChangedCheckedOut,
-            id: "file-2",
-            changelist: 2,
-          },
-        ],
-      },
     },
   ];
 }
