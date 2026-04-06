@@ -1,4 +1,4 @@
-import pino, { type Logger as PinoLogger } from "pino";
+import pino from "pino";
 import fs from "fs";
 import path from "path";
 import { format } from "date-fns";
@@ -69,96 +69,84 @@ interface LoggingConfig {
   };
 }
 
-export let Logger: PinoLogger<CustomLevelNames>;
+const loggingConfig = config.get<LoggingConfig>("logging");
 
-export function SetLogger(newLogger: PinoLogger<CustomLevelNames>): void {
-  Logger = newLogger;
-}
+const include = loggingConfig.prettify.include;
 
-export async function InitLogger(): Promise<void> {
-  const loggingConfig = config.get<LoggingConfig>("logging");
+const streams: (pino.DestinationStream | pino.StreamEntry<LevelNames>)[] = [
+  {
+    level: loggingConfig.level as LevelNames,
+    stream: loggingConfig.prettify.enabled
+      ? pretty({
+          colorize: loggingConfig.prettify.colorize,
+          colorizeObjects: loggingConfig.prettify.colorizeObjects,
+          crlf: loggingConfig.prettify.crlf,
+          levelFirst: loggingConfig.prettify.levelFirst,
+          messageFormat: loggingConfig.prettify.messageFormat,
+          translateTime: loggingConfig.prettify.translateTime,
+          ignore: loggingConfig.prettify.ignore.join(","),
+          include: include.length === 0 ? undefined : include.join(","),
+          hideObject: loggingConfig.prettify.hideObject,
+          singleLine: loggingConfig.prettify.singleLine,
+          customColors: CustomColors,
+        })
+      : process.stdout,
+  },
+];
 
-  const include = loggingConfig.prettify.include;
+const logToFile = loggingConfig.logFile.enabled;
+if (logToFile) {
+  const logFilePath = path.resolve(process.cwd(), loggingConfig.logFile.path);
+  const extName = path.extname(logFilePath);
 
-  const streams: (pino.DestinationStream | pino.StreamEntry<LevelNames>)[] = [
-    {
-      level: loggingConfig.level as LevelNames,
-      stream: loggingConfig.prettify.enabled
-        ? pretty({
-            colorize: loggingConfig.prettify.colorize,
-            colorizeObjects: loggingConfig.prettify.colorizeObjects,
-            crlf: loggingConfig.prettify.crlf,
-            levelFirst: loggingConfig.prettify.levelFirst,
-            messageFormat: loggingConfig.prettify.messageFormat,
-            translateTime: loggingConfig.prettify.translateTime,
-            ignore: loggingConfig.prettify.ignore.join(","),
-            include: include.length === 0 ? undefined : include.join(","),
-            hideObject: loggingConfig.prettify.hideObject,
-            singleLine: loggingConfig.prettify.singleLine,
-            customColors: CustomColors,
-          })
-        : process.stdout,
-    },
-  ];
+  fs.mkdirSync(path.dirname(logFilePath), { recursive: true });
 
-  const logToFile = loggingConfig.logFile.enabled;
-  if (logToFile) {
-    const logFilePath = path.resolve(process.cwd(), loggingConfig.logFile.path);
-    const extName = path.extname(logFilePath);
-
-    fs.mkdirSync(path.dirname(logFilePath), { recursive: true });
-
-    if (fs.existsSync(logFilePath)) {
-      const formattedDate = format(new Date(), "y.MM.dd-HH.mm.ss");
-      fs.renameSync(
-        logFilePath,
-        path.join(
-          path.dirname(logFilePath),
-          `${path.basename(logFilePath, extName)}-${formattedDate}${extName}`,
-        ),
-      );
-    }
-
-    const maxArchivedFiles = loggingConfig.logFile.maxArchivedFiles;
-
-    if (maxArchivedFiles >= 0) {
-      const logFiles = fs
-        .readdirSync(path.dirname(logFilePath))
-        .filter((f) => f.startsWith(`${path.basename(logFilePath, extName)}-`));
-
-      const numToRemove = logFiles.length - maxArchivedFiles;
-      const filesToRemove = logFiles.sort().slice(0, numToRemove);
-
-      for (const file of filesToRemove) {
-        fs.unlinkSync(path.join(path.dirname(logFilePath), file));
-      }
-    }
-
-    streams.push({
-      level: loggingConfig.logFile.level as LevelNames,
-      stream: fs.createWriteStream(logFilePath),
-    });
+  if (fs.existsSync(logFilePath)) {
+    const formattedDate = format(new Date(), "y.MM.dd-HH.mm.ss");
+    fs.renameSync(
+      logFilePath,
+      path.join(
+        path.dirname(logFilePath),
+        `${path.basename(logFilePath, extName)}-${formattedDate}${extName}`,
+      ),
+    );
   }
 
-  const normalLevel = loggingConfig.level as LevelNames;
-  const fileLevel = loggingConfig.logFile.level as LevelNames;
+  const maxArchivedFiles = loggingConfig.logFile.maxArchivedFiles;
 
-  const normalLevelNum = pino.levels.values[normalLevel];
-  const fileLevelNum = pino.levels.values[fileLevel];
+  if (maxArchivedFiles >= 0) {
+    const logFiles = fs
+      .readdirSync(path.dirname(logFilePath))
+      .filter((f) => f.startsWith(`${path.basename(logFilePath, extName)}-`));
 
-  Logger = pino<CustomLevelNames>(
-    {
-      level:
-        !logToFile ||
-        (normalLevelNum && fileLevelNum && normalLevelNum < fileLevelNum)
-          ? normalLevel
-          : fileLevel,
-      customLevels: CustomLevels,
-    },
-    pino.multistream(streams),
-  );
+    const numToRemove = logFiles.length - maxArchivedFiles;
+    const filesToRemove = logFiles.sort().slice(0, numToRemove);
+
+    for (const file of filesToRemove) {
+      fs.unlinkSync(path.join(path.dirname(logFilePath), file));
+    }
+  }
+
+  streams.push({
+    level: loggingConfig.logFile.level as LevelNames,
+    stream: fs.createWriteStream(logFilePath),
+  });
 }
 
-// this just makes sure Logger is always defined, but the DaemonManager init
-// will set it properly on startup
-Logger = pino<CustomLevelNames>();
+const normalLevel = loggingConfig.level as LevelNames;
+const fileLevel = loggingConfig.logFile.level as LevelNames;
+
+const normalLevelNum = pino.levels.values[normalLevel];
+const fileLevelNum = pino.levels.values[fileLevel];
+
+export const Logger = pino<CustomLevelNames>(
+  {
+    level:
+      !logToFile ||
+      (normalLevelNum && fileLevelNum && normalLevelNum < fileLevelNum)
+        ? normalLevel
+        : fileLevel,
+    customLevels: CustomLevels,
+  },
+  pino.multistream(streams),
+);
