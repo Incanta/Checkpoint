@@ -45,6 +45,8 @@ let licenseManagerVerified: boolean | null = null;
  * to that public key. If verification fails, the process crashes.
  */
 export async function verifyLicenseManagerKey(): Promise<boolean> {
+  Logger.debug("[License] Verifying license manager key...");
+
   const privateKeyBase64Source = config.tryGet<string>("licensing.incanta-key");
 
   if (!privateKeyBase64Source) {
@@ -67,6 +69,9 @@ export async function verifyLicenseManagerKey(): Promise<boolean> {
 
   let publicKeyBase64: string;
   try {
+    Logger.debug(
+      `[License] Resolving DNS TXT record for ${LICENSE_MANAGER_DNS_HOST}...`,
+    );
     const records = await dns.resolveTxt(LICENSE_MANAGER_DNS_HOST);
     // TXT records come as arrays of chunks; join them
     publicKeyBase64 = records
@@ -86,6 +91,10 @@ export async function verifyLicenseManagerKey(): Promise<boolean> {
     );
     process.exit(1);
   }
+
+  Logger.debug(
+    `[License] Successfully retrieved public key from DNS: ${publicKeyBase64}, verifying against configured private key...`,
+  );
 
   try {
     const privateKeyDer = Buffer.from(privateKeyBase64, "base64");
@@ -111,6 +120,7 @@ export async function verifyLicenseManagerKey(): Promise<boolean> {
       process.exit(1);
     }
 
+    Logger.info("[License] Successfully verified license manager key");
     licenseManagerVerified = true;
     return true;
   } catch (err: any) {
