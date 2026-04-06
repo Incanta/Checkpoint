@@ -154,6 +154,10 @@ export function getFeaturesForTier(tier: LicenseTier): LicenseFeature[] {
 }
 
 export function isLicenseManager(): boolean {
+  Logger.debug(
+    `[License] Checking if this instance is a license manager: ${licenseManagerVerified}`,
+  );
+  console.trace();
   return licenseManagerVerified === true;
 }
 
