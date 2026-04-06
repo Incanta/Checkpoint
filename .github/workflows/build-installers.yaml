@@ -71,7 +71,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          vcpkg install curl nlohmann-json --triplet x64-windows
+          vcpkg install curl nlohmann-json --triplet x64-windows-static
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -91,7 +91,9 @@ jobs:
           mkdir -p build && cd build
           if [ "$RUNNER_OS" = "Windows" ]; then
             cmake .. -G "Visual Studio 17 2022" -A x64 \
-              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_TARGET_TRIPLET=x64-windows-static \
+              -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
             cmake --build . --config Release
             cp Release/${{ matrix.cli_binary }} .
             cp Release/${{ matrix.cli_alias }} .
