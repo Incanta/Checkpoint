@@ -28,6 +28,23 @@ struct CurlResponse {
   std::string error;
 };
 
+struct R2UploadData {
+  const void* data;
+  size_t size;
+  size_t pos;
+};
+
+static size_t R2ReadCallback(char* buffer, size_t size, size_t nitems, void* userp) {
+  struct R2UploadData* upload = static_cast<struct R2UploadData*>(userp);
+  size_t remaining = upload->size - upload->pos;
+  size_t copy = (size * nitems < remaining) ? size * nitems : remaining;
+  if (copy > 0) {
+    memcpy(buffer, static_cast<const char*>(upload->data) + upload->pos, copy);
+    upload->pos += copy;
+  }
+  return copy;
+}
+
 static size_t R2WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
   size_t realsize = size * nmemb;
   std::string* str = static_cast<std::string*>(userp);
@@ -175,6 +192,7 @@ static CurlResponse R2HttpPut(const std::string& url,
                               const std::string& sessionToken,
                               const void* data,
                               size_t dataSize) {
+  struct Longtail_LogContextFmt_Private* ctx = 0;
   CurlResponse response;
   response.status_code = 0;
 
@@ -189,27 +207,32 @@ static CurlResponse R2HttpPut(const std::string& url,
   headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
   R2SetupAuth(curl, &headers, accessKeyId, secretAccessKey, sessionToken);
 
+  R2UploadData uploadData;
+  uploadData.data = data;
+  uploadData.size = dataSize;
+  uploadData.pos = 0;
+
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_READFUNCTION, R2ReadCallback);
+  curl_easy_setopt(curl, CURLOPT_READDATA, &uploadData);
+  curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)dataSize);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, R2WriteCallback);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
-  // For PUT with data, use CURLOPT_POSTFIELDS + CUSTOMREQUEST
-  // or use INFILESIZE + read callback. Simplest: use POSTFIELDS with custom PUT.
-  curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
-  curl_easy_setopt(curl, CURLOPT_UPLOAD, 0L);
-  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
-  curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)dataSize);
-
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
     response.error = curl_easy_strerror(res);
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpPut curl error: %s (url: %s)", response.error.c_str(), url.c_str())
   } else {
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
+    if (response.status_code < 200 || response.status_code >= 300) {
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpPut HTTP %ld (url: %s, body: %s)", response.status_code, url.c_str(), response.body.c_str())
+    }
   }
 
   curl_slist_free_all(headers);
@@ -451,7 +474,12 @@ static int R2StorageAPI_Write(
   CurlResponse r = R2HttpPut(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken,
                              input, (size_t)length);
 
-  return (r.status_code >= 200 && r.status_code < 300) ? 0 : EIO;
+  if (r.status_code < 200 || r.status_code >= 300) {
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2StorageAPI_Write failed: HTTP %ld, curl_error: %s, response: %s, path: %s",
+                 r.status_code, r.error.c_str(), r.body.c_str(), open_file->m_Path)
+    return EIO;
+  }
+  return 0;
 }
 
 static int R2StorageAPI_SetSize(
