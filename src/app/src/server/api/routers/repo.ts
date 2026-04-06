@@ -5,7 +5,7 @@ import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { createRepoDirectory } from "~/server/storage-service";
 import { isR2Enabled, createR2Bucket } from "~/server/r2-service";
 import { getEffectiveTier } from "~/server/license-client";
-import { hasFeature } from "~/server/license-utils";
+import { hasFeature, isLicenseManager } from "~/server/license-utils";
 import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { Logger } from "~/server/logging";
@@ -142,7 +142,7 @@ export const repoRouter = createTRPCRouter({
       // Create storage for the repo (R2 bucket or SeaweedFS directory)
       if (isR2Enabled()) {
         const tier = await getEffectiveTier(input.orgId, ctx.db);
-        if (hasFeature(tier, "r2Storage")) {
+        if (isLicenseManager() || hasFeature(tier, "r2Storage")) {
           const bucketName = `checkpoint-${repo.id}`;
           try {
             await createR2Bucket(bucketName);
