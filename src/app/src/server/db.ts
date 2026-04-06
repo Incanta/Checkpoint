@@ -7,7 +7,7 @@ const createPrismaClient = () => {
   const logLevel = config.get<string>("logging.level");
 
   const log: Prisma.LogLevel[] = ["error"];
-  if (logLevel === "debug" || logLevel === "trace") {
+  if (logLevel === "trace") {
     log.push("query", "warn");
   }
 
