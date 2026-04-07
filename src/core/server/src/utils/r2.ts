@@ -3,7 +3,7 @@ import config from "@incanta/config";
 
 let cachedClient: S3Client | null = null;
 
-export function getR2Client(): S3Client {
+export async function getR2Client(): Promise<S3Client> {
   if (cachedClient) {
     return cachedClient;
   }
@@ -13,8 +13,12 @@ export function getR2Client(): S3Client {
     region: "auto",
     endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
     credentials: {
-      accessKeyId: config.get<string>("storage.r2.access-key-id"),
-      secretAccessKey: config.get<string>("storage.r2.secret-access-key"),
+      accessKeyId: await config.getWithSecrets<string>(
+        "storage.r2.access-key-id",
+      ),
+      secretAccessKey: await config.getWithSecrets<string>(
+        "storage.r2.secret-access-key",
+      ),
     },
   });
 
@@ -45,7 +49,9 @@ interface R2UsageResponse {
 
 export async function getBucketUsageR2(bucket: string): Promise<number> {
   const accountId = config.get<string>("storage.r2.account-id");
-  const cfApiToken = config.get<string>("storage.r2.api-token");
+  const cfApiToken = await config.getWithSecrets<string>(
+    "storage.r2.api-token",
+  );
 
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets/${bucket}/usage`,

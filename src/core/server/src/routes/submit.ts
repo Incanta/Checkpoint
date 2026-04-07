@@ -252,10 +252,10 @@ export function routeSubmit(): Router {
 
       if (storageMode === "r2") {
         mergeOptions.storageType = "r2";
-        mergeOptions.r2AccessKeyId = config.get<string>(
+        mergeOptions.r2AccessKeyId = await config.getWithSecrets<string>(
           "storage.r2.access-key-id",
         );
-        mergeOptions.r2SecretAccessKey = config.get<string>(
+        mergeOptions.r2SecretAccessKey = await config.getWithSecrets<string>(
           "storage.r2.secret-access-key",
         );
         mergeOptions.r2Endpoint = getR2Endpoint();
