@@ -28,11 +28,6 @@ export function isR2Enabled(): boolean {
 }
 
 export function getR2Endpoint(): string {
-  const endpoint = config.get<string>("storage.r2.endpoint");
-  if (endpoint) {
-    return endpoint;
-  }
-
   const accountId = config.get<string>("storage.r2.account-id");
   return `https://${accountId}.r2.cloudflarestorage.com`;
 }
