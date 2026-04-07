@@ -970,5 +970,8 @@ struct Longtail_StorageAPI* CreateSeaweedFSStorageAPI(const char* url, const cha
   seaweed_storage_api->m_JWT = strdup(jwt);
   seaweed_storage_api->m_NumAddedBlocks = 0;
 
+  // Mark as object storage so FSBlockStore skips temp-file + rename pattern
+  storage_api->m_StorageFlags = LONGTAIL_STORAGE_FLAG_OBJECT_STORAGE;
+
   return storage_api;
 }

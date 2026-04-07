@@ -379,7 +379,17 @@ struct Longtail_StorageAPI {
   Longtail_Storage_GetParentPathFunc GetParentPath;
   Longtail_Storage_MapFileFunc MapFile;
   Longtail_Storage_UnmapFileFunc UnMapFile;
+
+  // Flags describing storage API capabilities. Set after creation.
+  // Default: 0 (local filesystem semantics)
+  uint32_t m_StorageFlags;
 };
+
+// Storage API flags (set via m_StorageFlags after creation)
+// Object storage: writes are atomic (PUT), directories are virtual,
+// and rename is expensive. FSBlockStore skips the temp-file + rename
+// pattern when this flag is set, writing directly to the final path.
+#define LONGTAIL_STORAGE_FLAG_OBJECT_STORAGE 1u
 
 LONGTAIL_EXPORT uint64_t Longtail_GetStorageAPISize();
 

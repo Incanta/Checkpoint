@@ -262,14 +262,31 @@ static int SafeWriteStoredBlock(
     TLongtail_Hash block_hash = *stored_block->m_BlockIndex->m_BlockHash;
     char* block_path = GetBlockPath(storage_api, store_path, block_extension, block_hash);
 
-    // Check if block exists, if it does it is just the store store index that is out of sync.
-    // Don't write the block unless we have to
+    // Object storage (R2, SeaweedFS, etc.): writes are atomic (idempotent PUT),
+    // so skip the IsFile HEAD check — PutStoredBlock's m_BlockState hashmap
+    // already prevents same-session duplicates, and re-uploading a block that
+    // already exists is harmless. This eliminates 1 HTTP round-trip per block.
+    if (storage_api->m_StorageFlags & LONGTAIL_STORAGE_FLAG_OBJECT_STORAGE)
+    {
+        int err = Longtail_WriteStoredBlock(storage_api, stored_block, block_path);
+        if (err)
+        {
+            LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "Longtail_WriteStoredBlock() failed with %d", err)
+        }
+        Longtail_Free((char*)block_path);
+        return err;
+    }
+
+    // Local filesystem: check if block exists to avoid unnecessary writes.
+    // The store index on disk may be out of sync with actual block files
+    // (e.g., after a crash or concurrent access).
     if (storage_api->IsFile(storage_api, block_path))
     {
         Longtail_Free((void*)block_path);
         return 0;
     }
 
+    // Local filesystem: use temp file + atomic rename for crash safety
     char* tmp_block_path = GetTempBlockPath(storage_api, store_path, block_hash, api->m_TmpExtension);
     int err = EnsureParentPathExists(storage_api, tmp_block_path);
     if (err)

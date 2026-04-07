@@ -357,6 +357,7 @@ struct Longtail_StorageAPI* Longtail_MakeStorageAPI(
     api->GetParentPath = get_parent_path_func;
     api->MapFile = map_file_func;
     api->UnMapFile = unmap_file_func;
+    api->m_StorageFlags = 0;
     return api;
 }
 
