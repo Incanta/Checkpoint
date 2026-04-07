@@ -145,6 +145,23 @@ export async function submit(
     onProgress: (step, done, total) => {
       onProgress?.(step, done, total);
     },
+    onTokenRefresh: async () => {
+      console.log("[submit] Token refresh requested by native addon");
+      const newToken = await client.storage.getToken.query({
+        repoId: workspace.repoId,
+        write: true,
+      });
+      console.log("[submit] Token refreshed successfully");
+      return {
+        jwt: newToken.token,
+        jwtExpirationMs: (newToken.expiration ?? 0) * 1000,
+        ...(newToken.r2Credentials && {
+          r2AccessKeyId: newToken.r2Credentials.accessKeyId,
+          r2SecretAccessKey: newToken.r2Credentials.secretAccessKey,
+          r2SessionToken: newToken.r2Credentials.sessionToken,
+        }),
+      };
+    },
   });
 
   if (status.error !== 0) {

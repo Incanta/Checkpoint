@@ -1,4 +1,5 @@
 #include "seaweedfs.h"
+#include "token-refresh.h"
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -261,6 +262,20 @@ static CurlResponse HttpDelete(const std::string& url, const std::string& jwt) {
 // SeaweedFS Storage API Implementation
 // ============================================================================
 
+// Check if the SeaweedFS JWT needs refreshing. If so, requests a new one from
+// the JS polling thread and updates m_JWT. The old JWT string is intentionally
+// leaked (~500 bytes per refresh) to avoid use-after-free in concurrent threads.
+static int SeaweedFS_RefreshTokenIfNeeded(SeaweedFSStorageAPI* api) {
+  if (!api->m_Handle) return 0;
+  int err = EnsureTokenFresh(api->m_Handle);
+  if (err) return err;
+  if (api->m_Handle->refreshedJwt[0] != '\0') {
+    api->m_JWT = strdup(api->m_Handle->refreshedJwt);
+    api->m_Handle->refreshedJwt[0] = '\0';
+  }
+  return 0;
+}
+
 static void SeaweedFSStorageAPI_Dispose(struct Longtail_API* storage_api) {
   MAKE_LOG_CONTEXT_FIELDS(ctx)
   LONGTAIL_LOGFIELD(storage_api, "%p")
@@ -327,6 +342,7 @@ static int SeaweedFSStorageAPI_GetSize(
   LONGTAIL_VALIDATE_INPUT(ctx, out_size != 0, return EINVAL);
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
+  { int err = SeaweedFS_RefreshTokenIfNeeded(seaweed_storage_api); if (err) return err; }
   SeaweedFSStorageAPI_OpenFile* open_file = (struct SeaweedFSStorageAPI_OpenFile*)f;
 
   std::string url = std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path);
@@ -368,6 +384,7 @@ static int SeaweedFSStorageAPI_Read(
   LONGTAIL_VALIDATE_INPUT(ctx, output != 0, return EINVAL);
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
+  { int err = SeaweedFS_RefreshTokenIfNeeded(seaweed_storage_api); if (err) return err; }
   SeaweedFSStorageAPI_OpenFile* open_file = (struct SeaweedFSStorageAPI_OpenFile*)f;
 
   std::string url = std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path);
@@ -455,6 +472,7 @@ static int SeaweedFSStorageAPI_Write(
   LONGTAIL_VALIDATE_INPUT(ctx, input != 0, return EINVAL);
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
+  { int err = SeaweedFS_RefreshTokenIfNeeded(seaweed_storage_api); if (err) return err; }
   SeaweedFSStorageAPI_OpenFile* open_file = (struct SeaweedFSStorageAPI_OpenFile*)f;
 
   std::string url = std::string(seaweed_storage_api->m_URL) + std::string(open_file->m_Path);
@@ -587,6 +605,7 @@ static int SeaweedFSStorageAPI_RenameFile(struct Longtail_StorageAPI* storage_ap
   LONGTAIL_VALIDATE_INPUT(ctx, target_path != 0, return EINVAL);
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
+  { int err = SeaweedFS_RefreshTokenIfNeeded(seaweed_storage_api); if (err) return err; }
 
   std::string url = std::string(seaweed_storage_api->m_URL) + std::string(target_path) + "?mv.from=" + std::string(source_path);
 
@@ -653,6 +672,7 @@ static int SeaweedFSStorageAPI_IsFile(struct Longtail_StorageAPI* storage_api, c
   LONGTAIL_VALIDATE_INPUT(ctx, path != 0, return EINVAL);
 
   struct SeaweedFSStorageAPI* seaweed_storage_api = (SeaweedFSStorageAPI*)storage_api;
+  { int err = SeaweedFS_RefreshTokenIfNeeded(seaweed_storage_api); if (err) return err; }
 
   std::string url = std::string(seaweed_storage_api->m_URL) + std::string(path);
 
@@ -950,7 +970,11 @@ static int SeaweedFSStorageAPI_Init(
   return 0;
 }
 
-struct Longtail_StorageAPI* CreateSeaweedFSStorageAPI(const char* url, const char* jwt) {
+struct Longtail_StorageAPI* CreateSeaweedFSStorageAPI(
+    const char* url,
+    const char* jwt,
+    struct WrapperAsyncHandle* handle,
+    uint64_t tokenExpirationMs) {
   MAKE_LOG_CONTEXT(ctx, 0, LONGTAIL_LOG_LEVEL_DEBUG)
 
   void* mem = (struct FSStorageAPI*)Longtail_Alloc("SeaweedFSStorageAPI", sizeof(struct SeaweedFSStorageAPI));
@@ -969,6 +993,10 @@ struct Longtail_StorageAPI* CreateSeaweedFSStorageAPI(const char* url, const cha
   seaweed_storage_api->m_URL = strdup(url);
   seaweed_storage_api->m_JWT = strdup(jwt);
   seaweed_storage_api->m_NumAddedBlocks = 0;
+  seaweed_storage_api->m_Handle = handle;
+  if (handle) {
+    handle->tokenExpirationMs = tokenExpirationMs;
+  }
 
   // Mark as object storage so FSBlockStore skips temp-file + rename pattern
   storage_api->m_StorageFlags = LONGTAIL_STORAGE_FLAG_OBJECT_STORAGE;

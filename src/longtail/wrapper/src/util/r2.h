@@ -2,6 +2,8 @@
 
 #include <longtail.h>
 
+struct WrapperAsyncHandle;
+
 struct R2StorageAPI {
   struct Longtail_StorageAPI m_R2StorageAPI;
 
@@ -11,6 +13,7 @@ struct R2StorageAPI {
   char* m_SecretAccessKey;
   char* m_SessionToken;
   uint32_t m_NumAddedBlocks;
+  struct WrapperAsyncHandle* m_Handle;
 };
 
 struct Longtail_StorageAPI* CreateR2StorageAPI(
@@ -18,4 +21,6 @@ struct Longtail_StorageAPI* CreateR2StorageAPI(
     const char* bucketName,
     const char* accessKeyId,
     const char* secretAccessKey,
-    const char* sessionToken);
+    const char* sessionToken,
+    struct WrapperAsyncHandle* handle = nullptr,
+    uint64_t tokenExpirationMs = 0);

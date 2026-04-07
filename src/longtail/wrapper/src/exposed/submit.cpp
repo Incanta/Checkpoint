@@ -46,9 +46,9 @@ int32_t SubmitSync(
   struct Longtail_StorageAPI* file_storage_api = Longtail_CreateFSStorageAPI();
   struct Longtail_StorageAPI* remote_storage_api;
   if (StorageType && strcmp(StorageType, "r2") == 0) {
-    remote_storage_api = CreateR2StorageAPI(R2Endpoint, R2BucketName, R2AccessKeyId, R2SecretAccessKey, R2SessionToken);
+    remote_storage_api = CreateR2StorageAPI(R2Endpoint, R2BucketName, R2AccessKeyId, R2SecretAccessKey, R2SessionToken, handle, JWTExpirationMs);
   } else {
-    remote_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT);
+    remote_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT, handle, JWTExpirationMs);
   }
 
   struct Longtail_BlockStoreAPI* store_block_fsstore_api = Longtail_CreateFSBlockStoreAPI(
@@ -604,6 +604,18 @@ int32_t SubmitSync(
 
   SetHandleStep(handle, "Uploading to server");
 
+  // Use the current JWT — if a token refresh occurred during the upload, the
+  // SeaweedFS storage API's m_JWT has been updated. For R2, the JWT field
+  // passed to SubmitSync is not used for storage (SigV4 is), but the backend
+  // /submit endpoint still needs a valid auth header.
+  const char* currentJwt = JWT;
+  if (!StorageType || strcmp(StorageType, "r2") != 0) {
+    SeaweedFSStorageAPI* sfs = (SeaweedFSStorageAPI*)remote_storage_api;
+    currentJwt = sfs->m_JWT;
+  } else if (handle->refreshedJwt[0] != '\0') {
+    currentJwt = handle->refreshedJwt;
+  }
+
   // Use libcurl directly for the multipart POST
   CURL* curl = curl_easy_init();
   if (!curl) {
@@ -644,7 +656,7 @@ int32_t SubmitSync(
   };
 
   struct curl_slist* headers = nullptr;
-  std::string authHeader = std::string("Authorization: Bearer ") + JWT;
+  std::string authHeader = std::string("Authorization: Bearer ") + currentJwt;
   headers = curl_slist_append(headers, authHeader.c_str());
   headers = curl_slist_append(headers, "Connection: close");
 

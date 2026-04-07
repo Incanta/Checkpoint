@@ -1,4 +1,5 @@
 #include "r2.h"
+#include "token-refresh.h"
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -112,6 +113,25 @@ static void R2SetupAuth(CURL* curl, struct curl_slist** headers,
     std::string tokenHeader = "x-amz-security-token: " + sessionToken;
     *headers = curl_slist_append(*headers, tokenHeader.c_str());
   }
+}
+
+// Check if R2 STS credentials need refreshing. If so, requests new ones from
+// the JS polling thread and updates the storage API's credential pointers.
+// Old credential strings are intentionally leaked (a few hundred bytes per
+// refresh) to avoid use-after-free in concurrent worker threads.
+static int R2_RefreshCredentialsIfNeeded(R2StorageAPI* api) {
+  if (!api->m_Handle) return 0;
+  int err = EnsureTokenFresh(api->m_Handle);
+  if (err) return err;
+  if (api->m_Handle->refreshedR2AccessKeyId[0] != '\0') {
+    api->m_AccessKeyId = strdup(api->m_Handle->refreshedR2AccessKeyId);
+    api->m_Handle->refreshedR2AccessKeyId[0] = '\0';
+    api->m_SecretAccessKey = strdup(api->m_Handle->refreshedR2SecretAccessKey);
+    api->m_Handle->refreshedR2SecretAccessKey[0] = '\0';
+    api->m_SessionToken = strdup(api->m_Handle->refreshedR2SessionToken);
+    api->m_Handle->refreshedR2SessionToken[0] = '\0';
+  }
+  return 0;
 }
 
 // Build the full URL for an object in the R2 bucket
@@ -440,6 +460,7 @@ static int R2StorageAPI_GetSize(
   LONGTAIL_VALIDATE_INPUT(ctx, out_size != 0, return EINVAL);
 
   struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+  { int err = R2_RefreshCredentialsIfNeeded(r2_api); if (err) return err; }
   R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_GetSize: path=%s", open_file->m_Path)
@@ -476,9 +497,8 @@ static int R2StorageAPI_Read(
   LONGTAIL_VALIDATE_INPUT(ctx, output != 0, return EINVAL);
 
   struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+  { int err = R2_RefreshCredentialsIfNeeded(r2_api); if (err) return err; }
   R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
-
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Read: path=%s, offset=%" PRIu64 ", length=%" PRIu64, open_file->m_Path, offset, length)
 
   std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
   CurlResponse r = R2HttpGet(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
@@ -615,6 +635,7 @@ static void R2StorageAPI_CloseFile(struct Longtail_StorageAPI* storage_api, Long
   // calls (e.g., block index + block data) are coalesced into one request.
   if (open_file->m_IsWriteMode && !open_file->m_WriteBuffer.empty()) {
     struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+    R2_RefreshCredentialsIfNeeded(r2_api);
     std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
 
     LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_CloseFile: uploading %zu bytes to %s",
@@ -646,6 +667,7 @@ static int R2StorageAPI_RenameFile(struct Longtail_StorageAPI* storage_api, cons
   LONGTAIL_VALIDATE_INPUT(ctx, target_path != 0, return EINVAL);
 
   struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+  { int err = R2_RefreshCredentialsIfNeeded(r2_api); if (err) return err; }
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_RenameFile: source=%s, target=%s", source_path, target_path)
 
@@ -916,7 +938,9 @@ struct Longtail_StorageAPI* CreateR2StorageAPI(
     const char* bucketName,
     const char* accessKeyId,
     const char* secretAccessKey,
-    const char* sessionToken) {
+    const char* sessionToken,
+    struct WrapperAsyncHandle* handle,
+    uint64_t tokenExpirationMs) {
   MAKE_LOG_CONTEXT(ctx, 0, LONGTAIL_LOG_LEVEL_DEBUG)
 
   void* mem = Longtail_Alloc("R2StorageAPI", sizeof(struct R2StorageAPI));
@@ -938,6 +962,10 @@ struct Longtail_StorageAPI* CreateR2StorageAPI(
   r2_api->m_SecretAccessKey = strdup(secretAccessKey);
   r2_api->m_SessionToken = sessionToken ? strdup(sessionToken) : strdup("");
   r2_api->m_NumAddedBlocks = 0;
+  r2_api->m_Handle = handle;
+  if (handle) {
+    handle->tokenExpirationMs = tokenExpirationMs;
+  }
 
   // Mark as object storage so FSBlockStore skips temp-file + rename pattern
   storage_api->m_StorageFlags = LONGTAIL_STORAGE_FLAG_OBJECT_STORAGE;

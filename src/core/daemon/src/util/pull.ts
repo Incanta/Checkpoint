@@ -66,6 +66,25 @@ export async function pull(
 
   const tokenExpirationMs = storageTokenResponse.expiration * 1000;
 
+  // Token refresh callback — shared between main pull and artifact pull loops
+  const refreshStorageToken = async () => {
+    Logger.debug("Token refresh requested by native addon");
+    const newToken = await client.storage.getToken.query({
+      repoId: workspace.repoId,
+      write: true,
+    });
+    Logger.debug("Token refreshed successfully");
+    return {
+      jwt: newToken.token,
+      jwtExpirationMs: (newToken.expiration ?? 0) * 1000,
+      ...(newToken.r2Credentials && {
+        r2AccessKeyId: newToken.r2Credentials.accessKeyId,
+        r2SecretAccessKey: newToken.r2Credentials.secretAccessKey,
+        r2SessionToken: newToken.r2Credentials.sessionToken,
+      }),
+    };
+  };
+
   let filerUrl = "";
   let token = "";
   if (storageTokenResponse.storageType === "r2") {
@@ -234,6 +253,7 @@ export async function pull(
       onProgress: (step, done, total) => {
         onProgress?.(step, done, total);
       },
+      onTokenRefresh: refreshStorageToken,
     });
 
     Logger.debug(
@@ -320,6 +340,7 @@ export async function pull(
           onProgress: (step, done, total) => {
             onProgress?.(`[artifacts] ${step}`, done, total);
           },
+          onTokenRefresh: refreshStorageToken,
         });
 
         freeHandle(handle);
