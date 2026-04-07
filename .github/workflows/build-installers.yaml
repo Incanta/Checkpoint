@@ -367,6 +367,19 @@ jobs:
           npx tsc
           npx vite build
 
+      - name: Strip workspace protocol deps before packaging
+        shell: bash
+        run: |
+          cd src/clients/desktop
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+            for (const [dep, ver] of Object.entries(pkg.devDependencies || {})) {
+              if (String(ver).startsWith('workspace:')) delete pkg.devDependencies[dep];
+            }
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
         env:
