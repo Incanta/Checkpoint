@@ -123,7 +123,6 @@ static CurlResponse R2HttpHead(const std::string& url,
   }
 
   struct curl_slist* headers = nullptr;
-  headers = curl_slist_append(headers, "Connection: close");
   R2SetupAuth(curl, &headers, accessKeyId, secretAccessKey, sessionToken);
 
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -138,8 +137,12 @@ static CurlResponse R2HttpHead(const std::string& url,
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
     response.error = curl_easy_strerror(res);
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpHead curl error: %s (url: %s)", response.error.c_str(), url.c_str())
   } else {
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
+    if (response.status_code < 200 || response.status_code >= 300) {
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpHead HTTP %ld (url: %s)", response.status_code, url.c_str())
+    }
   }
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpHead: status=%ld, error=%s", response.status_code, response.error.c_str())
@@ -166,7 +169,6 @@ static CurlResponse R2HttpGet(const std::string& url,
   }
 
   struct curl_slist* headers = nullptr;
-  headers = curl_slist_append(headers, "Connection: close");
   R2SetupAuth(curl, &headers, accessKeyId, secretAccessKey, sessionToken);
 
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -182,8 +184,12 @@ static CurlResponse R2HttpGet(const std::string& url,
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
     response.error = curl_easy_strerror(res);
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpGet curl error: %s (url: %s)", response.error.c_str(), url.c_str())
   } else {
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
+    if (response.status_code < 200 || response.status_code >= 300) {
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpGet HTTP %ld (url: %s, body: %s)", response.status_code, url.c_str(), response.body.c_str())
+    }
   }
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpGet: status=%ld, body_size=%zu, error=%s", response.status_code, response.body.size(), response.error.c_str())
@@ -267,7 +273,6 @@ static CurlResponse R2HttpDelete(const std::string& url,
   }
 
   struct curl_slist* headers = nullptr;
-  headers = curl_slist_append(headers, "Connection: close");
   R2SetupAuth(curl, &headers, accessKeyId, secretAccessKey, sessionToken);
 
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -282,8 +287,12 @@ static CurlResponse R2HttpDelete(const std::string& url,
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
     response.error = curl_easy_strerror(res);
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpDelete curl error: %s (url: %s)", response.error.c_str(), url.c_str())
   } else {
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
+    if (response.status_code < 200 || response.status_code >= 300) {
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpDelete HTTP %ld (url: %s, body: %s)", response.status_code, url.c_str(), response.body.c_str())
+    }
   }
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpDelete: status=%ld, error=%s", response.status_code, response.error.c_str())
