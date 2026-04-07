@@ -1,4 +1,5 @@
 #include "r2.h"
+#include "token-refresh.h"
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -72,6 +73,29 @@ static size_t R2HeaderCallback(char* buffer, size_t size, size_t nitems, void* u
   return realsize;
 }
 
+// Thread-local curl handle for TCP connection reuse across requests.
+// curl_easy_reset keeps the connection pool alive while clearing options.
+struct ThreadCurlHandle {
+  CURL* handle;
+  ThreadCurlHandle() : handle(nullptr) {}
+  ~ThreadCurlHandle() { if (handle) { curl_easy_cleanup(handle); handle = nullptr; } }
+};
+static thread_local ThreadCurlHandle tls_curl;
+
+static CURL* GetCurlHandle() {
+  if (!tls_curl.handle) {
+    tls_curl.handle = curl_easy_init();
+  } else {
+    curl_easy_reset(tls_curl.handle);
+  }
+  if (tls_curl.handle) {
+    curl_easy_setopt(tls_curl.handle, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(tls_curl.handle, CURLOPT_TCP_KEEPIDLE, 30L);
+    curl_easy_setopt(tls_curl.handle, CURLOPT_TCP_KEEPINTVL, 15L);
+  }
+  return tls_curl.handle;
+}
+
 // Configure curl handle with AWS SigV4 auth for R2
 static void R2SetupAuth(CURL* curl, struct curl_slist** headers,
                         const std::string& accessKeyId,
@@ -89,6 +113,25 @@ static void R2SetupAuth(CURL* curl, struct curl_slist** headers,
     std::string tokenHeader = "x-amz-security-token: " + sessionToken;
     *headers = curl_slist_append(*headers, tokenHeader.c_str());
   }
+}
+
+// Check if R2 STS credentials need refreshing. If so, requests new ones from
+// the JS polling thread and updates the storage API's credential pointers.
+// Old credential strings are intentionally leaked (a few hundred bytes per
+// refresh) to avoid use-after-free in concurrent worker threads.
+static int R2_RefreshCredentialsIfNeeded(R2StorageAPI* api) {
+  if (!api->m_Handle) return 0;
+  int err = EnsureTokenFresh(api->m_Handle);
+  if (err) return err;
+  if (api->m_Handle->refreshedR2AccessKeyId[0] != '\0') {
+    api->m_AccessKeyId = strdup(api->m_Handle->refreshedR2AccessKeyId);
+    api->m_Handle->refreshedR2AccessKeyId[0] = '\0';
+    api->m_SecretAccessKey = strdup(api->m_Handle->refreshedR2SecretAccessKey);
+    api->m_Handle->refreshedR2SecretAccessKey[0] = '\0';
+    api->m_SessionToken = strdup(api->m_Handle->refreshedR2SessionToken);
+    api->m_Handle->refreshedR2SessionToken[0] = '\0';
+  }
+  return 0;
 }
 
 // Build the full URL for an object in the R2 bucket
@@ -116,9 +159,9 @@ static CurlResponse R2HttpHead(const std::string& url,
   CurlResponse response;
   response.status_code = 0;
 
-  CURL* curl = curl_easy_init();
+  CURL* curl = GetCurlHandle();
   if (!curl) {
-    response.error = "Failed to initialize curl";
+    response.error = "Failed to get curl handle";
     return response;
   }
 
@@ -147,7 +190,6 @@ static CurlResponse R2HttpHead(const std::string& url,
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpHead: status=%ld, error=%s", response.status_code, response.error.c_str())
   curl_slist_free_all(headers);
-  curl_easy_cleanup(curl);
 
   return response;
 }
@@ -162,9 +204,9 @@ static CurlResponse R2HttpGet(const std::string& url,
   CurlResponse response;
   response.status_code = 0;
 
-  CURL* curl = curl_easy_init();
+  CURL* curl = GetCurlHandle();
   if (!curl) {
-    response.error = "Failed to initialize curl";
+    response.error = "Failed to get curl handle";
     return response;
   }
 
@@ -194,7 +236,6 @@ static CurlResponse R2HttpGet(const std::string& url,
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpGet: status=%ld, body_size=%zu, error=%s", response.status_code, response.body.size(), response.error.c_str())
   curl_slist_free_all(headers);
-  curl_easy_cleanup(curl);
 
   return response;
 }
@@ -211,9 +252,9 @@ static CurlResponse R2HttpPut(const std::string& url,
   CurlResponse response;
   response.status_code = 0;
 
-  CURL* curl = curl_easy_init();
+  CURL* curl = GetCurlHandle();
   if (!curl) {
-    response.error = "Failed to initialize curl";
+    response.error = "Failed to get curl handle";
     return response;
   }
 
@@ -251,7 +292,6 @@ static CurlResponse R2HttpPut(const std::string& url,
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpPut: status=%ld, error=%s", response.status_code, response.error.c_str())
   curl_slist_free_all(headers);
-  curl_easy_cleanup(curl);
 
   return response;
 }
@@ -266,9 +306,9 @@ static CurlResponse R2HttpDelete(const std::string& url,
   CurlResponse response;
   response.status_code = 0;
 
-  CURL* curl = curl_easy_init();
+  CURL* curl = GetCurlHandle();
   if (!curl) {
-    response.error = "Failed to initialize curl";
+    response.error = "Failed to get curl handle";
     return response;
   }
 
@@ -297,7 +337,65 @@ static CurlResponse R2HttpDelete(const std::string& url,
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpDelete: status=%ld, error=%s", response.status_code, response.error.c_str())
   curl_slist_free_all(headers);
-  curl_easy_cleanup(curl);
+
+  return response;
+}
+
+// HTTP server-side COPY (S3 CopyObject) with SigV4 auth.
+// Uses PUT with x-amz-copy-source header — no data transfer to/from client.
+static CurlResponse R2HttpCopy(const std::string& targetUrl,
+                                const std::string& bucket,
+                                const std::string& sourceKey,
+                                const std::string& accessKeyId,
+                                const std::string& secretAccessKey,
+                                const std::string& sessionToken) {
+  struct Longtail_LogContextFmt_Private* ctx = 0;
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpCopy: target=%s, source=/%s/%s", targetUrl.c_str(), bucket.c_str(), sourceKey.c_str())
+  CurlResponse response;
+  response.status_code = 0;
+
+  CURL* curl = GetCurlHandle();
+  if (!curl) {
+    response.error = "Failed to get curl handle";
+    return response;
+  }
+
+  struct curl_slist* headers = nullptr;
+
+  // Strip leading slash from source key
+  std::string cleanKey = sourceKey;
+  while (!cleanKey.empty() && cleanKey[0] == '/') {
+    cleanKey.erase(0, 1);
+  }
+  std::string copySource = "/" + bucket + "/" + cleanKey;
+  std::string copyHeader = "x-amz-copy-source: " + copySource;
+  headers = curl_slist_append(headers, copyHeader.c_str());
+
+  R2SetupAuth(curl, &headers, accessKeyId, secretAccessKey, sessionToken);
+
+  curl_easy_setopt(curl, CURLOPT_URL, targetUrl.c_str());
+  curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+  curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)0);
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, R2WriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+  CURLcode res = curl_easy_perform(curl);
+  if (res != CURLE_OK) {
+    response.error = curl_easy_strerror(res);
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpCopy curl error: %s (target: %s)", response.error.c_str(), targetUrl.c_str())
+  } else {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
+    if (response.status_code < 200 || response.status_code >= 300) {
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpCopy HTTP %ld (target: %s, body: %s)", response.status_code, targetUrl.c_str(), response.body.c_str())
+    }
+  }
+
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpCopy: status=%ld, error=%s", response.status_code, response.error.c_str())
+  curl_slist_free_all(headers);
 
   return response;
 }
@@ -362,6 +460,7 @@ static int R2StorageAPI_GetSize(
   LONGTAIL_VALIDATE_INPUT(ctx, out_size != 0, return EINVAL);
 
   struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+  { int err = R2_RefreshCredentialsIfNeeded(r2_api); if (err) return err; }
   R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_GetSize: path=%s", open_file->m_Path)
@@ -398,9 +497,8 @@ static int R2StorageAPI_Read(
   LONGTAIL_VALIDATE_INPUT(ctx, output != 0, return EINVAL);
 
   struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+  { int err = R2_RefreshCredentialsIfNeeded(r2_api); if (err) return err; }
   R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
-
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Read: path=%s, offset=%" PRIu64 ", length=%" PRIu64, open_file->m_Path, offset, length)
 
   std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
   CurlResponse r = R2HttpGet(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
@@ -476,31 +574,19 @@ static int R2StorageAPI_Write(
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Write: path=%s, offset=%" PRIu64 ", length=%" PRIu64 ", buffer_size=%zu",
                open_file->m_Path, offset, length, open_file->m_WriteBuffer.size())
 
-  // Buffer writes in memory and upload the complete buffer each time.
-  // R2/S3 doesn't support partial writes or appends, so we accumulate all
-  // data and PUT the entire object on each Write() call. This ensures errors
-  // propagate back to the caller (CloseFile is void and can't return errors).
+  // Buffer only — the actual PUT to R2 happens in CloseFile.
+  // Longtail_WriteStoredBlock calls Write twice (block index metadata, then
+  // block content). Buffering avoids a redundant intermediate PUT of the
+  // incomplete data. Combined with LONGTAIL_STORAGE_FLAG_OBJECT_STORAGE
+  // (which skips the temp-file + rename in FSBlockStore), this gives us
+  // 1 HEAD + 1 PUT = 2 HTTP requests per block.
   size_t required = (size_t)offset + (size_t)length;
   if (required > open_file->m_WriteBuffer.size()) {
     open_file->m_WriteBuffer.resize(required, '\0');
   }
   memcpy(&open_file->m_WriteBuffer[(size_t)offset], input, (size_t)length);
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
-  std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
-
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Write: uploading %zu bytes to %s", open_file->m_WriteBuffer.size(), open_file->m_Path)
-
-  CurlResponse r = R2HttpPut(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken,
-                             open_file->m_WriteBuffer.data(), open_file->m_WriteBuffer.size());
-
-  if (r.status_code < 200 || r.status_code >= 300) {
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2StorageAPI_Write failed: HTTP %ld, curl_error: %s, response: %s, path: %s",
-                 r.status_code, r.error.c_str(), r.body.c_str(), open_file->m_Path)
-    return EIO;
-  }
-
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Write: success, path=%s, total_size=%zu", open_file->m_Path, open_file->m_WriteBuffer.size())
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Write: buffered, path=%s, total_size=%zu", open_file->m_Path, open_file->m_WriteBuffer.size())
   return 0;
 }
 
@@ -540,8 +626,29 @@ static void R2StorageAPI_CloseFile(struct Longtail_StorageAPI* storage_api, Long
   LONGTAIL_VALIDATE_INPUT(ctx, f != 0, return);
 
   R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
+
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_CloseFile: path=%s, is_write=%d, buffer_size=%zu",
                open_file->m_Path, open_file->m_IsWriteMode, open_file->m_WriteBuffer.size())
+
+  // Flush the write buffer to R2 as a single PUT.
+  // Write() only buffers; the upload happens here so that multiple Write()
+  // calls (e.g., block index + block data) are coalesced into one request.
+  if (open_file->m_IsWriteMode && !open_file->m_WriteBuffer.empty()) {
+    struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+    R2_RefreshCredentialsIfNeeded(r2_api);
+    std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
+
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_CloseFile: uploading %zu bytes to %s",
+                 open_file->m_WriteBuffer.size(), open_file->m_Path)
+
+    CurlResponse r = R2HttpPut(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken,
+                               open_file->m_WriteBuffer.data(), open_file->m_WriteBuffer.size());
+    if (r.status_code < 200 || r.status_code >= 300) {
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2StorageAPI_CloseFile: PUT failed HTTP %ld, curl_error: %s, path: %s",
+                   r.status_code, r.error.c_str(), open_file->m_Path)
+    }
+  }
+
   Longtail_Free(open_file->m_Path);
   open_file->~R2StorageAPI_OpenFile();
   Longtail_Free(open_file);
@@ -560,33 +667,31 @@ static int R2StorageAPI_RenameFile(struct Longtail_StorageAPI* storage_api, cons
   LONGTAIL_VALIDATE_INPUT(ctx, target_path != 0, return EINVAL);
 
   struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+  { int err = R2_RefreshCredentialsIfNeeded(r2_api); if (err) return err; }
 
   LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_RenameFile: source=%s, target=%s", source_path, target_path)
 
-  // R2/S3 doesn't have native rename — copy then delete
-  // First, read the source object
+  // Use S3 CopyObject (server-side copy, no data transfer) instead of
+  // the old GET+PUT+DELETE which downloaded the entire object back.
+  // Note: With LONGTAIL_STORAGE_FLAG_OBJECT_STORAGE, FSBlockStore writes
+  // directly to the final path and never calls RenameFile for blocks.
+  // This codepath is only hit for non-block files (e.g., store index).
   std::string sourceUrl = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, source_path);
-  CurlResponse readResp = R2HttpGet(sourceUrl, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
-
-  if (readResp.status_code < 200 || readResp.status_code >= 300) {
-    return (readResp.status_code == 404) ? ENOENT : EIO;
-  }
-
-  // Write to target
   std::string targetUrl = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, target_path);
-  CurlResponse writeResp = R2HttpPut(targetUrl, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken,
-                                     readResp.body.data(), readResp.body.size());
 
-  if (writeResp.status_code < 200 || writeResp.status_code >= 300) {
-    return EIO;
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_RenameFile: CopyObject %s -> %s", source_path, target_path)
+
+  CurlResponse copyResp = R2HttpCopy(targetUrl, r2_api->m_BucketName, source_path,
+                                     r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
+  if (copyResp.status_code < 200 || copyResp.status_code >= 300) {
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2StorageAPI_RenameFile: CopyObject failed HTTP %ld", copyResp.status_code)
+    return (copyResp.status_code == 404) ? ENOENT : EIO;
   }
 
-  // Delete source
+  // Delete source after successful copy
   CurlResponse delResp = R2HttpDelete(sourceUrl, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
-
-  // 404 on delete is OK (source already gone)
   if (delResp.status_code != 404 && (delResp.status_code < 200 || delResp.status_code >= 300)) {
-    return EIO;
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_WARNING, "R2StorageAPI_RenameFile: DELETE source failed HTTP %ld (non-fatal)", delResp.status_code)
   }
 
   return 0;
@@ -833,7 +938,9 @@ struct Longtail_StorageAPI* CreateR2StorageAPI(
     const char* bucketName,
     const char* accessKeyId,
     const char* secretAccessKey,
-    const char* sessionToken) {
+    const char* sessionToken,
+    struct WrapperAsyncHandle* handle,
+    uint64_t tokenExpirationMs) {
   MAKE_LOG_CONTEXT(ctx, 0, LONGTAIL_LOG_LEVEL_DEBUG)
 
   void* mem = Longtail_Alloc("R2StorageAPI", sizeof(struct R2StorageAPI));
@@ -855,6 +962,13 @@ struct Longtail_StorageAPI* CreateR2StorageAPI(
   r2_api->m_SecretAccessKey = strdup(secretAccessKey);
   r2_api->m_SessionToken = sessionToken ? strdup(sessionToken) : strdup("");
   r2_api->m_NumAddedBlocks = 0;
+  r2_api->m_Handle = handle;
+  if (handle) {
+    handle->tokenExpirationMs = tokenExpirationMs;
+  }
+
+  // Mark as object storage so FSBlockStore skips temp-file + rename pattern
+  storage_api->m_StorageFlags = LONGTAIL_STORAGE_FLAG_OBJECT_STORAGE;
 
   return storage_api;
 }

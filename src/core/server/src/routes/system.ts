@@ -83,15 +83,6 @@ export function routeSystem(): Router {
       return;
     }
 
-    const storageMode = config.get<string>("storage.mode");
-
-    if (storageMode === "r2") {
-      // R2 doesn't require explicit directory creation
-      console.log(`Skipping mkdir for R2 mode: ${path}`);
-      res.status(201).json({ success: true, path });
-      return;
-    }
-
     if (config.get<boolean>("storage.seaweedfs.stub.enabled")) {
       // we can just make the directory locally without going through the filer API
       const localPath = `${config.get<string>(

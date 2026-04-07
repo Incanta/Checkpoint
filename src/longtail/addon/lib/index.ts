@@ -54,6 +54,7 @@ interface HandleStatus {
   error: number;
   progressTotal: number;
   progressDone: number;
+  needsTokenRefresh: boolean;
 }
 
 /** Opaque native handle — do not inspect directly */
@@ -70,6 +71,7 @@ interface LongtailAddonNative {
   getHandleStatus(handle: NativeHandle): HandleStatus;
   getHandleResult(handle: NativeHandle): any;
   cancelHandle(handle: NativeHandle): void;
+  setRefreshedToken(handle: NativeHandle, options: RefreshedTokenOptions): void;
   freeHandle(handle: NativeHandle): void;
 
   getReadFileData(handle: NativeHandle): Buffer;
@@ -173,6 +175,26 @@ export interface ReadFileFromVersionAsyncOptions {
 export { HandleStatus, NativeHandle };
 
 // --------------------------------------------------------------------------
+// Token refresh types
+// --------------------------------------------------------------------------
+
+export interface RefreshedTokenOptions {
+  jwt?: string;
+  r2AccessKeyId?: string;
+  r2SecretAccessKey?: string;
+  r2SessionToken?: string;
+  expirationMs: number;
+}
+
+export interface TokenRefreshResult {
+  jwt?: string;
+  jwtExpirationMs: number;
+  r2AccessKeyId?: string;
+  r2SecretAccessKey?: string;
+  r2SessionToken?: string;
+}
+
+// --------------------------------------------------------------------------
 // Utility functions (matching the old longtail.ts API)
 // --------------------------------------------------------------------------
 
@@ -235,6 +257,13 @@ export function freeHandle(handle: NativeHandle): void {
   addon.freeHandle(handle);
 }
 
+export function setRefreshedToken(
+  handle: NativeHandle,
+  options: RefreshedTokenOptions,
+): void {
+  addon.setRefreshedToken(handle, options);
+}
+
 export function getReadFileData(handle: NativeHandle): Buffer {
   return addon.getReadFileData(handle);
 }
@@ -258,6 +287,8 @@ export interface PollOptions {
   onStep?: (step: string) => void;
   /** Callback invoked when progress changes within a step */
   onProgress?: (step: string, done: number, total: number) => void;
+  /** Callback invoked when C++ requests a token refresh (credentials near expiry) */
+  onTokenRefresh?: () => Promise<TokenRefreshResult>;
 }
 
 /**
@@ -303,6 +334,23 @@ export async function pollHandle(
         status.progressDone,
         status.progressTotal,
       );
+    }
+
+    // C++ is requesting a token refresh — fetch new credentials and write them back
+    if (status.needsTokenRefresh && options.onTokenRefresh) {
+      try {
+        const refreshed = await options.onTokenRefresh();
+        setRefreshedToken(handle, {
+          jwt: refreshed.jwt,
+          r2AccessKeyId: refreshed.r2AccessKeyId,
+          r2SecretAccessKey: refreshed.r2SecretAccessKey,
+          r2SessionToken: refreshed.r2SessionToken,
+          expirationMs: refreshed.jwtExpirationMs,
+        });
+      } catch (err) {
+        console.error("[pollHandle] Token refresh failed:", err);
+        // Let C++ time out — it will return ETIMEDOUT
+      }
     }
 
     if (status.completed) {

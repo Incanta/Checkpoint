@@ -30,9 +30,9 @@ int PullSync(
   struct Longtail_StorageAPI* file_storage_api = Longtail_CreateFSStorageAPI();
   struct Longtail_StorageAPI* remote_storage_api;
   if (StorageType && strcmp(StorageType, "r2") == 0) {
-    remote_storage_api = CreateR2StorageAPI(R2Endpoint, R2BucketName, R2AccessKeyId, R2SecretAccessKey, R2SessionToken);
+    remote_storage_api = CreateR2StorageAPI(R2Endpoint, R2BucketName, R2AccessKeyId, R2SecretAccessKey, R2SessionToken, handle, JWTExpirationMs);
   } else {
-    remote_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT);
+    remote_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT, handle, JWTExpirationMs);
   }
 
   struct Longtail_BlockStoreAPI* store_block_remotestore_api = Longtail_CreateFSBlockStoreAPI(

@@ -589,6 +589,7 @@ static Napi::Value NapiGetHandleStatus(const Napi::CallbackInfo& info) {
   result.Set("error", Napi::Number::New(env, handle->error));
   result.Set("progressTotal", Napi::Number::New(env, handle->progressTotal));
   result.Set("progressDone", Napi::Number::New(env, handle->progressDone));
+  result.Set("needsTokenRefresh", Napi::Boolean::New(env, handle->needsTokenRefresh != 0));
 
   return result;
 }
@@ -656,6 +657,80 @@ static Napi::Value NapiCancelHandle(const Napi::CallbackInfo& info) {
   }
 
   handle->canceled = 1;
+
+  return env.Undefined();
+}
+
+// --------------------------------------------------------------------------
+// setRefreshedToken(handle, options): void
+// Called by the JS polling loop when C++ requests a token refresh.
+// options: { jwt?, r2AccessKeyId?, r2SecretAccessKey?, r2SessionToken?, expirationMs }
+// --------------------------------------------------------------------------
+static Napi::Value NapiSetRefreshedToken(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  if (info.Length() < 2 || !info[0].IsExternal() || !info[1].IsObject()) {
+    Napi::TypeError::New(env, "Expected (handle, options) arguments")
+        .ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  auto* ctx = info[0].As<Napi::External<HandleContext>>().Data();
+  if (!ctx || !ctx->nativeHandle || ctx->freed || ctx->isReadFileHandle) {
+    Napi::Error::New(env, "Handle is invalid or already freed")
+        .ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  WrapperAsyncHandle* handle = static_cast<WrapperAsyncHandle*>(ctx->nativeHandle);
+  Napi::Object opts = info[1].As<Napi::Object>();
+
+  // Write JWT (SeaweedFS)
+  {
+    Napi::Value val = opts.Get("jwt");
+    if (val.IsString()) {
+      std::string jwt = val.As<Napi::String>().Utf8Value();
+      strncpy(handle->refreshedJwt, jwt.c_str(), sizeof(handle->refreshedJwt) - 1);
+      handle->refreshedJwt[sizeof(handle->refreshedJwt) - 1] = '\0';
+    }
+  }
+
+  // Write R2 credentials
+  {
+    Napi::Value val = opts.Get("r2AccessKeyId");
+    if (val.IsString()) {
+      std::string s = val.As<Napi::String>().Utf8Value();
+      strncpy(handle->refreshedR2AccessKeyId, s.c_str(), sizeof(handle->refreshedR2AccessKeyId) - 1);
+      handle->refreshedR2AccessKeyId[sizeof(handle->refreshedR2AccessKeyId) - 1] = '\0';
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2SecretAccessKey");
+    if (val.IsString()) {
+      std::string s = val.As<Napi::String>().Utf8Value();
+      strncpy(handle->refreshedR2SecretAccessKey, s.c_str(), sizeof(handle->refreshedR2SecretAccessKey) - 1);
+      handle->refreshedR2SecretAccessKey[sizeof(handle->refreshedR2SecretAccessKey) - 1] = '\0';
+    }
+  }
+  {
+    Napi::Value val = opts.Get("r2SessionToken");
+    if (val.IsString()) {
+      std::string s = val.As<Napi::String>().Utf8Value();
+      strncpy(handle->refreshedR2SessionToken, s.c_str(), sizeof(handle->refreshedR2SessionToken) - 1);
+      handle->refreshedR2SessionToken[sizeof(handle->refreshedR2SessionToken) - 1] = '\0';
+    }
+  }
+
+  // Write expiration
+  {
+    Napi::Value val = opts.Get("expirationMs");
+    if (val.IsNumber()) {
+      handle->refreshedExpirationMs = static_cast<uint64_t>(val.As<Napi::Number>().Int64Value());
+    }
+  }
+
+  // Signal C++ that the refresh is complete
+  handle->tokenRefreshCompleted = 1;
 
   return env.Undefined();
 }
@@ -753,6 +828,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("getHandleStatus", Napi::Function::New(env, NapiGetHandleStatus));
   exports.Set("getHandleResult", Napi::Function::New(env, NapiGetHandleResult));
   exports.Set("cancelHandle", Napi::Function::New(env, NapiCancelHandle));
+  exports.Set("setRefreshedToken", Napi::Function::New(env, NapiSetRefreshedToken));
   exports.Set("freeHandle", Napi::Function::New(env, NapiFreeHandle));
   exports.Set("getReadFileData", Napi::Function::New(env, NapiGetReadFileData));
   exports.Set("getReadFileSize", Napi::Function::New(env, NapiGetReadFileSize));

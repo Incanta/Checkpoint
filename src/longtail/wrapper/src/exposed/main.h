@@ -33,17 +33,7 @@
 #include "../util/seaweedfs.h"
 #include "../util/r2.h"
 #include "exposed.h"
-
-struct WrapperAsyncHandle {
-  char currentStep[256];
-  uint32_t changingStep;
-  uint32_t canceled;
-  uint32_t completed;
-  int32_t error;
-  char result[2048];
-  uint32_t progressTotal;
-  uint32_t progressDone;
-};
+#include "wrapper-handle.h"
 
 void SetHandleStep(WrapperAsyncHandle* handle, const char* step);
 bool IsHandleCanceled(WrapperAsyncHandle* handle);

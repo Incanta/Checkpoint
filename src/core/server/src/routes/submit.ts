@@ -180,13 +180,7 @@ export function routeSubmit(): Router {
   const router = Router();
 
   router.post("/submit", upload.single("storeIndex"), async (req, res) => {
-    Logger.debug(
-      `[Submit] Received request with body: ${JSON.stringify(req.body)}`,
-    );
-
-    Logger.debug(
-      `[Submit] TODO MIKE HERE DELETE ME : Token ${req.headers["authorization"]} and file ${req.file ? req.file.originalname : "no file"}`,
-    );
+    Logger.debug(`[Submit] Received request`);
 
     const payload: RequestSchema = JSON.parse(req.body.payload);
 
@@ -377,6 +371,10 @@ export function routeSubmit(): Router {
           number: createChangelistResponse.number,
         };
       }
+
+      Logger.debug(
+        `[Submit] Successfully processed submit request, responding with ${JSON.stringify(responseMessage)}`,
+      );
 
       Logger.debug(
         `[Submit] Successfully processed submit request, responding with ${JSON.stringify(responseMessage)}`,
