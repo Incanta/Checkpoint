@@ -75,7 +75,9 @@ async function renameWithRetry(
 // ============================================================================
 
 function getStoragePath(): string {
-  return path.resolve(config.get<string>("seaweedfs.stub.storage-path"));
+  return path.resolve(
+    config.get<string>("storage.seaweedfs.stub.storage-path"),
+  );
 }
 
 /**
@@ -113,7 +115,7 @@ function verifyAuth(req: Request, requestPath: string, res: Response): boolean {
 
   let claims: UserJWTClaims;
   try {
-    const signingKey = config.get<string>("seaweedfs.jwt.signing-key");
+    const signingKey = config.get<string>("storage.jwt.signing-key");
     const verifiedToken = njwt.verify(token, signingKey);
 
     if (!verifiedToken) {

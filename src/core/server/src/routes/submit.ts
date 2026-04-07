@@ -19,6 +19,7 @@ import {
 import { Router } from "express";
 import multer from "multer";
 import { getFilerUrl } from "../utils/filer.js";
+import { getR2Endpoint } from "../utils/r2.js";
 
 interface JWTClaims {
   iss: string;
@@ -203,7 +204,7 @@ export function routeSubmit(): Router {
 
     const verifiedToken = jwt.verify(
       token,
-      config.get("seaweedfs.jwt.signing-key"),
+      config.get("storage.jwt.signing-key"),
     );
 
     if (!verifiedToken) {
@@ -214,7 +215,8 @@ export function routeSubmit(): Router {
 
     const claims: JWTClaims = verifiedToken.body.toJSON() as any;
 
-    const filerUrl = getFilerUrl(true);
+    const storageMode = config.get<string>("storage.mode");
+    const filerUrl = storageMode === "seaweedfs" ? getFilerUrl(true) : "";
 
     const basePath = `/${claims.orgId}/${claims.repoId}`;
 
@@ -237,13 +239,27 @@ export function routeSubmit(): Router {
         config.get<LongtailLogLevel>("longtail.log-level"),
       );
 
-      const handle = mergeAsync({
+      const mergeOptions: Parameters<typeof mergeAsync>[0] = {
         remoteBasePath: basePath,
         filerUrl,
         jwt: token,
         storeIndexBuffer: Buffer.from(storeIndexBuffer),
         logLevel,
-      });
+      };
+
+      if (storageMode === "r2") {
+        mergeOptions.storageType = "r2";
+        mergeOptions.r2AccessKeyId = config.get<string>(
+          "storage.r2.access-key-id",
+        );
+        mergeOptions.r2SecretAccessKey = config.get<string>(
+          "storage.r2.secret-access-key",
+        );
+        mergeOptions.r2Endpoint = getR2Endpoint();
+        mergeOptions.r2BucketName = `checkpoint-${claims.repoId}`;
+      }
+
+      const handle = mergeAsync(mergeOptions);
 
       if (!handle) {
         throw new Error("Failed to create longtail handle");
@@ -304,9 +320,13 @@ export function routeSubmit(): Router {
       res.status(200).json(responseMessage);
 
       // Fire and forget — recalculate and persist total repo size
-      calculateRepoSize(filerUrl, basePath, token)
-        .then((size) => writeRepoSize(filerUrl, basePath, token, size))
-        .catch((e) => console.error("Failed to update repo size:", e.message));
+      if (storageMode !== "r2") {
+        calculateRepoSize(filerUrl, basePath, token)
+          .then((size) => writeRepoSize(filerUrl, basePath, token, size))
+          .catch((e) =>
+            console.error("Failed to update repo size:", e.message),
+          );
+      }
     } catch (e: any) {
       console.error(e.message);
       res.status(500).send(e.message);

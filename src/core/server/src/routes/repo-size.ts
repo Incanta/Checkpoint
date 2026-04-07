@@ -2,6 +2,7 @@ import { Router } from "express";
 import jwt from "njwt";
 import config from "@incanta/config";
 import { getFilerUrl } from "../utils/filer.js";
+import { getBucketUsageR2 } from "../utils/r2.js";
 
 interface JWTClaims {
   iss: string;
@@ -32,7 +33,7 @@ export function routeRepoSize(): Router {
 
     const verifiedToken = jwt.verify(
       token,
-      config.get("seaweedfs.jwt.signing-key"),
+      config.get("storage.jwt.signing-key"),
     );
 
     if (!verifiedToken) {
@@ -42,28 +43,34 @@ export function routeRepoSize(): Router {
 
     const claims: JWTClaims = verifiedToken.body.toJSON() as any;
 
-    const filerUrl = getFilerUrl(true);
-
     const basePath = `/${claims.orgId}/${claims.repoId}`;
+    const storageMode = config.get<string>("storage.mode");
 
     try {
-      const response = await fetch(`${filerUrl}${basePath}/size`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      if (storageMode === "r2") {
+        const size = await getBucketUsageR2(`checkpoint-${claims.repoId}`);
+        res.status(200).json({ size });
+      } else {
+        const filerUrl = getFilerUrl(true);
 
-      if (!response.ok) {
-        // No size file yet — return 0
-        res.status(200).json({ size: 0 });
-        return;
+        const response = await fetch(`${filerUrl}${basePath}/size`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          // No size file yet — return 0
+          res.status(200).json({ size: 0 });
+          return;
+        }
+
+        const text = await response.text();
+        const size = parseInt(text, 10);
+
+        res.status(200).json({ size: isNaN(size) ? 0 : size });
       }
-
-      const text = await response.text();
-      const size = parseInt(text, 10);
-
-      res.status(200).json({ size: isNaN(size) ? 0 : size });
     } catch (e: any) {
       console.error(`Failed to read repo size for ${basePath}:`, e.message);
       res.status(500).send(e.message);

@@ -1,0 +1,33 @@
+mode: "seaweedfs" # "seaweedfs" | "r2" (Cloudflare R2, requires a Studio subscription)
+
+jwt:
+  signing-key: "secret"
+  system-signing-key: "system-secret"
+
+seaweedfs:
+  stub:
+    enabled: true
+    storage-path: "./data/filer"
+  connection:
+    master:
+      host: "master"
+      port: 9333
+      tls: false
+    filer:
+      internal:
+        host: "localhost"
+        port: "${server.listen-port}"
+        tls: false
+        path: "/filer"
+      external:
+        host: "localhost"
+        port: "${server.listen-port}"
+        tls: false
+        path: "/filer"
+
+r2:
+  account-id: ""
+  access-key-id: ""
+  secret-access-key: ""
+  api-token: ""
+  bucket: ""

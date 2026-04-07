@@ -11,6 +11,7 @@
     "start": "yarn build && NODE_CONFIG_ENV=default node --inspect=0.0.0.0:9230 lib/index.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1025.0",
     "@checkpointvcs/common": "workspace:*",
     "@checkpointvcs/longtail-addon": "^1.0.17",
     "express": "^5.2.1",
