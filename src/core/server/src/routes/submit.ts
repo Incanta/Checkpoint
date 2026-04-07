@@ -21,6 +21,7 @@ import { Router } from "express";
 import multer from "multer";
 import { getFilerUrl } from "../utils/filer.js";
 import { getR2Endpoint } from "../utils/r2.js";
+import { Logger } from "../logging.js";
 
 interface JWTClaims {
   iss: string;
@@ -179,13 +180,21 @@ export function routeSubmit(): Router {
   const router = Router();
 
   router.post("/submit", upload.single("storeIndex"), async (req, res) => {
+    Logger.debug(
+      `[Submit] Received request with body: ${JSON.stringify(req.body)}`,
+    );
+
+    Logger.debug(
+      `[Submit] TODO MIKE HERE DELETE ME : Token ${req.headers["authorization"]} and file ${req.file ? req.file.originalname : "no file"}`,
+    );
+
     const payload: RequestSchema = JSON.parse(req.body.payload);
 
     try {
       await RequestSchema.validate(payload);
     } catch (e: any) {
       if (e instanceof ValidationError) {
-        console.error(e.errors.join("\n"));
+        Logger.error(`[Submit] Invalid request shape: ${e.errors.join("\n")}`);
         res.status(500).send(e.errors.join("\n"));
         return;
       }
@@ -193,6 +202,7 @@ export function routeSubmit(): Router {
 
     const authorizationHeader = req.headers["authorization"];
     if (!authorizationHeader) {
+      Logger.error("[Submit] Missing Authorization header");
       res.status(401).send("Unauthorized");
       return;
     }
@@ -200,7 +210,7 @@ export function routeSubmit(): Router {
     const [type, token] = authorizationHeader.split(" ");
 
     if (type !== "Bearer") {
-      console.error(2);
+      Logger.error("[Submit] Invalid Authorization header type");
       res.status(401).send("Unauthorized");
       return;
     }
@@ -211,7 +221,7 @@ export function routeSubmit(): Router {
     );
 
     if (!verifiedToken) {
-      console.error(3);
+      Logger.error("[Submit] Invalid token");
       res.status(401).send("Unauthorized");
       return;
     }
@@ -250,6 +260,8 @@ export function routeSubmit(): Router {
         logLevel,
       };
 
+      Logger.debug(`[Submit] Using ${storageMode} storage for merge`);
+
       if (storageMode === "r2") {
         mergeOptions.storageType = "r2";
         mergeOptions.r2AccessKeyId = await config.getWithSecrets<string>(
@@ -269,11 +281,11 @@ export function routeSubmit(): Router {
       }
 
       const { status } = await pollHandle(handle, {
-        onStep: (step) => console.log(`Current step: ${step}`),
+        onStep: (step) => Logger.debug(`[Submit] Current step: ${step}`),
       });
 
-      console.log(
-        `Completed with exit code: ${status.error} and last step ${status.currentStep}`,
+      Logger.debug(
+        `[Submit] Completed with exit code: ${status.error} and last step ${status.currentStep}`,
       );
 
       freeHandle(handle);
@@ -307,6 +319,10 @@ export function routeSubmit(): Router {
       let responseMessage: RequestResponse;
 
       if (payload.shelfName) {
+        Logger.debug(
+          `[Submit] Routing to shelf creation with name ${payload.shelfName}`,
+        );
+
         // Route to shelf creation instead of branch changelist
         const shelfResponse = await client.shelf.createFromSubmit.mutate({
           repoId: claims.repoId,
@@ -325,6 +341,10 @@ export function routeSubmit(): Router {
         payload.artifactForChangelistNum != null &&
         payload.artifactForChangelistNum >= 0
       ) {
+        Logger.debug(
+          `[Submit] Routing to artifact attachment for changelist ${payload.artifactForChangelistNum}`,
+        );
+
         // Route to artifact attachment on existing CL
         const artifactResponse =
           await client.artifact.attachToChangelist.mutate({
@@ -339,6 +359,8 @@ export function routeSubmit(): Router {
           number: artifactResponse.changelistNumber,
         };
       } else {
+        Logger.debug(`[Submit] Routing to regular changelist creation`);
+
         const createChangelistResponse =
           await client.changelist.createChangelist.mutate({
             message: payload.message,
@@ -356,6 +378,10 @@ export function routeSubmit(): Router {
         };
       }
 
+      Logger.debug(
+        `[Submit] Successfully processed submit request, responding with ${JSON.stringify(responseMessage)}`,
+      );
+
       res.status(200).json(responseMessage);
 
       // Fire and forget — recalculate and persist total repo size
@@ -363,11 +389,11 @@ export function routeSubmit(): Router {
         calculateRepoSize(filerUrl, basePath, token)
           .then((size) => writeRepoSize(filerUrl, basePath, token, size))
           .catch((e) =>
-            console.error("Failed to update repo size:", e.message),
+            Logger.error(`[Submit] Failed to update repo size: ${e.message}`),
           );
       }
     } catch (e: any) {
-      console.error(e.message);
+      Logger.error(`[Submit] ${e.message}`);
       res.status(500).send(e.message);
     }
   });
