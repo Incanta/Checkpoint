@@ -40,33 +40,6 @@ export const storageRouter = createTRPCRouter({
         type: input.write ? "write" : "read",
       });
 
-      // Check if R2 storage should be used
-      if (isR2Enabled() && repo.r2BucketName) {
-        const tier = await getEffectiveTier(repo.orgId, ctx.db);
-        if (hasFeature(tier, "r2Storage")) {
-          const creds = await createR2TempCredentials(
-            repo.r2BucketName,
-            input.write ? "object-read-write" : "object-read-only",
-          );
-
-          return {
-            storageType: "r2" as const,
-            r2Credentials: {
-              accessKeyId: creds.accessKeyId,
-              secretAccessKey: creds.secretAccessKey,
-              sessionToken: creds.sessionToken,
-              endpoint: getR2Endpoint(),
-              bucket: repo.r2BucketName,
-            },
-            expiration:
-              Math.floor(Date.now() / 1000) +
-              config.get<number>("storage.token-expiration-seconds"),
-            token: "",
-            backendUrl: "",
-          };
-        }
-      }
-
       // Existing SeaweedFS flow
       const token = njwt.create(
         {
@@ -87,6 +60,33 @@ export const storageRouter = createTRPCRouter({
         Date.now() +
           config.get<number>("storage.token-expiration-seconds") * 1000,
       );
+
+      // Check if R2 storage should be used
+      if (isR2Enabled() && repo.r2BucketName) {
+        const tier = await getEffectiveTier(repo.orgId, ctx.db);
+        if (hasFeature(tier, "r2Storage")) {
+          const creds = await createR2TempCredentials(
+            repo.r2BucketName,
+            input.write ? "object-read-write" : "object-read-only",
+          );
+
+          return {
+            storageType: "r2" as "seaweedfs" | "r2",
+            token: token.compact(),
+            expiration:
+              Math.floor(Date.now() / 1000) +
+              config.get<number>("storage.token-expiration-seconds"),
+            backendUrl: config.get<string>("storage.backend-url.external"),
+            r2Credentials: {
+              accessKeyId: creds.accessKeyId,
+              secretAccessKey: creds.secretAccessKey,
+              sessionToken: creds.sessionToken,
+              endpoint: getR2Endpoint(),
+              bucket: repo.r2BucketName,
+            },
+          };
+        }
+      }
 
       return {
         storageType: "seaweedfs" as "seaweedfs" | "r2",
