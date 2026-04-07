@@ -21,7 +21,6 @@
     "superjson": "*"
   },
   "dependencies": {
-    "@checkpointvcs/daemon": "workspace:*",
     "@fortawesome/fontawesome-svg-core": "^7.1.0",
     "@fortawesome/free-brands-svg-icons": "^7.1.0",
     "@fortawesome/free-regular-svg-icons": "^7.1.0",
@@ -39,6 +38,7 @@
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
+    "@checkpointvcs/daemon": "workspace:*",
     "@types/path-browserify": "^1.0.3",
     "@vitejs/plugin-react": "^4.2.1",
     "cross-env": "*",
