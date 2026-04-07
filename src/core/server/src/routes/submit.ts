@@ -5,6 +5,7 @@ import {
   ValidationError,
   array,
   boolean,
+  number,
 } from "yup";
 import jwt from "njwt";
 import config from "@incanta/config";
@@ -19,7 +20,7 @@ import {
 import { Router } from "express";
 import multer from "multer";
 import { getFilerUrl } from "../utils/filer.js";
-import { getR2Endpoint } from "../utils/r2.js";
+import { Logger } from "../logging.js";
 
 interface JWTClaims {
   iss: string;
@@ -34,6 +35,8 @@ interface JWTClaims {
 const RequestSchema = object({
   apiToken: string().required(),
   branchName: string().required(),
+  shelfName: string().optional(),
+  artifactForChangelistNum: number().optional(),
   message: string().required(),
   versionIndex: string().defined(),
   modifications: array(
@@ -176,13 +179,15 @@ export function routeSubmit(): Router {
   const router = Router();
 
   router.post("/submit", upload.single("storeIndex"), async (req, res) => {
+    Logger.debug(`[Submit] Received request`);
+
     const payload: RequestSchema = JSON.parse(req.body.payload);
 
     try {
       await RequestSchema.validate(payload);
     } catch (e: any) {
       if (e instanceof ValidationError) {
-        console.error(e.errors.join("\n"));
+        Logger.error(`[Submit] Invalid request shape: ${e.errors.join("\n")}`);
         res.status(500).send(e.errors.join("\n"));
         return;
       }
@@ -190,6 +195,7 @@ export function routeSubmit(): Router {
 
     const authorizationHeader = req.headers["authorization"];
     if (!authorizationHeader) {
+      Logger.error("[Submit] Missing Authorization header");
       res.status(401).send("Unauthorized");
       return;
     }
@@ -197,7 +203,7 @@ export function routeSubmit(): Router {
     const [type, token] = authorizationHeader.split(" ");
 
     if (type !== "Bearer") {
-      console.error(2);
+      Logger.error("[Submit] Invalid Authorization header type");
       res.status(401).send("Unauthorized");
       return;
     }
@@ -208,7 +214,7 @@ export function routeSubmit(): Router {
     );
 
     if (!verifiedToken) {
-      console.error(3);
+      Logger.error("[Submit] Invalid token");
       res.status(401).send("Unauthorized");
       return;
     }
@@ -247,17 +253,7 @@ export function routeSubmit(): Router {
         logLevel,
       };
 
-      if (storageMode === "r2") {
-        mergeOptions.storageType = "r2";
-        mergeOptions.r2AccessKeyId = config.get<string>(
-          "storage.r2.access-key-id",
-        );
-        mergeOptions.r2SecretAccessKey = config.get<string>(
-          "storage.r2.secret-access-key",
-        );
-        mergeOptions.r2Endpoint = getR2Endpoint();
-        mergeOptions.r2BucketName = `checkpoint-${claims.repoId}`;
-      }
+      Logger.debug(`[Submit] Using ${storageMode} storage for merge`);
 
       const handle = mergeAsync(mergeOptions);
 
@@ -266,11 +262,11 @@ export function routeSubmit(): Router {
       }
 
       const { status } = await pollHandle(handle, {
-        onStep: (step) => console.log(`Current step: ${step}`),
+        onStep: (step) => Logger.debug(`[Submit] Current step: ${step}`),
       });
 
-      console.log(
-        `Completed with exit code: ${status.error} and last step ${status.currentStep}`,
+      Logger.debug(
+        `[Submit] Completed with exit code: ${status.error} and last step ${status.currentStep}`,
       );
 
       freeHandle(handle);
@@ -317,18 +313,20 @@ export function routeSubmit(): Router {
         number: createChangelistResponse.number,
       };
 
+      Logger.debug(
+        `[Submit] Successfully processed submit request, responding with ${JSON.stringify(responseMessage)}`,
+      );
+
       res.status(200).json(responseMessage);
 
       // Fire and forget — recalculate and persist total repo size
-      if (storageMode !== "r2") {
-        calculateRepoSize(filerUrl, basePath, token)
-          .then((size) => writeRepoSize(filerUrl, basePath, token, size))
-          .catch((e) =>
-            console.error("Failed to update repo size:", e.message),
-          );
-      }
+      calculateRepoSize(filerUrl, basePath, token)
+        .then((size) => writeRepoSize(filerUrl, basePath, token, size))
+        .catch((e) =>
+          Logger.error(`[Submit] Failed to update repo size: ${e.message}`),
+        );
     } catch (e: any) {
-      console.error(e.message);
+      Logger.error(`[Submit] ${e.message}`);
       res.status(500).send(e.message);
     }
   });

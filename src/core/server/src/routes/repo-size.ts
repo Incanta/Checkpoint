@@ -2,7 +2,6 @@ import { Router } from "express";
 import jwt from "njwt";
 import config from "@incanta/config";
 import { getFilerUrl } from "../utils/filer.js";
-import { getBucketUsageR2 } from "../utils/r2.js";
 
 interface JWTClaims {
   iss: string;
@@ -44,13 +43,9 @@ export function routeRepoSize(): Router {
     const claims: JWTClaims = verifiedToken.body.toJSON() as any;
 
     const basePath = `/${claims.orgId}/${claims.repoId}`;
-    const storageMode = config.get<string>("storage.mode");
 
     try {
-      if (storageMode === "r2") {
-        const size = await getBucketUsageR2(`checkpoint-${claims.repoId}`);
-        res.status(200).json({ size });
-      } else {
+      {
         const filerUrl = getFilerUrl(true);
 
         const response = await fetch(`${filerUrl}${basePath}/size`, {
