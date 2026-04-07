@@ -853,7 +853,7 @@ struct Longtail_StorageAPI* CreateR2StorageAPI(
   r2_api->m_BucketName = strdup(bucketName);
   r2_api->m_AccessKeyId = strdup(accessKeyId);
   r2_api->m_SecretAccessKey = strdup(secretAccessKey);
-  r2_api->m_SessionToken = strdup(sessionToken);
+  r2_api->m_SessionToken = sessionToken ? strdup(sessionToken) : strdup("");
   r2_api->m_NumAddedBlocks = 0;
 
   return storage_api;
