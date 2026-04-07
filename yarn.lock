@@ -1550,7 +1550,7 @@ __metadata:
   resolution: "@checkpointvcs/app@workspace:src/app"
   dependencies:
     "@better-auth/prisma-adapter": "npm:^1.5.3"
-    "@checkpointvcs/longtail-addon": "npm:^1.0.18"
+    "@checkpointvcs/longtail-addon": "npm:^1.0.19"
     "@incanta/config": "npm:*"
     "@prisma/client": "npm:^6.5.0"
     "@t3-oss/env-nextjs": "npm:^0.12.0"
@@ -1623,7 +1623,7 @@ __metadata:
   resolution: "@checkpointvcs/daemon@workspace:src/core/daemon"
   dependencies:
     "@checkpointvcs/common": "workspace:*"
-    "@checkpointvcs/longtail-addon": "npm:^1.0.18"
+    "@checkpointvcs/longtail-addon": "npm:^1.0.19"
     "@types/better-sqlite3": "npm:^7.6.13"
     "@typescript/native-preview": "npm:*"
     better-sqlite3: "npm:^12.8.0"
@@ -1640,10 +1640,10 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@checkpointvcs/longtail-addon@npm:^1.0.18":
-  version: 1.0.18
-  resolution: "@checkpointvcs/longtail-addon@npm:1.0.18"
-  checksum: 10c0/2ae7392922611cb5269eb76536428c2d5e4db09c2264e5d5598b19d9daa040d7c9a0ab1e5e33f9df656d4cff860b2336513f099132ecdfef0891a32633b47033
+"@checkpointvcs/longtail-addon@npm:^1.0.19":
+  version: 1.0.19
+  resolution: "@checkpointvcs/longtail-addon@npm:1.0.19"
+  checksum: 10c0/24db9ca83d31dfaf6dbad0ae4c8e5d1914e0665a6b8f2abd0667ee5c652e2651abdf5c5adbe27bc17a0509856b022b830ad7aef48722e8328ba2703ddb4cac57
   languageName: node
   linkType: hard
 
@@ -1691,7 +1691,7 @@ __metadata:
   dependencies:
     "@aws-sdk/client-s3": "npm:^3.1025.0"
     "@checkpointvcs/common": "workspace:*"
-    "@checkpointvcs/longtail-addon": "npm:^1.0.18"
+    "@checkpointvcs/longtail-addon": "npm:^1.0.19"
     "@types/express": "npm:^5.0.6"
     "@types/multer": "npm:^2.0.0"
     "@typescript/native-preview": "npm:*"
