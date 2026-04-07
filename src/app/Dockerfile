@@ -43,6 +43,9 @@ COPY --from=builder /app/src/app/.next/standalone ./
 COPY --from=builder /app/src/app/.next/static ./src/app/.next/static
 COPY --from=builder /app/src/app/public ./src/app/public
 
+# Remove original TS source files leaked by standalone file tracing
+RUN rm -rf ./src/app/src
+
 # Copy config files for runtime @incanta/config
 COPY --from=builder /app/src/app/config ./src/app/config
 
