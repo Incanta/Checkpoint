@@ -367,6 +367,26 @@ jobs:
           npx tsc
           npx vite build
 
+      - name: Strip deps before packaging (all bundled by Vite)
+        shell: bash
+        run: |
+          cd src/clients/desktop
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+            pkg.dependencies = {};
+            pkg.devDependencies = {};
+            pkg.peerDependencies = {};
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+          node -e "
+            const fs = require('fs');
+            const rootPkg = JSON.parse(fs.readFileSync('../../../package.json', 'utf-8'));
+            delete rootPkg.workspaces;
+            fs.writeFileSync('../../../package.json', JSON.stringify(rootPkg, null, 2));
+          "
+          rm -rf node_modules
+
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
         env:

@@ -17,10 +17,13 @@ export const authRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const [code, url] = await new Promise<[string, string]>((resolve) =>
-        AuthenticateDevice(input.endpoint, input.daemonId, (code, url) => {
-          resolve([code, url]);
-        }),
+      const [code, url] = await new Promise<[string, string]>(
+        (resolve, reject) =>
+          AuthenticateDevice(input.endpoint, input.daemonId, (code, url) => {
+            resolve([code, url]);
+          }).catch((error) => {
+            reject(error);
+          }),
       );
 
       return { code, url };
