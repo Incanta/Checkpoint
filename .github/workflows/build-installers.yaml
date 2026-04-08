@@ -401,11 +401,11 @@ jobs:
               delete cfg.win.certificateFile;
               delete cfg.win.certificatePassword;
               delete cfg.win.signingHashAlgorithms;
-              cfg.win.sign = false;
             }
-            if (process.env.HAS_MAC_CERT !== 'true' && cfg.mac) {
-              delete cfg.mac.identity;
-              cfg.mac.identity = null;
+            if (process.env.HAS_MAC_CERT !== 'true') {
+              if (cfg.mac) {
+                cfg.mac.identity = null;
+              }
               delete cfg.afterSign;
             }
             fs.writeFileSync('electron-builder.json', JSON.stringify(cfg, null, 2));
@@ -415,6 +415,7 @@ jobs:
         if: runner.os == 'Windows'
         env:
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         shell: pwsh
         run: |
           cd src/clients/desktop

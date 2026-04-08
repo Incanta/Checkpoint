@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "main": "dist/main/main.js",
+  "homepage": "https://checkpointvcs.com",
   "author": {
     "name": "Incanta LLC",
     "email": "support@incanta.dev",
