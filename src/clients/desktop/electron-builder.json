@@ -5,14 +5,15 @@
   "electronVersion": "39.8.5",
   "productName": "Checkpoint",
   "directories": {
-    "output": "release/${version}"
+    "output": "release/${version}",
+    "buildResources": "build-resources"
   },
   "files": [
     "dist"
   ],
   "extraResources": [
     {
-      "from": "../../core/daemon/dist-sea",
+      "from": "build-resources/daemon",
       "to": "daemon",
       "filter": [
         "**/*"
