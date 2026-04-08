@@ -379,6 +379,8 @@ jobs:
             pkg.peerDependencies = {};
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
           "
+          rm -rf node_modules
+          echo '{"lockfileVersion":3,"packages":{}}' > package-lock.json
 
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
