@@ -379,33 +379,13 @@ jobs:
             pkg.peerDependencies = {};
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
           "
+          node -e "
+            const fs = require('fs');
+            const rootPkg = JSON.parse(fs.readFileSync('../../package.json', 'utf-8'));
+            delete rootPkg.workspaces;
+            fs.writeFileSync('../../package.json', JSON.stringify(rootPkg, null, 2));
+          "
           rm -rf node_modules
-          echo '{"lockfileVersion":3,"packages":{}}' > package-lock.json
-
-      - name: Debug pre-packaging state
-        shell: bash
-        run: |
-          cd src/clients/desktop
-          echo "=== desktop package.json ==="
-          cat package.json
-          echo ""
-          echo "=== .npmrc files in tree ==="
-          for d in . ../.. ../../..; do echo "--- $d/.npmrc ---"; cat "$d/.npmrc" 2>/dev/null || echo "(none)"; done
-          echo ""
-          echo "=== node_modules exists? ==="
-          ls -la node_modules 2>/dev/null || echo "no node_modules"
-          echo ""
-          echo "=== package-lock.json ==="
-          cat package-lock.json 2>/dev/null || echo "no package-lock.json"
-          echo ""
-          echo "=== workspace:* in repo ==="
-          grep -r '"workspace:\*"' --include='package.json' ../.. || echo "none found"
-          echo ""
-          echo "=== npm config list ==="
-          npm config list
-          echo ""
-          echo "=== npm install --dry-run ==="
-          npm install --omit=dev --dry-run 2>&1 || true
 
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
