@@ -63,8 +63,8 @@
     "allowToChangeInstallationDirectory": true,
     "deleteAppDataOnUninstall": false,
     "include": "../../../installer/nsis/installer.nsh",
-    "installerIcon": "public/icon.ico",
-    "uninstallerIcon": "public/icon.ico",
+    "installerIcon": "public/icon.png",
+    "uninstallerIcon": "public/icon.png",
     "artifactName": "Checkpoint-Windows-x64-${version}-Setup.${ext}"
   },
   "mac": {
