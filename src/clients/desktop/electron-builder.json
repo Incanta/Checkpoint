@@ -51,7 +51,7 @@
       }
     ],
     "artifactName": "Checkpoint-Windows-x64-${version}-Setup.${ext}",
-    "icon": "public/icon.png",
+    "icon": "public/icon.ico",
     "signingHashAlgorithms": [
       "sha256"
     ],
@@ -64,8 +64,8 @@
     "allowToChangeInstallationDirectory": true,
     "deleteAppDataOnUninstall": false,
     "include": "../../../installer/nsis/installer.nsh",
-    "installerIcon": "public/icon.png",
-    "uninstallerIcon": "public/icon.png",
+    "installerIcon": "public/icon.ico",
+    "uninstallerIcon": "public/icon.ico",
     "artifactName": "Checkpoint-Windows-x64-${version}-Setup.${ext}"
   },
   "mac": {
