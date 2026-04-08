@@ -50,7 +50,7 @@
       }
     ],
     "artifactName": "Checkpoint-Windows-x64-${version}-Setup.${ext}",
-    "icon": "public/icon.ico",
+    "icon": "public/icon.png",
     "signingHashAlgorithms": [
       "sha256"
     ],
