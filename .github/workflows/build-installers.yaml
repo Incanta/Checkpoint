@@ -411,6 +411,25 @@ jobs:
             fs.writeFileSync('electron-builder.json', JSON.stringify(cfg, null, 2));
           "
 
+      # NOTE: The nsis-3.0.4.1 version below is electron-builder's bundled NSIS,
+      # hosted at electron-userland/electron-builder-binaries. If electron-builder
+      # is upgraded to a new major version, this cached path may change.
+      - name: Install NSIS EnVar plugin (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $pluginUrl = "https://nsis.sourceforge.io/mediawiki/images/7/7f/EnVar_plugin.zip"
+          $zipPath = "$env:RUNNER_TEMP\EnVar_plugin.zip"
+          $extractPath = "$env:RUNNER_TEMP\EnVar_plugin"
+          Invoke-WebRequest -Uri $pluginUrl -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+          $nsisDir = "$env:LOCALAPPDATA\electron-builder\Cache\nsis\nsis-3.0.4.1"
+          if (!(Test-Path $nsisDir)) {
+            cd src/clients/desktop
+            npx electron-builder --win --x64 --publish never 2>$null; $true
+          }
+          Copy-Item "$extractPath\Plugins\x86-unicode\EnVar.dll" "$nsisDir\Plugins\x86-unicode\" -Force
+
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
         env:
