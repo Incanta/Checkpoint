@@ -28,6 +28,15 @@ CREATE TYPE "ShelfStatus" AS ENUM ('ACTIVE', 'SUBMITTED', 'DELETED');
 -- CreateEnum
 CREATE TYPE "IssueStatus" AS ENUM ('OPEN', 'CLOSED');
 
+-- CreateEnum
+CREATE TYPE "SubscriptionStatus" AS ENUM ('TRIAL', 'ACTIVE', 'PAST_DUE', 'CANCELED', 'SUSPENDED', 'DELETED');
+
+-- CreateEnum
+CREATE TYPE "InvoiceStatus" AS ENUM ('DRAFT', 'ISSUED', 'PAID', 'FAILED', 'HELD', 'CANCELED');
+
+-- CreateEnum
+CREATE TYPE "InvoiceItemType" AS ENUM ('SEAT_READ', 'SEAT_WRITE', 'STORAGE', 'MINIMUM_DUE');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
@@ -37,6 +46,7 @@ CREATE TABLE "User" (
     "emailVerified" BOOLEAN NOT NULL DEFAULT false,
     "image" TEXT,
     "checkpointAdmin" BOOLEAN NOT NULL DEFAULT false,
+    "trialUsed" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -67,6 +77,16 @@ CREATE TABLE "Org" (
     "defaultCanCreateRepos" BOOLEAN NOT NULL DEFAULT true,
     "binaryExtensions" TEXT NOT NULL DEFAULT '',
     "subscriptionTier" "LicenseTier" NOT NULL DEFAULT 'BASIC',
+    "stripeCustomerId" TEXT,
+    "stripeSubscriptionId" TEXT,
+    "subscriptionStatus" "SubscriptionStatus" NOT NULL DEFAULT 'ACTIVE',
+    "trialEndsAt" TIMESTAMP(3),
+    "canceledAt" TIMESTAMP(3),
+    "delinquentSince" TIMESTAMP(3),
+    "suspendedAt" TIMESTAMP(3),
+    "creditBalanceCents" INTEGER NOT NULL DEFAULT 0,
+    "scheduledTier" "LicenseTier",
+    "scheduledTierAt" TIMESTAMP(3),
 
     CONSTRAINT "Org_pkey" PRIMARY KEY ("id")
 );
@@ -410,6 +430,55 @@ CREATE TABLE "IssueAssignee" (
 );
 
 -- CreateTable
+CREATE TABLE "Invoice" (
+    "id" TEXT NOT NULL,
+    "orgId" TEXT NOT NULL,
+    "stripeInvoiceId" TEXT,
+    "year" INTEGER NOT NULL,
+    "month" INTEGER NOT NULL,
+    "status" "InvoiceStatus" NOT NULL DEFAULT 'DRAFT',
+    "subtotalCents" INTEGER NOT NULL DEFAULT 0,
+    "creditAppliedCents" INTEGER NOT NULL DEFAULT 0,
+    "minimumDueAddedCents" INTEGER NOT NULL DEFAULT 0,
+    "totalCents" INTEGER NOT NULL DEFAULT 0,
+    "issuedAt" TIMESTAMP(3),
+    "paidAt" TIMESTAMP(3),
+    "failedAt" TIMESTAMP(3),
+    "heldAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Invoice_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "InvoiceItem" (
+    "id" TEXT NOT NULL,
+    "invoiceId" TEXT NOT NULL,
+    "type" "InvoiceItemType" NOT NULL,
+    "description" TEXT NOT NULL,
+    "quantity" INTEGER NOT NULL DEFAULT 1,
+    "unitPriceCents" INTEGER NOT NULL,
+    "totalCents" INTEGER NOT NULL,
+    "stripePriceId" TEXT,
+
+    CONSTRAINT "InvoiceItem_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CardExpiryNotification" (
+    "id" TEXT NOT NULL,
+    "orgId" TEXT NOT NULL,
+    "paymentMethodId" TEXT NOT NULL,
+    "expiryMonth" INTEGER NOT NULL,
+    "expiryYear" INTEGER NOT NULL,
+    "notifyDaysBefore" INTEGER NOT NULL,
+    "sentAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "CardExpiryNotification_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "Notification" (
     "id" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -501,6 +570,12 @@ CREATE UNIQUE INDEX "EmailPreferences_userId_key" ON "EmailPreferences"("userId"
 CREATE UNIQUE INDEX "Org_name_key" ON "Org"("name");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Org_stripeCustomerId_key" ON "Org"("stripeCustomerId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Org_stripeSubscriptionId_key" ON "Org"("stripeSubscriptionId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "OrgUser_orgId_userId_key" ON "OrgUser"("orgId", "userId");
 
 -- CreateIndex
@@ -583,6 +658,18 @@ CREATE UNIQUE INDEX "IssueLabelLink_issueId_labelId_key" ON "IssueLabelLink"("is
 
 -- CreateIndex
 CREATE UNIQUE INDEX "IssueAssignee_issueId_userId_key" ON "IssueAssignee"("issueId", "userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Invoice_stripeInvoiceId_key" ON "Invoice"("stripeInvoiceId");
+
+-- CreateIndex
+CREATE INDEX "Invoice_status_idx" ON "Invoice"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Invoice_orgId_year_month_key" ON "Invoice"("orgId", "year", "month");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CardExpiryNotification_orgId_paymentMethodId_notifyDaysBefo_key" ON "CardExpiryNotification"("orgId", "paymentMethodId", "notifyDaysBefore");
 
 -- CreateIndex
 CREATE INDEX "Notification_userId_read_idx" ON "Notification"("userId", "read");
@@ -751,6 +838,15 @@ ALTER TABLE "IssueAssignee" ADD CONSTRAINT "IssueAssignee_issueId_fkey" FOREIGN 
 
 -- AddForeignKey
 ALTER TABLE "IssueAssignee" ADD CONSTRAINT "IssueAssignee_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Org"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CardExpiryNotification" ADD CONSTRAINT "CardExpiryNotification_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Org"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

@@ -5,3 +5,4 @@ logs
 node_modules
 artifacts
 override.json
+dev-shadow.db

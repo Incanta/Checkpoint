@@ -56,10 +56,11 @@ export const storageRouter = createTRPCRouter({
         ),
       );
 
-      token.setExpiration(
-        Date.now() +
-          config.get<number>("storage.token-expiration-seconds") * 1000,
+      const expirationSeconds = config.get<number>(
+        "storage.token-expiration-seconds",
       );
+
+      token.setExpiration(Date.now() + expirationSeconds * 1000);
 
       // Check if R2 storage should be used
       if (isR2Enabled() && repo.r2BucketName) {
@@ -91,9 +92,7 @@ export const storageRouter = createTRPCRouter({
       return {
         storageType: "seaweedfs" as "seaweedfs" | "r2",
         token: token.compact(),
-        expiration:
-          Math.floor(Date.now() / 1000) +
-          config.get<number>("storage.token-expiration-seconds"),
+        expiration: Math.floor(Date.now() / 1000) + expirationSeconds,
         backendUrl: config.get<string>("storage.backend-url.external"),
         r2Credentials: null as {
           accessKeyId: string;

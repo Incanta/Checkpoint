@@ -361,6 +361,51 @@ jobs:
 
       # ---- Build TypeScript + Vite + Electron ----
 
+      - name: Generate .ico from .png (NSIS requires .ico)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd src/clients/desktop
+          node -e "
+            const sharp = require('sharp');
+            const fs = require('fs');
+            const sizes = [16, 32, 48, 64, 128, 256];
+            async function createIco() {
+              const buffers = [];
+              for (const size of sizes) {
+                const buf = await sharp('public/icon.png').resize(size, size).png().toBuffer();
+                buffers.push({ size, buf });
+              }
+              const headerSize = 6;
+              const dirEntrySize = 16;
+              let offset = headerSize + dirEntrySize * buffers.length;
+              const header = Buffer.alloc(headerSize);
+              header.writeUInt16LE(0, 0);
+              header.writeUInt16LE(1, 2);
+              header.writeUInt16LE(buffers.length, 4);
+              const dirEntries = [];
+              const imgDataParts = [];
+              for (const { size, buf } of buffers) {
+                const entry = Buffer.alloc(dirEntrySize);
+                entry.writeUInt8(size < 256 ? size : 0, 0);
+                entry.writeUInt8(size < 256 ? size : 0, 1);
+                entry.writeUInt8(0, 2);
+                entry.writeUInt8(0, 3);
+                entry.writeUInt16LE(1, 4);
+                entry.writeUInt16LE(32, 6);
+                entry.writeUInt32LE(buf.length, 8);
+                entry.writeUInt32LE(offset, 12);
+                dirEntries.push(entry);
+                imgDataParts.push(buf);
+                offset += buf.length;
+              }
+              const ico = Buffer.concat([header, ...dirEntries, ...imgDataParts]);
+              fs.writeFileSync('public/icon.ico', ico);
+              console.log('Generated icon.ico with sizes:', sizes.join(', '));
+            }
+            createIco().catch(e => { console.error(e); process.exit(1); });
+          "
+
       - name: Build app
         run: |
           cd src/clients/desktop
@@ -387,10 +432,77 @@ jobs:
           "
           rm -rf node_modules
 
+      - name: Strip code signing config if certs not available
+        shell: bash
+        env:
+          HAS_WIN_CERT: ${{ secrets.WINDOWS_CERT_BASE64 != '' }}
+          HAS_MAC_CERT: ${{ secrets.MACOS_CERT_BASE64 != '' }}
+        run: |
+          cd src/clients/desktop
+          node -e "
+            const fs = require('fs');
+            const cfg = JSON.parse(fs.readFileSync('electron-builder.json', 'utf-8'));
+            if (process.env.HAS_WIN_CERT !== 'true' && cfg.win) {
+              delete cfg.win.certificateFile;
+              delete cfg.win.certificatePassword;
+              delete cfg.win.signingHashAlgorithms;
+            }
+            if (process.env.HAS_MAC_CERT !== 'true') {
+              if (cfg.mac) {
+                cfg.mac.identity = null;
+              }
+              delete cfg.afterSign;
+            }
+            fs.writeFileSync('electron-builder.json', JSON.stringify(cfg, null, 2));
+          "
+
+      - name: Install NSIS EnVar plugin (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $pluginUrl = "https://nsis.sourceforge.io/mediawiki/images/7/7f/EnVar_plugin.zip"
+          $zipPath = "$env:RUNNER_TEMP\EnVar_plugin.zip"
+          $extractPath = "$env:RUNNER_TEMP\EnVar_plugin"
+          Invoke-WebRequest -Uri $pluginUrl -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+
+          # Debug: show extracted contents
+          Write-Host "Extracted contents:"
+          Get-ChildItem -Recurse $extractPath | ForEach-Object { Write-Host $_.FullName }
+
+          # Find the actual EnVar.dll for x86-unicode
+          $dllPath = Get-ChildItem -Recurse -Path $extractPath -Filter "EnVar.dll" |
+            Where-Object { $_.FullName -match "x86-unicode" } |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $dllPath) {
+            Write-Error "Could not find EnVar.dll for x86-unicode in extracted archive"
+            exit 1
+          }
+
+          # Copy to build-resources/x86-unicode (electron-builder auto-detects this path)
+          $pluginDir = "src/clients/desktop/build-resources/x86-unicode"
+          New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
+          Copy-Item $dllPath (Join-Path $pluginDir "EnVar.dll") -Force
+          Write-Host "EnVar.dll installed to $pluginDir"
+
+          # Also copy into electron-builder NSIS cache if it exists
+          $nsisCache = "$env:LOCALAPPDATA\electron-builder\Cache\nsis"
+          if (Test-Path $nsisCache) {
+            Get-ChildItem $nsisCache -Directory | ForEach-Object {
+              $cachePluginDir = Join-Path $_.FullName "Plugins\x86-unicode"
+              if (Test-Path $cachePluginDir) {
+                Copy-Item $dllPath $cachePluginDir -Force
+                Write-Host "EnVar.dll also installed to $cachePluginDir"
+              }
+            }
+          }
+
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
         env:
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         shell: pwsh
         run: |
           cd src/clients/desktop

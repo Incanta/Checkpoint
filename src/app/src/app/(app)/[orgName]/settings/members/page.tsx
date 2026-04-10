@@ -4,16 +4,9 @@ import { useState } from "react";
 import { useParams, notFound } from "next/navigation";
 import { api } from "~/trpc/react";
 import { useSession } from "~/lib/auth-client";
-import {
-  Button,
-  Card,
-  PageHeader,
-  Badge,
-  Avatar,
-  Tabs,
-  Tab,
-} from "~/app/_components/ui";
+import { Button, Card, PageHeader, Badge, Avatar } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
+import { SettingsTabs } from "../_components/settings-tabs";
 
 const ROLE_COLORS = {
   ADMIN: "accent" as const,
@@ -104,13 +97,7 @@ export default function OrgMembersPage() {
         }
       />
 
-      <Tabs className="mb-6">
-        <Tab href={`/${orgName}/settings`} exact>
-          General
-        </Tab>
-        <Tab href={`/${orgName}/settings/members`}>Members</Tab>
-        <Tab href={`/${orgName}/settings/subscription`}>Subscription</Tab>
-      </Tabs>
+      <SettingsTabs orgName={orgName} />
 
       <div className="space-y-6">
         {/* Monthly active users summary */}

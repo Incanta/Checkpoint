@@ -2,6 +2,7 @@ const { program } = require("commander");
 const { execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs").promises;
+const existsSync = require("fs").existsSync;
 
 program
   .name("yarn prisma:migrate")
@@ -58,6 +59,14 @@ program
       );
       await fs.writeFile(tempSchemaPath, `${datasource}\n\n${schema}`);
 
+      if (
+        provider === "sqlite" &&
+        existsSync(path.resolve(__dirname, "..", "dev-shadow.db"))
+      ) {
+        // delete shadow db if it exists
+        await fs.unlink(path.resolve(__dirname, "..", "dev-shadow.db"));
+      }
+
       const args = [
         "prisma",
         "migrate diff",
@@ -94,7 +103,7 @@ program
           baseFolder,
           "dev-shadow.db",
         );
-        if (fs.existsSync(shadowDbPath)) {
+        if (existsSync(shadowDbPath)) {
           await fs.unlink(shadowDbPath);
         }
       }

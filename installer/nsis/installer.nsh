@@ -1,16 +1,20 @@
 ; installer.nsh — NSIS custom script for Checkpoint installer
 ; Handles daemon service registration, CLI PATH setup, and cleanup
+;
+; NOTE: This file is included by electron-builder BEFORE the main template,
+; so we must explicitly include LogicLib for ${If}/${EndIf} macros.
+; MUI2.nsh and nsDialogs.nsh are NOT needed here (loaded by the template).
 
-!include "MUI2.nsh"
-!include "nsDialogs.nsh"
 !include "LogicLib.nsh"
+
+; ============================================================
+; Installation Sections (only for installer pass)
+; ============================================================
+
+!ifndef BUILD_UNINSTALLER
 
 ; Custom variables
 Var DAEMON_EXE
-
-; ============================================================
-; Installation Sections
-; ============================================================
 
 Section "Daemon Service" SEC_DAEMON
     ; Copy daemon files
@@ -61,9 +65,13 @@ Section "CLI Tools" SEC_CLI
     ${EndIf}
 SectionEnd
 
+!endif ; BUILD_UNINSTALLER
+
 ; ============================================================
-; Uninstallation Sections
+; Uninstallation Sections (only for uninstaller build pass)
 ; ============================================================
+
+!ifdef BUILD_UNINSTALLER
 
 Section "un.Daemon Service"
     ; Stop and remove the Windows service
@@ -97,3 +105,5 @@ Section "un.CLI Tools"
     Delete "$INSTDIR\cli\chk.exe"
     RMDir "$INSTDIR\cli"
 SectionEnd
+
+!endif ; BUILD_UNINSTALLER
