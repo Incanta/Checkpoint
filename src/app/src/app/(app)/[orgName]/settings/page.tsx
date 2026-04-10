@@ -4,8 +4,9 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter, notFound } from "next/navigation";
 import { api } from "~/trpc/react";
 import { useSession } from "~/lib/auth-client";
-import { Button, Card, PageHeader, Tabs, Tab } from "~/app/_components/ui";
+import { Button, Card, PageHeader } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
+import { SettingsTabs } from "./_components/settings-tabs";
 
 export default function OrgSettingsPage() {
   const params = useParams<{ orgName: string }>();
@@ -88,12 +89,7 @@ export default function OrgSettingsPage() {
         }
       />
 
-      <Tabs className="mb-6">
-        <Tab href={`/${orgName}/settings`} exact>
-          General
-        </Tab>
-        <Tab href={`/${orgName}/settings/members`}>Members</Tab>
-      </Tabs>
+      <SettingsTabs orgName={orgName} />
 
       <div className="space-y-6">
         <Card>
