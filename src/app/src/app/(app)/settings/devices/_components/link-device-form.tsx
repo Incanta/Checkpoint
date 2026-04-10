@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "~/trpc/react";
+import { Button } from "~/app/_components/ui";
 
 export function LinkDeviceForm() {
   return (
@@ -40,13 +41,11 @@ function LinkDeviceFormContent() {
       setSuccess(true);
       setError(null);
       setIsLoading(false);
-      // Reset form
       setFormData({
         name: "",
         deviceCode: "",
         expiration: "none",
       });
-      // Invalidate and refetch the devices list
       void utils.apiToken.getActiveDevices.invalidate();
     },
     onError: (error) => {
@@ -55,13 +54,12 @@ function LinkDeviceFormContent() {
     },
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
     setSuccess(false);
 
-    // Validate form
     if (!formData.name.trim()) {
       setError("Name is required");
       setIsLoading(false);
@@ -74,7 +72,6 @@ function LinkDeviceFormContent() {
       return;
     }
 
-    // Calculate expiration date
     let expiresAt: Date | null = null;
     const now = new Date();
 
@@ -111,10 +108,16 @@ function LinkDeviceFormContent() {
     }));
   };
 
+  const inputClass =
+    "w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-50";
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label htmlFor="name" className="mb-2 block text-sm font-medium">
+        <label
+          htmlFor="name"
+          className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]"
+        >
           Token Name
         </label>
         <input
@@ -124,13 +127,16 @@ function LinkDeviceFormContent() {
           value={formData.name}
           onChange={handleInputChange}
           placeholder="e.g., My Desktop, Work Laptop"
-          className="w-full rounded-md border border-white/20 bg-white/10 px-3 py-2 text-white placeholder-gray-400 focus:border-transparent focus:ring-2 focus:ring-[hsl(280,100%,70%)] focus:outline-none"
+          className={inputClass}
           disabled={isLoading}
         />
       </div>
 
       <div>
-        <label htmlFor="deviceCode" className="mb-2 block text-sm font-medium">
+        <label
+          htmlFor="deviceCode"
+          className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]"
+        >
           Device Code
         </label>
         <input
@@ -140,13 +146,16 @@ function LinkDeviceFormContent() {
           value={formData.deviceCode}
           onChange={handleInputChange}
           placeholder="Enter the code from your device"
-          className="w-full rounded-md border border-white/20 bg-white/10 px-3 py-2 text-white placeholder-gray-400 focus:border-transparent focus:ring-2 focus:ring-[hsl(280,100%,70%)] focus:outline-none"
+          className={inputClass}
           disabled={isLoading}
         />
       </div>
 
       <div>
-        <label htmlFor="expiration" className="mb-2 block text-sm font-medium">
+        <label
+          htmlFor="expiration"
+          className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]"
+        >
           Token Expiration
         </label>
         <select
@@ -154,7 +163,7 @@ function LinkDeviceFormContent() {
           name="expiration"
           value={formData.expiration}
           onChange={handleInputChange}
-          className="w-full rounded-md border border-white/20 bg-white/10 px-3 py-2 text-white focus:border-transparent focus:ring-2 focus:ring-[hsl(280,100%,70%)] focus:outline-none"
+          className={inputClass}
           disabled={isLoading}
         >
           <option value="none">No expiration</option>
@@ -165,24 +174,20 @@ function LinkDeviceFormContent() {
       </div>
 
       {error && (
-        <div className="rounded-md border border-red-500/50 bg-red-500/20 p-3 text-red-200">
+        <div className="rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 p-3 text-sm text-[var(--color-danger)]">
           {error}
         </div>
       )}
 
       {success && (
-        <div className="rounded-md border border-green-500/50 bg-green-500/20 p-3 text-green-200">
+        <div className="rounded-md border border-[var(--color-success)]/30 bg-[var(--color-success)]/10 p-3 text-sm text-[var(--color-success)]">
           API token created successfully! Your device should now be linked.
         </div>
       )}
 
-      <button
-        type="submit"
-        disabled={isLoading}
-        className="w-full rounded-md bg-[hsl(280,100%,70%)] px-4 py-2 font-semibold text-white transition-colors hover:bg-[hsl(280,100%,60%)] focus:ring-2 focus:ring-[hsl(280,100%,70%)] focus:ring-offset-2 focus:ring-offset-[#15162c] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <Button type="submit" disabled={isLoading} className="w-full">
         {isLoading ? "Creating Token..." : "Link Device"}
-      </button>
+      </Button>
     </form>
   );
 }
