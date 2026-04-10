@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AppHeader } from "./app-header";
 import { AppSidebar } from "./app-sidebar";
+import { BillingBanner } from "./billing-banner";
 
 function MenuIcon() {
   return (
@@ -18,6 +19,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen flex-col bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
       <AppHeader />
+      <BillingBanner />
 
       <div className="flex flex-1 overflow-hidden">
         {/* Mobile hamburger */}

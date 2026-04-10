@@ -100,6 +100,22 @@ export function AppSidebar() {
             >
               <OrgIcon />
               <span className="truncate">{org.name}</span>
+              {org.subscriptionStatus === "TRIAL" && (
+                <span
+                  title={
+                    org.trialEndsAt
+                      ? `Trial ends ${new Date(org.trialEndsAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+                      : "Trial active"
+                  }
+                  className="ml-auto shrink-0 rounded-full bg-[var(--color-info)]/15 px-1.5 text-[10px] leading-none font-medium text-[var(--color-info)]"
+                  style={{
+                    paddingTop: "2px",
+                    paddingBottom: "2px",
+                  }}
+                >
+                  Trial
+                </span>
+              )}
             </Link>
 
             {org.repos.length > 0 && (

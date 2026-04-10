@@ -35,7 +35,7 @@ export function getR2Endpoint(): string {
 export async function createR2TempCredentials(
   bucketName: string,
   permission: "object-read-write" | "object-read-only",
-  ttlSeconds = 3600,
+  ttlSeconds: number,
 ): Promise<R2TempCredentials> {
   const accountId = config.get<string>("storage.r2.account-id");
   const apiToken = await config.getWithSecrets<string>("storage.r2.api-token");

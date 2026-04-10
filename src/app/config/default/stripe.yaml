@@ -1,0 +1,56 @@
+enabled: false
+environment: "sandbox" # "sandbox" or "production"
+
+secret-key: ""
+publishable-key: ""
+webhook-secret: ""
+
+# API version (defaults to SDK's latest if empty)
+api-version: ""
+
+# Stripe Meter names (created in Stripe Dashboard)
+meters:
+  write-users: "checkpoint_write_users"
+  read-users: "checkpoint_read_users"
+  storage-buckets: "checkpoint_storage_buckets"
+  minimum-due: "checkpoint_minimum_due"
+
+# Stripe metered price IDs per tier (created in Stripe Dashboard)
+prices:
+  cloud:
+    studio-write: ""
+    studio-read: ""
+    pro-write: ""
+    pro-read: ""
+    basic-write: ""
+    basic-read: ""
+    storage: ""
+    minimum-due: ""
+  self-hosted:
+    studio-write: ""
+    studio-read: ""
+    pro-write: ""
+    pro-read: ""
+
+# Storage pricing (for our calculations, must match Stripe catalog price)
+storage:
+  free-tier-gb: 25
+  bucket-size-gb: 50
+  bucket-price-cents: 250 # $2.50 per bucket
+
+# Minimum invoice amount in cents — invoices between $0 and this are padded up
+minimum-invoice-cents: 500 # $5.00
+
+# Delinquency thresholds
+delinquency:
+  suspend-after-days: 14
+  delete-after-days: 30
+
+# Days before card expiry to send notifications
+card-expiry-notify-days:
+  - 30
+  - 7
+
+# Free trial settings
+trial:
+  duration-days: 30

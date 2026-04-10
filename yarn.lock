@@ -1574,6 +1574,7 @@ __metadata:
     remark-gfm: "npm:^4.0.1"
     server-only: "npm:^0.0.1"
     shiki: "npm:^3.0.0"
+    stripe: "npm:22.1.0-beta.2"
     tailwindcss: "npm:^4.1.18"
   peerDependencies:
     "@incanta/config": "*"
@@ -13602,6 +13603,18 @@ __metadata:
   version: 2.0.1
   resolution: "strip-json-comments@npm:2.0.1"
   checksum: 10c0/b509231cbdee45064ff4f9fd73609e2bcc4e84a4d508e9dd0f31f70356473fde18abfb5838c17d56fb236f5a06b102ef115438de0600b749e818a35fbbc48c43
+  languageName: node
+  linkType: hard
+
+"stripe@npm:22.1.0-beta.2":
+  version: 22.1.0-beta.2
+  resolution: "stripe@npm:22.1.0-beta.2"
+  peerDependencies:
+    "@types/node": ">=18"
+  peerDependenciesMeta:
+    "@types/node":
+      optional: true
+  checksum: 10c0/d81323d2eab7cdfe26be3849f392403f7ac8d56d1289aadec54ea130b3557d27e8a678869e2f4d8fb8608cb86ea2d969bd950840239208fa77d1ebff4da28165
   languageName: node
   linkType: hard
 
