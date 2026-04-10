@@ -69,6 +69,7 @@ export const storageRouter = createTRPCRouter({
           const creds = await createR2TempCredentials(
             repo.r2BucketName,
             input.write ? "object-read-write" : "object-read-only",
+            expirationSeconds,
           );
 
           return {
