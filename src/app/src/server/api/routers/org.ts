@@ -130,8 +130,6 @@ export const orgRouter = createTRPCRouter({
         Logger.error(
           `Failed to create org directory in storage: ${JSON.stringify(error)}`,
         );
-        // Note: We don't fail the org creation here since the DB record is created
-        // The directory can be created later if needed
       }
 
       return org;
