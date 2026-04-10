@@ -11,6 +11,11 @@ interface ProviderInfo {
   name: string;
 }
 
+interface ProvidersResponse {
+  providers: ProviderInfo[];
+  showNewsletter: boolean;
+}
+
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   discord: "Discord",
   github: "GitHub",
@@ -31,6 +36,8 @@ export default function SignInPage() {
 function SignInPageContent() {
   useDocumentTitle("Sign In · Checkpoint VCS");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [showNewsletter, setShowNewsletter] = useState(false);
+  const [subscribeNewsletter, setSubscribeNewsletter] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -42,12 +49,11 @@ function SignInPageContent() {
 
   useEffect(() => {
     const loadProviders = async () => {
-      // Fetch enabled providers from our API
       const res = await fetch("/api/auth/providers");
       if (res.ok) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const data: ProviderInfo[] = await res.json();
-        setProviders(data);
+        const data = (await res.json()) as ProvidersResponse;
+        setProviders(data.providers);
+        setShowNewsletter(data.showNewsletter);
       }
     };
     void loadProviders();
@@ -88,6 +94,12 @@ function SignInPageContent() {
         });
         if (error) {
           setAuthError(error.message ?? "Sign up failed. Please try again.");
+        } else if (subscribeNewsletter && showNewsletter) {
+          void fetch("/api/newsletter/subscribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, name }),
+          });
         }
       } else {
         const { error } = await authClient.signIn.email({
@@ -192,6 +204,19 @@ function SignInPageContent() {
                 placeholder="••••••••"
               />
             </div>
+            {isSignUp && showNewsletter && (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={subscribeNewsletter}
+                  onChange={(e) => setSubscribeNewsletter(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-[hsl(280,100%,70%)] focus:ring-[hsl(280,100%,70%)]"
+                />
+                <span className="text-sm text-gray-300">
+                  Sign up for news and release updates
+                </span>
+              </label>
+            )}
             <button
               type="submit"
               disabled={isLoading}

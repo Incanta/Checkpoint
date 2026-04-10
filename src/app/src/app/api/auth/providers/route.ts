@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import config from "@incanta/config";
 import { enabledProviderIds } from "~/server/auth/config";
+import { isLicenseManager } from "~/server/license-utils";
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   discord: "Discord",
@@ -16,5 +18,8 @@ export function GET() {
     name: PROVIDER_DISPLAY_NAMES[id] ?? id,
   }));
 
-  return NextResponse.json(providers);
+  const showNewsletter =
+    isLicenseManager() && config.get<boolean>("newsletter.kit.enabled");
+
+  return NextResponse.json({ providers, showNewsletter });
 }
