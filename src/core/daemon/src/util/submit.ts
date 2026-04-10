@@ -61,16 +61,12 @@ export async function submit(
 
   const tokenExpirationMs = storageTokenResponse.expiration * 1000;
 
-  let filerUrl = "";
-  let token = "";
-  let backendUrl = "";
-  if (storageTokenResponse.storageType === "r2") {
-    // R2: no filer URL needed
-  } else {
-    token = storageTokenResponse.token;
-    backendUrl = storageTokenResponse.backendUrl;
-    filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) => res.text());
-  }
+  const token = storageTokenResponse.token;
+  const backendUrl = storageTokenResponse.backendUrl;
+  const filerUrl =
+    storageTokenResponse.storageType === "r2"
+      ? ""
+      : await fetch(`${backendUrl}/filer-url`).then((res) => res.text());
 
   console.log(`[submit] Calling SubmitAsync:`);
   console.log(`[submit]   branchName: ${workspace.branchName}`);
@@ -83,12 +79,12 @@ export async function submit(
   if (storageTokenResponse.storageType === "r2") {
     console.log(
       `[submit]   Using R2 storage with endpoint: ${storageTokenResponse.r2Credentials?.endpoint}`,
+      `[submit]   R2 bucket name: ${storageTokenResponse.r2Credentials?.bucket}`,
     );
   } else {
     console.log(`[submit]   filerUrl: ${filerUrl}`);
-    console.log(`[submit]   jwt token: ${token}`);
-    console.log(`[submit]   backendUrl: ${backendUrl}`);
   }
+  console.log(`[submit]   backendUrl: ${backendUrl}`);
   console.log(`[submit]   workspaceId: ${workspaceId}`);
   console.log(`[submit]   modifications: ${modifications.length}`);
 
