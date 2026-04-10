@@ -71,7 +71,7 @@ export default function RepoSettingsPage() {
             updateRepo.mutate({
               id: repoData.id,
               name: name.trim() || undefined,
-              public: isPublic,
+              // public: isPublic,
             });
           }}
           className="space-y-4"
@@ -88,7 +88,7 @@ export default function RepoSettingsPage() {
             />
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* <div className="flex items-center gap-3">
             <input
               type="checkbox"
               id="repo-public"
@@ -99,7 +99,7 @@ export default function RepoSettingsPage() {
             <label htmlFor="repo-public" className="text-sm text-[var(--color-text-primary)]">
               Public repository
             </label>
-          </div>
+          </div> */}
 
           {updateRepo.error && (
             <p className="text-sm text-[var(--color-danger)]">{updateRepo.error.message}</p>
