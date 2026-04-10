@@ -7,6 +7,7 @@ CREATE TABLE "User" (
     "emailVerified" BOOLEAN NOT NULL DEFAULT false,
     "image" TEXT,
     "checkpointAdmin" BOOLEAN NOT NULL DEFAULT false,
+    "trialUsed" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
 );
@@ -33,7 +34,17 @@ CREATE TABLE "Org" (
     "defaultRepoAccess" TEXT NOT NULL DEFAULT 'WRITE',
     "defaultCanCreateRepos" BOOLEAN NOT NULL DEFAULT true,
     "binaryExtensions" TEXT NOT NULL DEFAULT '',
-    "subscriptionTier" TEXT NOT NULL DEFAULT 'BASIC'
+    "subscriptionTier" TEXT NOT NULL DEFAULT 'BASIC',
+    "stripeCustomerId" TEXT,
+    "stripeSubscriptionId" TEXT,
+    "subscriptionStatus" TEXT NOT NULL DEFAULT 'ACTIVE',
+    "trialEndsAt" DATETIME,
+    "canceledAt" DATETIME,
+    "delinquentSince" DATETIME,
+    "suspendedAt" DATETIME,
+    "creditBalanceCents" INTEGER NOT NULL DEFAULT 0,
+    "scheduledTier" TEXT,
+    "scheduledTierAt" DATETIME
 );
 
 -- CreateTable
@@ -373,6 +384,52 @@ CREATE TABLE "IssueAssignee" (
 );
 
 -- CreateTable
+CREATE TABLE "Invoice" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "orgId" TEXT NOT NULL,
+    "stripeInvoiceId" TEXT,
+    "year" INTEGER NOT NULL,
+    "month" INTEGER NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'DRAFT',
+    "subtotalCents" INTEGER NOT NULL DEFAULT 0,
+    "creditAppliedCents" INTEGER NOT NULL DEFAULT 0,
+    "minimumDueAddedCents" INTEGER NOT NULL DEFAULT 0,
+    "totalCents" INTEGER NOT NULL DEFAULT 0,
+    "issuedAt" DATETIME,
+    "paidAt" DATETIME,
+    "failedAt" DATETIME,
+    "heldAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Invoice_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Org" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "InvoiceItem" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "invoiceId" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "description" TEXT NOT NULL,
+    "quantity" INTEGER NOT NULL DEFAULT 1,
+    "unitPriceCents" INTEGER NOT NULL,
+    "totalCents" INTEGER NOT NULL,
+    "stripePriceId" TEXT,
+    CONSTRAINT "InvoiceItem_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "CardExpiryNotification" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "orgId" TEXT NOT NULL,
+    "paymentMethodId" TEXT NOT NULL,
+    "expiryMonth" INTEGER NOT NULL,
+    "expiryYear" INTEGER NOT NULL,
+    "notifyDaysBefore" INTEGER NOT NULL,
+    "sentAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "CardExpiryNotification_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Org" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
 CREATE TABLE "Notification" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "type" TEXT NOT NULL,
@@ -462,6 +519,12 @@ CREATE UNIQUE INDEX "EmailPreferences_userId_key" ON "EmailPreferences"("userId"
 CREATE UNIQUE INDEX "Org_name_key" ON "Org"("name");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Org_stripeCustomerId_key" ON "Org"("stripeCustomerId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Org_stripeSubscriptionId_key" ON "Org"("stripeSubscriptionId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "OrgUser_orgId_userId_key" ON "OrgUser"("orgId", "userId");
 
 -- CreateIndex
@@ -544,6 +607,18 @@ CREATE UNIQUE INDEX "IssueLabelLink_issueId_labelId_key" ON "IssueLabelLink"("is
 
 -- CreateIndex
 CREATE UNIQUE INDEX "IssueAssignee_issueId_userId_key" ON "IssueAssignee"("issueId", "userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Invoice_stripeInvoiceId_key" ON "Invoice"("stripeInvoiceId");
+
+-- CreateIndex
+CREATE INDEX "Invoice_status_idx" ON "Invoice"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Invoice_orgId_year_month_key" ON "Invoice"("orgId", "year", "month");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CardExpiryNotification_orgId_paymentMethodId_notifyDaysBefore_key" ON "CardExpiryNotification"("orgId", "paymentMethodId", "notifyDaysBefore");
 
 -- CreateIndex
 CREATE INDEX "Notification_userId_read_idx" ON "Notification"("userId", "read");

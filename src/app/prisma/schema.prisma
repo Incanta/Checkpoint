@@ -24,6 +24,8 @@ model User {
 
   checkpointAdmin Boolean @default(false)
 
+  trialUsed Boolean @default(false)
+
   orgs              OrgUser[]
   specificRepoRoles RepoRole[]
   changelists       Changelist[]
@@ -99,11 +101,25 @@ model Org {
 
   subscriptionTier LicenseTier @default(BASIC)
 
+  // Stripe billing (cloud / license-manager only)
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  subscriptionStatus   SubscriptionStatus @default(ACTIVE)
+  trialEndsAt          DateTime?
+  canceledAt           DateTime?
+  delinquentSince      DateTime?
+  suspendedAt          DateTime?
+  creditBalanceCents   Int                @default(0)
+  scheduledTier        LicenseTier?
+  scheduledTierAt      DateTime?
+
   users      OrgUser[]
   repos      Repo[]
   workspaces Workspace[]
   activity   OrgUserActivity[]
   license    License?
+  invoices   Invoice[]
+  cardExpiryNotifications CardExpiryNotification[]
 }
 
 model OrgUser {
@@ -648,6 +664,96 @@ model IssueAssignee {
   userId String
 
   @@unique([issueId, userId])
+}
+
+// ── Billing ──────────────────────────────────────────────────────
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  SUSPENDED
+  DELETED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  FAILED
+  HELD
+  CANCELED
+}
+
+enum InvoiceItemType {
+  SEAT_READ
+  SEAT_WRITE
+  STORAGE
+  MINIMUM_DUE
+}
+
+model Invoice {
+  id    String @id @default(cuid())
+  org   Org    @relation(fields: [orgId], references: [id])
+  orgId String
+
+  stripeInvoiceId String? @unique
+
+  year  Int
+  month Int
+
+  status InvoiceStatus @default(DRAFT)
+
+  // All amounts in cents (USD)
+  subtotalCents        Int @default(0)
+  creditAppliedCents   Int @default(0)
+  minimumDueAddedCents Int @default(0)
+  totalCents           Int @default(0)
+
+  items InvoiceItem[]
+
+  issuedAt DateTime?
+  paidAt   DateTime?
+  failedAt DateTime?
+  heldAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, year, month])
+  @@index([status])
+}
+
+model InvoiceItem {
+  id        String  @id @default(cuid())
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String
+
+  type        InvoiceItemType
+  description String
+
+  quantity       Int @default(1)
+  unitPriceCents Int
+  totalCents     Int
+
+  // Stripe catalog price reference (null for non-catalog items)
+  stripePriceId String?
+}
+
+model CardExpiryNotification {
+  id    String @id @default(cuid())
+  org   Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId String
+
+  paymentMethodId String
+  expiryMonth     Int
+  expiryYear      Int
+  notifyDaysBefore Int
+
+  sentAt DateTime @default(now())
+
+  @@unique([orgId, paymentMethodId, notifyDaysBefore])
 }
 
 // ── Notifications & Subscriptions ────────────────────────────────
