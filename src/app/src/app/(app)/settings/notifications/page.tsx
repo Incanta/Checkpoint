@@ -111,7 +111,7 @@ export default function NotificationsSettingsPage() {
   };
 
   return (
-    <div>
+    <div className="mx-auto max-w-2xl">
       <PageHeader
         title="Notifications"
         description="Choose which emails you'd like to receive."

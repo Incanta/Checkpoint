@@ -4,8 +4,9 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter, notFound } from "next/navigation";
 import { api } from "~/trpc/react";
 import { useSession } from "~/lib/auth-client";
-import { Button, Card, PageHeader, Tabs, Tab } from "~/app/_components/ui";
+import { Button, Card, PageHeader } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
+import { SettingsTabs } from "./_components/settings-tabs";
 
 export default function OrgSettingsPage() {
   const params = useParams<{ orgName: string }>();
@@ -88,13 +89,7 @@ export default function OrgSettingsPage() {
         }
       />
 
-      <Tabs className="mb-6">
-        <Tab href={`/${orgName}/settings`} exact>
-          General
-        </Tab>
-        <Tab href={`/${orgName}/settings/members`}>Members</Tab>
-        <Tab href={`/${orgName}/settings/subscription`}>Subscription</Tab>
-      </Tabs>
+      <SettingsTabs orgName={orgName} />
 
       <div className="space-y-6">
         <Card>
@@ -246,7 +241,9 @@ function BinaryExtensionsCard({ orgId }: { orgId: string }) {
   };
 
   const handleAdd = (ext: string, op: "+" | "-") => {
-    const normalized = ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`;
+    const normalized = ext.startsWith(".")
+      ? ext.toLowerCase()
+      : `.${ext.toLowerCase()}`;
     if (overrides.some((o) => o.ext === normalized && o.op === op)) return;
     saveOverrides([...overrides, { op, ext: normalized }]);
     setNewExt("");
@@ -264,8 +261,9 @@ function BinaryExtensionsCard({ orgId }: { orgId: string }) {
         Binary file extensions
       </h3>
       <p className="mb-4 text-sm text-[var(--color-text-secondary)]">
-        Files with these extensions are treated as binary (no text diff or auto-merge).
-        Add or remove extensions to customize the list for this organization.
+        Files with these extensions are treated as binary (no text diff or
+        auto-merge). Add or remove extensions to customize the list for this
+        organization.
       </p>
 
       {overrides.length > 0 && (
@@ -283,7 +281,8 @@ function BinaryExtensionsCard({ orgId }: { orgId: string }) {
                     : "bg-[var(--color-danger)]/15 text-[var(--color-danger)]"
                 }`}
               >
-                {o.op === "+" ? "+" : "\u2212"}{o.ext}
+                {o.op === "+" ? "+" : "\u2212"}
+                {o.ext}
                 <button
                   type="button"
                   onClick={() => handleRemove(i)}
