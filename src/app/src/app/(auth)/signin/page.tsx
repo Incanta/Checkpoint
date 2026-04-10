@@ -88,6 +88,9 @@ function SignInPageContent() {
         });
         if (error) {
           setAuthError(error.message ?? "Sign up failed. Please try again.");
+        } else {
+          window.location.href = "/";
+          return;
         }
       } else {
         const { error } = await authClient.signIn.email({
@@ -97,6 +100,9 @@ function SignInPageContent() {
         });
         if (error) {
           setAuthError(error.message ?? "Invalid email or password.");
+        } else {
+          window.location.href = "/";
+          return;
         }
       }
     } catch (err) {
