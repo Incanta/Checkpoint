@@ -10,10 +10,9 @@ import {
   PageHeader,
   Badge,
   Avatar,
-  Tabs,
-  Tab,
 } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
+import { SettingsTabs } from "../_components/settings-tabs";
 
 const ROLE_COLORS = {
   ADMIN: "accent" as const,
@@ -104,12 +103,7 @@ export default function OrgMembersPage() {
         }
       />
 
-      <Tabs className="mb-6">
-        <Tab href={`/${orgName}/settings`} exact>
-          General
-        </Tab>
-        <Tab href={`/${orgName}/settings/members`}>Members</Tab>
-      </Tabs>
+      <SettingsTabs orgName={orgName} />
 
       <div className="space-y-6">
         {/* Monthly active users summary */}
