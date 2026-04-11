@@ -4,7 +4,7 @@
 # ============================================================
 
 # --------------- base ---------------
-FROM node:24-alpine AS base
+FROM node:24-slim AS base
 RUN corepack enable && corepack prepare yarn@4.13.0
 
 # --------------- builder ---------------
@@ -28,20 +28,23 @@ RUN cd src/app && yarn build
 RUN cd src/app && node scripts/obfuscate.mjs
 
 # --------------- runner ---------------
-FROM node:24-alpine AS runner
+FROM node:24-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV HOSTNAME="0.0.0.0"
 ENV PORT=3000
 
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+RUN groupadd --system --gid 1001 nodejs && \
+    useradd --system --uid 1001 --gid nodejs nextjs
 
 # Copy standalone output
 COPY --from=builder /app/src/app/.next/standalone ./
 COPY --from=builder /app/src/app/.next/static ./src/app/.next/static
 COPY --from=builder /app/src/app/public ./src/app/public
+
+# Ensure native addon prebuilds are present (not always traced by Next.js)
+COPY --from=builder /app/node_modules/@checkpointvcs/longtail-addon/prebuilds ./node_modules/@checkpointvcs/longtail-addon/prebuilds
 
 # Remove original TS source files leaked by standalone file tracing
 RUN rm -rf ./src/app/src

@@ -165,7 +165,7 @@ export default function RepoSettingsPage() {
             updateRepo.mutate({
               id: repoData.id,
               name: name.trim() || undefined,
-              public: isPublic,
+              // public: isPublic,
               requiredReviews,
               mergePermissionsSame,
             });
@@ -184,7 +184,7 @@ export default function RepoSettingsPage() {
             />
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* <div className="flex items-center gap-3">
             <input
               type="checkbox"
               id="repo-public"
@@ -198,7 +198,7 @@ export default function RepoSettingsPage() {
             >
               Public repository
             </label>
-          </div>
+          </div> */}
 
           {updateRepo.error && (
             <p className="text-sm text-[var(--color-danger)]">
