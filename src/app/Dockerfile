@@ -13,9 +13,19 @@ WORKDIR /app
 
 ARG DB_PROVIDER=sqlite
 
+# Runtime libraries needed for native addon loading during Next.js build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY . .
 
 RUN yarn install --immutable
+
+# Verify the longtail addon prebuilds exist and can load
+RUN ls -la node_modules/@checkpointvcs/longtail-addon/prebuilds/linux-x64/longtail_addon.node
+RUN node -e "require('@checkpointvcs/longtail-addon')"
 
 # Set the Prisma datasource provider and generate client
 RUN cd src/app && DB_PROVIDER=${DB_PROVIDER} node scripts/set-db-provider.mjs && npx prisma generate
@@ -34,6 +44,12 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME="0.0.0.0"
 ENV PORT=3000
+
+# Runtime libraries needed for native addon
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 1001 nodejs && \
     useradd --system --uid 1001 --gid nodejs nextjs
