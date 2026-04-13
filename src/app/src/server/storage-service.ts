@@ -20,7 +20,7 @@ export function createSystemToken(action: string, path: string): string {
       action,
       path,
     } satisfies SystemJWTClaims,
-    config.get<string>("storage.signing-keys.system"),
+    config.get<string>("storage.jwt.signing-key"),
   );
 
   token.setExpiration(
@@ -77,4 +77,45 @@ export async function createRepoDirectory(
   repoId: string,
 ): Promise<void> {
   await createStorageDirectory(`/${orgId}/${repoId}`);
+}
+
+/**
+ * Deletes a directory in the storage backend (SeaweedFS via core server).
+ * Used during repo deletion to clean up storage.
+ */
+export async function deleteStorageDirectory(path: string): Promise<void> {
+  const backendUrl = config.get<string>("storage.backend-url.internal");
+  const token = createSystemToken("rmdir", path);
+
+  let response: Response;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    response = await fetch(`${backendUrl}/system/rmdir`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ path }),
+    });
+
+    if (response.ok) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+  }
+
+  const errorText = await response!.text();
+  throw new Error(`Failed to delete storage directory ${path}: ${errorText}`);
+}
+
+/**
+ * Deletes the repository directory in storage.
+ * Path format: /{orgId}/{repoId}
+ */
+export async function deleteRepoDirectory(
+  orgId: string,
+  repoId: string,
+): Promise<void> {
+  await deleteStorageDirectory(`/${orgId}/${repoId}`);
 }

@@ -78,7 +78,9 @@ export async function submit(
   console.log(`[submit]   remoteRoot: /${orgId}/${workspace.repoId}`);
   if (storageTokenResponse.storageType === "r2") {
     console.log(
-      `[submit]   Using R2 storage with endpoint: ${storageTokenResponse.r2Credentials?.endpoint}`,
+      `[submit]   Using R2 storage with endpoint: ${storageTokenResponse.r2Credentials?.endpoint}`
+    );
+    console.log(
       `[submit]   R2 bucket name: ${storageTokenResponse.r2Credentials?.bucket}`,
     );
   } else {

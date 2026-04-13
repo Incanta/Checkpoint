@@ -14,6 +14,9 @@ const config = {
       "../../node_modules/@checkpointvcs/longtail-addon/**/*",
     ],
   },
+  logging: {
+    incomingRequests: false,
+  },
 };
 
 export default config;

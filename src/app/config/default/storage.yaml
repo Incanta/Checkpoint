@@ -1,13 +1,8 @@
-signing-keys:
-  read: "secret"
-  write: "secret"
-  system: "system-secret"
+jwt:
+  signing-key: "secret"
 
 token-expiration-seconds: 3600
 
 backend-url:
   internal: "http://localhost:13001"
   external: "http://localhost:13001"
-
-filer-ui-enabled: false
-filer-url: "http://localhost"

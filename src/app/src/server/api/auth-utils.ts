@@ -1,8 +1,18 @@
-import type { User, RepoAccess, Repo, Org, OrgUser, RepoRole } from "@prisma/client";
+import type {
+  User,
+  RepoAccess,
+  Repo,
+  Org,
+  OrgUser,
+  RepoRole,
+} from "@prisma/client";
 import type { TRPCContextPrivate } from "./trpc";
 import { TRPCError } from "@trpc/server";
 
-type RepoWithOrg = Repo & { org: Org & { users: OrgUser[] }; additionalRoles: RepoRole[] };
+type RepoWithOrg = Repo & {
+  org: Org & { users: OrgUser[] };
+  additionalRoles: RepoRole[];
+};
 
 export async function getCheckpointUser(
   ctx: TRPCContextPrivate,
@@ -56,6 +66,7 @@ export async function getUserAndRepoWithAccess(
   if (access === "READ") {
     const hasAccess =
       repo.public ||
+      orgUser?.role === "ADMIN" ||
       (repo.org.defaultRepoAccess !== "NONE" && orgUser) ||
       (repoRole && repoRole.access !== "NONE");
 
@@ -68,7 +79,8 @@ export async function getUserAndRepoWithAccess(
   } else if (access === "WRITE") {
     const hasWriteAccess =
       orgUser &&
-      (repo.org.defaultRepoAccess === "WRITE" ||
+      (orgUser.role === "ADMIN" ||
+        repo.org.defaultRepoAccess === "WRITE" ||
         repo.org.defaultRepoAccess === "ADMIN" ||
         (repoRole &&
           (repoRole.access === "WRITE" || repoRole.access === "ADMIN")));
@@ -82,8 +94,9 @@ export async function getUserAndRepoWithAccess(
   } else if (access === "ADMIN") {
     isAdmin = !!(
       orgUser &&
-      (repo.org.defaultRepoAccess === "ADMIN" ||
-        (repoRole?.access === "ADMIN"))
+      (orgUser.role === "ADMIN" ||
+        repo.org.defaultRepoAccess === "ADMIN" ||
+        repoRole?.access === "ADMIN")
     );
 
     if (!isAdmin) {
