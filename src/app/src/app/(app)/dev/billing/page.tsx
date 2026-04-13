@@ -18,8 +18,6 @@ export default function DevBillingPage() {
   useDocumentTitle("Dev Billing Tools · Checkpoint VCS");
 
   const [selectedOrgId, setSelectedOrgId] = useState<string>("");
-  const [invoiceYear, setInvoiceYear] = useState(new Date().getFullYear());
-  const [invoiceMonth, setInvoiceMonth] = useState(new Date().getMonth() + 1);
   const [log, setLog] = useState<string[]>([]);
 
   // Date override fields
@@ -43,15 +41,16 @@ export default function DevBillingPage() {
       { enabled: !!selectedOrgId },
     );
 
-  const triggerMonthly = api.billingDev.triggerMonthlyInvoicing.useMutation({
-    onSuccess: (data) => {
-      appendLog(
-        `Monthly invoicing: ${data.message ?? `${data.results.length} result(s)`}`,
-      );
+  const triggerMeterReport = api.billingDev.triggerMeterReport.useMutation({
+    onSuccess: (data: { orgId?: string; storageBuckets?: number; reported?: number; total?: number }) => {
+      if (data.orgId) {
+        appendLog(`Meter report: org ${data.orgId}, ${data.storageBuckets ?? 0} storage buckets`);
+      } else {
+        appendLog(`Meter report: ${data.reported ?? 0}/${data.total ?? 0} orgs reported`);
+      }
       void refetchOrgs();
-      void refetchInvoices();
     },
-    onError: (err) => appendLog(`Error: ${err.message}`),
+    onError: (err: { message: string }) => appendLog(`Error: ${err.message}`),
   });
 
   const triggerDaily = api.billingDev.triggerDailyChecks.useMutation({
@@ -127,10 +126,6 @@ export default function DevBillingPage() {
             </h3>
             <div className="mt-1 space-x-4 text-xs text-[var(--color-text-muted)]">
               <span>
-                Last invoice run:{" "}
-                <strong>{schedulerState?.lastInvoiceRun ?? "never"}</strong>
-              </span>
-              <span>
                 Last daily run:{" "}
                 <strong>{schedulerState?.lastDailyRun ?? "never"}</strong>
               </span>
@@ -194,47 +189,19 @@ export default function DevBillingPage() {
           Trigger Operations
         </h3>
         <div className="space-y-3">
-          {/* Monthly invoicing */}
+          {/* Meter reporting */}
           <div className="flex items-end gap-2">
-            <div>
-              <label className="block text-xs text-[var(--color-text-muted)]">
-                Year
-              </label>
-              <input
-                type="number"
-                value={invoiceYear}
-                onChange={(e) => setInvoiceYear(Number(e.target.value))}
-                className="w-20 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-[var(--color-text-muted)]">
-                Month
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={12}
-                value={invoiceMonth}
-                onChange={(e) => setInvoiceMonth(Number(e.target.value))}
-                className="w-16 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
-              />
-            </div>
             <Button
               onClick={() =>
-                triggerMonthly.mutate(
-                  selectedOrgId
-                    ? {
-                        orgId: selectedOrgId,
-                        year: invoiceYear,
-                        month: invoiceMonth,
-                      }
-                    : { year: invoiceYear, month: invoiceMonth },
+                triggerMeterReport.mutate(
+                  selectedOrgId ? { orgId: selectedOrgId } : undefined,
                 )
               }
-              disabled={triggerMonthly.isPending}
+              disabled={triggerMeterReport.isPending}
             >
-              {selectedOrgId ? "Invoice Selected Org" : "Invoice All Orgs"}
+              {selectedOrgId
+                ? "Report Meters for Selected Org"
+                : "Report Meters for All Orgs"}
             </Button>
           </div>
 

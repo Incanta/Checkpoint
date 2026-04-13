@@ -1,3 +1,5 @@
+mode: "seaweedfs" # "seaweedfs" | "r2" (Cloudflare R2, requires a Studio subscription)
+
 jwt:
   signing-key: "secret"
 
@@ -8,7 +10,6 @@ backend-url:
   external: "http://localhost:13001"
 
 r2:
-  enabled: false
   account-id: ""
   api-token: ""
   access-key-id: ""

@@ -6,23 +6,23 @@ import {
   getCardExpiryNotifyDays,
   getStripeClient,
 } from "../stripe/client";
-import { generateMonthlyInvoice } from "./invoice";
 import { checkTrialExpiry } from "./trial";
 import { checkDelinquency } from "./delinquency";
 import { calculateStorageCharge } from "./storage-usage";
-import { reportOrgStorageMeters } from "./meter-reporting";
+import { isR2Enabled, deleteR2Bucket } from "~/server/r2-service";
+import { reportOrgStorageMeters, reportOrgUserMeters } from "./meter-reporting";
 import { sendEmail } from "../email/service";
 import {
   cardExpiryEmail,
   trialEndingEmail,
   trialChargeWarningEmail,
 } from "../email/billing-templates";
+import { type PrismaClient } from "@prisma/client";
 
 // Track the last run dates to prevent duplicate runs
 const SCHEDULER_STATE_KEY = Symbol.for("checkpoint.billing.scheduler");
 
 interface SchedulerState {
-  lastInvoiceRun: string | null; // "YYYY-MM" of last invoice generation
   lastDailyRun: string | null; // "YYYY-MM-DD" of last daily check
   intervalId: ReturnType<typeof setInterval> | null;
 }
@@ -35,7 +35,6 @@ const globalForScheduler = globalThis as unknown as {
 export function getSchedulerState(): SchedulerState {
   if (!globalForScheduler[SCHEDULER_STATE_KEY]) {
     globalForScheduler[SCHEDULER_STATE_KEY] = {
-      lastInvoiceRun: null,
       lastDailyRun: null,
       intervalId: null,
     };
@@ -44,11 +43,13 @@ export function getSchedulerState(): SchedulerState {
 }
 
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const METER_BATCH_SIZE = 10;
+const METER_BATCH_DELAY_MS = 1000; // 1 second between batches
 
 /**
  * Initialize the billing scheduler.
  * Checks every hour:
- * - On the 1st of the month: generate invoices / report meter events
+ * - Report meter events to Stripe (staggered batches)
  * - Daily: check trial expiry, delinquency, card expiry
  */
 export function initBillingScheduler(): void {
@@ -77,18 +78,14 @@ async function runSchedulerTick(): Promise<void> {
   const now = new Date();
   const state = getSchedulerState();
   const todayStr = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
-  const monthStr = todayStr.slice(0, 7); // "YYYY-MM"
 
   try {
-    // Monthly invoice generation (1st of month)
-    if (now.getDate() === 1 && state.lastInvoiceRun !== monthStr) {
-      await runMonthlyInvoicing(now);
-      state.lastInvoiceRun = monthStr;
-    }
+    // Hourly: report all meters to Stripe (staggered)
+    await reportMeters();
 
     // Daily checks (trial expiry, delinquency, card expiry)
     if (state.lastDailyRun !== todayStr) {
-      await runDailyChecks(now);
+      await runBillingChecks(now);
       state.lastDailyRun = todayStr;
     }
   } catch (err: any) {
@@ -96,58 +93,7 @@ async function runSchedulerTick(): Promise<void> {
   }
 }
 
-export async function runMonthlyInvoicing(now: Date): Promise<void> {
-  Logger.info(
-    "[Billing] Running monthly invoice generation / meter event reporting",
-  );
-
-  const { db } = await import("~/server/db");
-
-  // Bill for the previous month
-  const prevMonth = new Date(now);
-  prevMonth.setMonth(prevMonth.getMonth() - 1);
-  const year = prevMonth.getFullYear();
-  const month = prevMonth.getMonth() + 1;
-
-  const orgs = await db.org.findMany({
-    where: {
-      subscriptionStatus: { in: ["ACTIVE", "TRIAL", "PAST_DUE"] },
-      deletedAt: null,
-      stripeCustomerId: { not: null },
-    },
-    select: { id: true, name: true },
-  });
-
-  Logger.info(
-    `[Billing] Generating invoices for ${orgs.length} orgs (${year}-${month})`,
-  );
-
-  let success = 0;
-  let skipped = 0;
-  let failed = 0;
-
-  for (const org of orgs) {
-    try {
-      const result = await generateMonthlyInvoice(org.id, year, month, db);
-      if (result.skipped) {
-        skipped++;
-      } else {
-        success++;
-      }
-    } catch (err: any) {
-      failed++;
-      Logger.error(
-        `[Billing] Failed to generate invoice for org ${org.name}: ${JSON.stringify(err)}`,
-      );
-    }
-  }
-
-  Logger.info(
-    `[Billing] Invoice generation complete: ${success} created, ${skipped} skipped, ${failed} failed`,
-  );
-}
-
-export async function runDailyChecks(now: Date): Promise<void> {
+export async function runBillingChecks(now: Date): Promise<void> {
   Logger.info("[Billing] Running daily billing checks");
 
   const { db } = await import("~/server/db");
@@ -164,13 +110,11 @@ export async function runDailyChecks(now: Date): Promise<void> {
   // 4. Send trial ending reminders
   await sendTrialReminders(db);
 
-  // 5. Report storage meters to Stripe (daily catch-up)
-  await reportDailyStorageMeters(db);
+  // 5. Clean up R2 buckets for deleted repos
+  await cleanupDeletedRepoStorage(db);
 }
 
-async function checkCardExpiry(
-  db: import("@prisma/client").PrismaClient,
-): Promise<void> {
+async function checkCardExpiry(db: PrismaClient): Promise<void> {
   if (!isStripeEnabled()) return;
 
   const notifyDays = getCardExpiryNotifyDays();
@@ -264,9 +208,7 @@ async function checkCardExpiry(
   }
 }
 
-async function sendTrialReminders(
-  db: import("@prisma/client").PrismaClient,
-): Promise<void> {
+async function sendTrialReminders(db: PrismaClient): Promise<void> {
   const now = new Date();
 
   // Find trial orgs ending in ~7 days
@@ -330,51 +272,121 @@ async function sendTrialReminders(
 }
 
 /**
- * Report storage meter events to Stripe for all active orgs.
- * Runs daily as a catch-up — storage changes slowly and is too expensive for real-time.
+ * Report all meter events (users + storage) to Stripe for active orgs.
+ * Runs every scheduler tick (~hourly). Processes orgs in staggered batches
+ * to stay under Stripe API rate limits and avoid internal load spikes.
  */
-async function reportDailyStorageMeters(
-  db: import("@prisma/client").PrismaClient,
-): Promise<void> {
+async function reportMeters(): Promise<void> {
   if (!isStripeEnabled()) return;
+
+  const { db } = await import("~/server/db");
 
   const orgs = await db.org.findMany({
     where: {
-      subscriptionStatus: { in: ["ACTIVE", "PAST_DUE"] },
+      subscriptionStatus: { in: ["TRIAL", "ACTIVE", "PAST_DUE"] },
       stripeCustomerId: { not: null },
       deletedAt: null,
     },
     select: { id: true, name: true, stripeCustomerId: true },
   });
 
+  if (orgs.length === 0) return;
+
   Logger.info(
-    `[Billing] Reporting daily storage meters for ${orgs.length} orgs`,
+    `[Billing] Reporting meters for ${orgs.length} orgs (batch size: ${METER_BATCH_SIZE})`,
   );
 
   let success = 0;
   let failed = 0;
 
-  for (const org of orgs) {
-    if (!org.stripeCustomerId) continue;
+  for (let i = 0; i < orgs.length; i += METER_BATCH_SIZE) {
+    const batch = orgs.slice(i, i + METER_BATCH_SIZE);
+
+    await Promise.all(
+      batch.map(async (org) => {
+        if (!org.stripeCustomerId) return;
+
+        try {
+          const storage = await calculateStorageCharge(org.id, db);
+          await reportOrgStorageMeters(
+            org.id,
+            org.stripeCustomerId,
+            storage.buckets,
+            db,
+          );
+          await reportOrgUserMeters(org.id, db);
+          success++;
+        } catch (err: unknown) {
+          failed++;
+          Logger.warn(
+            `[Billing] Failed to report meters for org ${org.name}: ${String(err)}`,
+          );
+        }
+      }),
+    );
+
+    // Delay between batches to avoid rate limits
+    if (i + METER_BATCH_SIZE < orgs.length) {
+      await new Promise((resolve) => setTimeout(resolve, METER_BATCH_DELAY_MS));
+    }
+  }
+
+  Logger.info(
+    `[Billing] Meter reporting complete: ${success} reported, ${failed} failed`,
+  );
+}
+
+/**
+ * Clean up R2 buckets for repos that were soft-deleted more than 5 minutes ago.
+ * Short delay avoids any Cloudflare API race conditions while minimizing
+ * platform storage costs from orphaned buckets.
+ */
+export async function cleanupDeletedRepoStorage(
+  db: PrismaClient,
+): Promise<void> {
+  if (!isR2Enabled()) return;
+
+  const cutoff = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes ago
+
+  const repos = await db.repo.findMany({
+    where: {
+      deletedAt: { not: null, lt: cutoff },
+      r2BucketName: { not: null },
+    },
+    select: { id: true, r2BucketName: true, orgId: true },
+  });
+
+  if (repos.length === 0) return;
+
+  Logger.info(
+    `[Billing] Cleaning up R2 buckets for ${repos.length} deleted repos`,
+  );
+
+  let success = 0;
+  let failed = 0;
+
+  for (const repo of repos) {
+    if (!repo.r2BucketName) continue;
 
     try {
-      const storage = await calculateStorageCharge(org.id, db);
-      await reportOrgStorageMeters(
-        org.id,
-        org.stripeCustomerId,
-        storage.buckets,
-        db,
-      );
+      await deleteR2Bucket(repo.r2BucketName);
+      await db.repo.update({
+        where: { id: repo.id },
+        data: { r2BucketName: null },
+      });
       success++;
+      Logger.debug(
+        `[Billing] Deleted R2 bucket ${repo.r2BucketName} for repo ${repo.id}`,
+      );
     } catch (err: unknown) {
       failed++;
       Logger.warn(
-        `[Billing] Failed to report storage meters for org ${org.name}: ${String(err)}`,
+        `[Billing] Failed to delete R2 bucket ${repo.r2BucketName}: ${String(err)}`,
       );
     }
   }
 
   Logger.info(
-    `[Billing] Daily storage meters complete: ${success} reported, ${failed} failed`,
+    `[Billing] R2 cleanup complete: ${success} deleted, ${failed} failed`,
   );
 }

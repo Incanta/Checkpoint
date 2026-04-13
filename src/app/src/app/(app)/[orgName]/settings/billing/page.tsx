@@ -3,12 +3,7 @@
 import { useState } from "react";
 import { useParams, notFound } from "next/navigation";
 import { api } from "~/trpc/react";
-import {
-  Button,
-  Card,
-  PageHeader,
-  Badge,
-} from "~/app/_components/ui";
+import { Button, Card, PageHeader, Badge } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 import { useLicenseTier } from "~/app/_hooks/use-license-tier";
 import { SettingsTabs } from "../_components/settings-tabs";
@@ -151,6 +146,11 @@ export default function BillingPage() {
   );
 
   const { data: checkoutSettings } = api.billing.getCheckoutSettings.useQuery();
+
+  const { data: storageData } = api.billing.getStorageUsage.useQuery(
+    { orgId: org?.id ?? "" },
+    { enabled: !!org?.id },
+  );
 
   const { data: currentUser } = api.user.me.useQuery();
   const orgUser = (
@@ -343,7 +343,7 @@ export default function BillingPage() {
 
           {/* Included features */}
           <div className="mt-4">
-            <h4 className="mb-2 text-xs font-medium uppercase text-[var(--color-text-muted)]">
+            <h4 className="mb-2 text-xs font-medium text-[var(--color-text-muted)] uppercase">
               Included features
             </h4>
             <ul className="space-y-1 text-sm text-[var(--color-text-secondary)]">
@@ -425,6 +425,87 @@ export default function BillingPage() {
           </Card>
         )}
 
+        {/* Storage usage */}
+        {storageData && (
+          <Card>
+            <h3 className="mb-3 text-sm font-semibold text-[var(--color-text-primary)]">
+              Storage
+            </h3>
+            <div
+              className={`grid gap-4 ${storageData.isLicenseManager ? "grid-cols-3" : "grid-cols-1"}`}
+            >
+              <div className="rounded-md bg-[var(--color-bg-tertiary)] p-3 text-center">
+                <div className="text-2xl font-bold text-[var(--color-text-primary)]">
+                  {storageData.totalGB.toFixed(1)} GB
+                </div>
+                <div className="text-xs text-[var(--color-text-muted)]">
+                  Current Usage
+                </div>
+              </div>
+              {storageData.isLicenseManager && (
+                <>
+                  <div className="rounded-md bg-[var(--color-bg-tertiary)] p-3 text-center">
+                    <div className="text-2xl font-bold text-[var(--color-text-primary)]">
+                      {storageData.billedGB.toFixed(1)} GB
+                    </div>
+                    <div className="text-xs text-[var(--color-text-muted)]">
+                      Billed Usage
+                    </div>
+                    {storageData.billedGB > storageData.totalGB && (
+                      <div className="mt-1 text-xs text-amber-400">
+                        Includes peak from deleted repos
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-md bg-[var(--color-bg-tertiary)] p-3 text-center">
+                    <div className="text-2xl font-bold text-[var(--color-text-primary)]">
+                      {storageData.buckets}
+                    </div>
+                    <div className="text-xs text-[var(--color-text-muted)]">
+                      Paid Storage Buckets
+                    </div>
+                    {storageData.capacityGB > 0 && (
+                      <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+                        {storageData.capacityGB} GB capacity
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+            {storageData.isLicenseManager &&
+              storageData.pendingCleanup.length > 0 && (
+                <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+                  <p className="text-xs font-medium text-amber-400">
+                    Pending cleanup
+                  </p>
+                  <ul className="mt-1 space-y-1">
+                    {storageData.pendingCleanup.map((repo) => (
+                      <li
+                        key={repo.id}
+                        className="text-xs text-[var(--color-text-muted)]"
+                      >
+                        {repo.name}{" "}
+                        <span className="text-[var(--color-text-muted)]/60">
+                          — deleted{" "}
+                          {repo.deletedAt
+                            ? new Date(repo.deletedAt).toLocaleDateString()
+                            : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                    Once cleanup completes, billed usage will drop to your
+                    current usage ({storageData.totalGB.toFixed(1)} GB) and{" "}
+                    {(storageData.billedGB - storageData.totalGB).toFixed(1)} GB
+                    of capacity will become available.
+                  </p>
+                </div>
+              )}
+          </Card>
+        )}
+
         {/* Credits */}
         {billing && billing.creditBalanceCents > 0 && (
           <Card>
@@ -442,68 +523,66 @@ export default function BillingPage() {
 
         {/* Invoice History */}
         <Card>
-            <h3 className="mb-3 text-sm font-semibold text-[var(--color-text-primary)]">
-              Invoice History
-            </h3>
-            {billingLoading ? (
-              <p className="text-sm text-[var(--color-text-muted)]">
-                Loading...
-              </p>
-            ) : allInvoices.length === 0 ? (
-              <p className="text-sm text-[var(--color-text-muted)]">
-                No invoices yet.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                <div className="grid grid-cols-4 gap-2 text-xs font-medium uppercase text-[var(--color-text-muted)]">
-                  <div>Period</div>
-                  <div>Amount</div>
-                  <div>Status</div>
-                  <div>Date</div>
-                </div>
-                {allInvoices.map((inv) => {
-                  const invStatus =
-                    INVOICE_STATUS_BADGE[inv.status] ??
-                    INVOICE_STATUS_BADGE.DRAFT!;
-                  return (
-                    <div
-                      key={inv.id}
-                      className="grid grid-cols-4 gap-2 border-t border-[var(--color-border-default)] py-2 text-sm"
-                    >
-                      <div className="text-[var(--color-text-primary)]">
-                        {inv.month}/{inv.year}
-                      </div>
-                      <div className="text-[var(--color-text-primary)]">
-                        {formatCents(inv.totalCents)}
-                      </div>
-                      <div>
-                        <Badge variant={invStatus.variant}>
-                          {invStatus.label}
-                        </Badge>
-                      </div>
-                      <div className="text-[var(--color-text-muted)]">
-                        {formatDate(
-                          (inv.paidAt ??
-                            inv.issuedAt ??
-                            inv.createdAt) as unknown as string,
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-                {hasNextPage && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => void fetchNextPage()}
-                    className="mt-2"
-                  >
-                    Load more
-                  </Button>
-                )}
+          <h3 className="mb-3 text-sm font-semibold text-[var(--color-text-primary)]">
+            Invoice History
+          </h3>
+          {billingLoading ? (
+            <p className="text-sm text-[var(--color-text-muted)]">Loading...</p>
+          ) : allInvoices.length === 0 ? (
+            <p className="text-sm text-[var(--color-text-muted)]">
+              No invoices yet.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <div className="grid grid-cols-4 gap-2 text-xs font-medium text-[var(--color-text-muted)] uppercase">
+                <div>Period</div>
+                <div>Amount</div>
+                <div>Status</div>
+                <div>Date</div>
               </div>
-            )}
-          </Card>
+              {allInvoices.map((inv) => {
+                const invStatus =
+                  INVOICE_STATUS_BADGE[inv.status] ??
+                  INVOICE_STATUS_BADGE.DRAFT!;
+                return (
+                  <div
+                    key={inv.id}
+                    className="grid grid-cols-4 gap-2 border-t border-[var(--color-border-default)] py-2 text-sm"
+                  >
+                    <div className="text-[var(--color-text-primary)]">
+                      {inv.month}/{inv.year}
+                    </div>
+                    <div className="text-[var(--color-text-primary)]">
+                      {formatCents(inv.totalCents)}
+                    </div>
+                    <div>
+                      <Badge variant={invStatus.variant}>
+                        {invStatus.label}
+                      </Badge>
+                    </div>
+                    <div className="text-[var(--color-text-muted)]">
+                      {formatDate(
+                        (inv.paidAt ??
+                          inv.issuedAt ??
+                          inv.createdAt) as unknown as string,
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {hasNextPage && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void fetchNextPage()}
+                  className="mt-2"
+                >
+                  Load more
+                </Button>
+              )}
+            </div>
+          )}
+        </Card>
       </div>
 
       {/* Change Plan Modal */}

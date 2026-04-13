@@ -10,12 +10,13 @@ import {
   getStripeEnvironment,
   getStripePriceConfig,
   getTrialDurationDays,
+  getStoragePricingConfig,
 } from "~/server/stripe/client";
 import {
-  getCreditBalance,
   cancelSubscription,
   resumeSubscription,
   startTrial,
+  calculateStorageCharge,
 } from "~/server/billing";
 import { Logger } from "~/server/logging";
 
@@ -517,4 +518,61 @@ export const billingRouter = createTRPCRouter({
     });
     return { trialUsed: user.trialUsed };
   }),
+
+  /** Get storage usage breakdown for an org. */
+  getStorageUsage: protectedProcedure
+    .input(z.object({ orgId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const orgUser = await ctx.db.orgUser.findFirst({
+        where: { orgId: input.orgId, userId: ctx.session.user.id },
+      });
+      if (!orgUser) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not a member" });
+      }
+
+      const lm = isLicenseManager();
+
+      const storage = await calculateStorageCharge(input.orgId, ctx.db);
+
+      // Pricing config for capacity display
+      let freeGb = 0;
+      let bucketSizeGb = 0;
+      let billedGB = storage.totalGB;
+      let capacityGB = 0;
+      if (lm) {
+        const pricing = getStoragePricingConfig();
+        freeGb = pricing.freeTierGb;
+        bucketSizeGb = pricing.bucketSizeGb;
+        billedGB = Number(storage.peakBytes) / (1024 * 1024 * 1024);
+        capacityGB = freeGb + storage.buckets * bucketSizeGb;
+      }
+
+      // Find repos pending R2 cleanup
+      const pendingCleanup = await ctx.db.repo.findMany({
+        where: {
+          orgId: input.orgId,
+          deletedAt: { not: null },
+          r2BucketName: { not: null },
+        },
+        select: { id: true, name: true, deletedAt: true },
+      });
+
+      return {
+        totalBytes: storage.totalBytes,
+        totalGB: storage.totalGB,
+        peakBytes: storage.peakBytes.toString(),
+        billedGB,
+        buckets: storage.buckets,
+        chargeCents: storage.chargeCents,
+        freeGb,
+        bucketSizeGb,
+        capacityGB,
+        isLicenseManager: lm,
+        pendingCleanup: pendingCleanup.map((r) => ({
+          id: r.id,
+          name: r.name,
+          deletedAt: r.deletedAt,
+        })),
+      };
+    }),
 });

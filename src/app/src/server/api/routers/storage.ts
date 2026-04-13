@@ -12,9 +12,8 @@ import {
   isR2Enabled,
   getR2Endpoint,
   createR2TempCredentials,
+  getBucketUsageR2,
 } from "~/server/r2-service";
-import { getEffectiveTier } from "~/server/license-client";
-import { hasFeature } from "~/server/license-utils";
 
 export const storageRouter = createTRPCRouter({
   getToken: protectedProcedure
@@ -38,7 +37,6 @@ export const storageRouter = createTRPCRouter({
         type: input.write ? "write" : "read",
       });
 
-      // Existing SeaweedFS flow
       const token = njwt.create(
         {
           iss: "checkpoint-vcs",
@@ -59,29 +57,33 @@ export const storageRouter = createTRPCRouter({
       token.setExpiration(Date.now() + expirationSeconds * 1000);
 
       // Check if R2 storage should be used
-      if (isR2Enabled() && repo.r2BucketName) {
-        const tier = await getEffectiveTier(repo.orgId, ctx.db);
-        if (hasFeature(tier, "r2Storage")) {
-          const creds = await createR2TempCredentials(
-            repo.r2BucketName,
-            input.write ? "object-read-write" : "object-read-only",
-            expirationSeconds,
-          );
-
-          return {
-            storageType: "r2" as "seaweedfs" | "r2",
-            token: token.compact(),
-            expiration: Math.floor(Date.now() / 1000) + expirationSeconds,
-            backendUrl: config.get<string>("storage.backend-url.external"),
-            r2Credentials: {
-              accessKeyId: creds.accessKeyId,
-              secretAccessKey: creds.secretAccessKey,
-              sessionToken: creds.sessionToken,
-              endpoint: getR2Endpoint(),
-              bucket: repo.r2BucketName,
-            },
-          };
+      if (isR2Enabled()) {
+        if (!repo.r2BucketName) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "R2 storage is enabled but repo does not have a bucket",
+          });
         }
+
+        const creds = await createR2TempCredentials(
+          repo.r2BucketName,
+          input.write ? "object-read-write" : "object-read-only",
+          expirationSeconds,
+        );
+
+        return {
+          storageType: "r2" as "seaweedfs" | "r2",
+          token: token.compact(),
+          expiration: Math.floor(Date.now() / 1000) + expirationSeconds,
+          backendUrl: config.get<string>("storage.backend-url.external"),
+          r2Credentials: {
+            accessKeyId: creds.accessKeyId,
+            secretAccessKey: creds.secretAccessKey,
+            sessionToken: creds.sessionToken,
+            endpoint: getR2Endpoint(),
+            bucket: repo.r2BucketName,
+          },
+        };
       }
 
       return {
@@ -111,6 +113,25 @@ export const storageRouter = createTRPCRouter({
         input.repoId,
         "READ",
       );
+
+      if (isR2Enabled()) {
+        if (!repo.r2BucketName) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "R2 storage is enabled but repo does not have a bucket",
+          });
+        }
+
+        try {
+          const usage = await getBucketUsageR2(repo.r2BucketName);
+          return { size: usage };
+        } catch (err: unknown) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `Failed to fetch repo size from R2: ${String(err)}`,
+          });
+        }
+      }
 
       const token = njwt.create(
         {

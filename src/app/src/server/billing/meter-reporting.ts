@@ -10,37 +10,15 @@ import {
   getStoragePricingConfig,
 } from "../stripe/client";
 
-// In-memory debounce map: orgId → last report timestamp (ms)
-const DEBOUNCE_KEY = Symbol.for("checkpoint.billing.meterDebounce");
-const DEBOUNCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-
-const globalForDebounce = globalThis as unknown as {
-  [DEBOUNCE_KEY]?: Map<string, number>;
-};
-
-function getDebounceMap(): Map<string, number> {
-  if (!globalForDebounce[DEBOUNCE_KEY]) {
-    globalForDebounce[DEBOUNCE_KEY] = new Map();
-  }
-  return globalForDebounce[DEBOUNCE_KEY];
-}
-
 /**
- * Report the current user meter values (write/read/minimum-due) to Stripe
- * for a given org. Debounced per-org to avoid excessive API calls.
- *
- * Fire-and-forget — callers should not await or depend on the result.
+ * Report the current user meter values (write/read) to Stripe
+ * for a given org.
  */
 export async function reportOrgUserMeters(
   orgId: string,
   db: PrismaClient,
 ): Promise<void> {
   if (!isStripeEnabled()) return;
-
-  // Debounce check
-  const debounceMap = getDebounceMap();
-  const lastReport = debounceMap.get(orgId) ?? 0;
-  if (Date.now() - lastReport < DEBOUNCE_INTERVAL_MS) return;
 
   try {
     const org = await db.org.findUnique({
@@ -53,10 +31,9 @@ export async function reportOrgUserMeters(
     });
 
     if (!org?.stripeCustomerId) return;
-    // Don't report meters during trial — Stripe skips invoicing during trial
-    if (org.subscriptionStatus === "TRIAL") return;
     // Only report for active subscriptions
-    if (!["ACTIVE", "PAST_DUE"].includes(org.subscriptionStatus ?? "")) return;
+    if (!["TRIAL", "ACTIVE", "PAST_DUE"].includes(org.subscriptionStatus ?? ""))
+      return;
 
     const now = new Date();
     const year = now.getUTCFullYear();
@@ -72,14 +49,7 @@ export async function reportOrgUserMeters(
       (u) => u.readCount > 0 && u.writeCount === 0,
     ).length;
 
-    await reportUserMeterEvents(
-      org.stripeCustomerId,
-      writeUsers,
-      readUsers,
-    );
-
-    // Update debounce timestamp
-    debounceMap.set(orgId, Date.now());
+    await reportUserMeterEvents(org.stripeCustomerId, writeUsers, readUsers);
 
     Logger.debug(
       `[Billing] Reported user meters for org ${orgId}: ${writeUsers}w/${readUsers}r`,
@@ -134,8 +104,7 @@ export async function reportOrgStorageMeters(
     const prices = SEAT_PRICES[tier] ?? SEAT_PRICES.BASIC!;
     const { bucketPriceCents } = getStoragePricingConfig();
 
-    const userCharges =
-      writeUsers * prices.write + readUsers * prices.read;
+    const userCharges = writeUsers * prices.write + readUsers * prices.read;
     const storageCharges = storageBuckets * bucketPriceCents;
     const subtotal = userCharges + storageCharges;
 

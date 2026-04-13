@@ -7,11 +7,10 @@ import {
   deleteRepoDirectory,
 } from "~/server/storage-service";
 import { isR2Enabled, createR2Bucket } from "~/server/r2-service";
-import { getEffectiveTier } from "~/server/license-client";
-import { hasFeature, isLicenseManager } from "~/server/license-utils";
 import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { Logger } from "~/server/logging";
+import { snapshotStoragePeak } from "~/server/billing/storage-usage";
 
 export const repoRouter = createTRPCRouter({
   getRepo: protectedProcedure
@@ -146,34 +145,25 @@ export const repoRouter = createTRPCRouter({
 
       // Create storage for the repo (R2 bucket or SeaweedFS directory)
       if (isR2Enabled()) {
-        Logger.debug(
-          `R2 is enabled, checking if org/instance has R2 feature...`,
-        );
-        const tier = await getEffectiveTier(input.orgId, ctx.db);
-        if (isLicenseManager() || hasFeature(tier, "r2Storage")) {
-          Logger.debug(`Org/instance has R2 feature, creating R2 bucket...`);
-          const bucketName = `checkpoint-${repo.id}`;
-          try {
-            await createR2Bucket(bucketName);
-            await ctx.db.repo.update({
-              where: { id: repo.id },
-              data: { r2BucketName: bucketName },
-            });
-          } catch (error: any) {
-            Logger.error(
-              `Failed to create R2 bucket: ${JSON.stringify(error)}`,
-            );
-          }
-        } else {
-          // Org/instance doesn't have R2 feature, fall back to SeaweedFS
-          Logger.debug(`Org/instance doesn't have R2 feature, using Filer...`);
-          try {
-            await createRepoDirectory(input.orgId, repo.id);
-          } catch (error: any) {
-            Logger.error(
-              `Failed to create repo directory in storage: ${JSON.stringify(error)}`,
-            );
-          }
+        Logger.debug(`R2 enabled, creating bucket...`);
+        const bucketName = `checkpoint-${repo.id}`;
+        try {
+          await createR2Bucket(bucketName);
+          await ctx.db.repo.update({
+            where: { id: repo.id },
+            data: { r2BucketName: bucketName },
+          });
+        } catch (error: any) {
+          Logger.error(`Failed to create R2 bucket: ${JSON.stringify(error)}`);
+          // rollback repo creation if bucket creation fails
+          await ctx.db.repoRole.deleteMany({ where: { repoId: repo.id } });
+          await ctx.db.branch.deleteMany({ where: { repoId: repo.id } });
+          await ctx.db.changelist.deleteMany({ where: { repoId: repo.id } });
+          await ctx.db.repo.delete({ where: { id: repo.id } });
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to create storage for the repository",
+          });
         }
       } else {
         // R2 not enabled, use SeaweedFS
@@ -232,6 +222,15 @@ export const repoRouter = createTRPCRouter({
         input.id,
         RepoAccess.ADMIN,
       );
+
+      // Snapshot peak storage before deletion so billing remembers this period's usage
+      try {
+        await snapshotStoragePeak(repo.orgId, ctx.db);
+      } catch (err: unknown) {
+        Logger.warn(
+          `[Repo] Failed to snapshot storage peak for org ${repo.orgId}: ${String(err)}`,
+        );
+      }
 
       // Soft-delete the repo
       const deleted = await ctx.db.repo.update({

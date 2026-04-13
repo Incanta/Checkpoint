@@ -6,10 +6,10 @@ import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { Logger } from "~/server/logging";
 import {
   getSchedulerState,
-  runMonthlyInvoicing,
-  runDailyChecks,
+  runBillingChecks,
 } from "~/server/billing/scheduler";
-import { generateMonthlyInvoice } from "~/server/billing/invoice";
+import { reportOrgUserMeters, reportOrgStorageMeters } from "~/server/billing/meter-reporting";
+import { calculateStorageCharge } from "~/server/billing/storage-usage";
 import { checkTrialExpiry } from "~/server/billing/trial";
 import { checkDelinquency } from "~/server/billing/delinquency";
 
@@ -29,7 +29,6 @@ export const billingDevRouter = createTRPCRouter({
     assertDevMode();
     const state = getSchedulerState();
     return {
-      lastInvoiceRun: state.lastInvoiceRun,
       lastDailyRun: state.lastDailyRun,
       isRunning: state.intervalId !== null,
     };
@@ -39,19 +38,16 @@ export const billingDevRouter = createTRPCRouter({
   resetSchedulerState: protectedProcedure.mutation(() => {
     assertDevMode();
     const state = getSchedulerState();
-    state.lastInvoiceRun = null;
     state.lastDailyRun = null;
     Logger.info("[BillingDev] Scheduler state reset");
     return { success: true };
   }),
 
-  /** Trigger monthly invoicing for a specific year/month. */
-  triggerMonthlyInvoicing: protectedProcedure
+  /** Trigger meter reporting for a single org or all orgs. */
+  triggerMeterReport: protectedProcedure
     .input(
       z
         .object({
-          year: z.number().optional(),
-          month: z.number().min(1).max(12).optional(),
           orgId: z.string().optional(),
         })
         .optional(),
@@ -59,41 +55,71 @@ export const billingDevRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       assertDevMode();
 
-      if (input?.orgId && input.year && input.month) {
-        // Single org, specific period
-        const result = await generateMonthlyInvoice(
-          input.orgId,
-          input.year,
-          input.month,
+      if (input?.orgId) {
+        const org = await ctx.db.org.findUniqueOrThrow({
+          where: { id: input.orgId },
+          select: { id: true, name: true, stripeCustomerId: true },
+        });
+        if (!org.stripeCustomerId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Org has no Stripe customer ID",
+          });
+        }
+
+        const storage = await calculateStorageCharge(org.id, ctx.db);
+        await reportOrgStorageMeters(
+          org.id,
+          org.stripeCustomerId,
+          storage.buckets,
           ctx.db,
         );
+        await reportOrgUserMeters(org.id, ctx.db);
+
         Logger.info(
-          `[BillingDev] Invoice generated for org ${input.orgId}: ${JSON.stringify(result)}`,
+          `[BillingDev] Meter report triggered for org ${org.name}`,
         );
-        return { results: [result] };
+        return { orgId: org.id, storageBuckets: storage.buckets };
       }
 
-      // All orgs — use the scheduler's batch function
-      const now = new Date();
-      if (input?.year && input?.month) {
-        // Fake the date so runMonthlyInvoicing bills for the right period
-        // runMonthlyInvoicing bills for "previous month", so set to month+1
-        now.setFullYear(input.year);
-        now.setMonth(input.month); // month is 0-indexed, so this = input.month + 1 effectively
-        now.setDate(1);
+      // All orgs
+      const orgs = await ctx.db.org.findMany({
+        where: {
+          subscriptionStatus: { in: ["ACTIVE", "TRIAL", "PAST_DUE"] },
+          stripeCustomerId: { not: null },
+          deletedAt: null,
+        },
+        select: { id: true, name: true, stripeCustomerId: true },
+      });
+
+      let success = 0;
+      for (const org of orgs) {
+        if (!org.stripeCustomerId) continue;
+        try {
+          const storage = await calculateStorageCharge(org.id, ctx.db);
+          await reportOrgStorageMeters(
+            org.id,
+            org.stripeCustomerId,
+            storage.buckets,
+            ctx.db,
+          );
+          await reportOrgUserMeters(org.id, ctx.db);
+          success++;
+        } catch {
+          // continue with next org
+        }
       }
 
-      await runMonthlyInvoicing(now);
-      return {
-        results: [],
-        message: "Monthly invoicing completed for all orgs",
-      };
+      Logger.info(
+        `[BillingDev] Meter report triggered for ${success}/${orgs.length} orgs`,
+      );
+      return { reported: success, total: orgs.length };
     }),
 
   /** Trigger all daily checks immediately. */
   triggerDailyChecks: protectedProcedure.mutation(async () => {
     assertDevMode();
-    await runDailyChecks(new Date());
+    await runBillingChecks(new Date());
     Logger.info("[BillingDev] Daily checks triggered");
     return { success: true };
   }),

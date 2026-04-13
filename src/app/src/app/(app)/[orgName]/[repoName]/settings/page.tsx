@@ -145,6 +145,8 @@ export default function RepoSettingsPage() {
     },
   });
 
+  const { data: checkoutSettings } = api.billing.getCheckoutSettings.useQuery();
+
   const deleteRepo = api.repo.deleteRepo.useMutation({
     onSuccess: () => {
       void utils.org.myOrgs.invalidate();
@@ -332,6 +334,16 @@ export default function RepoSettingsPage() {
               Type <strong>{repoName}</strong> to confirm. This cannot be
               undone.
             </p>
+            {checkoutSettings?.enabled && (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+                <p className="text-xs text-amber-400">
+                  <strong>Storage billing note:</strong> Storage used by this
+                  repository will continue to count toward your current billing
+                  period&apos;s peak usage. Storage cleanup will begin shortly
+                  after deletion.
+                </p>
+              </div>
+            )}
             <input
               type="text"
               value={deleteConfirm}

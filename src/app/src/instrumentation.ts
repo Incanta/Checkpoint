@@ -8,17 +8,33 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { Logger } = await import("./server/logging");
 
-    // Small delay to ensure the server is fully ready
-    setTimeout(() => {
-      Logger.log("[healthy] App is ready");
-    }, 100);
-
     // Verify license manager key (Ed25519 via DNS TXT record)
-    const { verifyLicenseManagerKey } = await import("~/server/license-utils");
+    const { verifyLicenseManagerKey, isLicenseManager } =
+      await import("~/server/license-utils");
     await verifyLicenseManagerKey();
 
     // Initialize license client for self-hosted instances
-    const { initLicenseClient } = await import("~/server/license-client");
-    void initLicenseClient();
+    const { initLicenseClient, getInstanceTier } =
+      await import("~/server/license-client");
+    await initLicenseClient();
+
+    const { default: config } = await import("@incanta/config");
+
+    Logger.log(`Checkpoint App:`);
+    Logger.log(`  Port:        ${config.get<number>("server.listen-port")}`);
+    Logger.log(`  License:     ${getInstanceTier()}`);
+    Logger.log(
+      `  Storage:     ${config.get<string>("storage.mode") === "r2" ? "R2" : "SeaweedFS"}`,
+    );
+    Logger.log(`  Database:    ${config.get<string>("db.provider")}`);
+    if (isLicenseManager()) {
+      Logger.log(`  Stripe:      ${config.get<boolean>("stripe.enabled")}`);
+      Logger.log(
+        `  Newsletter:  ${config.get<boolean>("newsletter.kit.enabled")}`,
+      );
+      Logger.log(`  SMTP:        ${config.get<boolean>("email.enabled")}`);
+    }
+
+    Logger.log("[healthy] App is ready");
   }
 }
