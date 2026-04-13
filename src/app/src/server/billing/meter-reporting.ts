@@ -9,6 +9,7 @@ import {
   getMinimumInvoiceCents,
   getStoragePricingConfig,
 } from "../stripe/client";
+import { getBillingPeriod } from "./billing-period";
 
 /**
  * Report the current user meter values (write/read) to Stripe
@@ -27,6 +28,7 @@ export async function reportOrgUserMeters(
         stripeCustomerId: true,
         subscriptionStatus: true,
         subscriptionTier: true,
+        billingCycleAnchor: true,
       },
     });
 
@@ -35,9 +37,10 @@ export async function reportOrgUserMeters(
     if (!["TRIAL", "ACTIVE", "PAST_DUE"].includes(org.subscriptionStatus ?? ""))
       return;
 
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const month = now.getUTCMonth() + 1;
+    const { year, month } = getBillingPeriod(
+      new Date(),
+      org.billingCycleAnchor,
+    );
 
     const activities = await db.orgUserActivity.findMany({
       where: { orgId, year, month },
@@ -63,7 +66,6 @@ export async function reportOrgUserMeters(
 
 /**
  * Report storage and minimum-due meters for an org.
- * Called by the daily scheduler — not real-time (too expensive).
  */
 export async function reportOrgStorageMeters(
   orgId: string,
@@ -74,9 +76,15 @@ export async function reportOrgStorageMeters(
   if (!isStripeEnabled()) return;
 
   try {
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const month = now.getUTCMonth() + 1;
+    const org = await db.org.findUnique({
+      where: { id: orgId },
+      select: { subscriptionTier: true, billingCycleAnchor: true },
+    });
+
+    const { year, month } = getBillingPeriod(
+      new Date(),
+      org?.billingCycleAnchor ?? 1,
+    );
 
     // Get current user counts for minimum-due calculation
     const activities = await db.orgUserActivity.findMany({
@@ -88,11 +96,6 @@ export async function reportOrgStorageMeters(
     const readUsers = activities.filter(
       (u) => u.readCount > 0 && u.writeCount === 0,
     ).length;
-
-    const org = await db.org.findUnique({
-      where: { id: orgId },
-      select: { subscriptionTier: true },
-    });
 
     // Calculate approximate minimum due based on current meters
     const SEAT_PRICES: Record<string, { write: number; read: number }> = {

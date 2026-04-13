@@ -9,6 +9,7 @@ import {
   resolveBinaryExtensions,
 } from "~/server/binary-extensions";
 import { Logger } from "~/server/logging";
+import { getBillingPeriod } from "~/server/billing/billing-period";
 
 export const orgRouter = createTRPCRouter({
   myOrgs: protectedProcedure.query(async ({ ctx }) => {
@@ -288,9 +289,16 @@ export const orgRouter = createTRPCRouter({
         });
       }
 
-      const now = new Date();
-      const year = input.year ?? now.getUTCFullYear();
-      const month = input.month ?? now.getUTCMonth() + 1;
+      const org = await ctx.db.org.findUnique({
+        where: { id: input.orgId },
+        select: { billingCycleAnchor: true },
+      });
+      const defaultPeriod = getBillingPeriod(
+        new Date(),
+        org?.billingCycleAnchor ?? 1,
+      );
+      const year = input.year ?? defaultPeriod.year;
+      const month = input.month ?? defaultPeriod.month;
 
       const activities = await ctx.db.orgUserActivity.findMany({
         where: {

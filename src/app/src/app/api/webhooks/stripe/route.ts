@@ -92,7 +92,7 @@ async function applyScheduledTierChange(
       stripeSubscriptionId: true,
     },
   });
-  if (!org || !org.scheduledTier) return;
+  if (!org?.scheduledTier) return;
 
   const newTier = org.scheduledTier;
 
@@ -100,9 +100,7 @@ async function applyScheduledTierChange(
   if (org.stripeSubscriptionId) {
     try {
       const stripe = getStripeClient();
-      const sub = await stripe.subscriptions.retrieve(
-        org.stripeSubscriptionId,
-      );
+      const sub = await stripe.subscriptions.retrieve(org.stripeSubscriptionId);
       const prices = getStripePriceConfig();
       const tierKey = newTier.toLowerCase() as "basic" | "pro" | "studio";
       const cloudPrices = prices.cloud;
@@ -192,6 +190,25 @@ async function handleCheckoutCompleted(
       subscriptionTier: tier,
     },
   });
+
+  // Sync billing cycle anchor from the Stripe subscription
+  if (subscriptionId) {
+    try {
+      const stripe = getStripeClient();
+      const sub = await stripe.subscriptions.retrieve(subscriptionId);
+      if (sub.billing_cycle_anchor) {
+        const anchorDate = new Date(sub.billing_cycle_anchor * 1000);
+        await db.org.update({
+          where: { id: org.id },
+          data: { billingCycleAnchor: anchorDate.getUTCDate() },
+        });
+      }
+    } catch (err: unknown) {
+      Logger.warn(
+        `[Stripe Webhook] Failed to sync billing cycle anchor for org ${org.id}: ${String(err)}`,
+      );
+    }
+  }
 
   // Add the user as admin
   await db.orgUser.create({
@@ -295,19 +312,22 @@ async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> {
         where: { stripeCustomerId: customerId },
       });
       if (org) {
-        const now = new Date();
+        // Use invoice period_start for year/month (the billing period this invoice covers)
+        const periodStart = invoice.period_start
+          ? new Date(invoice.period_start * 1000)
+          : new Date();
         await db.invoice.create({
           data: {
             orgId: org.id,
             stripeInvoiceId,
-            year: now.getFullYear(),
-            month: now.getMonth() + 1,
+            year: periodStart.getUTCFullYear(),
+            month: periodStart.getUTCMonth() + 1,
             status: "PAID",
             subtotalCents: invoice.subtotal,
             creditAppliedCents: 0,
             minimumDueAddedCents: 0,
             totalCents: invoice.total,
-            paidAt: now,
+            paidAt: new Date(),
           },
         });
       }
@@ -386,13 +406,21 @@ async function handleSubscriptionUpdated(
   });
   if (!org) return;
 
-  // Sync trial end date from Stripe
+  // Sync trial end date and billing cycle anchor from Stripe
+  const updateData: Record<string, unknown> = {};
+
   if (subscription.trial_end) {
+    updateData.trialEndsAt = new Date(subscription.trial_end * 1000);
+  }
+  if (subscription.billing_cycle_anchor) {
+    const anchorDate = new Date(subscription.billing_cycle_anchor * 1000);
+    updateData.billingCycleAnchor = anchorDate.getUTCDate();
+  }
+
+  if (Object.keys(updateData).length > 0) {
     await db.org.update({
       where: { id: org.id },
-      data: {
-        trialEndsAt: new Date(subscription.trial_end * 1000),
-      },
+      data: updateData,
     });
   }
 

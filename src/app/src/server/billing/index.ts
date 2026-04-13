@@ -12,3 +12,4 @@ export {
   reportOrgUserMeters,
   reportOrgStorageMeters,
 } from "./meter-reporting";
+export { getBillingPeriod } from "./billing-period";

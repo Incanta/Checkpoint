@@ -6,6 +6,7 @@ import { Logger } from "../logging";
 import { getStoragePricingConfig } from "../stripe/client";
 import { isLicenseManager } from "../license-utils";
 import { getBucketUsageR2, isR2Enabled } from "../r2-service";
+import { getBillingPeriod } from "./billing-period";
 
 export interface StorageChargeResult {
   totalBytes: number;
@@ -75,9 +76,14 @@ export async function calculateStorageCharge(
   let peakBytes = BigInt(totalBytes);
 
   if (isLicenseManager()) {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
+    const org = await db.org.findUnique({
+      where: { id: orgId },
+      select: { billingCycleAnchor: true },
+    });
+    const { year, month } = getBillingPeriod(
+      new Date(),
+      org?.billingCycleAnchor ?? 1,
+    );
 
     const peak = await db.orgStoragePeak.upsert({
       where: { orgId_year_month: { orgId, year, month } },
