@@ -1565,7 +1565,7 @@ __metadata:
     eslint: "npm:*"
     javascript-obfuscator: "npm:^5.4.1"
     next: "npm:^16.1.7"
-    nodemailer: "npm:^8.0.4"
+    nodemailer: "npm:^8.0.5"
     postcss: "npm:^8.5.3"
     prettier: "npm:*"
     prettier-plugin-tailwindcss: "npm:^0.6.11"
@@ -7080,7 +7080,7 @@ __metadata:
     react-router: "npm:^7.12.0"
     tailwindcss: "npm:^4.1.18"
     typescript: "npm:*"
-    vite: "npm:^7.3.1"
+    vite: "npm:^7.3.2"
     vite-plugin-electron: "npm:^0.28.6"
     vite-plugin-electron-renderer: "npm:^0.14.5"
   peerDependencies:
@@ -10778,10 +10778,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"nodemailer@npm:^8.0.4":
-  version: 8.0.4
-  resolution: "nodemailer@npm:8.0.4"
-  checksum: 10c0/5fb6fa72645b541c18b84b861de46f4740449e1d7c987b4d9ef715d815d613f93262225bc319e217df6215d6f123efadb9a412dcf937fe0a41cbecf279dfb2a0
+"nodemailer@npm:^8.0.5":
+  version: 8.0.5
+  resolution: "nodemailer@npm:8.0.5"
+  checksum: 10c0/5e8450499bd059c56d74ba96fa5f9928de2ecdae0d53c083dba5661d797114c1f9524d30f992d0263cc5a7dcf5a54b9c1d92dc1f766da150c9d0bde7d3798431
   languageName: node
   linkType: hard
 
@@ -13611,9 +13611,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vite@npm:^7.3.1":
-  version: 7.3.1
-  resolution: "vite@npm:7.3.1"
+"vite@npm:^7.3.2":
+  version: 7.3.2
+  resolution: "vite@npm:7.3.2"
   dependencies:
     esbuild: "npm:^0.27.0"
     fdir: "npm:^6.5.0"
@@ -13662,7 +13662,7 @@ __metadata:
       optional: true
   bin:
     vite: bin/vite.js
-  checksum: 10c0/5c7548f5f43a23533e53324304db4ad85f1896b1bfd3ee32ae9b866bac2933782c77b350eb2b52a02c625c8ad1ddd4c000df077419410650c982cd97fde8d014
+  checksum: 10c0/74be36907e208916f18bfec81c8eba18b869f0a170f1ece0a4dcb14874d0f0e7c022fb6c2ad896e3ee6c973fe88f53ac23b4078879ada340d8b263260868b8d4
   languageName: node
   linkType: hard
 
