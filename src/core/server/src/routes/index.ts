@@ -12,15 +12,14 @@ export function routes(): Router {
 
   router.use(routeRoot());
   router.use(routeSubmit());
-  router.use(routeFiler());
   router.use(routeSystem());
-  router.use(routeRepoSize());
 
-  if (
-    config.get<string>("storage.mode") === "seaweedfs" &&
-    config.get<boolean>("storage.seaweedfs.stub.enabled")
-  ) {
-    router.use("/filer", routeStubFiler());
+  if (config.get<string>("storage.mode") === "seaweedfs") {
+    router.use(routeFiler());
+    router.use(routeRepoSize());
+    if (config.get<boolean>("storage.seaweedfs.stub.enabled")) {
+      router.use("/filer", routeStubFiler());
+    }
   }
 
   return router;

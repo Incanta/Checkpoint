@@ -2,7 +2,10 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { createRepoDirectory } from "~/server/storage-service";
+import {
+  createRepoDirectory,
+  deleteRepoDirectory,
+} from "~/server/storage-service";
 import { isR2Enabled, createR2Bucket } from "~/server/r2-service";
 import { getEffectiveTier } from "~/server/license-client";
 import { hasFeature, isLicenseManager } from "~/server/license-utils";
@@ -62,7 +65,9 @@ export const repoRouter = createTRPCRouter({
 
       const isAdmin = !!(
         orgUser &&
-        (repo.org.defaultRepoAccess === "ADMIN" || repoRole?.access === "ADMIN")
+        (orgUser.role === "ADMIN" ||
+          repo.org.defaultRepoAccess === "ADMIN" ||
+          repoRole?.access === "ADMIN")
       );
 
       return { isMember, canWrite, isAdmin };
@@ -180,6 +185,15 @@ export const repoRouter = createTRPCRouter({
             `Failed to create repo directory in storage: ${JSON.stringify(error)}`,
           );
         }
+        // rollback repo creation if directory creation fails
+        await ctx.db.repoRole.deleteMany({ where: { repoId: repo.id } });
+        await ctx.db.branch.deleteMany({ where: { repoId: repo.id } });
+        await ctx.db.changelist.deleteMany({ where: { repoId: repo.id } });
+        await ctx.db.repo.delete({ where: { id: repo.id } });
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create storage for the repository",
+        });
       }
 
       return repo;
@@ -213,15 +227,34 @@ export const repoRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await getUserAndRepoWithAccess(ctx, input.id, RepoAccess.ADMIN);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.id,
+        RepoAccess.ADMIN,
+      );
 
-      return ctx.db.repo.update({
+      // Soft-delete the repo
+      const deleted = await ctx.db.repo.update({
         where: { id: input.id },
         data: {
+          name: `${repo.name}-deleted-${Date.now()}`,
           deletedAt: new Date(),
           deletedBy: ctx.session.user.id,
         },
       });
+
+      // Clean up SeaweedFS directory immediately (non-R2 repos)
+      if (!repo.r2BucketName) {
+        try {
+          await deleteRepoDirectory(repo.orgId, repo.id);
+        } catch (err: unknown) {
+          Logger.warn(
+            `[Repo] Failed to delete storage directory for repo ${repo.id}: ${String(err)}`,
+          );
+        }
+      }
+
+      return deleted;
     }),
 
   list: protectedProcedure

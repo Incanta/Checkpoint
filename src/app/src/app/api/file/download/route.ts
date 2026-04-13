@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
       mode: "read",
       basePath: remoteBasePath,
     },
-    config.get<string>("storage.signing-keys.read"),
+    config.get<string>("storage.jwt.signing-key"),
   );
 
   const expirationSeconds = config.get<number>(

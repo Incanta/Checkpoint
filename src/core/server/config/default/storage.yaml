@@ -2,7 +2,6 @@ mode: "seaweedfs" # "seaweedfs" | "r2" (Cloudflare R2, requires a Studio subscri
 
 jwt:
   signing-key: "secret"
-  system-signing-key: "system-secret"
 
 seaweedfs:
   stub:
