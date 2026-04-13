@@ -120,6 +120,7 @@ model Org {
   license    License?
   invoices   Invoice[]
   cardExpiryNotifications CardExpiryNotification[]
+  storagePeaks OrgStoragePeak[]
 }
 
 model OrgUser {
@@ -754,6 +755,23 @@ model CardExpiryNotification {
   sentAt DateTime @default(now())
 
   @@unique([orgId, paymentMethodId, notifyDaysBefore])
+}
+
+model OrgStoragePeak {
+  id    String @id @default(cuid())
+  org   Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId String
+
+  year  Int
+  month Int // 1-12
+
+  peakStorageBytes BigInt @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, year, month])
+  @@index([orgId])
 }
 
 // ── Notifications & Subscriptions ────────────────────────────────
