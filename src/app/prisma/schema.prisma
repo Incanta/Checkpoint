@@ -105,6 +105,7 @@ model Org {
   stripeCustomerId     String?            @unique
   stripeSubscriptionId String?            @unique
   subscriptionStatus   SubscriptionStatus @default(ACTIVE)
+  billingCycleAnchor   Int                @default(1) // Day of month when billing cycle starts (1-31)
   trialEndsAt          DateTime?
   canceledAt           DateTime?
   delinquentSince      DateTime?
