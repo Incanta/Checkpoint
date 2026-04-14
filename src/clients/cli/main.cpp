@@ -19,8 +19,10 @@
  *   revert <file...>              Revert files to head version
  *   diff <file>                   Show diff for a file
  *   init [orgName/repoName]       Initialize a workspace in the current directory
+ *   unlink                        Unlink a workspace from the daemon
  *   accounts                      List authenticated accounts
  *   login [--endpoint URL]        Authenticate with a Checkpoint server
+ *   logout                        Remove authentication for a Checkpoint server
  *   shelve <name> [-m msg]        Shelve staged files to a named shelf
  *   unshelve <name> [-b branch]   Submit a shelf to a branch
  *   shelf [list|delete <name>]    Manage shelves
@@ -158,6 +160,10 @@ int main(int argc, char** argv) {
       .default_value(std::string(""))
       .nargs(argparse::nargs_pattern::optional);
 
+  // unlink
+  argparse::ArgumentParser unlinkCmd("unlink");
+  unlinkCmd.add_description("Unlink a workspace from the daemon");
+
   // accounts
   argparse::ArgumentParser accountsCmd("accounts");
   accountsCmd.add_description("List authenticated accounts");
@@ -171,6 +177,10 @@ int main(int argc, char** argv) {
   loginCmd.add_argument("--id")
       .help("Daemon ID for this credential (default: auto-generated)")
       .default_value(std::string(""));
+
+  // logout
+  argparse::ArgumentParser logoutCmd("logout");
+  logoutCmd.add_description("Remove authentication for a Checkpoint server");
 
   // shelve
   argparse::ArgumentParser shelveCmd("shelve");
@@ -242,8 +252,10 @@ int main(int argc, char** argv) {
   program.add_subparser(revertCmd);
   program.add_subparser(diffCmd);
   program.add_subparser(initCmd);
+  program.add_subparser(unlinkCmd);
   program.add_subparser(accountsCmd);
   program.add_subparser(loginCmd);
+  program.add_subparser(logoutCmd);
   program.add_subparser(shelveCmd);
   program.add_subparser(unshelveCmd);
   program.add_subparser(shelfCmd);
@@ -287,10 +299,14 @@ int main(int argc, char** argv) {
         std::cerr << diffCmd;
       } else if (cmd == "init") {
         std::cerr << initCmd;
+      } else if (cmd == "unlink") {
+        std::cerr << unlinkCmd;
       } else if (cmd == "accounts") {
         std::cerr << accountsCmd;
       } else if (cmd == "login") {
         std::cerr << loginCmd;
+      } else if (cmd == "logout") {
+        std::cerr << logoutCmd;
       } else if (cmd == "shelve") {
         std::cerr << shelveCmd;
       } else if (cmd == "unshelve") {
@@ -378,6 +394,10 @@ int main(int argc, char** argv) {
       return checkpoint::cmdInit(repo);
     }
 
+    if (program.is_subcommand_used(unlinkCmd)) {
+      return checkpoint::cmdUnlink();
+    }
+
     if (program.is_subcommand_used(accountsCmd)) {
       return checkpoint::cmdAccounts();
     }
@@ -398,6 +418,10 @@ int main(int argc, char** argv) {
         }
       }
       return checkpoint::cmdLogin(endpoint, daemonId);
+    }
+
+    if (program.is_subcommand_used(logoutCmd)) {
+      return checkpoint::cmdLogout();
     }
 
     if (program.is_subcommand_used(shelveCmd)) {

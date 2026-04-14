@@ -148,6 +148,37 @@ export class DaemonManager {
   }
 
   /**
+   * Unlinks a workspace: stops watching, clears all cached state.
+   * Does NOT delete the .checkpoint directory on disk.
+   */
+  public unlinkWorkspace(workspaceId: string, daemonId: string): void {
+    // Close file watcher
+    const watcher = this.watchers.get(workspaceId);
+    if (watcher) {
+      watcher.close();
+      this.watchers.delete(workspaceId);
+    }
+
+    // Clear all cached state
+    this.workspaceStates.delete(workspaceId);
+    this.dirtyFiles.delete(workspaceId);
+    this.workspacePendingChanges.delete(workspaceId);
+    this.syncStatuses.delete(workspaceId);
+    this.trackedDirSets.delete(workspaceId);
+    this.ignorePatterns.delete(workspaceId);
+    this.ignoreCaches.delete(workspaceId);
+    this.vcsOperationActive.delete(workspaceId);
+    this.vcsBufferedEvents.delete(workspaceId);
+
+    // Remove from in-memory workspace list
+    const workspaces = this.workspaces.get(daemonId) ?? [];
+    this.workspaces.set(
+      daemonId,
+      workspaces.filter((w) => w.id !== workspaceId),
+    );
+  }
+
+  /**
    * Loads the workspace state from state.json and caches it.
    */
   private async loadWorkspaceState(workspace: Workspace): Promise<void> {

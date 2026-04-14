@@ -145,6 +145,10 @@ export default class DaemonHandler {
       this.handleLogin(data);
     });
 
+    ipcOn(this.ipcMain, "auth:logout", async (_event, data) => {
+      this.handleLogout(data);
+    });
+
     ipcOn(this.ipcMain, "workspace:create", async (event, data) => {
       this.workspaceCreate(data);
     });
@@ -155,6 +159,10 @@ export default class DaemonHandler {
       if (workspace) {
         this.selectWorkspace(workspace);
       }
+    });
+
+    ipcOn(this.ipcMain, "workspace:unlink", async (_event, data) => {
+      this.handleUnlinkWorkspace(data);
     });
 
     ipcOn(this.ipcMain, "workspace:refresh", async (event, data) => {
@@ -450,6 +458,86 @@ export default class DaemonHandler {
       }
 
       throw new Error("Timed out waiting for device authorization");
+    }
+  }
+
+  private async handleLogout(data: Channels["auth:logout"]): Promise<void> {
+    try {
+      if (!this.isMocked) {
+        const client = await CreateDaemonClient();
+        await client.auth.logout.mutate({ daemonId: data.daemonId });
+      }
+
+      const currentUsers = store.get(usersAtom) || [];
+      const nextUsers = currentUsers.filter(
+        (u) => u.daemonId !== data.daemonId,
+      );
+      store.set(usersAtom, nextUsers.length > 0 ? nextUsers : null);
+
+      const currentUser = store.get(currentUserAtom);
+      if (currentUser?.daemonId === data.daemonId) {
+        if (nextUsers.length > 0) {
+          store.set(currentUserAtom, nextUsers[0]);
+        } else {
+          store.set(currentUserAtom, null);
+          store.set(workspacesAtom, null);
+          store.set(currentWorkspaceAtom, null);
+          store.set(dashboardOrgsAtom, []);
+          store.set(dashboardReposAtom, []);
+        }
+      }
+
+      if (this.webContents) {
+        ipcSend(this.webContents, "auth:logout:success", null);
+      }
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "auth:logout:error", {
+          message: error?.message || "Failed to logout",
+        });
+      }
+    }
+  }
+
+  private async handleUnlinkWorkspace(
+    data: Channels["workspace:unlink"],
+  ): Promise<void> {
+    try {
+      const currentUser = store.get(currentUserAtom);
+      if (!currentUser) {
+        throw new Error("No user selected");
+      }
+
+      if (!this.isMocked) {
+        const client = await CreateDaemonClient();
+        await client.workspaces.ops.remove.mutate({
+          daemonId: currentUser.daemonId,
+          workspaceId: data.workspaceId,
+        });
+      }
+
+      const currentWorkspaces = store.get(workspacesAtom) || [];
+      const nextWorkspaces = currentWorkspaces.filter(
+        (ws) => ws.id !== data.workspaceId,
+      );
+      store.set(workspacesAtom, nextWorkspaces);
+
+      const activeWorkspace = store.get(currentWorkspaceAtom);
+      if (activeWorkspace?.id === data.workspaceId) {
+        store.set(currentWorkspaceAtom, null);
+      }
+
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:unlink:success", {
+          workspaceId: data.workspaceId,
+        });
+      }
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:unlink:error", {
+          message: error?.message || "Failed to unlink workspace",
+        });
+      }
     }
   }
 
