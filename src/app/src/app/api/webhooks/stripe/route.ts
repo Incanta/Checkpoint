@@ -231,7 +231,7 @@ async function handleCheckoutCompleted(
   // Start trial if requested
   if (useTrial) {
     try {
-      await startTrial(org.id, userId, db);
+      await startTrial(org.id, userId, db, tier);
     } catch (err: any) {
       Logger.warn(
         `[Stripe Webhook] Failed to start trial for org ${org.id}: ${JSON.stringify(err)}`,
@@ -402,7 +402,7 @@ async function handleSubscriptionUpdated(
 ): Promise<void> {
   const org = await db.org.findFirst({
     where: { stripeSubscriptionId: subscription.id },
-    select: { id: true },
+    select: { id: true, subscriptionStatus: true },
   });
   if (!org) return;
 
@@ -415,6 +415,17 @@ async function handleSubscriptionUpdated(
   if (subscription.billing_cycle_anchor) {
     const anchorDate = new Date(subscription.billing_cycle_anchor * 1000);
     updateData.billingCycleAnchor = anchorDate.getUTCDate();
+  }
+
+  if (
+    (org.subscriptionStatus === "PAST_DUE" ||
+      org.subscriptionStatus === "SUSPENDED") &&
+    subscription.status === "active"
+  ) {
+    updateData.subscriptionStatus = "ACTIVE";
+    updateData.canceledAt = null;
+    updateData.suspendedAt = null;
+    updateData.delinquentSince = null;
   }
 
   if (Object.keys(updateData).length > 0) {

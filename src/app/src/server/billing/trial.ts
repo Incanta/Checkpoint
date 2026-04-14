@@ -2,6 +2,7 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 import { Logger } from "../logging";
+import { TimeManager } from "../time";
 import {
   getTrialDurationDays,
   getStripeClient,
@@ -18,6 +19,7 @@ export async function startTrial(
   orgId: string,
   userId: string,
   db: PrismaClient,
+  tier: "BASIC" | "PRO" | "STUDIO" = "BASIC",
 ): Promise<{ success: boolean; trialEndsAt: Date | null; error?: string }> {
   const user = await db.user.findUniqueOrThrow({
     where: { id: userId },
@@ -33,7 +35,7 @@ export async function startTrial(
   }
 
   const durationDays = getTrialDurationDays();
-  const trialEndsAt = new Date();
+  const trialEndsAt = TimeManager.date();
   trialEndsAt.setDate(trialEndsAt.getDate() + durationDays);
 
   await db.$transaction([
@@ -41,7 +43,7 @@ export async function startTrial(
       where: { id: orgId },
       data: {
         subscriptionStatus: "TRIAL",
-        subscriptionTier: "BASIC",
+        subscriptionTier: tier,
         trialEndsAt,
       },
     }),
@@ -66,7 +68,7 @@ export async function startTrial(
  * If trial ended and canceled → SUSPENDED (delinquent)
  */
 export async function checkTrialExpiry(db: PrismaClient): Promise<void> {
-  const now = new Date();
+  const now = TimeManager.date();
 
   // Trials that ended without cancellation → transition to ACTIVE
   const expiredActive = await db.org.findMany({

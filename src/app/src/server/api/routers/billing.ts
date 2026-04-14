@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import config from "@incanta/config";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { isLicenseManager } from "~/server/license-utils";
@@ -437,7 +438,12 @@ export const billingRouter = createTRPCRouter({
 
   /** Start a free trial for the org. */
   startTrial: protectedProcedure
-    .input(z.object({ orgId: z.string() }))
+    .input(
+      z.object({
+        orgId: z.string(),
+        tier: z.enum(["BASIC", "PRO", "STUDIO"]).default("BASIC"),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       assertBillingEnabled();
 
@@ -449,7 +455,12 @@ export const billingRouter = createTRPCRouter({
       if (!orgUser) throw new TRPCError({ code: "FORBIDDEN" });
       assertBillingRole(orgUser.role);
 
-      const result = await startTrial(input.orgId, ctx.session.user.id, ctx.db);
+      const result = await startTrial(
+        input.orgId,
+        ctx.session.user.id,
+        ctx.db,
+        input.tier,
+      );
 
       if (!result.success) {
         throw new TRPCError({
@@ -488,7 +499,7 @@ export const billingRouter = createTRPCRouter({
         const stripe = getStripeClient();
         const session = await stripe.billingPortal.sessions.create({
           customer: org.stripeCustomerId,
-          return_url: `${ctx.headers.get("origin") ?? ""}/${input.orgId}/settings/billing`,
+          return_url: `${config.get<string>("server.external-url")}/${input.orgId}/settings/billing`,
         });
         return { url: session.url };
       } catch (err: any) {

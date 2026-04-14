@@ -27,6 +27,11 @@ export default function DevBillingPage() {
   const [canceledAt, setCanceledAt] = useState("");
   const [overrideStatus, setOverrideStatus] = useState("");
 
+  // Time simulation fields
+  const [simYear, setSimYear] = useState("");
+  const [simMonth, setSimMonth] = useState("");
+  const [simDay, setSimDay] = useState("");
+
   const appendLog = (msg: string) => {
     setLog((prev) => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
   };
@@ -108,6 +113,25 @@ export default function DevBillingPage() {
     onError: (err) => appendLog(`Error: ${err.message}`),
   });
 
+  const { data: timeInfo, refetch: refetchTimeInfo } =
+    api.billingDev.getTimeInfo.useQuery();
+
+  const setSimulatedDay = api.billingDev.setSimulatedDay.useMutation({
+    onSuccess: (data) => {
+      appendLog(`Simulated day set to ${data.simulatedDate}`);
+      void refetchTimeInfo();
+    },
+    onError: (err: { message: string }) => appendLog(`Error: ${err.message}`),
+  });
+
+  const clearSimulatedDay = api.billingDev.clearSimulatedDay.useMutation({
+    onSuccess: () => {
+      appendLog("Time simulation cleared");
+      void refetchTimeInfo();
+    },
+    onError: (err: { message: string }) => appendLog(`Error: ${err.message}`),
+  });
+
   const selectedOrg = orgs?.find((o) => o.id === selectedOrgId);
 
   return (
@@ -145,6 +169,107 @@ export default function DevBillingPage() {
             disabled={resetScheduler.isPending}
           >
             Reset State
+          </Button>
+        </div>
+      </Card>
+
+      {/* Time Simulation */}
+      <Card>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
+              Time Simulation
+            </h3>
+            <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+              {timeInfo?.isSimulated ? (
+                <span>
+                  Simulated:{" "}
+                  <strong className="text-amber-400">
+                    {formatDate(timeInfo.effectiveTime)}
+                  </strong>
+                  <span className="ml-2 text-[var(--color-text-muted)]">
+                    (real: {formatDate(timeInfo.realTime)})
+                  </span>
+                </span>
+              ) : (
+                <span>
+                  Real time:{" "}
+                  <strong>{formatDate(timeInfo?.realTime)}</strong>
+                </span>
+              )}
+            </div>
+          </div>
+          {timeInfo?.isSimulated && (
+            <Badge variant="warning">SIMULATED</Badge>
+          )}
+        </div>
+        <div className="mt-3 flex items-end gap-2">
+          <div>
+            <label className="block text-xs text-[var(--color-text-muted)]">
+              Year
+            </label>
+            <input
+              type="number"
+              value={simYear}
+              onChange={(e) => setSimYear(e.target.value)}
+              placeholder={String(new Date().getFullYear())}
+              className="w-20 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-[var(--color-text-muted)]">
+              Month
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={12}
+              value={simMonth}
+              onChange={(e) => setSimMonth(e.target.value)}
+              placeholder={String(new Date().getMonth() + 1)}
+              className="w-16 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-[var(--color-text-muted)]">
+              Day
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={31}
+              value={simDay}
+              onChange={(e) => setSimDay(e.target.value)}
+              placeholder={String(new Date().getDate())}
+              className="w-16 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
+            />
+          </div>
+          <Button
+            onClick={() => {
+              const y = parseInt(simYear, 10);
+              const m = parseInt(simMonth, 10);
+              const d = parseInt(simDay, 10);
+              if (isNaN(y) || isNaN(m) || isNaN(d)) {
+                appendLog("Invalid date values");
+                return;
+              }
+              setSimulatedDay.mutate({ year: y, month: m, day: d });
+            }}
+            disabled={setSimulatedDay.isPending || !simYear || !simMonth || !simDay}
+          >
+            Set Day
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              clearSimulatedDay.mutate();
+              setSimYear("");
+              setSimMonth("");
+              setSimDay("");
+            }}
+            disabled={clearSimulatedDay.isPending || !timeInfo?.isSimulated}
+          >
+            Clear
           </Button>
         </div>
       </Card>

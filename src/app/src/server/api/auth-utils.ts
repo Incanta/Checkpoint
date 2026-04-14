@@ -59,6 +59,20 @@ export async function getUserAndRepoWithAccess(
     throw new TRPCError({ code: "NOT_FOUND", message: "Repository not found" });
   }
 
+  if (repo.org.subscriptionStatus === "SUSPENDED") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "Your organization's access is suspended due to unpaid invoices. Please contact your organization administrator to update your payment method.",
+    });
+  } else if (repo.org.subscriptionStatus === "DELETED") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "Your organization's data has been deleted due to unpaid invoices.",
+    });
+  }
+
   const orgUser = repo.org.users[0];
   const repoRole = repo.additionalRoles[0];
   let isAdmin = false;

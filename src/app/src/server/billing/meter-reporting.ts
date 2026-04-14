@@ -2,6 +2,7 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 import { Logger } from "../logging";
+import { TimeManager } from "../time";
 import {
   getStripeClient,
   isStripeEnabled,
@@ -35,7 +36,7 @@ export async function getOrgUserMeters(
       return null;
 
     const { year, month } = getBillingPeriod(
-      new Date(),
+      TimeManager.date(),
       org.billingCycleAnchor,
     );
 
@@ -125,7 +126,7 @@ export async function reportOrgMeters(
 
     const stripe = getStripeClient();
     const meters = getMeterNames();
-    const timestamp = Math.floor(Date.now() / 1000);
+    const timestamp = Math.floor(TimeManager.now() / 1000);
 
     await stripe.billing.meterEvents.create({
       event_name: meters.writeUsers,

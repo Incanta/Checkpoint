@@ -11,6 +11,7 @@ import {
 import { db } from "~/server/db";
 import type { PrismaClient } from "@prisma/client";
 import { Logger } from "./logging";
+import { TimeManager } from "./time";
 
 const CACHED_TIER_KEY = Symbol.for("checkpoint.licenseClient.cachedTier");
 const LAST_VALIDATION_KEY = Symbol.for(
@@ -93,7 +94,7 @@ async function reportUsage(): Promise<void> {
   const config = getLicenseConfig();
   if (!config.key || !config.secret || !config.managerUrl) return;
 
-  const now = new Date();
+  const now = TimeManager.date();
   // Report for the previous month
   let year = now.getUTCFullYear();
   let month = now.getUTCMonth(); // 0-11, so this is previous month (getUTCMonth() + 1 - 1)
@@ -138,7 +139,7 @@ export async function initLicenseClient(): Promise<void> {
 
   // Validate on startup
   setCachedTier(await validateWithManager());
-  setLastValidation(Date.now());
+  setLastValidation(TimeManager.now());
   Logger.info(`[License] Validated. Tier: ${getCachedTier()}`);
 
   // Periodic re-validation
@@ -146,11 +147,11 @@ export async function initLicenseClient(): Promise<void> {
     setInterval(() => {
       void (async () => {
         setCachedTier(await validateWithManager());
-        setLastValidation(Date.now());
+        setLastValidation(TimeManager.now());
         Logger.info(`[License] Re-validated. Tier: ${getCachedTier()}`);
 
         // Report usage on the reporting day
-        const now = new Date();
+        const now = TimeManager.date();
         if (now.getUTCDate() === REPORTING_DAY) {
           await reportUsage();
         }

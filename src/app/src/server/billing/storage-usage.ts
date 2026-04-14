@@ -3,6 +3,7 @@ import "server-only";
 import type { PrismaClient } from "@prisma/client";
 import config from "@incanta/config";
 import { Logger } from "../logging";
+import { TimeManager } from "../time";
 import { getStoragePricingConfig } from "../stripe/client";
 import { isLicenseManager } from "../license-utils";
 import { getBucketUsageR2, isR2Enabled } from "../r2-service";
@@ -81,7 +82,7 @@ export async function calculateStorageCharge(
       select: { billingCycleAnchor: true },
     });
     const { year, month } = getBillingPeriod(
-      new Date(),
+      TimeManager.date(),
       org?.billingCycleAnchor ?? 1,
     );
 

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Logger } from "../logging";
+import { TimeManager } from "../time";
 import {
   isStripeEnabled,
   getCardExpiryNotifyDays,
@@ -75,7 +76,7 @@ export function initBillingScheduler(): void {
 }
 
 async function runSchedulerTick(): Promise<void> {
-  const now = new Date();
+  const now = TimeManager.date();
   const state = getSchedulerState();
   const todayStr = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
 
@@ -141,7 +142,7 @@ async function checkCardExpiry(db: PrismaClient): Promise<void> {
         customer: org.stripeCustomerId,
         type: "card",
       });
-      const now = new Date();
+      const now = TimeManager.date();
 
       for (const method of methods.data) {
         if (method.type !== "card" || !method.card) continue;
@@ -209,9 +210,7 @@ async function checkCardExpiry(db: PrismaClient): Promise<void> {
 }
 
 async function sendTrialReminders(db: PrismaClient): Promise<void> {
-  const now = new Date();
-
-  // Find trial orgs ending in ~7 days
+  const now = TimeManager.date();
   const reminderThreshold = new Date(now);
   reminderThreshold.setDate(reminderThreshold.getDate() + 7);
 
@@ -345,7 +344,7 @@ export async function cleanupDeletedRepoStorage(
 ): Promise<void> {
   if (!isR2Enabled()) return;
 
-  const cutoff = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes ago
+  const cutoff = new Date(TimeManager.now() - 5 * 60 * 1000); // 5 minutes ago
 
   const repos = await db.repo.findMany({
     where: {

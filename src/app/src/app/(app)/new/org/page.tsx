@@ -248,9 +248,12 @@ export default function NewOrgPage() {
               Free Trial
             </h3>
             <p className="text-sm text-[var(--color-text-secondary)]">
-              Start with a 1-month free trial of the Basic plan. No charges
-              during the trial period. Your subscription will automatically
-              begin after the trial ends unless you cancel.
+              Start with a 1-month free trial of the{" "}
+              <span className="font-medium text-[var(--color-text-primary)]">
+                {tier}
+              </span>{" "}
+              plan. No charges during the trial period. Your subscription will
+              automatically begin after the trial ends unless you cancel.
             </p>
 
             <div className="space-y-2">

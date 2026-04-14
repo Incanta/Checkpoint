@@ -2,6 +2,7 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 import { Logger } from "../logging";
+import { TimeManager } from "../time";
 import {
   getDelinquencyConfig,
   getStripeClient,
@@ -32,7 +33,7 @@ export async function markDelinquent(
       where: { id: orgId },
       data: {
         subscriptionStatus: "PAST_DUE",
-        delinquentSince: new Date(),
+        delinquentSince: TimeManager.date(),
       },
     });
     Logger.warn(`[Billing] Org ${org.name} (${orgId}) marked PAST_DUE`);
@@ -47,7 +48,7 @@ export async function markDelinquent(
  */
 export async function checkDelinquency(db: PrismaClient): Promise<void> {
   const { suspendAfterDays, deleteAfterDays } = getDelinquencyConfig();
-  const now = new Date();
+  const now = TimeManager.date();
 
   const suspendThreshold = new Date(now);
   suspendThreshold.setDate(suspendThreshold.getDate() - suspendAfterDays);
@@ -244,7 +245,7 @@ export async function cancelSubscription(
     data: {
       subscriptionStatus:
         org.subscriptionStatus === "TRIAL" ? "TRIAL" : "CANCELED",
-      canceledAt: new Date(),
+      canceledAt: TimeManager.date(),
     },
   });
 

@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { getBillingPeriod } from "../billing/billing-period";
+import { TimeManager } from "../time";
 
 /**
  * Record a user activity event (read or write) for an org.
@@ -14,7 +15,7 @@ export async function recordActivity(
     type: "read" | "write";
   },
 ) {
-  const now = new Date();
+  const now = TimeManager.date();
   const isWrite = opts.type === "write";
 
   try {

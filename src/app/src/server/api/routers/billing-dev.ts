@@ -4,6 +4,7 @@ import config from "@incanta/config";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { Logger } from "~/server/logging";
+import { TimeManager } from "~/server/time";
 import {
   getSchedulerState,
   runBillingChecks,
@@ -117,7 +118,7 @@ export const billingDevRouter = createTRPCRouter({
   /** Trigger all daily checks immediately. */
   triggerDailyChecks: protectedProcedure.mutation(async () => {
     assertDevMode();
-    await runBillingChecks(new Date());
+    await runBillingChecks(TimeManager.date());
     Logger.info("[BillingDev] Daily checks triggered");
     return { success: true };
   }),
@@ -208,10 +209,10 @@ export const billingDevRouter = createTRPCRouter({
       assertDevMode();
 
       const data: Record<string, unknown> = { status: input.status };
-      if (input.status === "PAID") data.paidAt = new Date();
-      if (input.status === "FAILED") data.failedAt = new Date();
-      if (input.status === "ISSUED") data.issuedAt = new Date();
-      if (input.status === "HELD") data.heldAt = new Date();
+      if (input.status === "PAID") data.paidAt = TimeManager.date();
+      if (input.status === "FAILED") data.failedAt = TimeManager.date();
+      if (input.status === "ISSUED") data.issuedAt = TimeManager.date();
+      if (input.status === "HELD") data.heldAt = TimeManager.date();
 
       const invoice = await ctx.db.invoice.update({
         where: { id: input.invoiceId },
@@ -265,4 +266,43 @@ export const billingDevRouter = createTRPCRouter({
         include: { items: true },
       });
     }),
+
+  /** Set a simulated day for billing/metering systems. */
+  setSimulatedDay: protectedProcedure
+    .input(
+      z.object({
+        year: z.number().int().min(2020).max(2100),
+        month: z.number().int().min(1).max(12),
+        day: z.number().int().min(1).max(31),
+      }),
+    )
+    .mutation(({ input }) => {
+      assertDevMode();
+      TimeManager.setDay(input.year, input.month, input.day);
+      Logger.info(
+        `[BillingDev] Simulated day set to ${input.year}-${String(input.month).padStart(2, "0")}-${String(input.day).padStart(2, "0")}`,
+      );
+      return {
+        simulatedDate: TimeManager.date().toISOString(),
+        isSimulated: true,
+      };
+    }),
+
+  /** Clear time simulation, revert to real time. */
+  clearSimulatedDay: protectedProcedure.mutation(() => {
+    assertDevMode();
+    TimeManager.clearSimulation();
+    Logger.info("[BillingDev] Time simulation cleared");
+    return { simulatedDate: null, isSimulated: false };
+  }),
+
+  /** Get current time info (real and simulated). */
+  getTimeInfo: protectedProcedure.query(() => {
+    assertDevMode();
+    return {
+      realTime: new Date().toISOString(),
+      effectiveTime: TimeManager.date().toISOString(),
+      isSimulated: TimeManager.isSimulated(),
+    };
+  }),
 });

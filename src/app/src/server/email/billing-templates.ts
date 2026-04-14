@@ -72,11 +72,12 @@ export function paymentFailedEmail(
     html: layout(
       `Payment failed for ${orgName}`,
       `<p>We were unable to collect a payment of <span class="amount">${amount}</span> for <strong>${esc(orgName)}</strong>.</p>
-       <p>Please update your payment method to avoid service interruption. If payment is not received within 14 days, your organization's access will be suspended.</p>
+       <p>Please update your payment method to avoid service interruption. If payment is not received <strong>within ${config.get<number>("stripe.delinquency.suspend-after-days")} days</strong>, your organization's <strong>access will be suspended</strong>.</p>
+       <p><strong>Important:</strong> If the balance remains unpaid for ${config.get<number>("stripe.delinquency.delete-after-days")} days, all data for your organization will be <strong>permanently deleted</strong>.</p>
        ${button("Update Payment Method", retryUrl)}
        <p class="muted">If you believe this is an error, please contact support.</p>`,
     ),
-    text: `Payment of ${amount} failed for ${orgName}. Please update your payment method at ${retryUrl} to avoid service interruption.`,
+    text: `Payment of ${amount} failed for ${orgName}. Please update your payment method at ${retryUrl} to avoid service interruption. Access will be suspended after ${config.get<number>("stripe.delinquency.suspend-after-days")} days and data will be deleted after ${config.get<number>("stripe.delinquency.delete-after-days")} days if unpaid.`,
   };
 }
 
@@ -107,9 +108,9 @@ export function accountDeletionWarningEmail(
       subject: `⚠️ Data deletion for ${orgName}`,
       html: layout(
         `Data deletion notification for ${orgName}`,
-        `<p><strong>Your data for ${esc(orgName)} has been permanently deleted due to non-payment. You must still pay any outstanding invoices.</strong></p>`,
+        `<p><strong>Your data for ${esc(orgName)} has been permanently deleted due to non-payment.</strong></p>`,
       ),
-      text: `ALERT: Data for ${orgName} has been permanently deleted due to non-payment. You must still pay any outstanding invoices.`,
+      text: `ALERT: Data for ${orgName} has been permanently deleted due to non-payment.`,
     };
   }
 

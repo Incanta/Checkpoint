@@ -152,6 +152,13 @@ export default function BillingPage() {
     { enabled: !!org?.id },
   );
 
+  const { data: paymentUpdateUrl } = api.billing.getPaymentUpdateUrl.useQuery(
+    { orgId: org?.id ?? "" },
+    {
+      enabled: !!org?.id && billing?.status !== "DELETED",
+    },
+  );
+
   const { data: currentUser } = api.user.me.useQuery();
   const orgUser = (
     (org as Record<string, unknown> | undefined)?.users as
@@ -251,7 +258,21 @@ export default function BillingPage() {
             </div>
 
             {canManage && billing && (
-              <div>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    if (paymentUpdateUrl?.url) {
+                      window.open(paymentUpdateUrl.url, "_blank");
+                    }
+                  }}
+                  disabled={
+                    !paymentUpdateUrl?.url || billing.status === "DELETED"
+                  }
+                >
+                  Update Payment Method
+                </Button>
                 {(billing.status === "PAST_DUE" ||
                   billing.status === "SUSPENDED" ||
                   billing.status === "CANCELED" ||
