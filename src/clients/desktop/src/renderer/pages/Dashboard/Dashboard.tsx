@@ -14,6 +14,7 @@ import { faFolderOpen } from "@fortawesome/free-solid-svg-icons/faFolderOpen";
 import { faPlus } from "@fortawesome/free-solid-svg-icons/faPlus";
 import { faArrowUpRightFromSquare } from "@fortawesome/free-solid-svg-icons/faArrowUpRightFromSquare";
 import { faNetworkWired } from "@fortawesome/free-solid-svg-icons/faNetworkWired";
+import { faLinkSlash } from "@fortawesome/free-solid-svg-icons/faLinkSlash";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ipc } from "../ipc";
 import { Dropdown } from "primereact/dropdown";
@@ -59,6 +60,22 @@ export default function Dashboard(): React.ReactElement {
     setWorkspaceNameInput("");
     setWorkspacePathInput("");
     setDashboardNewWorkspaceFolder("");
+  };
+
+  const [unlinkTarget, setUnlinkTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+
+  const handleLogout = () => {
+    if (!currentUser) return;
+    ipc.sendMessage("auth:logout", { daemonId: currentUser.daemonId });
+  };
+
+  const handleUnlinkWorkspace = () => {
+    if (!unlinkTarget) return;
+    ipc.sendMessage("workspace:unlink", { workspaceId: unlinkTarget.id });
+    setUnlinkTarget(null);
   };
 
   const openCreateWorkspaceDialog = (repoId: string) => {
@@ -150,12 +167,17 @@ export default function Dashboard(): React.ReactElement {
                 label: user.details!.username || user.details!.email,
                 value: user.details!.id,
               }))
-              .concat({ label: "Add login credentials...", value: "add" })}
+              .concat(
+                { label: "Add login credentials...", value: "add" },
+                { label: "Logout", value: "logout" },
+              )}
             placeholder="Select a User"
             onChange={(e) => {
               if (e.value === "add") {
                 setCurrentUser(null);
                 navigate("/login");
+              } else if (e.value === "logout") {
+                handleLogout();
               } else {
                 const selectedUser = users?.find(
                   (user) => user.details?.id === e.value,
@@ -256,7 +278,7 @@ export default function Dashboard(): React.ReactElement {
                               boxShadow:
                                 "0.13rem 0.13rem 0.13rem rgba(0, 0, 0, 0.3)",
                             }}
-                            className="grid grid-cols-[1.75rem_auto_3rem] items-center"
+                            className="grid grid-cols-[1.75rem_auto_5.5rem] items-center"
                           >
                             <div className="col-span-1">
                               <FontAwesomeIcon
@@ -284,7 +306,7 @@ export default function Dashboard(): React.ReactElement {
                                 {ws.localPath}
                               </div>
                             </div>
-                            <div className="col-span-1">
+                            <div className="col-span-1 flex gap-1 justify-end">
                               <Button
                                 label={
                                   <FontAwesomeIcon
@@ -292,10 +314,23 @@ export default function Dashboard(): React.ReactElement {
                                   />
                                 }
                                 tooltip="Open workspace"
-                                className="ml-[1rem] text-[0.8em] p-[0.25rem]"
+                                className="text-[0.8em] p-[0.25rem]"
                                 onClick={() => {
                                   ipc.sendMessage("workspace:select", {
                                     id: ws.id,
+                                  });
+                                }}
+                              />
+                              <Button
+                                label={
+                                  <FontAwesomeIcon icon={faLinkSlash} />
+                                }
+                                tooltip="Unlink workspace"
+                                className="text-[0.8em] p-[0.25rem]"
+                                onClick={() => {
+                                  setUnlinkTarget({
+                                    id: ws.id,
+                                    name: ws.name,
                                   });
                                 }}
                               />
@@ -408,6 +443,43 @@ export default function Dashboard(): React.ReactElement {
             </div>
           </label>
         </div>
+      </Dialog>
+      <Dialog
+        header="Unlink Workspace"
+        visible={unlinkTarget !== null}
+        style={{
+          width: "28rem",
+          backgroundColor: "var(--color-panel)",
+          padding: "1rem",
+          borderRadius: "0.5rem",
+          boxShadow: "0.2rem 0.2rem 2rem 0.1rem #00000094",
+        }}
+        modal
+        onHide={() => setUnlinkTarget(null)}
+        footer={
+          <div className="flex w-full justify-end gap-2">
+            <button
+              type="button"
+              className="px-3 py-2 rounded bg-[#3b3b3b] text-white"
+              onClick={() => setUnlinkTarget(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="px-4 py-2 rounded bg-[#dc2626] text-white"
+              onClick={handleUnlinkWorkspace}
+            >
+              Unlink
+            </button>
+          </div>
+        }
+      >
+        <p className="text-[0.9em]">
+          Are you sure you want to unlink{" "}
+          <strong>{unlinkTarget?.name}</strong>? The workspace directory will not
+          be deleted, but Checkpoint will stop tracking changes.
+        </p>
       </Dialog>
     </div>
   );

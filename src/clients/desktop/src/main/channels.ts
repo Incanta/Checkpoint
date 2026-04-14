@@ -26,6 +26,9 @@ export type Channels = {
   "atom:value": { key: string; value: any };
 
   "auth:login": { daemonId: string; endpoint: string };
+  "auth:logout": { daemonId: string };
+  "auth:logout:success": null;
+  "auth:logout:error": { message: string };
   "auth:select-user": { daemonId: string };
 
   "set-renderer-url": { url: string };
@@ -37,6 +40,9 @@ export type Channels = {
     defaultBranchName: string;
   };
   "workspace:select": { id: string };
+  "workspace:unlink": { workspaceId: string };
+  "workspace:unlink:success": { workspaceId: string };
+  "workspace:unlink:error": { message: string };
   "workspace:create-branch": {
     name: string;
     headNumber: number;

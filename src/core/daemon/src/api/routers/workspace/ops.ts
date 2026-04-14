@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { Workspace } from "../../../types/index.js";
 import { DaemonConfig } from "../../../daemon-config.js";
 import { saveWorkspaceConfig } from "../../../util/util.js";
+import { Logger } from "../../../logging.js";
 
 export const opsRouter = router({
   list: {
@@ -82,5 +83,32 @@ export const opsRouter = router({
       manager.watchWorkspace(newWorkspace);
 
       return { workspace: newWorkspace };
+    }),
+
+  remove: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = ctx.manager;
+
+      // Stop watching and clear cached state
+      manager.unlinkWorkspace(input.workspaceId, input.daemonId);
+
+      // Remove from daemon.json
+      const config = DaemonConfig.Ensure().vars;
+      config.workspaces = config.workspaces.filter(
+        (w) => w.id !== input.workspaceId,
+      );
+      await DaemonConfig.Save();
+
+      Logger.info(
+        `Workspace ${input.workspaceId} unlinked for daemon ${input.daemonId}`,
+      );
+
+      return { success: true };
     }),
 });

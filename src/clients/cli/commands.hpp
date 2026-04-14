@@ -1485,6 +1485,60 @@ inline int cmdLogin(const std::string& endpoint, const std::string& daemonId) {
 }
 
 // ═════════════════════════════════════════════════════════════════
+//  COMMAND: logout (remove authentication for a Checkpoint server)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdLogout() {
+  int port = getDaemonPort();
+  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  DaemonClient client(baseUrl);
+
+  auto usersResult = client.query("auth.getUsers");
+  if (usersResult.is_null() ||
+      !usersResult.contains("users") ||
+      !usersResult["users"].is_array() ||
+      usersResult["users"].empty()) {
+    std::cout << "No authenticated accounts." << std::endl;
+    std::cout << color::dim() << "  (use \"chk login\" to sign in)"
+              << color::reset() << std::endl;
+    return 0;
+  }
+
+  // Interactive account selection
+  auto& users = usersResult["users"];
+  std::vector<std::string> endpoints;
+  for (auto& user : users) {
+    endpoints.push_back(user["endpoint"].get<std::string>());
+  }
+
+  auto endpointChoice = interactiveSelect("Select an account to log out:", endpoints);
+  if (!endpointChoice.has_value()) {
+    std::cout << "Cancelled." << std::endl;
+    return 1;
+  }
+
+  auto& chosenEndpoint = endpoints[endpointChoice.value()];
+
+  for (auto& user : users) {
+    if (user["endpoint"].get<std::string>() == chosenEndpoint) {
+      std::string daemonId = user.value("daemonId", "");
+      if (!daemonId.empty()) {
+        nlohmann::json logoutInput = {{"daemonId", daemonId}};
+        client.mutate("auth.logout", logoutInput);
+        std::cout << color::green() << "Logged out of " << chosenEndpoint
+                  << color::reset() << std::endl;
+        return 0;
+      }
+    }
+  }
+
+  std::cerr << color::red() << "error: failed to find daemon ID for selected account."
+            << color::reset() << std::endl;
+
+  return 1;
+}
+
+// ═════════════════════════════════════════════════════════════════
 //  COMMAND: shelve (shelve staged files)
 // ═════════════════════════════════════════════════════════════════
 
@@ -1754,6 +1808,122 @@ inline int cmdArtifactUpload(int changelistNumber, const std::vector<std::string
   std::cout << color::green() << color::bold()
             << "Successfully uploaded " << files.size() << " artifact(s) for CL #"
             << changelistNumber << "."
+            << color::reset() << std::endl;
+
+  return 0;
+}
+
+/**
+ * chk unlink — Interactively select a workspace to unlink from the daemon.
+ * Stops watching and removes from daemon.json, but does NOT delete .checkpoint.
+ */
+inline int cmdUnlink() {
+  // Connect to daemon
+  int port = getDaemonPort();
+  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  DaemonClient client(baseUrl);
+
+  // Get authenticated users
+  auto usersResult = client.query("auth.getUsers");
+  if (usersResult.is_null() ||
+      !usersResult.contains("users") ||
+      !usersResult["users"].is_array() ||
+      usersResult["users"].empty()) {
+    std::cerr << color::red()
+              << "error: not authenticated. Please sign in via the Checkpoint desktop app."
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  std::vector<User> users;
+  for (auto& entry : usersResult["users"]) {
+    User u;
+    from_json(entry, u);
+    users.push_back(u);
+  }
+
+  User user;
+  if (users.size() == 1) {
+    user = users[0];
+  } else {
+    std::vector<std::string> userLabels;
+    for (auto& u : users) {
+      std::string label = u.name.empty() ? u.username : u.name;
+      if (label.empty()) label = u.email;
+      if (!u.email.empty() && label != u.email) {
+        label += " <" + u.email + ">";
+      }
+      userLabels.push_back(label);
+    }
+
+    auto choice = interactiveSelect("Select an account:", userLabels);
+    if (!choice.has_value()) {
+      std::cout << "Cancelled." << std::endl;
+      return 1;
+    }
+    user = users[choice.value()];
+  }
+
+  std::string daemonId = user.daemonId;
+
+  // Fetch local workspaces for this daemon
+  nlohmann::json listInput = {{"daemonId", daemonId}};
+  auto wsResult = client.query("workspaces.ops.list.local", listInput);
+
+  if (wsResult.is_null() ||
+      !wsResult.contains("workspaces") ||
+      !wsResult["workspaces"].is_array() ||
+      wsResult["workspaces"].empty()) {
+    std::cout << "No linked workspaces found." << std::endl;
+    return 0;
+  }
+
+  struct WorkspaceEntry {
+    std::string id;
+    std::string name;
+    std::string localPath;
+    std::string branchName;
+  };
+
+  std::vector<WorkspaceEntry> workspaces;
+  for (auto& entry : wsResult["workspaces"]) {
+    WorkspaceEntry ws;
+    ws.id = entry.value("id", "");
+    ws.name = entry.value("name", "");
+    ws.localPath = entry.value("localPath", "");
+    ws.branchName = entry.value("branchName", "");
+    workspaces.push_back(ws);
+  }
+
+  // Build display labels
+  std::vector<std::string> labels;
+  for (auto& ws : workspaces) {
+    std::string label = ws.localPath;
+    if (!ws.branchName.empty()) {
+      label += " (" + ws.branchName + ")";
+    }
+    labels.push_back(label);
+  }
+
+  auto choice = interactiveSelect("Select a workspace to unlink:", labels);
+  if (!choice.has_value()) {
+    std::cout << "Cancelled." << std::endl;
+    return 0;
+  }
+
+  auto& selected = workspaces[choice.value()];
+
+  // Call daemon to unlink
+  nlohmann::json removeInput = {
+      {"daemonId", daemonId},
+      {"workspaceId", selected.id},
+  };
+  client.mutate("workspaces.ops.remove", removeInput);
+
+  std::cout << color::green() << "Workspace unlinked: " << color::reset()
+            << selected.localPath << std::endl;
+  std::cout << color::dim()
+            << "The .checkpoint directory was preserved. Run 'chk init' to re-link."
             << color::reset() << std::endl;
 
   return 0;

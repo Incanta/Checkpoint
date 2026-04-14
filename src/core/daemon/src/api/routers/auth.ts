@@ -2,6 +2,7 @@ import { publicProcedure, router } from "../trpc.js";
 import {
   CreateApiClientAuth,
   CreateApiClientAuthManual,
+  DeleteAuthToken,
   GetAllAuthConfigUsers,
 } from "@checkpointvcs/common";
 import { z } from "zod";
@@ -27,6 +28,20 @@ export const authRouter = router({
       );
 
       return { code, url };
+    }),
+
+  logout: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const users = await GetAllAuthConfigUsers();
+
+      if (users[input.daemonId]) {
+        await DeleteAuthToken(input.daemonId);
+      }
     }),
 
   getUser: publicProcedure
