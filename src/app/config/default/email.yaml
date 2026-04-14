@@ -3,7 +3,7 @@ enabled: false
 smtp:
   host: ""
   port: 587
-  secure: false
+  secure: false # most email providers use STARTTLS on port 587, which is not secure by default but can be upgraded to secure
   auth:
     user: ""
     pass: ""
