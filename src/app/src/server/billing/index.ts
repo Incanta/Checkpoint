@@ -1,6 +1,6 @@
 export { calculateStorageCharge } from "./storage-usage";
 export { applyCredits, addCredits, getCreditBalance } from "./credits";
-export { startTrial, cancelTrial, checkTrialExpiry } from "./trial";
+export { startTrial, checkTrialExpiry } from "./trial";
 export {
   markDelinquent,
   checkDelinquency,
@@ -8,8 +8,5 @@ export {
   cancelSubscription,
 } from "./delinquency";
 export { initBillingScheduler } from "./scheduler";
-export {
-  reportOrgUserMeters,
-  reportOrgStorageMeters,
-} from "./meter-reporting";
+export { reportOrgMeters } from "./meter-reporting";
 export { getBillingPeriod } from "./billing-period";

@@ -43,8 +43,8 @@ minimum-invoice-cents: 500 # $5.00
 
 # Delinquency thresholds
 delinquency:
-  suspend-after-days: 14
-  delete-after-days: 30
+  suspend-after-days: 5
+  delete-after-days: 14
 
 # Days before card expiry to send notifications
 card-expiry-notify-days:

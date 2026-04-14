@@ -9,7 +9,6 @@ import {
 } from "../stripe/client";
 import { sendEmail } from "../email/service";
 import {
-  paymentFailedEmail,
   accountSuspendedEmail,
   accountDeletionWarningEmail,
 } from "../email/billing-templates";
@@ -95,6 +94,9 @@ export async function checkDelinquency(db: PrismaClient): Promise<void> {
       where: { id: org.id },
       data: { subscriptionStatus: "DELETED" },
     });
+
+    // NOTE: for now, we do not automatically delete data after marking DELETED.
+    // This allows Checkpoint operators to determine if/when the data gets deleted.
 
     // Notify admins before deletion
     await notifyOrgAdmins(org.id, org.name, "deletion", db);
@@ -182,20 +184,8 @@ export async function resumeSubscription(
       },
     });
 
-    // Re-issue held local invoices
-    await db.invoice.updateMany({
-      where: { orgId, status: "HELD" },
-      data: { status: "ISSUED", issuedAt: new Date(), heldAt: null },
-    });
-
     Logger.info(`[Billing] Trial cancellation undone for org ${orgId}`);
   } else {
-    // Re-issue held local invoices
-    await db.invoice.updateMany({
-      where: { orgId, status: "HELD" },
-      data: { status: "ISSUED", issuedAt: new Date(), heldAt: null },
-    });
-
     // Restore ACTIVE status
     await db.org.update({
       where: { id: orgId },
@@ -228,14 +218,10 @@ export async function cancelSubscription(
     select: { subscriptionStatus: true, stripeSubscriptionId: true },
   });
 
-  if (org.subscriptionStatus === "TRIAL") {
-    // Delegate to trial cancel
-    const { cancelTrial } = await import("./trial");
-    await cancelTrial(orgId, db);
-    return;
-  }
-
-  if (org.subscriptionStatus !== "ACTIVE") {
+  if (
+    org.subscriptionStatus !== "TRIAL" &&
+    org.subscriptionStatus !== "ACTIVE"
+  ) {
     throw new Error(`Cannot cancel org in ${org.subscriptionStatus} status`);
   }
 
@@ -256,7 +242,8 @@ export async function cancelSubscription(
   await db.org.update({
     where: { id: orgId },
     data: {
-      subscriptionStatus: "CANCELED",
+      subscriptionStatus:
+        org.subscriptionStatus === "TRIAL" ? "TRIAL" : "CANCELED",
       canceledAt: new Date(),
     },
   });
@@ -283,8 +270,12 @@ async function notifyOrgAdmins(
     try {
       const template =
         type === "suspended"
-          ? accountSuspendedEmail(orgName, "/billing")
-          : accountDeletionWarningEmail(orgName, 0, "/billing");
+          ? accountSuspendedEmail(orgName, `/${orgName}/settings/billing`)
+          : accountDeletionWarningEmail(
+              orgName,
+              0,
+              `/${orgName}/settings/billing`,
+            );
 
       await sendEmail({
         to: admin.user.email,
@@ -293,6 +284,29 @@ async function notifyOrgAdmins(
     } catch (err: any) {
       Logger.warn(
         `[Billing] Failed to send ${type} email to ${admin.user.email}: ${JSON.stringify(err)}`,
+      );
+    }
+  }
+
+  const checkpointAdmins = await db.user.findMany({
+    where: { checkpointAdmin: true },
+    select: { email: true },
+  });
+
+  for (const admin of checkpointAdmins) {
+    try {
+      const template =
+        type === "suspended"
+          ? accountSuspendedEmail(orgName, "/admin/billing")
+          : accountDeletionWarningEmail(orgName, 0, "/admin/billing");
+
+      await sendEmail({
+        to: admin.email,
+        ...template,
+      });
+    } catch (err: any) {
+      Logger.warn(
+        `[Billing] Failed to send ${type} email to Checkpoint admin ${admin.email}: ${JSON.stringify(err)}`,
       );
     }
   }

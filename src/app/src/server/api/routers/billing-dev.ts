@@ -8,7 +8,9 @@ import {
   getSchedulerState,
   runBillingChecks,
 } from "~/server/billing/scheduler";
-import { reportOrgUserMeters, reportOrgStorageMeters } from "~/server/billing/meter-reporting";
+import {
+  reportOrgMeters,
+} from "~/server/billing/meter-reporting";
 import { calculateStorageCharge } from "~/server/billing/storage-usage";
 import { checkTrialExpiry } from "~/server/billing/trial";
 import { checkDelinquency } from "~/server/billing/delinquency";
@@ -68,17 +70,14 @@ export const billingDevRouter = createTRPCRouter({
         }
 
         const storage = await calculateStorageCharge(org.id, ctx.db);
-        await reportOrgStorageMeters(
+        await reportOrgMeters(
           org.id,
           org.stripeCustomerId,
           storage.buckets,
           ctx.db,
         );
-        await reportOrgUserMeters(org.id, ctx.db);
 
-        Logger.info(
-          `[BillingDev] Meter report triggered for org ${org.name}`,
-        );
+        Logger.info(`[BillingDev] Meter report triggered for org ${org.name}`);
         return { orgId: org.id, storageBuckets: storage.buckets };
       }
 
@@ -97,13 +96,12 @@ export const billingDevRouter = createTRPCRouter({
         if (!org.stripeCustomerId) continue;
         try {
           const storage = await calculateStorageCharge(org.id, ctx.db);
-          await reportOrgStorageMeters(
+          await reportOrgMeters(
             org.id,
             org.stripeCustomerId,
             storage.buckets,
             ctx.db,
           );
-          await reportOrgUserMeters(org.id, ctx.db);
           success++;
         } catch {
           // continue with next org

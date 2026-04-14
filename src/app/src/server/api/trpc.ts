@@ -184,6 +184,22 @@ export const protectedProcedure = t.procedure
     });
   });
 
+/**
+ * Admin procedure
+ *
+ * Extends protectedProcedure to also verify the user has checkpointAdmin === true.
+ */
+export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  const user = await ctx.db.user.findUnique({
+    where: { id: ctx.session.user.id },
+    select: { checkpointAdmin: true },
+  });
+  if (!user?.checkpointAdmin) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
+  }
+  return next({ ctx });
+});
+
 export type TRPCContextPublic = Awaited<ReturnType<typeof createTRPCContext>>;
 export type TRPCContextPrivate = TRPCContextPublic & {
   session: NonNullable<TRPCContextPublic["session"]>;

@@ -20,6 +20,7 @@ import { artifactRouter } from "./routers/artifact";
 import { emailRouter } from "./routers/email";
 import { billingRouter } from "./routers/billing";
 import { billingDevRouter } from "./routers/billing-dev";
+import { adminRouter } from "./routers/admin";
 
 /**
  * This is the primary router for your server.
@@ -48,6 +49,7 @@ export const appRouter = createTRPCRouter({
   email: emailRouter,
   billing: billingRouter,
   billingDev: billingDevRouter,
+  admin: adminRouter,
 });
 
 // export type definition of API

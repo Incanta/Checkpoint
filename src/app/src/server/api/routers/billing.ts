@@ -108,24 +108,13 @@ export const billingRouter = createTRPCRouter({
         },
       };
 
-      if (input.useTrial) {
-        sessionParams.subscription_data = {
-          trial_period_days: getTrialDurationDays(),
-          metadata: {
-            orgName: input.orgName,
-            tier: input.tier,
-            userId: ctx.session.user.id,
-          },
-        };
-      } else {
-        sessionParams.subscription_data = {
-          metadata: {
-            orgName: input.orgName,
-            tier: input.tier,
-            userId: ctx.session.user.id,
-          },
-        };
-      }
+      sessionParams.subscription_data = {
+        metadata: {
+          orgName: input.orgName,
+          tier: input.tier,
+          userId: ctx.session.user.id,
+        },
+      };
 
       const session = await stripe.checkout.sessions.create(sessionParams);
 

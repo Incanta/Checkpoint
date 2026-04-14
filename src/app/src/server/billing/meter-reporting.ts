@@ -15,27 +15,24 @@ import { getBillingPeriod } from "./billing-period";
  * Report the current user meter values (write/read) to Stripe
  * for a given org.
  */
-export async function reportOrgUserMeters(
-  orgId: string,
+export async function getOrgUserMeters(
+  org: {
+    id: string;
+    billingCycleAnchor: number;
+    canceledAt: Date | null;
+    stripeCustomerId: string | null;
+    subscriptionStatus: string | null;
+    subscriptionTier: string | null;
+  },
   db: PrismaClient,
-): Promise<void> {
-  if (!isStripeEnabled()) return;
+): Promise<{ writeUsers: number; readUsers: number } | null> {
+  if (!isStripeEnabled()) return null;
 
   try {
-    const org = await db.org.findUnique({
-      where: { id: orgId },
-      select: {
-        stripeCustomerId: true,
-        subscriptionStatus: true,
-        subscriptionTier: true,
-        billingCycleAnchor: true,
-      },
-    });
-
-    if (!org?.stripeCustomerId) return;
+    if (!org.stripeCustomerId) return null;
     // Only report for active subscriptions
     if (!["TRIAL", "ACTIVE", "PAST_DUE"].includes(org.subscriptionStatus ?? ""))
-      return;
+      return null;
 
     const { year, month } = getBillingPeriod(
       new Date(),
@@ -43,7 +40,7 @@ export async function reportOrgUserMeters(
     );
 
     const activities = await db.orgUserActivity.findMany({
-      where: { orgId, year, month },
+      where: { orgId: org.id, year, month },
       select: { writeCount: true, readCount: true },
     });
 
@@ -52,22 +49,24 @@ export async function reportOrgUserMeters(
       (u) => u.readCount > 0 && u.writeCount === 0,
     ).length;
 
-    await reportUserMeterEvents(org.stripeCustomerId, writeUsers, readUsers);
-
-    Logger.debug(
-      `[Billing] Reported user meters for org ${orgId}: ${writeUsers}w/${readUsers}r`,
-    );
+    if (org.subscriptionStatus === "TRIAL" && org.canceledAt) {
+      return { writeUsers: 0, readUsers: 0 };
+    } else {
+      return { writeUsers, readUsers };
+    }
   } catch (err: unknown) {
     Logger.warn(
-      `[Billing] Failed to report user meters for org ${orgId}: ${String(err)}`,
+      `[Billing] Failed to report user meters for org ${org.id}: ${String(err)}`,
     );
+
+    return null;
   }
 }
 
 /**
  * Report storage and minimum-due meters for an org.
  */
-export async function reportOrgStorageMeters(
+export async function reportOrgMeters(
   orgId: string,
   stripeCustomerId: string,
   storageBuckets: number,
@@ -78,24 +77,27 @@ export async function reportOrgStorageMeters(
   try {
     const org = await db.org.findUnique({
       where: { id: orgId },
-      select: { subscriptionTier: true, billingCycleAnchor: true },
+      select: {
+        id: true,
+        subscriptionTier: true,
+        billingCycleAnchor: true,
+        stripeCustomerId: true,
+        subscriptionStatus: true,
+        canceledAt: true,
+      },
     });
 
-    const { year, month } = getBillingPeriod(
-      new Date(),
-      org?.billingCycleAnchor ?? 1,
-    );
+    if (!org?.stripeCustomerId) {
+      Logger.warn(
+        `[Billing] Cannot report meters for org ${orgId} without Stripe customer ID`,
+      );
+      return;
+    }
 
-    // Get current user counts for minimum-due calculation
-    const activities = await db.orgUserActivity.findMany({
-      where: { orgId, year, month },
-      select: { writeCount: true, readCount: true },
-    });
-
-    const writeUsers = activities.filter((u) => u.writeCount > 0).length;
-    const readUsers = activities.filter(
-      (u) => u.readCount > 0 && u.writeCount === 0,
-    ).length;
+    const { writeUsers, readUsers } = (await getOrgUserMeters(org, db)) ?? {
+      writeUsers: 0,
+      readUsers: 0,
+    };
 
     // Calculate approximate minimum due based on current meters
     const SEAT_PRICES: Record<string, { write: number; read: number }> = {
@@ -117,33 +119,14 @@ export async function reportOrgStorageMeters(
       minimumDueCents = minInvoice - subtotal;
     }
 
-    await reportStorageMeterEvents(
-      stripeCustomerId,
-      storageBuckets,
-      minimumDueCents,
-    );
+    if (org.subscriptionStatus === "TRIAL" && org.canceledAt) {
+      minimumDueCents = 0;
+    }
 
-    Logger.debug(
-      `[Billing] Reported storage meters for org ${orgId}: ${storageBuckets} buckets, min-due ${minimumDueCents}c`,
-    );
-  } catch (err: unknown) {
-    Logger.warn(
-      `[Billing] Failed to report storage meters for org ${orgId}: ${String(err)}`,
-    );
-  }
-}
+    const stripe = getStripeClient();
+    const meters = getMeterNames();
+    const timestamp = Math.floor(Date.now() / 1000);
 
-/** Report write/read user meter events to Stripe. */
-async function reportUserMeterEvents(
-  stripeCustomerId: string,
-  writeUsers: number,
-  readUsers: number,
-): Promise<void> {
-  const stripe = getStripeClient();
-  const meters = getMeterNames();
-  const timestamp = Math.floor(Date.now() / 1000);
-
-  if (writeUsers > 0) {
     await stripe.billing.meterEvents.create({
       event_name: meters.writeUsers,
       timestamp,
@@ -152,8 +135,7 @@ async function reportUserMeterEvents(
         stripe_customer_id: stripeCustomerId,
       },
     });
-  }
-  if (readUsers > 0) {
+
     await stripe.billing.meterEvents.create({
       event_name: meters.readUsers,
       timestamp,
@@ -162,30 +144,18 @@ async function reportUserMeterEvents(
         stripe_customer_id: stripeCustomerId,
       },
     });
-  }
-}
 
-/** Report storage and minimum-due meter events to Stripe. */
-async function reportStorageMeterEvents(
-  stripeCustomerId: string,
-  storageBuckets: number,
-  minimumDueCents: number,
-): Promise<void> {
-  const stripe = getStripeClient();
-  const meters = getMeterNames();
-  const timestamp = Math.floor(Date.now() / 1000);
+    if (storageBuckets > 0) {
+      await stripe.billing.meterEvents.create({
+        event_name: meters.storageBuckets,
+        timestamp,
+        payload: {
+          value: String(storageBuckets),
+          stripe_customer_id: stripeCustomerId,
+        },
+      });
+    }
 
-  if (storageBuckets > 0) {
-    await stripe.billing.meterEvents.create({
-      event_name: meters.storageBuckets,
-      timestamp,
-      payload: {
-        value: String(storageBuckets),
-        stripe_customer_id: stripeCustomerId,
-      },
-    });
-  }
-  if (minimumDueCents > 0) {
     await stripe.billing.meterEvents.create({
       event_name: meters.minimumDue,
       timestamp,
@@ -194,5 +164,13 @@ async function reportStorageMeterEvents(
         stripe_customer_id: stripeCustomerId,
       },
     });
+
+    Logger.debug(
+      `[Billing] Reported storage meters for org ${orgId}: ${storageBuckets} buckets, min-due ${minimumDueCents}c`,
+    );
+  } catch (err: unknown) {
+    Logger.warn(
+      `[Billing] Failed to report storage meters for org ${orgId}: ${String(err)}`,
+    );
   }
 }

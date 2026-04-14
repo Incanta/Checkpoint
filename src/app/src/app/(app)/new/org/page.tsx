@@ -25,7 +25,7 @@ export default function NewOrgPage() {
   const [name, setName] = useState("");
   const [step, setStep] = useState<Step>("name");
   const [tier, setTier] = useState<"BASIC" | "PRO" | "STUDIO">("BASIC");
-  const [useTrial, setUseTrial] = useState(false);
+  const [useTrial, setUseTrial] = useState(true);
   const [redirecting, setRedirecting] = useState(false);
   const router = useRouter();
   const utils = api.useUtils();
@@ -81,7 +81,8 @@ export default function NewOrgPage() {
     });
   };
 
-  const isPending = createOrg.isPending || createCheckout.isPending || redirecting;
+  const isPending =
+    createOrg.isPending || createCheckout.isPending || redirecting;
   const error = createOrg.error ?? createCheckout.error;
 
   return (
@@ -218,10 +219,7 @@ export default function NewOrgPage() {
               >
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                disabled={!name.trim() || isPending}
-              >
+              <Button type="submit" disabled={!name.trim() || isPending}>
                 {isPending
                   ? "Setting up..."
                   : billingEnabled && canUseTrial
@@ -234,7 +232,8 @@ export default function NewOrgPage() {
 
             {billingEnabled && (
               <p className="text-xs text-[var(--color-text-muted)]">
-                You&apos;ll be redirected to Stripe to enter your payment details.
+                You&apos;ll be redirected to Stripe to enter your payment
+                details.
               </p>
             )}
           </form>
@@ -265,7 +264,7 @@ export default function NewOrgPage() {
                 />
                 <div>
                   <div className="text-sm font-medium text-[var(--color-text-primary)]">
-                    Start free trial
+                    Start free trial (excluding storage over 25GB)
                   </div>
                   <div className="text-xs text-[var(--color-text-muted)]">
                     30 days free, cancel anytime
@@ -303,9 +302,7 @@ export default function NewOrgPage() {
                 Back
               </Button>
               <Button onClick={handleCreate} disabled={isPending}>
-                {isPending
-                  ? "Setting up..."
-                  : "Continue to Payment"}
+                {isPending ? "Setting up..." : "Continue to Payment"}
               </Button>
             </div>
 

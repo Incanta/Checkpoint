@@ -59,55 +59,6 @@ export async function startTrial(
 }
 
 /**
- * Cancel a trial (user cancels before trial period ends).
- * Access continues until trialEndsAt, then org becomes SUSPENDED.
- * Outstanding invoices are held.
- */
-export async function cancelTrial(
-  orgId: string,
-  db: PrismaClient,
-): Promise<void> {
-  const org = await db.org.findUniqueOrThrow({
-    where: { id: orgId },
-    select: { subscriptionStatus: true, stripeSubscriptionId: true },
-  });
-
-  if (org.subscriptionStatus !== "TRIAL") {
-    throw new Error("Org is not in trial status");
-  }
-
-  // Cancel Stripe subscription at period end
-  if (isStripeEnabled() && org.stripeSubscriptionId) {
-    try {
-      const stripe = getStripeClient();
-      await stripe.subscriptions.update(org.stripeSubscriptionId, {
-        cancel_at_period_end: true,
-      });
-    } catch (err: any) {
-      Logger.warn(
-        `[Billing] Failed to cancel Stripe subscription for org ${orgId}: ${JSON.stringify(err)}`,
-      );
-    }
-  }
-
-  // Hold any pending invoices
-  await db.invoice.updateMany({
-    where: {
-      orgId,
-      status: { in: ["DRAFT", "ISSUED"] },
-    },
-    data: { status: "HELD", heldAt: new Date() },
-  });
-
-  await db.org.update({
-    where: { id: orgId },
-    data: { canceledAt: new Date() },
-  });
-
-  Logger.info(`[Billing] Trial canceled for org ${orgId}`);
-}
-
-/**
  * Check if a trial has expired and transition the org status.
  * Called by the daily scheduler.
  *
@@ -128,15 +79,14 @@ export async function checkTrialExpiry(db: PrismaClient): Promise<void> {
     select: { id: true, name: true },
   });
 
-  for (const org of expiredActive) {
-    await db.org.update({
-      where: { id: org.id },
-      data: { subscriptionStatus: "ACTIVE" },
-    });
-    Logger.info(
-      `[Billing] Trial ended for org ${org.name} (${org.id}) — transitioned to ACTIVE`,
-    );
-  }
+  await db.org.updateMany({
+    where: {
+      id: {
+        in: expiredActive.map((o) => o.id),
+      },
+    },
+    data: { subscriptionStatus: "ACTIVE" },
+  });
 
   // Trials that ended AND were canceled → SUSPENDED
   const expiredCanceled = await db.org.findMany({
@@ -149,17 +99,16 @@ export async function checkTrialExpiry(db: PrismaClient): Promise<void> {
     select: { id: true, name: true },
   });
 
-  for (const org of expiredCanceled) {
-    await db.org.update({
-      where: { id: org.id },
-      data: {
-        subscriptionStatus: "SUSPENDED",
-        suspendedAt: now,
-        delinquentSince: now,
+  await db.org.updateMany({
+    where: {
+      id: {
+        in: expiredCanceled.map((o) => o.id),
       },
-    });
-    Logger.info(
-      `[Billing] Trial ended (canceled) for org ${org.name} (${org.id}) — SUSPENDED`,
-    );
-  }
+    },
+    data: {
+      subscriptionStatus: "SUSPENDED",
+      suspendedAt: now,
+      delinquentSince: now,
+    },
+  });
 }

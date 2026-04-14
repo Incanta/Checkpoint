@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { EmailTemplate } from "./templates";
+import config from "@incanta/config";
 
 const BRAND_COLOR = "#6366f1";
 
@@ -51,7 +52,7 @@ function esc(s: string): string {
 
 function button(label: string, url: string, danger = false): string {
   const cls = danger ? "btn btn-danger" : "btn";
-  return `<p style="text-align:center;margin:24px 0"><a class="${cls}" href="${esc(url)}">${esc(label)}</a></p>`;
+  return `<p style="text-align:center;margin:24px 0"><a class="${cls}" href="${esc(config.get<string>("server.external-url") + url)}">${esc(label)}</a></p>`;
 }
 
 function formatCents(cents: number): string {
@@ -89,10 +90,10 @@ export function accountSuspendedEmail(
       `Access suspended for ${orgName}`,
       `<p>Access to <strong>${esc(orgName)}</strong> has been suspended due to an outstanding balance.</p>
        <p>Your data is still safe, but all members have lost access. Please resume your subscription and settle the outstanding balance to restore access.</p>
-       <p><strong>Important:</strong> If the balance is not settled within 30 days of the original payment failure, your data will be permanently deleted.</p>
+       <p><strong>Important:</strong> If the balance is not settled within ${config.get<number>("stripe.delinquency.delete-after-days")} days of the original payment failure, your data will be permanently deleted.</p>
        ${button("Resume Subscription", resumeUrl, true)}`,
     ),
-    text: `Access to ${orgName} has been suspended due to an outstanding balance. Resume your subscription at ${resumeUrl} to restore access. Data will be deleted after 30 days.`,
+    text: `Access to ${orgName} has been suspended due to an outstanding balance. Resume your subscription at ${resumeUrl} to restore access. Data will be deleted after ${config.get<number>("stripe.delinquency.delete-after-days")} days.`,
   };
 }
 
@@ -101,6 +102,17 @@ export function accountDeletionWarningEmail(
   daysRemaining: number,
   resumeUrl: string,
 ): EmailTemplate {
+  if (daysRemaining <= 0) {
+    return {
+      subject: `⚠️ Data deletion for ${orgName}`,
+      html: layout(
+        `Data deletion notification for ${orgName}`,
+        `<p><strong>Your data for ${esc(orgName)} has been permanently deleted due to non-payment. You must still pay any outstanding invoices.</strong></p>`,
+      ),
+      text: `ALERT: Data for ${orgName} has been permanently deleted due to non-payment. You must still pay any outstanding invoices.`,
+    };
+  }
+
   return {
     subject: `⚠️ Data deletion warning for ${orgName}`,
     html: layout(

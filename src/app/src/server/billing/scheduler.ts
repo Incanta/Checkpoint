@@ -10,7 +10,7 @@ import { checkTrialExpiry } from "./trial";
 import { checkDelinquency } from "./delinquency";
 import { calculateStorageCharge } from "./storage-usage";
 import { isR2Enabled, deleteR2Bucket } from "~/server/r2-service";
-import { reportOrgStorageMeters, reportOrgUserMeters } from "./meter-reporting";
+import { reportOrgMeters } from "./meter-reporting";
 import { sendEmail } from "../email/service";
 import {
   cardExpiryEmail,
@@ -308,13 +308,12 @@ async function reportMeters(): Promise<void> {
 
         try {
           const storage = await calculateStorageCharge(org.id, db);
-          await reportOrgStorageMeters(
+          await reportOrgMeters(
             org.id,
             org.stripeCustomerId,
             storage.buckets,
             db,
           );
-          await reportOrgUserMeters(org.id, db);
           success++;
         } catch (err: unknown) {
           failed++;
