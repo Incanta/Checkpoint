@@ -268,11 +268,13 @@ export default function BillingPage() {
             )}
           </div>
 
-          {billing?.trialEndsAt && !billing.canceledAt && (
-            <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-              Trial ends: {formatDate(billing.trialEndsAt)}
-            </p>
-          )}
+          {billing?.status === "TRIAL" &&
+            billing.trialEndsAt &&
+            !billing.canceledAt && (
+              <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+                Trial ends: {formatDate(billing.trialEndsAt)}
+              </p>
+            )}
           {billing?.delinquentSince && (
             <p className="mt-2 text-sm text-[var(--color-danger)]">
               Payment overdue since {formatDate(billing.delinquentSince)}
