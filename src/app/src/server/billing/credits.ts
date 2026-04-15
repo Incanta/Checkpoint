@@ -63,6 +63,66 @@ export async function addCredits(
 }
 
 /**
+ * Remove credits from an org via a Stripe Customer Balance Transaction.
+ * This creates a positive (debit) transaction on the customer balance,
+ * reducing available credit.
+ */
+export async function removeCredits(
+  orgId: string,
+  amountCents: number,
+  description: string,
+  db: PrismaClient,
+): Promise<void> {
+  if (amountCents <= 0) return;
+
+  if (!isStripeEnabled()) {
+    await db.org.update({
+      where: { id: orgId },
+      data: { creditBalanceCents: { decrement: amountCents } },
+    });
+    // Ensure we don't go negative locally
+    await db.org.updateMany({
+      where: { id: orgId, creditBalanceCents: { lt: 0 } },
+      data: { creditBalanceCents: 0 },
+    });
+    Logger.debug(`[Billing] Removed ${amountCents}c credits for org ${orgId} (local only)`);
+    return;
+  }
+
+  const org = await db.org.findUniqueOrThrow({
+    where: { id: orgId },
+    select: { stripeCustomerId: true },
+  });
+
+  if (!org.stripeCustomerId) {
+    Logger.warn(
+      `[Billing] Cannot remove credits for org ${orgId}: no Stripe customer`,
+    );
+    return;
+  }
+
+  try {
+    const stripe = getStripeClient();
+    // Positive amount = debit on Stripe Customer Balance (reduces credit)
+    await stripe.customers.createBalanceTransaction(org.stripeCustomerId, {
+      amount: amountCents,
+      currency: "usd",
+      description,
+    });
+
+    await syncCreditBalance(orgId, org.stripeCustomerId, db);
+
+    Logger.info(
+      `[Billing] Removed ${amountCents}c credits for org ${orgId}: ${description}`,
+    );
+  } catch (err: unknown) {
+    Logger.warn(
+      `[Billing] Failed to remove credits from Stripe for org ${orgId}: ${String(err)}`,
+    );
+  }
+}
+
+/**
  * Fetch the Stripe Customer Balance and update the local cache.
  * Stripe stores credit as a negative balance; we store the absolute value.
  */

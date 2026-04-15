@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
+import config from "@incanta/config";
 import { Logger } from "../logging";
 import { TimeManager } from "../time";
 import {
@@ -160,10 +161,24 @@ export async function reportOrgMeters(
       : seatPrices.cloud;
     const prices = servicePrices[tier];
     const { bucketPriceCents } = getStoragePricingConfig();
+    const stripe = getStripeClient();
 
     const userCharges = writeUsers * prices.write + readUsers * prices.read;
     const storageCharges = storageBuckets * bucketPriceCents;
-    const subtotal = userCharges + storageCharges;
+
+    // Fetch available credit from Stripe customer balance
+    let creditCents = 0;
+    try {
+      const customer = await stripe.customers.retrieve(stripeCustomerId);
+      if (!customer.deleted) {
+        // Stripe balance: negative = credit available
+        creditCents = Math.max(0, -(customer.balance ?? 0));
+      }
+    } catch {
+      // Non-critical — proceed without credit offset
+    }
+
+    const subtotal = Math.max(0, userCharges + storageCharges - creditCents);
 
     let minimumDueCents = 0;
     const minInvoice = getMinimumInvoiceCents();
@@ -176,7 +191,6 @@ export async function reportOrgMeters(
       minimumDueCents = 0;
     }
 
-    const stripe = getStripeClient();
     const meters = getMeterNames();
     const timestamp = Math.floor(TimeManager.now() / 1000);
 

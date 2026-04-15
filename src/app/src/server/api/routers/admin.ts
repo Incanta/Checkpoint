@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createTRPCRouter, adminProcedure } from "~/server/api/trpc";
 import { snapshotStoragePeak } from "~/server/billing/storage-usage";
+import { addCredits, removeCredits, getCreditBalance } from "~/server/billing/credits";
 import { Logger } from "~/server/logging";
 
 export const adminRouter = createTRPCRouter({
@@ -131,5 +132,66 @@ export const adminRouter = createTRPCRouter({
       );
 
       return { deletedCount: result.count };
+    }),
+
+  searchOrgs: adminProcedure
+    .input(z.object({ query: z.string().min(1).max(100) }))
+    .query(async ({ ctx, input }) => {
+      const orgs = await ctx.db.org.findMany({
+        where: {
+          name: { contains: input.query },
+        },
+        select: {
+          id: true,
+          name: true,
+          subscriptionTier: true,
+          subscriptionStatus: true,
+          creditBalanceCents: true,
+          stripeCustomerId: true,
+        },
+        take: 10,
+        orderBy: { name: "asc" },
+      });
+
+      return orgs;
+    }),
+
+  getOrgCreditBalance: adminProcedure
+    .input(z.object({ orgId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const balance = await getCreditBalance(input.orgId, ctx.db);
+      return { creditBalanceCents: balance };
+    }),
+
+  adjustCredit: adminProcedure
+    .input(
+      z.object({
+        orgId: z.string(),
+        amountCents: z.number().int().positive(),
+        action: z.enum(["add", "remove"]),
+        description: z.string().min(1).max(500),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const org = await ctx.db.org.findUniqueOrThrow({
+        where: { id: input.orgId },
+        select: { name: true },
+      });
+
+      const fullDescription = `[Admin: ${ctx.session.user.name ?? ctx.session.user.id}] ${input.description}`;
+
+      if (input.action === "add") {
+        await addCredits(input.orgId, input.amountCents, fullDescription, ctx.db);
+      } else {
+        await removeCredits(input.orgId, input.amountCents, fullDescription, ctx.db);
+      }
+
+      const balance = await getCreditBalance(input.orgId, ctx.db);
+
+      Logger.info(
+        `[Admin] ${input.action === "add" ? "Added" : "Removed"} ${input.amountCents}c credit for org ${org.name} (${input.orgId}) by ${ctx.session.user.id}: ${input.description}`,
+      );
+
+      return { creditBalanceCents: balance };
     }),
 });
