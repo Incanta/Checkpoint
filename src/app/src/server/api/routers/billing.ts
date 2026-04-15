@@ -126,6 +126,101 @@ export const billingRouter = createTRPCRouter({
       return { checkoutUrl: session.url };
     }),
 
+  /** Create a Stripe Checkout Session to resubscribe a CANCELED org. */
+  resubscribe: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string(),
+        tier: z.enum(["BASIC", "PRO", "STUDIO"]),
+        successUrl: z.string(),
+        cancelUrl: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      assertBillingEnabled();
+
+      const orgUser = await ctx.db.orgUser.findUnique({
+        where: {
+          orgId_userId: { orgId: input.orgId, userId: ctx.session.user.id },
+        },
+      });
+      if (!orgUser) throw new TRPCError({ code: "FORBIDDEN" });
+      assertBillingRole(orgUser.role);
+
+      const org = await ctx.db.org.findUniqueOrThrow({
+        where: { id: input.orgId },
+        select: {
+          id: true,
+          name: true,
+          subscriptionStatus: true,
+          stripeCustomerId: true,
+        },
+      });
+
+      if (org.subscriptionStatus !== "CANCELED") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Only canceled organizations can resubscribe",
+        });
+      }
+
+      const stripe = getStripeClient();
+
+      // Reuse existing Stripe customer or create a new one
+      let customerId = org.stripeCustomerId;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          name: org.name,
+          email: ctx.session.user.email ?? undefined,
+          metadata: { orgName: org.name, orgId: org.id },
+        });
+        customerId = customer.id;
+      }
+
+      const prices = getStripePriceConfig();
+      const tierKey = input.tier.toLowerCase() as "basic" | "pro" | "studio";
+      const lineItems: Array<{ price: string }> = [];
+
+      const cloudPrices = prices.cloud;
+      const writeKey = `${tierKey}-write` as keyof typeof cloudPrices;
+      const readKey = `${tierKey}-read` as keyof typeof cloudPrices;
+
+      if (cloudPrices[writeKey])
+        lineItems.push({ price: cloudPrices[writeKey] });
+      if (cloudPrices[readKey])
+        lineItems.push({ price: cloudPrices[readKey] });
+      if (cloudPrices.storage) lineItems.push({ price: cloudPrices.storage });
+      if (cloudPrices["minimum-due"])
+        lineItems.push({ price: cloudPrices["minimum-due"] });
+
+      const session = await stripe.checkout.sessions.create({
+        customer: customerId,
+        mode: "subscription",
+        line_items: lineItems,
+        success_url: input.successUrl,
+        cancel_url: input.cancelUrl,
+        managed_payments: { enabled: true },
+        metadata: {
+          existingOrgId: org.id,
+          tier: input.tier,
+          userId: ctx.session.user.id,
+        },
+        subscription_data: {
+          metadata: {
+            orgName: org.name,
+            tier: input.tier,
+            userId: ctx.session.user.id,
+          },
+        },
+      });
+
+      Logger.info(
+        `[Billing] Created resubscribe Checkout Session ${session.id} for org "${org.name}" (${org.id}, ${input.tier})`,
+      );
+
+      return { checkoutUrl: session.url };
+    }),
+
   /** Get billing info for an org. */
   getBillingInfo: protectedProcedure
     .input(z.object({ orgId: z.string() }))
@@ -171,6 +266,29 @@ export const billingRouter = createTRPCRouter({
           }
         } catch {
           // Non-critical — continue without period end
+        }
+      }
+
+      // Fetch credit balance from Stripe (source of truth)
+      let creditBalanceCents = org.creditBalanceCents;
+      if (isStripeEnabled() && org.stripeCustomerId) {
+        try {
+          const stripe = getStripeClient();
+          const customer = await stripe.customers.retrieve(
+            org.stripeCustomerId,
+          );
+          if (!customer.deleted) {
+            creditBalanceCents = Math.max(0, -(customer.balance ?? 0));
+            // Update local cache if it drifted
+            if (creditBalanceCents !== org.creditBalanceCents) {
+              await ctx.db.org.update({
+                where: { id: input.orgId },
+                data: { creditBalanceCents },
+              });
+            }
+          }
+        } catch {
+          // Non-critical — use cached value
         }
       }
 
@@ -286,6 +404,7 @@ export const billingRouter = createTRPCRouter({
       z.object({
         orgId: z.string(),
         tier: z.enum(["BASIC", "PRO", "STUDIO"]),
+        schedule: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -312,10 +431,11 @@ export const billingRouter = createTRPCRouter({
       const currentRank = tierOrder[org.subscriptionTier] ?? 0;
       const newRank = tierOrder[input.tier] ?? 0;
       const isDowngrade = newRank < currentRank;
+      const isUpgrade = newRank > currentRank;
       const isTrial = org.subscriptionStatus === "TRIAL";
 
-      // Downgrade while not in trial → schedule for end of billing period
-      if (isDowngrade && !isTrial) {
+      // Schedule for end of billing period (downgrades always, upgrades if requested)
+      if ((!isTrial && isDowngrade) || (isUpgrade && input.schedule)) {
         let scheduledAt: Date | null = null;
         if (isStripeEnabled() && org.stripeSubscriptionId) {
           try {
@@ -343,7 +463,7 @@ export const billingRouter = createTRPCRouter({
         });
 
         Logger.info(
-          `[Billing] Scheduled downgrade to ${input.tier} for org ${input.orgId} (effective ${scheduledAt?.toISOString() ?? "end of period"})`,
+          `[Billing] Scheduled ${isDowngrade ? "downgrade" : "upgrade"} to ${input.tier} for org ${input.orgId} (effective ${scheduledAt?.toISOString() ?? "end of period"})`,
         );
         return { success: true, tier: input.tier, scheduled: true };
       }
@@ -360,9 +480,23 @@ export const billingRouter = createTRPCRouter({
             | "basic"
             | "pro"
             | "studio";
+          const priorTierKey = org.subscriptionTier.toLowerCase() as
+            | "basic"
+            | "pro"
+            | "studio";
           const cloudPrices = prices.cloud;
           const writeKey = `${tierKey}-write` as keyof typeof cloudPrices;
           const readKey = `${tierKey}-read` as keyof typeof cloudPrices;
+
+          if (!cloudPrices[writeKey] && !cloudPrices[readKey]) {
+            Logger.warn(
+              `[Billing] No Stripe prices found for tier ${input.tier}, cannot update subscription`,
+            );
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Pricing configuration error",
+            });
+          }
 
           // Replace subscription items with new tier's prices
           const items: Array<{
@@ -371,17 +505,19 @@ export const billingRouter = createTRPCRouter({
             deleted?: boolean;
           }> = [];
           for (const item of sub.items.data) {
-            items.push({ id: item.id, deleted: true });
+            if (item.price.id === cloudPrices[`${priorTierKey}-write`]) {
+              items.push({ id: item.id, price: cloudPrices[writeKey] });
+            } else if (item.price.id === cloudPrices[`${priorTierKey}-read`]) {
+              items.push({ id: item.id, price: cloudPrices[readKey] });
+            } else {
+              // keep storage and minimum due items unchanged
+              items.push({ id: item.id, price: item.price.id });
+            }
           }
-          if (cloudPrices[writeKey])
-            items.push({ price: cloudPrices[writeKey] });
-          if (cloudPrices[readKey]) items.push({ price: cloudPrices[readKey] });
-          if (cloudPrices.storage) items.push({ price: cloudPrices.storage });
-          if (cloudPrices["minimum-due"])
-            items.push({ price: cloudPrices["minimum-due"] });
 
           await stripe.subscriptions.update(org.stripeSubscriptionId, {
             items,
+            proration_behavior: "none",
             metadata: { tier: input.tier },
           });
         } catch (err: any) {

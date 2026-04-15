@@ -173,6 +173,7 @@ export default function BillingPage() {
   const [selectedTier, setSelectedTier] = useState<"BASIC" | "PRO" | "STUDIO">(
     "BASIC",
   );
+  const [scheduleUpgrade, setScheduleUpgrade] = useState<boolean | null>(null);
 
   const cancelSub = api.billing.cancelSubscription.useMutation({
     onSuccess: () => {
@@ -202,6 +203,20 @@ export default function BillingPage() {
     },
   });
 
+  const [showResubscribe, setShowResubscribe] = useState(false);
+  const [resubscribeTier, setResubscribeTier] = useState<
+    "BASIC" | "PRO" | "STUDIO"
+  >("BASIC");
+  const [resubscribeRedirecting, setResubscribeRedirecting] = useState(false);
+  const resubscribe = api.billing.resubscribe.useMutation({
+    onSuccess: (data) => {
+      if (data.checkoutUrl) {
+        setResubscribeRedirecting(true);
+        window.location.href = data.checkoutUrl;
+      }
+    },
+  });
+
   if (checkoutSettings && !checkoutSettings.enabled) {
     notFound();
   }
@@ -209,7 +224,12 @@ export default function BillingPage() {
   const tierOrder = { BASIC: 0, PRO: 1, STUDIO: 2 } as Record<string, number>;
   const isDowngrade =
     (tierOrder[selectedTier] ?? 0) < (tierOrder[billing?.tier ?? ""] ?? 0);
+  const isUpgrade =
+    (tierOrder[selectedTier] ?? 0) > (tierOrder[billing?.tier ?? ""] ?? 0);
   const isTrial = billing?.status === "TRIAL";
+
+  console.log("Billing info");
+  console.log(selectedTier, billing?.tier, isDowngrade, isUpgrade, isTrial);
 
   const statusInfo = billing
     ? (STATUS_BADGE[billing.status ?? ""] ?? STATUS_BADGE.ACTIVE!)
@@ -273,9 +293,23 @@ export default function BillingPage() {
                 >
                   Update Payment Method
                 </Button>
+                {billing.status === "CANCELED" && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      setResubscribeTier(
+                        (billing.tier as "BASIC" | "PRO" | "STUDIO") ??
+                          "BASIC",
+                      );
+                      setShowResubscribe(true);
+                    }}
+                  >
+                    Resubscribe
+                  </Button>
+                )}
                 {(billing.status === "PAST_DUE" ||
                   billing.status === "SUSPENDED" ||
-                  billing.status === "CANCELED" ||
                   (billing.status === "TRIAL" && billing.canceledAt)) && (
                   <Button
                     variant="primary"
@@ -396,6 +430,7 @@ export default function BillingPage() {
                     setSelectedTier(
                       (billing.tier as "BASIC" | "PRO" | "STUDIO") ?? "BASIC",
                     );
+                    setScheduleUpgrade(null);
                     setShowChangePlan(true);
                   }}
                 >
@@ -616,7 +651,9 @@ export default function BillingPage() {
         <p className="mb-4 text-sm text-[var(--color-text-secondary)]">
           {isDowngrade && !isTrial
             ? "Select a new plan. Downgrades take effect at the end of your current billing period — you'll keep your current features until then."
-            : "Select a new plan. Your subscription will be updated immediately."}
+            : isUpgrade && !isTrial
+              ? "Select a new plan. Metered usage is not prorated, so you can choose to upgrade now or schedule it for the start of your next billing cycle."
+              : "Select a new plan. Your subscription will be updated immediately."}
         </p>
 
         <div className="grid grid-cols-3 items-start gap-3">
@@ -691,6 +728,47 @@ export default function BillingPage() {
           </p>
         )}
 
+        {isUpgrade && !isTrial && (
+          <div className="mt-3 space-y-2">
+            <label className="flex items-center gap-3 rounded-md border border-[var(--color-border-default)] p-3 text-sm transition-colors hover:border-[var(--color-accent)]/50">
+              <input
+                type="radio"
+                name="upgrade-timing"
+                checked={scheduleUpgrade === false}
+                onChange={() => setScheduleUpgrade(false)}
+                className="accent-[var(--color-accent)]"
+              />
+              <div>
+                <div className="font-medium text-[var(--color-text-primary)]">
+                  Upgrade now
+                </div>
+                <div className="text-xs text-[var(--color-text-muted)]">
+                  Metered usage will not be prorated for the current cycle
+                </div>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 rounded-md border border-[var(--color-border-default)] p-3 text-sm transition-colors hover:border-[var(--color-accent)]/50">
+              <input
+                type="radio"
+                name="upgrade-timing"
+                checked={scheduleUpgrade === true}
+                onChange={() => setScheduleUpgrade(true)}
+                className="accent-[var(--color-accent)]"
+              />
+              <div>
+                <div className="font-medium text-[var(--color-text-primary)]">
+                  Schedule for next billing cycle
+                </div>
+                <div className="text-xs text-[var(--color-text-muted)]">
+                  {billing?.currentPeriodEnd
+                    ? `Upgrade takes effect on ${formatDate(billing.currentPeriodEnd)}`
+                    : "Upgrade takes effect at the start of your next billing period"}
+                </div>
+              </div>
+            </label>
+          </div>
+        )}
+
         {changeTier.error && (
           <p className="mt-3 text-sm text-[var(--color-danger)]">
             {changeTier.error.message}
@@ -702,10 +780,21 @@ export default function BillingPage() {
             Cancel
           </Button>
           <Button
-            disabled={changeTier.isPending || selectedTier === billing?.tier}
+            disabled={
+              changeTier.isPending ||
+              selectedTier === billing?.tier ||
+              (isUpgrade && scheduleUpgrade === null)
+            }
             onClick={() => {
               if (org) {
-                changeTier.mutate({ orgId: org.id, tier: selectedTier });
+                changeTier.mutate({
+                  orgId: org.id,
+                  tier: selectedTier,
+                  schedule:
+                    isUpgrade && !isTrial && scheduleUpgrade
+                      ? true
+                      : undefined,
+                });
               }
             }}
           >
@@ -713,7 +802,9 @@ export default function BillingPage() {
               ? "Updating..."
               : isDowngrade && !isTrial
                 ? `Schedule downgrade to ${selectedTier}`
-                : `Switch to ${selectedTier}`}
+                : isUpgrade && !isTrial && scheduleUpgrade
+                  ? `Schedule upgrade to ${selectedTier}`
+                  : `Switch to ${selectedTier}`}
           </Button>
         </div>
       </Modal>
@@ -823,6 +914,106 @@ export default function BillingPage() {
             }}
           >
             {cancelSub.isPending ? "Canceling..." : "Confirm Cancellation"}
+          </Button>
+        </div>
+      </Modal>
+
+      {/* Resubscribe Modal (CANCELED orgs) */}
+      <Modal open={showResubscribe} onClose={() => setShowResubscribe(false)}>
+        <h3 className="mb-2 text-lg font-semibold text-[var(--color-text-primary)]">
+          Resubscribe
+        </h3>
+
+        <p className="mb-4 text-sm text-[var(--color-text-secondary)]">
+          Your subscription was canceled. Choose a plan to start a new
+          subscription. You&apos;ll be redirected to Stripe to enter your
+          payment details.
+        </p>
+
+        <div className="grid grid-cols-3 items-start gap-3">
+          {(["BASIC", "PRO", "STUDIO"] as const).map((t) => {
+            const pricing = TIER_PRICING[t]!;
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setResubscribeTier(t)}
+                className={`rounded-md border p-4 text-left text-sm transition-colors ${
+                  resubscribeTier === t
+                    ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10"
+                    : "border-[var(--color-border-default)] hover:border-[var(--color-accent)]/50"
+                }`}
+              >
+                <Badge
+                  variant={
+                    t === "STUDIO"
+                      ? "accent"
+                      : t === "PRO"
+                        ? "info"
+                        : "default"
+                  }
+                >
+                  {t}
+                </Badge>
+
+                <div className="mt-3 space-y-0.5">
+                  <p className="text-lg font-bold text-[var(--color-text-primary)]">
+                    ${pricing.write}
+                    <span className="text-xs font-normal text-[var(--color-text-muted)]">
+                      /write user/mo
+                    </span>
+                  </p>
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    ${pricing.read}/read user/mo
+                  </p>
+                </div>
+
+                <ul className="mt-3 space-y-0.5 text-xs text-[var(--color-text-secondary)]">
+                  {(TIER_FEATURES[t] ?? []).map((f) => (
+                    <li key={f}>• {f}</li>
+                  ))}
+                  {t !== "BASIC" && (
+                    <li className="text-[var(--color-text-muted)]">
+                      + all {t === "STUDIO" ? "Pro" : "Basic"} features
+                    </li>
+                  )}
+                </ul>
+              </button>
+            );
+          })}
+        </div>
+
+        {resubscribe.error && (
+          <p className="mt-3 text-sm text-[var(--color-danger)]">
+            {resubscribe.error.message}
+          </p>
+        )}
+
+        <div className="mt-6 flex justify-end gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => setShowResubscribe(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            disabled={resubscribe.isPending || resubscribeRedirecting}
+            onClick={() => {
+              if (org) {
+                resubscribe.mutate({
+                  orgId: org.id,
+                  tier: resubscribeTier,
+                  successUrl: `${window.location.origin}/${org.name}/settings/billing?checkout=success`,
+                  cancelUrl: `${window.location.origin}/${org.name}/settings/billing`,
+                });
+              }
+            }}
+          >
+            {resubscribeRedirecting
+              ? "Redirecting to Stripe..."
+              : resubscribe.isPending
+                ? "Setting up..."
+                : `Continue to Payment (${resubscribeTier})`}
           </Button>
         </div>
       </Modal>

@@ -81,7 +81,7 @@ export async function checkDelinquency(db: PrismaClient): Promise<void> {
   }
 
   // Find orgs that should be marked for deletion (delinquent > deleteAfterDays)
-  const toDelete = await db.org.findMany({
+  const toDeleteSuspended = await db.org.findMany({
     where: {
       subscriptionStatus: "SUSPENDED",
       delinquentSince: { lte: deleteThreshold },
@@ -90,7 +90,31 @@ export async function checkDelinquency(db: PrismaClient): Promise<void> {
     select: { id: true, name: true },
   });
 
-  for (const org of toDelete) {
+  for (const org of toDeleteSuspended) {
+    await db.org.update({
+      where: { id: org.id },
+      data: { subscriptionStatus: "DELETED" },
+    });
+
+    // NOTE: for now, we do not automatically delete data after marking DELETED.
+    // This allows Checkpoint operators to determine if/when the data gets deleted.
+
+    // Notify admins before deletion
+    await notifyOrgAdmins(org.id, org.name, "deletion", db);
+    Logger.warn(`[Billing] Org ${org.name} (${org.id}) marked DELETED`);
+  }
+
+  // Find orgs that should be marked for deletion due to cancellation (canceled > deleteAfterDays)
+  const toDeleteCanceled = await db.org.findMany({
+    where: {
+      subscriptionStatus: "CANCELED",
+      canceledAt: { lte: deleteThreshold },
+      deletedAt: null,
+    },
+    select: { id: true, name: true },
+  });
+
+  for (const org of toDeleteCanceled) {
     await db.org.update({
       where: { id: org.id },
       data: { subscriptionStatus: "DELETED" },
@@ -128,7 +152,7 @@ export async function resumeSubscription(
 
   if (
     !isCanceledTrial &&
-    !["PAST_DUE", "SUSPENDED", "CANCELED"].includes(org.subscriptionStatus)
+    !["PAST_DUE", "SUSPENDED"].includes(org.subscriptionStatus)
   ) {
     return { success: false, error: "Org is not in a resumable state" };
   }

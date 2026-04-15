@@ -63,13 +63,19 @@ export async function getUserAndRepoWithAccess(
     throw new TRPCError({
       code: "FORBIDDEN",
       message:
-        "Your organization's access is suspended due to unpaid invoices. Please contact your organization administrator to update your payment method.",
+        "Your organization's access is suspended due to unpaid invoices. Please contact your organization administrator to update your payment method or risk permanent data deletion.",
     });
   } else if (repo.org.subscriptionStatus === "DELETED") {
     throw new TRPCError({
       code: "FORBIDDEN",
       message:
         "Your organization's data has been deleted due to unpaid invoices.",
+    });
+  } else if (repo.org.subscriptionStatus === "CANCELED") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "Your organization's subscription has been canceled. Please contact your organization administrator to resume your subscription or risk permanent data deletion.",
     });
   }
 

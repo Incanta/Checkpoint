@@ -5,84 +5,112 @@ import { Logger } from "../logging";
 import { getStripeClient, isStripeEnabled } from "../stripe/client";
 
 /**
- * Apply org credits as a discount on the invoice subtotal.
- * With Stripe, credits are tracked via Customer Balance which auto-applies to invoices.
- * This function is kept for local tracking and pre-calculation of minimum due.
- */
-export async function applyCredits(
-  orgId: string,
-  subtotalCents: number,
-  db: PrismaClient,
-): Promise<{ discountCents: number; remainingCreditsCents: number }> {
-  const org = await db.org.findUniqueOrThrow({
-    where: { id: orgId },
-    select: { creditBalanceCents: true },
-  });
-
-  if (org.creditBalanceCents <= 0 || subtotalCents <= 0) {
-    return {
-      discountCents: 0,
-      remainingCreditsCents: org.creditBalanceCents,
-    };
-  }
-
-  const discountCents = Math.min(org.creditBalanceCents, subtotalCents);
-  const remainingCreditsCents = org.creditBalanceCents - discountCents;
-
-  await db.org.update({
-    where: { id: orgId },
-    data: { creditBalanceCents: remainingCreditsCents },
-  });
-
-  Logger.debug(
-    `[Billing] Applied ${discountCents}c credits for org ${orgId}, remaining: ${remainingCreditsCents}c`,
-  );
-
-  return { discountCents, remainingCreditsCents };
-}
-
-/**
- * Add credits to an org's balance (e.g., minimum-due overage).
- * Also syncs to Stripe Customer Balance for automatic invoice application.
+ * Add credits to an org via a Stripe Customer Balance Transaction.
+ * Stripe Customer Balance is the source of truth — a negative balance means
+ * the customer has credit that Stripe automatically applies to future invoices.
+ * The local `creditBalanceCents` is a display cache updated via `syncCreditBalance()`.
  */
 export async function addCredits(
   orgId: string,
   amountCents: number,
+  description: string,
   db: PrismaClient,
 ): Promise<void> {
   if (amountCents <= 0) return;
 
-  await db.org.update({
-    where: { id: orgId },
-    data: { creditBalanceCents: { increment: amountCents } },
-  });
-
-  // Sync to Stripe Customer Balance (negative amount = credit)
-  if (isStripeEnabled()) {
-    try {
-      const org = await db.org.findUniqueOrThrow({
-        where: { id: orgId },
-        select: { stripeCustomerId: true },
-      });
-      if (org.stripeCustomerId) {
-        const stripe = getStripeClient();
-        await stripe.customers.createBalanceTransaction(org.stripeCustomerId, {
-          amount: -amountCents,
-          currency: "usd",
-        });
-      }
-    } catch (err: any) {
-      Logger.warn(
-        `[Billing] Failed to sync credits to Stripe for org ${orgId}: ${JSON.stringify(err)}`,
-      );
-    }
+  if (!isStripeEnabled()) {
+    // Non-Stripe environments: local tracking only
+    await db.org.update({
+      where: { id: orgId },
+      data: { creditBalanceCents: { increment: amountCents } },
+    });
+    Logger.debug(`[Billing] Added ${amountCents}c credits for org ${orgId} (local only)`);
+    return;
   }
 
-  Logger.debug(`[Billing] Added ${amountCents}c credits for org ${orgId}`);
+  const org = await db.org.findUniqueOrThrow({
+    where: { id: orgId },
+    select: { stripeCustomerId: true },
+  });
+
+  if (!org.stripeCustomerId) {
+    Logger.warn(
+      `[Billing] Cannot add credits for org ${orgId}: no Stripe customer`,
+    );
+    return;
+  }
+
+  try {
+    const stripe = getStripeClient();
+    // Negative amount = credit on Stripe Customer Balance
+    await stripe.customers.createBalanceTransaction(org.stripeCustomerId, {
+      amount: -amountCents,
+      currency: "usd",
+      description,
+    });
+
+    // Sync the cache from Stripe
+    await syncCreditBalance(orgId, org.stripeCustomerId, db);
+
+    Logger.info(
+      `[Billing] Added ${amountCents}c credits for org ${orgId}: ${description}`,
+    );
+  } catch (err: unknown) {
+    Logger.warn(
+      `[Billing] Failed to add credits to Stripe for org ${orgId}: ${String(err)}`,
+    );
+  }
 }
 
 /**
- * Get the current credit balance for an org.
+ * Fetch the Stripe Customer Balance and update the local cache.
+ * Stripe stores credit as a negative balance; we store the absolute value.
+ */
+export async function syncCreditBalance(
+  orgId: string,
+  stripeCustomerId: string,
+  db: PrismaClient,
+): Promise<number> {
+  if (!isStripeEnabled()) {
+    const org = await db.org.findUniqueOrThrow({
+      where: { id: orgId },
+      select: { creditBalanceCents: true },
+    });
+    return org.creditBalanceCents;
+  }
+
+  try {
+    const stripe = getStripeClient();
+    const customer = await stripe.customers.retrieve(stripeCustomerId);
+
+    if (customer.deleted) {
+      return 0;
+    }
+
+    // Stripe balance: negative = credit available. Convert to positive for display.
+    const creditCents = Math.max(0, -(customer.balance ?? 0));
+
+    await db.org.update({
+      where: { id: orgId },
+      data: { creditBalanceCents: creditCents },
+    });
+
+    return creditCents;
+  } catch (err: unknown) {
+    Logger.warn(
+      `[Billing] Failed to sync credit balance from Stripe for org ${orgId}: ${String(err)}`,
+    );
+    // Fall back to cached value
+    const org = await db.org.findUniqueOrThrow({
+      where: { id: orgId },
+      select: { creditBalanceCents: true },
+    });
+    return org.creditBalanceCents;
+  }
+}
+
+/**
+ * Get the credit balance for an org, fetching from Stripe if available.
  */
 export async function getCreditBalance(
   orgId: string,
@@ -90,7 +118,12 @@ export async function getCreditBalance(
 ): Promise<number> {
   const org = await db.org.findUniqueOrThrow({
     where: { id: orgId },
-    select: { creditBalanceCents: true },
+    select: { creditBalanceCents: true, stripeCustomerId: true },
   });
+
+  if (isStripeEnabled() && org.stripeCustomerId) {
+    return syncCreditBalance(orgId, org.stripeCustomerId, db);
+  }
+
   return org.creditBalanceCents;
 }

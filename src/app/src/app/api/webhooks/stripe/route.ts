@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
+import config from "@incanta/config";
 import { Logger } from "~/server/logging";
 import { isLicenseManager } from "~/server/license-utils";
 import {
@@ -11,8 +12,12 @@ import {
 import { db } from "~/server/db";
 import { markDelinquent } from "~/server/billing/delinquency";
 import { startTrial } from "~/server/billing/trial";
+import { addCredits, syncCreditBalance } from "~/server/billing/credits";
 import { sendEmail } from "~/server/email/service";
-import { paymentFailedEmail } from "~/server/email/billing-templates";
+import {
+  paymentFailedEmail,
+  accountDeletionWarningEmail,
+} from "~/server/email/billing-templates";
 import { createOrgDirectory } from "~/server/storage-service";
 
 export async function POST(request: NextRequest) {
@@ -52,6 +57,10 @@ export async function POST(request: NextRequest) {
         await handleInvoicePaid(event.data.object);
         break;
 
+      case "invoice.finalized":
+        await handleInvoiceFinalized(event.data.object);
+        break;
+
       case "invoice.payment_failed":
         await handleInvoicePaymentFailed(event.data.object);
         break;
@@ -88,6 +97,7 @@ async function applyScheduledTierChange(
     where: { stripeCustomerId, scheduledTier: { not: null } },
     select: {
       id: true,
+      subscriptionTier: true,
       scheduledTier: true,
       stripeSubscriptionId: true,
     },
@@ -103,9 +113,19 @@ async function applyScheduledTierChange(
       const sub = await stripe.subscriptions.retrieve(org.stripeSubscriptionId);
       const prices = getStripePriceConfig();
       const tierKey = newTier.toLowerCase() as "basic" | "pro" | "studio";
+      const priorTierKey = org.subscriptionTier.toLowerCase() as
+        | "basic"
+        | "pro"
+        | "studio";
       const cloudPrices = prices.cloud;
       const writeKey = `${tierKey}-write` as keyof typeof cloudPrices;
       const readKey = `${tierKey}-read` as keyof typeof cloudPrices;
+
+      if (!cloudPrices[writeKey] && !cloudPrices[readKey]) {
+        Logger.warn(
+          `[Billing] No Stripe prices found for tier ${newTier}, cannot update subscription`,
+        );
+      }
 
       const items: Array<{
         id?: string;
@@ -113,16 +133,19 @@ async function applyScheduledTierChange(
         deleted?: boolean;
       }> = [];
       for (const item of sub.items.data) {
-        items.push({ id: item.id, deleted: true });
+        if (item.price.id === cloudPrices[`${priorTierKey}-write`]) {
+          items.push({ id: item.id, price: cloudPrices[writeKey] });
+        } else if (item.price.id === cloudPrices[`${priorTierKey}-read`]) {
+          items.push({ id: item.id, price: cloudPrices[readKey] });
+        } else {
+          // keep storage and minimum due items unchanged
+          items.push({ id: item.id, price: item.price.id });
+        }
       }
-      if (cloudPrices[writeKey]) items.push({ price: cloudPrices[writeKey] });
-      if (cloudPrices[readKey]) items.push({ price: cloudPrices[readKey] });
-      if (cloudPrices.storage) items.push({ price: cloudPrices.storage });
-      if (cloudPrices["minimum-due"])
-        items.push({ price: cloudPrices["minimum-due"] });
 
       await stripe.subscriptions.update(org.stripeSubscriptionId, {
         items,
+        proration_behavior: "none",
         metadata: { tier: newTier },
       });
     } catch (err: any) {
@@ -155,6 +178,13 @@ async function applyScheduledTierChange(
 async function handleCheckoutCompleted(
   session: Stripe.Checkout.Session,
 ): Promise<void> {
+  const existingOrgId = session.metadata?.existingOrgId;
+
+  // Resubscribe flow — reactivate an existing CANCELED org
+  if (existingOrgId) {
+    return handleResubscribe(session, existingOrgId);
+  }
+
   const orgName = session.metadata?.orgName;
   const userId = session.metadata?.userId;
   if (!orgName || !userId) {
@@ -244,6 +274,79 @@ async function handleCheckoutCompleted(
   );
 }
 
+async function handleResubscribe(
+  session: Stripe.Checkout.Session,
+  orgId: string,
+): Promise<void> {
+  const userId = session.metadata?.userId;
+  if (!userId) {
+    Logger.warn(
+      "[Stripe Webhook] resubscribe checkout missing userId metadata",
+    );
+    return;
+  }
+
+  const subscriptionId =
+    typeof session.subscription === "string"
+      ? session.subscription
+      : session.subscription?.id;
+
+  const customerId =
+    typeof session.customer === "string"
+      ? session.customer
+      : session.customer?.id;
+
+  const tier = (session.metadata?.tier ?? "BASIC") as
+    | "BASIC"
+    | "PRO"
+    | "STUDIO";
+
+  // Reactivate the existing org with new subscription
+  await db.org.update({
+    where: { id: orgId },
+    data: {
+      stripeCustomerId: customerId ?? undefined,
+      stripeSubscriptionId: subscriptionId ?? undefined,
+      subscriptionStatus: "ACTIVE",
+      subscriptionTier: tier,
+      canceledAt: null,
+      suspendedAt: null,
+      delinquentSince: null,
+      scheduledTier: null,
+      scheduledTierAt: null,
+    },
+  });
+
+  // Sync billing cycle anchor from the new Stripe subscription
+  if (subscriptionId) {
+    try {
+      const stripe = getStripeClient();
+      const sub = await stripe.subscriptions.retrieve(subscriptionId);
+      if (sub.billing_cycle_anchor) {
+        const anchorDate = new Date(sub.billing_cycle_anchor * 1000);
+        await db.org.update({
+          where: { id: orgId },
+          data: { billingCycleAnchor: anchorDate.getUTCDate() },
+        });
+      }
+    } catch (err: unknown) {
+      Logger.warn(
+        `[Stripe Webhook] Failed to sync billing cycle anchor for resubscribed org ${orgId}: ${String(err)}`,
+      );
+    }
+  }
+
+  // Update licenses to new tier
+  await db.license.updateMany({
+    where: { orgId },
+    data: { tier },
+  });
+
+  Logger.info(
+    `[Stripe Webhook] Resubscribe completed — org ${orgId} reactivated with subscription ${subscriptionId ?? "none"}, tier ${tier}`,
+  );
+}
+
 async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> {
   const stripeInvoiceId = invoice.id;
   if (!stripeInvoiceId) return;
@@ -258,23 +361,66 @@ async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> {
     await applyScheduledTierChange(customerId);
   }
 
+  // Find the org for this invoice
+  const org = customerId
+    ? await db.org.findFirst({
+        where: { stripeCustomerId: customerId },
+        select: { id: true, subscriptionStatus: true },
+      })
+    : null;
+
   // Try to find our local invoice by Stripe invoice ID
   const localInvoice = await db.invoice.findUnique({
     where: { stripeInvoiceId },
   });
 
+  // Extract minimum-due charges and add as credit
+  if (org) {
+    const prices = getStripePriceConfig();
+    const minimumDuePriceId = prices.cloud["minimum-due"];
+    let minimumDueCents = 0;
+
+    if (minimumDuePriceId && invoice.lines?.data) {
+      for (const line of invoice.lines.data) {
+        const priceRef = line.pricing?.price_details?.price;
+        const priceId =
+          typeof priceRef === "string" ? priceRef : priceRef?.id;
+        if (priceId === minimumDuePriceId && line.amount > 0) {
+          minimumDueCents += line.amount;
+        }
+      }
+    }
+
+    if (minimumDueCents > 0) {
+      await addCredits(
+        org.id,
+        minimumDueCents,
+        `Minimum-due credit from invoice ${stripeInvoiceId}`,
+        db,
+      );
+      Logger.info(
+        `[Stripe Webhook] Added ${minimumDueCents}c minimum-due credit for org ${org.id}`,
+      );
+    }
+  }
+
   if (localInvoice) {
+    // Record credit applied from Stripe Customer Balance
+    const creditAppliedCents = Math.max(
+      0,
+      invoice.subtotal - invoice.amount_due,
+    );
+
     await db.invoice.update({
       where: { id: localInvoice.id },
-      data: { status: "PAID", paidAt: new Date() },
+      data: {
+        status: "PAID",
+        paidAt: new Date(),
+        creditAppliedCents,
+      },
     });
 
     // Clear delinquency if all invoices are now paid
-    const org = await db.org.findUnique({
-      where: { id: localInvoice.orgId },
-      select: { subscriptionStatus: true },
-    });
-
     if (org?.subscriptionStatus === "PAST_DUE") {
       const unpaid = await db.invoice.count({
         where: {
@@ -300,39 +446,57 @@ async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> {
     Logger.info(
       `[Stripe Webhook] Invoice ${stripeInvoiceId} paid — local invoice ${localInvoice.id} marked PAID`,
     );
-  } else {
-    // Stripe-generated invoice we don't track locally (e.g., first subscription invoice)
-    // Try to find org by customer ID and create a local record
-    const customerId =
-      typeof invoice.customer === "string"
-        ? invoice.customer
-        : invoice.customer?.id;
-    if (customerId && invoice.total > 0) {
-      const org = await db.org.findFirst({
-        where: { stripeCustomerId: customerId },
-      });
-      if (org) {
-        // Use invoice period_start for year/month (the billing period this invoice covers)
-        const periodStart = invoice.period_start
-          ? new Date(invoice.period_start * 1000)
-          : new Date();
-        await db.invoice.create({
-          data: {
-            orgId: org.id,
-            stripeInvoiceId,
-            year: periodStart.getUTCFullYear(),
-            month: periodStart.getUTCMonth() + 1,
-            status: "PAID",
-            subtotalCents: invoice.subtotal,
-            creditAppliedCents: 0,
-            minimumDueAddedCents: 0,
-            totalCents: invoice.total,
-            paidAt: new Date(),
-          },
-        });
-      }
-    }
+  } else if (customerId && invoice.total > 0 && org) {
+    // Stripe-generated invoice we don't track locally — create a local record
+    const periodStart = invoice.period_start
+      ? new Date(invoice.period_start * 1000)
+      : new Date();
+    const creditAppliedCents = Math.max(
+      0,
+      invoice.subtotal - invoice.amount_due,
+    );
+    await db.invoice.create({
+      data: {
+        orgId: org.id,
+        stripeInvoiceId,
+        year: periodStart.getUTCFullYear(),
+        month: periodStart.getUTCMonth() + 1,
+        status: "PAID",
+        subtotalCents: invoice.subtotal,
+        creditAppliedCents,
+        minimumDueAddedCents: 0,
+        totalCents: invoice.total,
+        paidAt: new Date(),
+      },
+    });
   }
+}
+
+/**
+ * When an invoice is finalized, sync the Stripe Customer Balance back to our
+ * local cache. Stripe may have auto-applied balance to reduce the invoice.
+ */
+async function handleInvoiceFinalized(
+  invoice: Stripe.Invoice,
+): Promise<void> {
+  const customerId =
+    typeof invoice.customer === "string"
+      ? invoice.customer
+      : invoice.customer?.id;
+  if (!customerId) return;
+
+  const org = await db.org.findFirst({
+    where: { stripeCustomerId: customerId },
+    select: { id: true },
+  });
+  if (!org) return;
+
+  // Sync credit balance cache from Stripe
+  await syncCreditBalance(org.id, customerId, db);
+
+  Logger.debug(
+    `[Stripe Webhook] Invoice ${invoice.id} finalized — synced credit balance for org ${org.id}`,
+  );
 }
 
 async function handleInvoicePaymentFailed(
@@ -445,7 +609,7 @@ async function handleSubscriptionDeleted(
 ): Promise<void> {
   const org = await db.org.findFirst({
     where: { stripeSubscriptionId: subscription.id },
-    select: { id: true },
+    select: { id: true, name: true },
   });
   if (!org) return;
 
@@ -457,6 +621,33 @@ async function handleSubscriptionDeleted(
       stripeSubscriptionId: null,
     },
   });
+
+  const admins = await db.orgUser.findMany({
+    where: {
+      orgId: org.id,
+      role: { in: ["ADMIN", "BILLING"] },
+    },
+    include: { user: { select: { email: true } } },
+  });
+
+  for (const admin of admins) {
+    try {
+      const template = accountDeletionWarningEmail(
+        org.name,
+        config.get<number>("stripe.delinquency.delete-after-days"),
+        `/${org.name}/settings/billing`,
+      );
+
+      await sendEmail({
+        to: admin.user.email,
+        ...template,
+      });
+    } catch (err: any) {
+      Logger.warn(
+        `[Billing] Failed to send cancellation email to ${admin.user.email}: ${JSON.stringify(err)}`,
+      );
+    }
+  }
 
   Logger.info(
     `[Stripe Webhook] Subscription ${subscription.id} deleted — org ${org.id} set to CANCELED`,

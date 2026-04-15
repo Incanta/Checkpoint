@@ -1,5 +1,5 @@
 export { calculateStorageCharge } from "./storage-usage";
-export { applyCredits, addCredits, getCreditBalance } from "./credits";
+export { addCredits, syncCreditBalance, getCreditBalance } from "./credits";
 export { startTrial, checkTrialExpiry } from "./trial";
 export {
   markDelinquent,

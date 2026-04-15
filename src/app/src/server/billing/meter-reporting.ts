@@ -120,7 +120,8 @@ export async function reportOrgMeters(
       minimumDueCents = minInvoice - subtotal;
     }
 
-    if (org.subscriptionStatus === "TRIAL" && org.canceledAt) {
+    if (org.canceledAt) {
+      // don't charge for a minimum if the subscription is canceled to prevent refunds
       minimumDueCents = 0;
     }
 
