@@ -262,4 +262,101 @@ export const licenseRouter = createTRPCRouter({
       const tier = await getEffectiveTierHelper(input.orgId, ctx.db);
       return hasFeature(tier, input.feature);
     }),
+
+  // Org member: get license info for a self-hosted org
+  getLicenseInfo: protectedProcedure
+    .input(z.object({ orgId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const orgUser = await ctx.db.orgUser.findUnique({
+        where: {
+          orgId_userId: { orgId: input.orgId, userId: ctx.session.user.id },
+        },
+      });
+      if (!orgUser) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      const org = await ctx.db.org.findUniqueOrThrow({
+        where: { id: input.orgId },
+        select: { selfHosted: true },
+      });
+      if (!org.selfHosted) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Not a self-hosted organization",
+        });
+      }
+
+      const license = await ctx.db.license.findFirst({
+        where: { orgId: input.orgId },
+        select: {
+          id: true,
+          key: true,
+          tier: true,
+          active: true,
+          createdAt: true,
+          lastReportAt: true,
+        },
+      });
+
+      if (!license) return null;
+
+      // Get recent usage reports
+      const usageReports = await ctx.db.licenseUsageReport.findMany({
+        where: { licenseId: license.id },
+        orderBy: [{ year: "desc" }, { month: "desc" }],
+        take: 12,
+      });
+
+      return { ...license, usageReports };
+    }),
+
+  // Org admin: regenerate license secret
+  regenerateSecret: protectedProcedure
+    .input(z.object({ orgId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const orgUser = await ctx.db.orgUser.findUnique({
+        where: {
+          orgId_userId: { orgId: input.orgId, userId: ctx.session.user.id },
+        },
+      });
+      if (orgUser?.role !== "ADMIN") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
+      }
+
+      const org = await ctx.db.org.findUniqueOrThrow({
+        where: { id: input.orgId },
+        select: { selfHosted: true },
+      });
+      if (!org.selfHosted) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Not a self-hosted organization",
+        });
+      }
+
+      const license = await ctx.db.license.findFirst({
+        where: { orgId: input.orgId },
+      });
+      if (!license) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "No license found for this organization",
+        });
+      }
+
+      const secret = "sec_" + crypto.randomBytes(32).toString("hex");
+      const secretHash = crypto
+        .createHash("sha256")
+        .update(secret)
+        .digest("hex");
+
+      await ctx.db.license.update({
+        where: { id: license.id },
+        data: { secretHash },
+      });
+
+      // Return the new secret — this is the only time it can be viewed
+      return { secret };
+    }),
 });

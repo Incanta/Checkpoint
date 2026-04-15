@@ -77,6 +77,7 @@ export const orgRouter = createTRPCRouter({
         return {
           id: org.id,
           name: org.name,
+          selfHosted: org.selfHosted,
           defaultRepoAccess: RepoAccess.NONE,
           defaultCanCreateRepos: false,
           repos: org.repos?.filter((repo) => repo.public) || [],

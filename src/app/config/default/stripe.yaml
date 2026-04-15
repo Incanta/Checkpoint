@@ -32,6 +32,28 @@ prices:
     pro-write: ""
     pro-read: ""
 
+seat-prices:
+  cloud:
+    basic:
+      write: 400
+      read: 200
+    pro:
+      write: 900
+      read: 400
+    studio:
+      write: 2400
+      read: 1200
+  self-hosted:
+    basic:
+      write: 0
+      read: 0
+    pro:
+      write: 400
+      read: 200
+    studio:
+      write: 900
+      read: 400
+
 # Storage pricing (for our calculations, must match Stripe catalog price)
 storage:
   free-tier-gb: 25

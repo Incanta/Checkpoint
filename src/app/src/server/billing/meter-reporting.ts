@@ -14,11 +14,13 @@ import { getBillingPeriod } from "./billing-period";
 
 /**
  * Report the current user meter values (write/read) to Stripe
- * for a given org.
+ * for a given org. For self-hosted orgs, reads from LicenseUsageReport
+ * instead of OrgUserActivity.
  */
 export async function getOrgUserMeters(
   org: {
     id: string;
+    selfHosted: boolean;
     billingCycleAnchor: number;
     canceledAt: Date | null;
     stripeCustomerId: string | null;
@@ -40,6 +42,40 @@ export async function getOrgUserMeters(
       org.billingCycleAnchor,
     );
 
+    if (org.selfHosted) {
+      // Self-hosted: read from LicenseUsageReport
+      const license = await db.license.findFirst({
+        where: { orgId: org.id, active: true },
+        select: { id: true },
+      });
+      if (!license) return { writeUsers: 0, readUsers: 0 };
+
+      const report = await db.licenseUsageReport.findUnique({
+        where: {
+          licenseId_year_month: {
+            licenseId: license.id,
+            year,
+            month,
+          },
+        },
+        select: { awuCount: true, aruCount: true },
+      });
+
+      if (!report) {
+        Logger.warn(
+          `[Billing] No license usage report found for self-hosted org ${org.id} for ${year}-${month}`,
+        );
+
+        return null;
+      }
+
+      return {
+        writeUsers: report.awuCount,
+        readUsers: report.aruCount,
+      };
+    }
+
+    // Cloud: read from OrgUserActivity
     const activities = await db.orgUserActivity.findMany({
       where: { orgId: org.id, year, month },
       select: { writeCount: true, readCount: true },
@@ -80,6 +116,7 @@ export async function reportOrgMeters(
       where: { id: orgId },
       select: {
         id: true,
+        selfHosted: true,
         subscriptionTier: true,
         billingCycleAnchor: true,
         stripeCustomerId: true,
@@ -100,14 +137,28 @@ export async function reportOrgMeters(
       readUsers: 0,
     };
 
-    // Calculate approximate minimum due based on current meters
-    const SEAT_PRICES: Record<string, { write: number; read: number }> = {
-      BASIC: { write: 300, read: 150 },
-      PRO: { write: 600, read: 300 },
-      STUDIO: { write: 1400, read: 700 },
-    };
-    const tier = (org?.subscriptionTier ?? "BASIC") as string;
-    const prices = SEAT_PRICES[tier] ?? SEAT_PRICES.BASIC!;
+    interface TierPrices {
+      write: number;
+      read: number;
+    }
+
+    interface ServicePrices {
+      basic: TierPrices;
+      pro: TierPrices;
+      studio: TierPrices;
+    }
+
+    interface SeatPrices {
+      cloud: ServicePrices;
+      selfHosted: ServicePrices;
+    }
+
+    const seatPrices = config.get<SeatPrices>("stripe.seat-prices");
+    const tier = org.subscriptionTier.toLowerCase() as keyof ServicePrices;
+    const servicePrices = org.selfHosted
+      ? seatPrices.selfHosted
+      : seatPrices.cloud;
+    const prices = servicePrices[tier];
     const { bucketPriceCents } = getStoragePricingConfig();
 
     const userCharges = writeUsers * prices.write + readUsers * prices.read;
@@ -168,11 +219,11 @@ export async function reportOrgMeters(
     });
 
     Logger.debug(
-      `[Billing] Reported storage meters for org ${orgId}: ${storageBuckets} buckets, min-due ${minimumDueCents}c`,
+      `[Billing] Reported meters for org ${orgId}: write=${writeUsers}, read=${readUsers}${org.selfHosted ? " (self-hosted)" : `, storage=${storageBuckets} buckets`}`,
     );
   } catch (err: unknown) {
     Logger.warn(
-      `[Billing] Failed to report storage meters for org ${orgId}: ${String(err)}`,
+      `[Billing] Failed to report meters for org ${orgId}: ${String(err)}`,
     );
   }
 }

@@ -7,6 +7,7 @@ import { Button, Card, PageHeader, Badge } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 
 type Step = "name" | "trial";
+type HostingType = "cloud" | "self-hosted";
 
 const TIER_FEATURES: Record<string, string[]> = {
   BASIC: ["Checkouts & locking", "Branching", "All clients"],
@@ -25,6 +26,7 @@ export default function NewOrgPage() {
   const [name, setName] = useState("");
   const [step, setStep] = useState<Step>("name");
   const [tier, setTier] = useState<"BASIC" | "PRO" | "STUDIO">("BASIC");
+  const [hostingType, setHostingType] = useState<HostingType>("cloud");
   const [useTrial, setUseTrial] = useState(true);
   const [redirecting, setRedirecting] = useState(false);
   const router = useRouter();
@@ -35,6 +37,8 @@ export default function NewOrgPage() {
   const billingEnabled = checkoutSettings?.enabled ?? false;
   const canUseTrial = !trialStatus?.trialUsed;
 
+  const isSelfHosted = hostingType === "self-hosted";
+
   const createCheckout = api.billing.createCheckoutSession.useMutation({
     onSuccess: (data) => {
       if (data.checkoutUrl) {
@@ -44,6 +48,16 @@ export default function NewOrgPage() {
     },
   });
 
+  const createSelfHostedCheckout =
+    api.billing.createSelfHostedCheckout.useMutation({
+      onSuccess: (data) => {
+        if (data.checkoutUrl) {
+          setRedirecting(true);
+          window.location.href = data.checkoutUrl;
+        }
+      },
+    });
+
   const createOrg = api.org.createOrg.useMutation({
     onSuccess: (org) => {
       void utils.org.myOrgs.invalidate();
@@ -51,39 +65,55 @@ export default function NewOrgPage() {
     },
   });
 
+  const handleCheckout = () => {
+    const trimmedName = name.trim();
+    if (isSelfHosted) {
+      createSelfHostedCheckout.mutate({
+        orgName: trimmedName,
+        tier: tier as "PRO" | "STUDIO",
+        successUrl: `${window.location.origin}/${trimmedName}/settings/license?checkout=success`,
+        cancelUrl: `${window.location.origin}/new/org?checkout=canceled`,
+      });
+    } else {
+      createCheckout.mutate({
+        orgName: trimmedName,
+        tier,
+        useTrial,
+        successUrl: `${window.location.origin}/${trimmedName}?checkout=success`,
+        cancelUrl: `${window.location.origin}/new/org?checkout=canceled`,
+      });
+    }
+  };
+
   const handleNameSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
-    if (billingEnabled && canUseTrial) {
+    if (isSelfHosted) {
+      // Self-hosted: no trial, go straight to checkout
+      handleCheckout();
+    } else if (billingEnabled && canUseTrial) {
       setStep("trial");
     } else if (billingEnabled) {
-      // No trial available, go straight to checkout
-      createCheckout.mutate({
-        orgName: name.trim(),
-        tier,
-        useTrial: false,
-        successUrl: `${window.location.origin}/${name.trim()}?checkout=success`,
-        cancelUrl: `${window.location.origin}/new/org?checkout=canceled`,
-      });
+      handleCheckout();
     } else {
       createOrg.mutate({ name: name.trim() });
     }
   };
 
-  const handleCreate = () => {
-    createCheckout.mutate({
-      orgName: name.trim(),
-      tier,
-      useTrial,
-      successUrl: `${window.location.origin}/${name.trim()}?checkout=success`,
-      cancelUrl: `${window.location.origin}/new/org?checkout=canceled`,
-    });
-  };
-
   const isPending =
-    createOrg.isPending || createCheckout.isPending || redirecting;
-  const error = createOrg.error ?? createCheckout.error;
+    createOrg.isPending ||
+    createCheckout.isPending ||
+    createSelfHostedCheckout.isPending ||
+    redirecting;
+  const error =
+    createOrg.error ?? createCheckout.error ?? createSelfHostedCheckout.error;
+
+  // Available tiers based on hosting type
+  const availableTiers =
+    isSelfHosted
+      ? (["PRO", "STUDIO"] as const)
+      : (["BASIC", "PRO", "STUDIO"] as const);
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -93,7 +123,7 @@ export default function NewOrgPage() {
       />
 
       {/* Step indicators for billing flow */}
-      {billingEnabled && canUseTrial && (
+      {billingEnabled && canUseTrial && !isSelfHosted && (
         <div className="mb-4 flex items-center gap-2">
           {(["name", "trial"] as Step[]).map((s, i) => (
             <div key={s} className="flex items-center gap-2">
@@ -146,63 +176,114 @@ export default function NewOrgPage() {
             </div>
 
             {billingEnabled && (
-              <div>
-                <label className="mb-2 block text-sm font-medium text-[var(--color-text-primary)]">
-                  Plan
-                </label>
-                <div className="grid grid-cols-3 items-start gap-3">
-                  {(["BASIC", "PRO", "STUDIO"] as const).map((t) => {
-                    const pricing = TIER_PRICING[t]!;
-                    return (
+              <>
+                {/* Hosting Type Toggle */}
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-[var(--color-text-primary)]">
+                    Hosting
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {(["cloud", "self-hosted"] as const).map((ht) => (
                       <button
-                        key={t}
+                        key={ht}
                         type="button"
-                        onClick={() => setTier(t)}
-                        className={`rounded-md border p-4 text-left text-sm transition-colors ${
-                          tier === t
+                        onClick={() => {
+                          setHostingType(ht);
+                          // Reset tier if switching to self-hosted and on BASIC
+                          if (ht === "self-hosted" && tier === "BASIC") {
+                            setTier("PRO");
+                          }
+                        }}
+                        className={`rounded-md border p-3 text-left text-sm transition-colors ${
+                          hostingType === ht
                             ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10"
                             : "border-[var(--color-border-default)] hover:border-[var(--color-accent)]/50"
                         }`}
                       >
-                        <Badge
-                          variant={
-                            t === "STUDIO"
-                              ? "accent"
-                              : t === "PRO"
-                                ? "info"
-                                : "default"
-                          }
-                        >
-                          {t}
-                        </Badge>
-
-                        <div className="mt-3 space-y-0.5">
-                          <p className="text-lg font-bold text-[var(--color-text-primary)]">
-                            ${pricing.write}
-                            <span className="text-xs font-normal text-[var(--color-text-muted)]">
-                              /write user/mo
-                            </span>
-                          </p>
-                          <p className="text-xs text-[var(--color-text-muted)]">
-                            ${pricing.read}/read user/mo
-                          </p>
+                        <div className="font-medium text-[var(--color-text-primary)]">
+                          {ht === "cloud" ? "☁️ Cloud" : "🏠 Self-Hosted"}
                         </div>
-
-                        <ul className="mt-3 space-y-0.5 text-xs text-[var(--color-text-secondary)]">
-                          {(TIER_FEATURES[t] ?? []).map((f) => (
-                            <li key={f}>• {f}</li>
-                          ))}
-                          {t !== "BASIC" && (
-                            <li className="text-[var(--color-text-muted)]">
-                              + all {t === "STUDIO" ? "Pro" : "Basic"} features
-                            </li>
-                          )}
-                        </ul>
+                        <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+                          {ht === "cloud"
+                            ? "Managed by Checkpoint. Repos, storage, and billing included."
+                            : "Run on your own infrastructure. License key provided."}
+                        </div>
                       </button>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
-              </div>
+
+                {/* Plan Selection */}
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-[var(--color-text-primary)]">
+                    Plan
+                  </label>
+
+                  {isSelfHosted && (
+                    <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+                      Self-hosted Basic is free and doesn&apos;t require a
+                      license. Choose Pro or Studio for advanced features.
+                    </p>
+                  )}
+
+                  <div
+                    className={`grid items-start gap-3 ${isSelfHosted ? "grid-cols-2" : "grid-cols-3"}`}
+                  >
+                    {availableTiers.map((t) => {
+                      const pricing = TIER_PRICING[t]!;
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setTier(t)}
+                          className={`rounded-md border p-4 text-left text-sm transition-colors ${
+                            tier === t
+                              ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10"
+                              : "border-[var(--color-border-default)] hover:border-[var(--color-accent)]/50"
+                          }`}
+                        >
+                          <Badge
+                            variant={
+                              t === "STUDIO"
+                                ? "accent"
+                                : t === "PRO"
+                                  ? "info"
+                                  : "default"
+                            }
+                          >
+                            {t}
+                          </Badge>
+
+                          <div className="mt-3 space-y-0.5">
+                            <p className="text-lg font-bold text-[var(--color-text-primary)]">
+                              ${pricing.write}
+                              <span className="text-xs font-normal text-[var(--color-text-muted)]">
+                                /write user/mo
+                              </span>
+                            </p>
+                            <p className="text-xs text-[var(--color-text-muted)]">
+                              ${pricing.read}/read user/mo
+                            </p>
+                          </div>
+
+                          <ul className="mt-3 space-y-0.5 text-xs text-[var(--color-text-secondary)]">
+                            {(TIER_FEATURES[t] ?? []).map((f) => (
+                              <li key={f}>• {f}</li>
+                            ))}
+                            {t !== "BASIC" && (
+                              <li className="text-[var(--color-text-muted)]">
+                                + all{" "}
+                                {t === "STUDIO" ? "Pro" : "Basic"}{" "}
+                                features
+                              </li>
+                            )}
+                          </ul>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
             )}
 
             {error && (
@@ -222,26 +303,29 @@ export default function NewOrgPage() {
               <Button type="submit" disabled={!name.trim() || isPending}>
                 {isPending
                   ? "Setting up..."
-                  : billingEnabled && canUseTrial
-                    ? "Next: Trial"
-                    : billingEnabled
-                      ? "Continue to Payment"
-                      : "Create organization"}
+                  : isSelfHosted
+                    ? "Continue to Payment"
+                    : billingEnabled && canUseTrial
+                      ? "Next: Trial"
+                      : billingEnabled
+                        ? "Continue to Payment"
+                        : "Create organization"}
               </Button>
             </div>
 
             {billingEnabled && (
               <p className="text-xs text-[var(--color-text-muted)]">
-                You&apos;ll be redirected to Stripe to enter your payment
-                details.
+                {isSelfHosted
+                  ? "You'll be redirected to Stripe to enter your payment details. A license key will be generated after checkout."
+                  : "You'll be redirected to Stripe to enter your payment details."}
               </p>
             )}
           </form>
         </Card>
       )}
 
-      {/* Step 2: Trial */}
-      {step === "trial" && (
+      {/* Step 2: Trial (cloud only) */}
+      {step === "trial" && !isSelfHosted && (
         <Card>
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -304,7 +388,7 @@ export default function NewOrgPage() {
               <Button variant="secondary" onClick={() => setStep("name")}>
                 Back
               </Button>
-              <Button onClick={handleCreate} disabled={isPending}>
+              <Button onClick={handleCheckout} disabled={isPending}>
                 {isPending ? "Setting up..." : "Continue to Payment"}
               </Button>
             </div>
@@ -329,3 +413,4 @@ export default function NewOrgPage() {
     </div>
   );
 }
+
