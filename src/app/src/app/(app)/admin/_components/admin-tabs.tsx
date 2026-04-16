@@ -8,6 +8,7 @@ export function AdminTabs() {
       <Tab href="/admin" exact>
         Dashboard
       </Tab>
+      <Tab href="/admin/metrics">Metrics</Tab>
       <Tab href="/admin/billing">Billing</Tab>
     </Tabs>
   );

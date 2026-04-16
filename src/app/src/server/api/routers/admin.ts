@@ -194,4 +194,30 @@ export const adminRouter = createTRPCRouter({
 
       return { creditBalanceCents: balance };
     }),
+
+  getDailyMetrics: adminProcedure
+    .input(
+      z
+        .object({
+          from: z.date().optional(),
+          to: z.date().optional(),
+          limit: z.number().int().min(1).max(365).default(30),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const where: Record<string, unknown> = {};
+      if (input?.from || input?.to) {
+        const dateFilter: Record<string, Date> = {};
+        if (input.from) dateFilter.gte = input.from;
+        if (input.to) dateFilter.lte = input.to;
+        where.date = dateFilter;
+      }
+
+      return ctx.db.dailyMetrics.findMany({
+        where,
+        orderBy: { date: "desc" },
+        take: input?.limit ?? 30,
+      });
+    }),
 });

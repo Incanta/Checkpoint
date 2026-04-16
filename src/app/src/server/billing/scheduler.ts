@@ -12,6 +12,8 @@ import { checkDelinquency } from "./delinquency";
 import { calculateStorageCharge } from "./storage-usage";
 import { isR2Enabled, deleteR2Bucket } from "~/server/r2-service";
 import { reportOrgMeters } from "./meter-reporting";
+import { collectDailyMetrics } from "~/server/metrics/daily-metrics";
+import { isLicenseManager } from "~/server/license-utils";
 import { sendEmail } from "../email/service";
 import {
   cardExpiryEmail,
@@ -113,6 +115,17 @@ export async function runBillingChecks(now: Date): Promise<void> {
 
   // 5. Clean up R2 buckets for deleted repos
   await cleanupDeletedRepoStorage(db);
+
+  // 6. Collect daily platform metrics (license-manager only)
+  if (isLicenseManager()) {
+    try {
+      await collectDailyMetrics(db);
+    } catch (err: unknown) {
+      Logger.warn(
+        `[Billing] Failed to collect daily metrics: ${String(err)}`,
+      );
+    }
+  }
 }
 
 async function checkCardExpiry(db: PrismaClient): Promise<void> {
