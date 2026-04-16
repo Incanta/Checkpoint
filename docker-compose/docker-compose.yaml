@@ -1,70 +1,4 @@
-# docker-compose.prod.yaml — Checkpoint production stack
-#
-# Usage:
-#   cp .env.example .env        # Edit with your settings
-#   docker compose -f docker-compose.prod.yaml up -d
-#
-# For ACME/LetsEncrypt:
-#   docker compose -f docker-compose.prod.yaml --profile acme up -d
-#   ./scripts/obtain-cert.sh    # First-time cert enrollment
-#
-# For custom certs:
-#   Set TLS_MODE=custom and CUSTOM_CERT_DIR in .env
-#   Mount your cert dir with fullchain.pem + privkey.pem
-
 services:
-  # ----------------------------------------------------------------
-  # Nginx — TLS-terminating reverse proxy
-  # ----------------------------------------------------------------
-  nginx:
-    container_name: checkpoint-nginx
-    image: nginx:alpine
-    depends_on:
-      - app
-      - server
-    restart: always
-    volumes:
-      - nginx-logs:/var/log/nginx
-      - ./config/nginx/conf:/etc/nginx
-      - ./scripts/init-certs.sh:/init-certs.sh:ro
-      - certbot-certs:/etc/letsencrypt
-      - certbot-www:/var/www/certbot
-      - ${CUSTOM_CERT_DIR:-/dev/null}:/certs:ro
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      CHECKPOINT_HOSTNAME: "${CHECKPOINT_HOSTNAME}"
-      TLS_MODE: "${TLS_MODE:-none}"
-      CUSTOM_CERT_DIR: "/certs"
-    entrypoint: ["/bin/sh", "/init-certs.sh"]
-    networks:
-      - checkpoint
-
-  # ----------------------------------------------------------------
-  # Certbot — ACME certificate lifecycle (only with --profile acme)
-  # ----------------------------------------------------------------
-  certbot:
-    container_name: checkpoint-certbot
-    image: certbot/certbot
-    volumes:
-      - certbot-certs:/etc/letsencrypt
-      - certbot-www:/var/www/certbot
-    # Renewal loop: check every 12h, renew if within 30 days of expiry.
-    # Nginx reloads on its own 6h cycle to pick up renewed certs.
-    entrypoint: >-
-      /bin/sh -c 'trap exit TERM;
-      while :; do
-        certbot renew --webroot -w /var/www/certbot --quiet;
-        sleep 12h & wait $${!};
-      done'
-    depends_on:
-      - nginx
-    networks:
-      - checkpoint
-    profiles:
-      - acme
-
   # ----------------------------------------------------------------
   # App — Next.js application (UI + API)
   # ----------------------------------------------------------------
@@ -74,9 +8,12 @@ services:
     restart: unless-stopped
     networks:
       - checkpoint
+    ports:
+      - "13000:13000"
     volumes:
       - app-data:/app/data
       - ./config/app:/app/config
+      - ./config/.secrets:/app/.secrets:ro
 
   # ----------------------------------------------------------------
   # Server — Core storage server
@@ -87,68 +24,16 @@ services:
     restart: unless-stopped
     networks:
       - checkpoint
+    ports:
+      - "13001:13001"
     volumes:
       - storage-data:/app/data
       - ./config/server:/app/config
-
-  master:
-    image: ghcr.io/incanta/checkpoint-seaweedfs:latest
-    build:
-      context: ./src/seaweedfs/docker
-      dockerfile: Dockerfile.local
-    pull_policy: always
-    command: "master -ip=master -ip.bind=0.0.0.0"
-    volumes:
-      - ./config/seaweedfs/security.toml:/etc/seaweedfs/security.toml
-    networks:
-      - checkpoint
-    profiles:
-      - seaweedfs
-
-  volume:
-    image: ghcr.io/incanta/checkpoint-seaweedfs:latest
-    build:
-      context: ./src/seaweedfs/docker
-      dockerfile: Dockerfile.local
-    pull_policy: always
-    command: 'volume -mserver="master:9333" -ip.bind=0.0.0.0 -port=8080'
-    depends_on:
-      - master
-    volumes:
-      - seaweedfs-data:/data
-      - ./config/seaweedfs/security.toml:/etc/seaweedfs/security.toml
-    networks:
-      - checkpoint
-    profiles:
-      - seaweedfs
-
-  filer:
-    image: ghcr.io/incanta/checkpoint-seaweedfs:latest
-    build:
-      context: ./src/seaweedfs/docker
-      dockerfile: Dockerfile.local
-    pull_policy: always
-    command: 'filer -master="master:9333" -ip.bind=0.0.0.0 -metricsPort=9326'
-    tty: true
-    stdin_open: true
-    depends_on:
-      - master
-      - volume
-    volumes:
-      - ./config/seaweedfs/filer.toml:/etc/seaweedfs/filer.toml
-      - ./config/seaweedfs/security.toml:/etc/seaweedfs/security.toml
-    networks:
-      - checkpoint
-    profiles:
-      - seaweedfs
+      - ./config/.secrets:/app/.secrets:ro
 
 volumes:
-  nginx-logs:
   app-data:
   storage-data:
-  certbot-certs:
-  certbot-www:
-  seaweedfs-data:
 
 networks:
   checkpoint:

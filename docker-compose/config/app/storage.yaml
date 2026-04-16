@@ -1,0 +1,8 @@
+jwt:
+  signing-key: "secret|storage_signing_key"
+
+token-expiration-seconds: 3600
+
+backend-url:
+  internal: "http://checkpoint-server:13001"
+  external: "http://IP_ADDRESS:13001"

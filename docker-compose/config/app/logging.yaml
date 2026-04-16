@@ -1,0 +1,34 @@
+# Enabling this in production will have a performance impact; it's recommended to
+# keep this disabled for production, download the files locally, and run `yarn log <log-file>` to view the log prettified.
+# See documentation for the other options at https://github.com/pinojs/pino-pretty
+prettify:
+  enabled: true
+  colorize: true
+  colorizeObjects: true
+  crlf: true
+  levelFirst: false
+  messageFormat: false
+  translateTime: "HH:MM:ss.l"
+  ignore: ["hostname"]
+  include: []
+  hideObject: false
+  singleLine: false
+
+# This is the level name that will be printed to stdout. Any other levels that have a higher
+# order value will also be printed. Custom levels can be added in packages/common/src/util/logging.ts
+level: "info"
+
+longtail-level: "off"
+
+log-file:
+  # This will also log to a file in addition to stdout
+  enabled: false
+
+  level: "trace"
+
+  # Set this to an absolute path or a relative one (relative to the current process working directory)
+  # to log to also a file.
+  path: "logs/checkpoint.log"
+
+  # The number of files to keep in the directory; older files will be deleted. Set to -1 to keep all files.
+  max-archived-files: 10
