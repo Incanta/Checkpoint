@@ -8,6 +8,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
+#define API_VERSION TEXT("1.0.0")
+
 /**
  * HTTP client for communicating with the Checkpoint daemon's tRPC API.
  * The daemon runs locally and exposes a tRPC HTTP server with superjson
@@ -204,6 +206,21 @@ public:
   );
 
   // ---- Settings / Workspace-creation API ----
+
+  /**
+   * Check daemon API version compatibility.
+   * @param OutCurrentVersion   Daemon's current API version
+   * @param OutMinimumVersion   Minimum client version required
+   * @param OutRecommendedVersion  Recommended client version
+   * @param OutError            Error message if call failed
+   * @return true on success
+   */
+  bool CheckVersion(
+    FString &OutCurrentVersion,
+    FString &OutMinimumVersion,
+    FString &OutRecommendedVersion,
+    FString &OutError
+  );
 
   /**
    * Initiate device-code login flow for a new account.

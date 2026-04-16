@@ -4,6 +4,7 @@ import {
   FileStatus,
   FileType,
 } from "@checkpointvcs/daemon";
+import { checkVersionCompatibility } from "@checkpointvcs/common";
 import { MockedData } from "../common/mock-data";
 import { User, usersAtom, currentUserAtom } from "../common/state/auth";
 import { store } from "../common/state/store";
@@ -34,11 +35,14 @@ import {
   dashboardReposAtom,
 } from "../common/state/dashboard";
 import { updateAtom } from "../common/state/update";
+import { versionCheckAtom } from "../common/state/version";
 import type { File, Workspace } from "@checkpointvcs/daemon";
 import { exec } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
+
+const API_VERSION = "1.0.0";
 
 const JOB_POLL_INTERVAL_MS = 500;
 
@@ -352,6 +356,9 @@ export default class DaemonHandler {
 
     // Auto-update handlers
     this.initUpdateHandlers();
+
+    // API version compatibility checker
+    this.initVersionCheckHandlers();
   }
 
   private async handleLogin(data: Channels["auth:login"]): Promise<void> {
@@ -2493,6 +2500,40 @@ export default class DaemonHandler {
     ipcOn(this.ipcMain, "update:dismiss", async () => {
       const current = store.get(updateAtom);
       store.set(updateAtom, { ...current, dismissed: true });
+    });
+  }
+
+  private initVersionCheckHandlers(): void {
+    const VERSION_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+    const pollVersionCheck = async (): Promise<void> => {
+      try {
+        const client = await CreateDaemonClient();
+        const versionInfo = await client.version.check.query();
+
+        const result = checkVersionCompatibility(API_VERSION, versionInfo);
+
+        const current = store.get(versionCheckAtom);
+        if (current.dismissed && current.status === result.status) {
+          return;
+        }
+
+        store.set(versionCheckAtom, {
+          status: result.status,
+          message: result.status === "compatible" ? null : result.message,
+          dismissed: current.dismissed && current.status === result.status,
+        });
+      } catch {
+        // Daemon might not be running yet
+      }
+    };
+
+    setInterval(() => void pollVersionCheck(), VERSION_CHECK_INTERVAL_MS);
+    setTimeout(() => void pollVersionCheck(), 10_000);
+
+    ipcOn(this.ipcMain, "version:dismiss", async () => {
+      const current = store.get(versionCheckAtom);
+      store.set(versionCheckAtom, { ...current, dismissed: true });
     });
   }
 }

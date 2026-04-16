@@ -266,6 +266,28 @@ bool FCheckpointDaemonClient::PollJob(
 
 // ---- High-level API methods ----
 
+bool FCheckpointDaemonClient::CheckVersion(
+  FString &OutCurrentVersion,
+  FString &OutMinimumVersion,
+  FString &OutRecommendedVersion,
+  FString &OutError
+) {
+  TSharedPtr<FJsonObject> Result;
+  if (!QueryProcedure(TEXT("version.check"), nullptr, Result, OutError)) {
+    return false;
+  }
+
+  if (Result.IsValid()) {
+    Result->TryGetStringField(TEXT("currentVersion"), OutCurrentVersion);
+    Result->TryGetStringField(TEXT("minimumVersion"), OutMinimumVersion);
+    Result->TryGetStringField(TEXT("recommendedVersion"), OutRecommendedVersion);
+    return true;
+  }
+
+  OutError = TEXT("Unexpected response format for version.check");
+  return false;
+}
+
 bool FCheckpointDaemonClient::GetUsers(
   TArray<TSharedPtr<FJsonValue>> &OutUsers, FString &OutError
 ) {

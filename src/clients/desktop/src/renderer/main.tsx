@@ -14,6 +14,7 @@ import Workspace from "./pages/Workspace/Workspace";
 import FileHistory from "./components/FileHistory";
 import ChangelistChanges from "./components/ChangelistChanges";
 import UpdateNotification from "./components/UpdateNotification";
+import VersionNotification from "./components/VersionNotification";
 
 window.electron.ipcRenderer.on("set-renderer-url", (data: { url: string }) => {
   window.location.href = data.url;
@@ -51,6 +52,7 @@ if (popoutType === "file-history") {
             <Route path="/workspace" element={<Workspace />} />
           </Routes>
           <UpdateNotification />
+          <VersionNotification />
         </Router>
       </Provider>
     </React.StrictMode>,
