@@ -181,6 +181,9 @@ export type Channels = {
   "update:download": null;
   "update:apply": null;
   "update:dismiss": null;
+
+  // API version check
+  "version:dismiss": null;
 };
 
 export type InvokeChannels = {

@@ -26,6 +26,7 @@
 #include "daemon_client.hpp"
 #include "terminal_menu.hpp"
 #include "types.hpp"
+#include "version.hpp"
 #include "workspace.hpp"
 
 namespace checkpoint {
@@ -228,6 +229,55 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
   }
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  VERSION CHECK: verify CLI ↔ Daemon compatibility
+// ═════════════════════════════════════════════════════════════════
+
+/**
+ * Checks CLI version against the daemon's version requirements.
+ * Returns 0 if compatible, 1 if incompatible (hard block).
+ * Prints a warning to stderr if below recommended version.
+ */
+inline int checkDaemonVersion() {
+  int port = getDaemonPort();
+  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  DaemonClient client(baseUrl);
+
+  try {
+    auto result = client.query("version.check");
+
+    if (result.is_null() || !result.is_object()) {
+      return 0;  // can't check, allow operation
+    }
+
+    std::string minimumVersion = result.value("minimumVersion", "");
+    std::string recommendedVersion = result.value("recommendedVersion", "");
+
+    if (!minimumVersion.empty() && compareVersions(API_VERSION, minimumVersion) < 0) {
+      std::cerr << color::red() << color::bold()
+                << "error: " << color::reset() << color::red()
+                << "CLI version " << API_VERSION
+                << " is below the minimum required version " << minimumVersion
+                << ". Please upgrade to continue." << color::reset()
+                << std::endl;
+      return 1;
+    }
+
+    if (!recommendedVersion.empty() && compareVersions(API_VERSION, recommendedVersion) < 0) {
+      std::cerr << color::yellow()
+                << "warning: CLI version " << API_VERSION
+                << " is below the recommended version " << recommendedVersion
+                << ". Please consider upgrading." << color::reset()
+                << std::endl;
+    }
+  } catch (...) {
+    // If we can't reach the daemon for version check, don't block the user.
+    // The command itself will fail with a connection error if daemon is down.
+  }
+
+  return 0;
 }
 
 // ═════════════════════════════════════════════════════════════════

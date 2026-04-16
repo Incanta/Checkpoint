@@ -330,6 +330,12 @@ int main(int argc, char** argv) {
   // ─── Dispatch commands ─────────────────────────────────────────
 
   try {
+    // Check CLI ↔ Daemon API version compatibility before any command
+    {
+      int versionResult = checkpoint::checkDaemonVersion();
+      if (versionResult != 0) return versionResult;
+    }
+
     if (program.is_subcommand_used(statusCmd)) {
       return checkpoint::cmdStatus();
     }
