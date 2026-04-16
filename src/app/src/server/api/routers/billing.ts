@@ -354,7 +354,8 @@ export const billingRouter = createTRPCRouter({
 
       // Fetch credit balance from Stripe (source of truth)
       let creditBalanceCents = org.creditBalanceCents;
-      if (isStripeEnabled() && org.stripeCustomerId) {
+      const minInvoice = getMinimumInvoiceCents();
+      if (minInvoice !== null && isStripeEnabled() && org.stripeCustomerId) {
         try {
           const stripe = getStripeClient();
           const customer = await stripe.customers.retrieve(

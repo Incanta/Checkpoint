@@ -163,26 +163,28 @@ export async function reportOrgMeters(
     const prices = servicePrices[tier];
     const { bucketPriceCents } = getStoragePricingConfig();
     const stripe = getStripeClient();
+    const minInvoice = getMinimumInvoiceCents();
 
     const userCharges = writeUsers * prices.write + readUsers * prices.read;
     const storageCharges = storageBuckets * bucketPriceCents;
 
     // Fetch available credit from Stripe customer balance
     let creditCents = 0;
-    try {
-      const customer = await stripe.customers.retrieve(stripeCustomerId);
-      if (!customer.deleted) {
-        // Stripe balance: negative = credit available
-        creditCents = Math.max(0, -(customer.balance ?? 0));
+    if (minInvoice !== null) {
+      try {
+        const customer = await stripe.customers.retrieve(stripeCustomerId);
+        if (!customer.deleted) {
+          // Stripe balance: negative = credit available
+          creditCents = Math.max(0, -(customer.balance ?? 0));
+        }
+      } catch {
+        // Non-critical — proceed without credit offset
       }
-    } catch {
-      // Non-critical — proceed without credit offset
     }
 
     const subtotal = Math.max(0, userCharges + storageCharges - creditCents);
 
     let minimumDueCents = 0;
-    const minInvoice = getMinimumInvoiceCents();
     if (minInvoice !== null && subtotal > 0 && subtotal < minInvoice) {
       minimumDueCents = minInvoice - subtotal;
     }

@@ -2,7 +2,11 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 import { Logger } from "../logging";
-import { getStripeClient, isStripeEnabled } from "../stripe/client";
+import {
+  getMinimumInvoiceCents,
+  getStripeClient,
+  isStripeEnabled,
+} from "../stripe/client";
 
 /**
  * Add credits to an org via a Stripe Customer Balance Transaction.
@@ -24,7 +28,9 @@ export async function addCredits(
       where: { id: orgId },
       data: { creditBalanceCents: { increment: amountCents } },
     });
-    Logger.debug(`[Billing] Added ${amountCents}c credits for org ${orgId} (local only)`);
+    Logger.debug(
+      `[Billing] Added ${amountCents}c credits for org ${orgId} (local only)`,
+    );
     return;
   }
 
@@ -85,7 +91,9 @@ export async function removeCredits(
       where: { id: orgId, creditBalanceCents: { lt: 0 } },
       data: { creditBalanceCents: 0 },
     });
-    Logger.debug(`[Billing] Removed ${amountCents}c credits for org ${orgId} (local only)`);
+    Logger.debug(
+      `[Billing] Removed ${amountCents}c credits for org ${orgId} (local only)`,
+    );
     return;
   }
 
@@ -131,7 +139,9 @@ export async function syncCreditBalance(
   stripeCustomerId: string,
   db: PrismaClient,
 ): Promise<number> {
-  if (!isStripeEnabled()) {
+  const minInvoice = getMinimumInvoiceCents();
+
+  if (minInvoice === null || !isStripeEnabled()) {
     const org = await db.org.findUniqueOrThrow({
       where: { id: orgId },
       select: { creditBalanceCents: true },
