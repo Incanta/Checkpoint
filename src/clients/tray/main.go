@@ -7,21 +7,33 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"math"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/systray"
 )
 
 var (
-	mStatus  *systray.MenuItem
-	mStart   *systray.MenuItem
-	mStop    *systray.MenuItem
-	mRestart *systray.MenuItem
+	mStatus     *systray.MenuItem
+	mVersionMsg *systray.MenuItem
+	mStart      *systray.MenuItem
+	mStop       *systray.MenuItem
+	mRestart    *systray.MenuItem
 )
+
+const trayApiVersion = "1.0.0"
+
+type apiVersionInfo struct {
+	CurrentVersion     string `json:"currentVersion"`
+	MinimumVersion     string `json:"minimumVersion"`
+	RecommendedVersion string `json:"recommendedVersion"`
+}
 
 func main() {
 	systray.Run(onReady, onExit)
@@ -33,6 +45,9 @@ func onReady() {
 
 	mStatus = systray.AddMenuItem("Daemon: Checking...", "Daemon status")
 	mStatus.Disable()
+	mVersionMsg = systray.AddMenuItem("", "Version compatibility status")
+	mVersionMsg.Disable()
+	mVersionMsg.Hide()
 	systray.AddSeparator()
 	mStart = systray.AddMenuItem("Start Daemon", "Start the Checkpoint daemon service")
 	mStop = systray.AddMenuItem("Stop Daemon", "Stop the Checkpoint daemon service")
@@ -145,12 +160,101 @@ func updateDaemonStatus() {
 		mStart.Disable()
 		mStop.Enable()
 		mRestart.Enable()
+		checkDaemonVersion()
 	} else {
 		mStatus.SetTitle("Daemon: Stopped")
 		mStart.Enable()
 		mStop.Disable()
 		mRestart.Disable()
+		mVersionMsg.Hide()
 	}
+}
+
+func compareVersions(a, b string) int {
+	a = strings.TrimPrefix(a, "v")
+	b = strings.TrimPrefix(b, "v")
+	partsA := strings.Split(a, ".")
+	partsB := strings.Split(b, ".")
+	maxLen := len(partsA)
+	if len(partsB) > maxLen {
+		maxLen = len(partsB)
+	}
+	for i := 0; i < maxLen; i++ {
+		var na, nb int
+		if i < len(partsA) {
+			na, _ = strconv.Atoi(partsA[i])
+		}
+		if i < len(partsB) {
+			nb, _ = strconv.Atoi(partsB[i])
+		}
+		if na > nb {
+			return 1
+		}
+		if na < nb {
+			return -1
+		}
+	}
+	return 0
+}
+
+func checkDaemonVersion() {
+	port := getDaemonPort()
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	url := fmt.Sprintf(
+		"http://127.0.0.1:%d/version.check?batch=1&input={}",
+		port,
+	)
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return
+	}
+
+	// tRPC batch response: [{"result":{"data":{"json":{...}}}}]
+	var batch []struct {
+		Result struct {
+			Data struct {
+				JSON apiVersionInfo `json:"json"`
+			} `json:"data"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &batch); err != nil || len(batch) == 0 {
+		return
+	}
+
+	info := batch[0].Result.Data.JSON
+	if info.MinimumVersion == "" {
+		mVersionMsg.Hide()
+		return
+	}
+
+	if compareVersions(trayApiVersion, info.MinimumVersion) < 0 {
+		mVersionMsg.SetTitle(fmt.Sprintf(
+			"⚠ Upgrade required (tray %s < min %s)",
+			trayApiVersion, info.MinimumVersion,
+		))
+		mVersionMsg.Show()
+		return
+	}
+
+	if info.RecommendedVersion != "" &&
+		compareVersions(trayApiVersion, info.RecommendedVersion) < 0 {
+		mVersionMsg.SetTitle(fmt.Sprintf(
+			"Upgrade recommended (tray %s < rec %s)",
+			trayApiVersion, info.RecommendedVersion,
+		))
+		mVersionMsg.Show()
+		return
+	}
+
+	mVersionMsg.Hide()
 }
 
 // generateIcon creates a 32x32 blue circle PNG as a placeholder tray icon.

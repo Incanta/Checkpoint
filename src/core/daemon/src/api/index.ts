@@ -7,6 +7,7 @@ import { orgRouter } from "./routers/org.js";
 import { repoRouter } from "./routers/repo.js";
 import { jobsRouter } from "./routers/jobs.js";
 import { updaterRouter } from "./routers/updater.js";
+import { versionRouter } from "./routers/version.js";
 import net from "net";
 import path from "path";
 import { homedir } from "os";
@@ -40,6 +41,7 @@ const appRouter = router({
   repos: repoRouter,
   jobs: jobsRouter,
   updater: updaterRouter,
+  version: versionRouter,
 });
 
 // Export type router type signature,

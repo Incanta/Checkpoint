@@ -1,5 +1,10 @@
 import { createTRPCRouter } from "~/server/api/trpc";
 import { publicProcedure } from "~/server/api/trpc";
+import {
+  APP_API_VERSION,
+  APP_MIN_DAEMON_VERSION,
+  APP_RECOMMENDED_DAEMON_VERSION,
+} from "../api-version";
 
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -15,6 +20,9 @@ export const versionRouter = createTRPCRouter({
     return {
       version: packageJson.version,
       minDesktopVersion: packageJson.minDesktopVersion,
+      apiVersion: APP_API_VERSION,
+      minimumDaemonVersion: APP_MIN_DAEMON_VERSION,
+      recommendedDaemonVersion: APP_RECOMMENDED_DAEMON_VERSION,
     };
   }),
 });
