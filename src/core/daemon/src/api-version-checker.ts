@@ -4,6 +4,7 @@ import {
   type ApiVersionInfo,
   checkVersionCompatibility,
   type VersionCheckResult,
+  type AuthConfigUser,
 } from "@checkpointvcs/common";
 import { DAEMON_APP_API_VERSION } from "./api-version.js";
 import { Logger } from "./logging.js";
@@ -55,7 +56,7 @@ export class ApiVersionChecker {
   }
 
   private async checkAll(): Promise<void> {
-    let users: Record<string, { endpoint: string; apiToken?: string }>;
+    let users: Record<string, AuthConfigUser>;
     try {
       users = await GetAllAuthConfigUsers();
     } catch {
