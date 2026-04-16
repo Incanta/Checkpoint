@@ -873,3 +873,15 @@ model Verification {
   createdAt  DateTime? @default(now())
   updatedAt  DateTime? @updatedAt
 }
+
+// ── Instance Settings (singleton) ────────────────────────────────
+
+model InstanceSettings {
+  id String @id @default("default")
+
+  eulaAcceptedAt DateTime?
+  eulaAcceptedBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

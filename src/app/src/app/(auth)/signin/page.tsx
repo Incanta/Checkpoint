@@ -12,6 +12,11 @@ interface ProviderInfo {
   name: string;
 }
 
+interface ProvidersResponse {
+  providers: ProviderInfo[];
+  registrationOpen: boolean;
+}
+
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   discord: "Discord",
   github: "GitHub",
@@ -32,6 +37,7 @@ export default function SignInPage() {
 function SignInPageContent() {
   useDocumentTitle("Sign In · Checkpoint VCS");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [registrationOpen, setRegistrationOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -47,8 +53,9 @@ function SignInPageContent() {
       const res = await fetch("/api/auth/providers");
       if (res.ok) {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const data: ProviderInfo[] = await res.json();
-        setProviders(data);
+        const data = (await res.json()) as ProvidersResponse;
+        setProviders(data.providers);
+        setRegistrationOpen(data.registrationOpen);
       }
     };
     void loadProviders();
@@ -253,16 +260,22 @@ function SignInPageContent() {
           </button>
           <p className="text-center text-sm text-[var(--color-text-secondary)]">
             {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setAuthError(null);
-              }}
-              className="text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] hover:underline"
-            >
-              {isSignUp ? "Sign in" : "Sign up"}
-            </button>
+            {registrationOpen || isSignUp ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSignUp(!isSignUp);
+                  setAuthError(null);
+                }}
+                className="text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] hover:underline"
+              >
+                {isSignUp ? "Sign in" : "Sign up"}
+              </button>
+            ) : (
+              <span className="text-[var(--color-text-muted)]">
+                Registration is not yet available.
+              </span>
+            )}
           </p>
         </form>
 
