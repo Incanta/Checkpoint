@@ -18,6 +18,7 @@ import { notificationRouter } from "./routers/notification";
 import { shelfRouter } from "./routers/shelf";
 import { artifactRouter } from "./routers/artifact";
 import { emailRouter } from "./routers/email";
+import { setupRouter } from "./routers/setup";
 import { billingRouter } from "./routers/billing";
 import { billingDevRouter } from "./routers/billing-dev";
 import { adminRouter } from "./routers/admin";
@@ -47,6 +48,7 @@ export const appRouter = createTRPCRouter({
   shelf: shelfRouter,
   artifact: artifactRouter,
   email: emailRouter,
+  setup: setupRouter,
   billing: billingRouter,
   billingDev: billingDevRouter,
   admin: adminRouter,

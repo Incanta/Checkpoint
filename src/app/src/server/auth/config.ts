@@ -2,6 +2,7 @@ import config from "@incanta/config";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { db } from "~/server/db";
+import { Logger } from "~/server/logging";
 
 /**
  * Session type used throughout the app for compatibility.
@@ -103,6 +104,36 @@ async function getAuth() {
     socialProviders: buildSocialProviders(),
     pages: {
       signIn: "/signin",
+    },
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (_user) => {
+            const userCount = await db.user.count();
+            if (userCount > 0) {
+              const settings = await db.instanceSettings.findUnique({
+                where: { id: "default" },
+              });
+              if (!settings?.eulaAcceptedAt) {
+                return false;
+              }
+            }
+            return undefined;
+          },
+          after: async (user) => {
+            const userCount = await db.user.count();
+            if (userCount === 1) {
+              await db.user.update({
+                where: { id: (user as { id: string }).id },
+                data: { checkpointAdmin: true },
+              });
+              Logger.info(
+                `[Auth] First user registered — granted checkpointAdmin to ${(user as { id: string }).id}`,
+              );
+            }
+          },
+        },
+      },
     },
   });
 }

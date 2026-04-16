@@ -14,6 +14,7 @@ interface ProviderInfo {
 
 interface ProvidersResponse {
   providers: ProviderInfo[];
+  registrationOpen: boolean;
   showNewsletter: boolean;
 }
 
@@ -37,6 +38,7 @@ export default function SignInPage() {
 function SignInPageContent() {
   useDocumentTitle("Sign In · Checkpoint VCS");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [registrationOpen, setRegistrationOpen] = useState(true);
   const [showNewsletter, setShowNewsletter] = useState(false);
   const [subscribeNewsletter, setSubscribeNewsletter] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -54,6 +56,7 @@ function SignInPageContent() {
       if (res.ok) {
         const data = (await res.json()) as ProvidersResponse;
         setProviders(data.providers);
+        setRegistrationOpen(data.registrationOpen);
         setShowNewsletter(data.showNewsletter);
       }
     };
@@ -280,16 +283,22 @@ function SignInPageContent() {
           </button>
           <p className="text-center text-sm text-[var(--color-text-secondary)]">
             {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setAuthError(null);
-              }}
-              className="text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] hover:underline"
-            >
-              {isSignUp ? "Sign in" : "Sign up"}
-            </button>
+            {registrationOpen || isSignUp ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSignUp(!isSignUp);
+                  setAuthError(null);
+                }}
+                className="text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] hover:underline"
+              >
+                {isSignUp ? "Sign in" : "Sign up"}
+              </button>
+            ) : (
+              <span className="text-[var(--color-text-muted)]">
+                Registration is not yet available.
+              </span>
+            )}
           </p>
         </form>
 
