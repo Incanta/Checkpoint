@@ -885,3 +885,22 @@ model InstanceSettings {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// ── Daily Platform Metrics (license-manager only) ────────────────
+
+model DailyMetrics {
+  id   String   @id @default(cuid())
+  date DateTime @unique // start-of-day UTC, one row per calendar day
+
+  activeTrials        Int
+  activeSubscriptions Int
+  delinquentSubs      Int
+  totalUsers          Int
+  activeOrgs          Int
+  activeRepos         Int
+
+  orgUsersHistogram    Json // { "1": 12, "2": 5, "3": 3, ... } bucket → count
+  reposPerOrgHistogram Json // same format
+
+  createdAt DateTime @default(now())
+}
