@@ -21,6 +21,11 @@ import {
   isBinaryFile,
 } from "~/server/binary-extensions";
 import { Logger } from "~/server/logging";
+import {
+  isR2Enabled,
+  getR2Endpoint,
+  createR2TempCredentials,
+} from "~/server/r2-service";
 
 const MAX_TEXT_SIZE = 5 * 1024 * 1024; // 5 MB text limit
 
@@ -637,31 +642,68 @@ export const fileRouter = createTRPCRouter({
       }
 
       const remoteBasePath = `/${repo.orgId}/${repo.id}`;
-
-      const readToken = njwt.create(
-        {
-          iss: "checkpoint-vcs",
-          sub: ctx.session.user.id,
-          userId: ctx.session.user.id,
-          orgId: repo.orgId,
-          repoId: repo.id,
-          mode: "read",
-          basePath: remoteBasePath,
-        },
-        config.get<string>("storage.jwt.signing-key"),
-      );
-
       const expirationSeconds = config.get<number>(
         "storage.token-expiration-seconds",
       );
-      readToken.setExpiration(Date.now() + expirationSeconds * 1000);
-      const jwt = readToken.compact();
-      const jwtExpirationMs = Date.now() + expirationSeconds * 1000;
 
-      const backendUrl = config.get<string>("storage.backend-url.internal");
-      const filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
-        res.text(),
-      );
+      let filerUrl = "";
+      let jwt = "";
+      let jwtExpirationMs = 0;
+      let r2Params:
+        | {
+            storageType: "r2";
+            r2AccessKeyId: string;
+            r2SecretAccessKey: string;
+            r2SessionToken: string;
+            r2Endpoint: string;
+            r2BucketName: string;
+          }
+        | undefined;
+
+      if (isR2Enabled()) {
+        if (!repo.r2BucketName) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "R2 storage is enabled but repo does not have a bucket",
+          });
+        }
+
+        const creds = await createR2TempCredentials(
+          repo.r2BucketName,
+          "object-read-only",
+          expirationSeconds,
+        );
+        r2Params = {
+          storageType: "r2",
+          r2AccessKeyId: creds.accessKeyId,
+          r2SecretAccessKey: creds.secretAccessKey,
+          r2SessionToken: creds.sessionToken,
+          r2Endpoint: getR2Endpoint(),
+          r2BucketName: repo.r2BucketName,
+        };
+        jwtExpirationMs = Date.now() + expirationSeconds * 1000;
+      } else {
+        const readToken = njwt.create(
+          {
+            iss: "checkpoint-vcs",
+            sub: ctx.session.user.id,
+            userId: ctx.session.user.id,
+            orgId: repo.orgId,
+            repoId: repo.id,
+            mode: "read",
+            basePath: remoteBasePath,
+          },
+          config.get<string>("storage.jwt.signing-key"),
+        );
+        readToken.setExpiration(Date.now() + expirationSeconds * 1000);
+        jwt = readToken.compact();
+        jwtExpirationMs = Date.now() + expirationSeconds * 1000;
+
+        const backendUrl = config.get<string>("storage.backend-url.internal");
+        filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
+          res.text(),
+        );
+      }
 
       const logLevel = GetLogLevel(
         config.get<string>(
@@ -677,6 +719,7 @@ export const fileRouter = createTRPCRouter({
         jwt,
         jwtExpirationMs,
         logLevel,
+        ...r2Params,
       });
 
       if (!handle) {
