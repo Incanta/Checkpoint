@@ -1,0 +1,21 @@
+{
+  "name": "@checkpointvcs/license-manager",
+  "version": "1.0.0",
+  "description": "Standalone license validation service for Checkpoint",
+  "main": "lib/index.js",
+  "license": "(Elastic-2.0 OR AGPL-3.0)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsgo -p .",
+    "start": "yarn build && node lib/index.js"
+  },
+  "dependencies": {
+    "@prisma/client": "*",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@typescript/native-preview": "*"
+  }
+}

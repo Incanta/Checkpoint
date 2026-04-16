@@ -11,7 +11,7 @@
  *   node dev.js -t           - Same as --test
  *   node dev.js stop         - Stop running services
  *
- * Starts: app, daemon, server
+ * Starts: app, daemon, server, license-manager
  * Features:
  * - Colored prefixed logging (like Docker Compose)
  * - Individual log files in ./logs/
@@ -74,6 +74,14 @@ let services = [
     color: colors.yellow,
     command: process.platform === "win32" ? "yarn.cmd" : "yarn",
     args: ["server"],
+    cwd: path.join(__dirname, "src/core"),
+    healthPattern: /\[healthy\]/i,
+  },
+  {
+    name: "license-mgr",
+    color: colors.blue,
+    command: process.platform === "win32" ? "yarn.cmd" : "yarn",
+    args: ["license-manager"],
     cwd: path.join(__dirname, "src/core"),
     healthPattern: /\[healthy\]/i,
   },

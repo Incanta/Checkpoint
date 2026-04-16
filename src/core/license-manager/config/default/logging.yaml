@@ -1,0 +1,7 @@
+level: "info"
+
+prettify:
+  enabled: true
+  colorize: true
+  translateTime: "HH:MM:ss.l"
+  singleLine: false

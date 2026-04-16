@@ -1643,6 +1643,17 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@checkpointvcs/license-manager@workspace:src/core/license-manager":
+  version: 0.0.0-use.local
+  resolution: "@checkpointvcs/license-manager@workspace:src/core/license-manager"
+  dependencies:
+    "@prisma/client": "npm:*"
+    "@types/express": "npm:^5.0.6"
+    "@typescript/native-preview": "npm:*"
+    express: "npm:^5.2.1"
+  languageName: unknown
+  linkType: soft
+
 "@checkpointvcs/longtail-addon@npm:^1.0.20":
   version: 1.0.20
   resolution: "@checkpointvcs/longtail-addon@npm:1.0.20"
@@ -3069,6 +3080,30 @@ __metadata:
   version: 7.4.2
   resolution: "@prisma/client-runtime-utils@npm:7.4.2"
   checksum: 10c0/d53184cb57d0782a0a5db8f48ba259c22c0ddb0801af657b060d0fc6cf8830699259b1f1909b2789ecdc10025faad7f82bdff61e75cd29022c810b715019cad3
+  languageName: node
+  linkType: hard
+
+"@prisma/client-runtime-utils@npm:7.7.0":
+  version: 7.7.0
+  resolution: "@prisma/client-runtime-utils@npm:7.7.0"
+  checksum: 10c0/357cc0fc2a27c7facba40f6d7fae6d82165db7d30dd9d548059553c15e873187faa8352928d5179bc05c216d7aff9dc7925db6982556778ad1bb3496ba69bdeb
+  languageName: node
+  linkType: hard
+
+"@prisma/client@npm:*":
+  version: 7.7.0
+  resolution: "@prisma/client@npm:7.7.0"
+  dependencies:
+    "@prisma/client-runtime-utils": "npm:7.7.0"
+  peerDependencies:
+    prisma: "*"
+    typescript: ">=5.4.0"
+  peerDependenciesMeta:
+    prisma:
+      optional: true
+    typescript:
+      optional: true
+  checksum: 10c0/07437c95c72b58e6e895cda5b51c2a6d88167bbd05f4c33d820d7e6ab8eadc69a9c46d6cec339a76e5fd1a9f08905ef8066e96742a65c4a50cc43ed0c1739c1a
   languageName: node
   linkType: hard
 

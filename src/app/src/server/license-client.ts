@@ -5,6 +5,8 @@ import {
   getLicenseConfig,
   hasFeature,
   isLicenseManager,
+  resolveManagerPublicKey,
+  verifyValidationToken,
   type LicenseFeature,
   type LicenseTier,
 } from "~/server/license-utils";
@@ -75,13 +77,31 @@ async function validateWithManager(): Promise<LicenseTier> {
     const data = (await response.json()) as {
       valid: boolean;
       tier: LicenseTier;
+      token?: string;
     };
-    if (!data.valid) {
-      Logger.warn("[License] License is not valid");
-      return "BASIC";
+
+    if (!data.token) {
+      Logger.warn("[License] Response missing signed token, rejecting");
+      return getCachedTier();
     }
 
-    return data.tier;
+    const publicKey = await resolveManagerPublicKey();
+    if (!publicKey) {
+      Logger.warn(
+        "[License] Cannot resolve public key from DNS, rejecting",
+      );
+      return getCachedTier();
+    }
+
+    const verified = verifyValidationToken(data.token, publicKey);
+    if (!verified) {
+      Logger.warn(
+        "[License] Signed token verification failed, rejecting",
+      );
+      return getCachedTier();
+    }
+
+    return verified.tier;
   } catch (error: any) {
     Logger.warn(
       `[License] Failed to reach license manager: ${JSON.stringify(error)}`,

@@ -1,0 +1,5 @@
+# The license-manager shares the same database as the main app.
+# For development, this points to the app's SQLite database.
+# For production, override with a PostgreSQL connection string:
+#   "postgresql://user:password@host:5432/checkpoint"
+url: "file:../../app/prisma/db.sqlite"

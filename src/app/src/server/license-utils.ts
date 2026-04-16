@@ -190,3 +190,106 @@ export function getLicenseConfig() {
     };
   }
 }
+
+// ---------------------------------------------------------------------------
+// JWT verification for signed license validation responses
+// ---------------------------------------------------------------------------
+
+const PUBLIC_KEY_CACHE_KEY = Symbol.for(
+  "checkpoint.licenseManagerPublicKey",
+);
+const PUBLIC_KEY_CACHE_TIME_KEY = Symbol.for(
+  "checkpoint.licenseManagerPublicKeyTime",
+);
+
+const globalForPublicKey = globalThis as unknown as {
+  [PUBLIC_KEY_CACHE_KEY]?: crypto.KeyObject;
+  [PUBLIC_KEY_CACHE_TIME_KEY]?: number;
+};
+
+const PUBLIC_KEY_CACHE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Resolves the license manager's Ed25519 public key from DNS and caches it.
+ * Returns null if the DNS lookup fails or the record is empty.
+ */
+export async function resolveManagerPublicKey(): Promise<crypto.KeyObject | null> {
+  const cached = globalForPublicKey[PUBLIC_KEY_CACHE_KEY];
+  const cachedTime = globalForPublicKey[PUBLIC_KEY_CACHE_TIME_KEY] ?? 0;
+
+  if (cached && Date.now() - cachedTime < PUBLIC_KEY_CACHE_MS) {
+    return cached;
+  }
+
+  try {
+    const records = await dns.resolveTxt(LICENSE_MANAGER_DNS_HOST);
+    const publicKeyBase64 = records
+      .map((chunks) => chunks.join(""))
+      .join("")
+      .trim();
+
+    if (!publicKeyBase64) return null;
+
+    const publicKeyDer = Buffer.from(publicKeyBase64, "base64");
+    const publicKey = crypto.createPublicKey({
+      key: publicKeyDer,
+      format: "der",
+      type: "spki",
+    });
+
+    globalForPublicKey[PUBLIC_KEY_CACHE_KEY] = publicKey;
+    globalForPublicKey[PUBLIC_KEY_CACHE_TIME_KEY] = Date.now();
+
+    return publicKey;
+  } catch {
+    return null;
+  }
+}
+
+export interface ValidationTokenPayload {
+  valid: boolean;
+  tier: LicenseTier;
+  features: LicenseFeature[];
+  licenseKey: string;
+}
+
+/**
+ * Verifies an EdDSA-signed JWT returned by the license manager.
+ * Returns the decoded payload on success, or null if verification fails.
+ */
+export function verifyValidationToken(
+  token: string,
+  publicKey: crypto.KeyObject,
+): ValidationTokenPayload | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+
+    const [headerB64, payloadB64, signatureB64] = parts as [string, string, string];
+    const data = `${headerB64}.${payloadB64}`;
+    const signature = Buffer.from(signatureB64, "base64url");
+
+    const isValid = crypto.verify(
+      null,
+      Buffer.from(data),
+      publicKey,
+      signature,
+    );
+    if (!isValid) return null;
+
+    const payload = JSON.parse(
+      Buffer.from(payloadB64, "base64url").toString(),
+    ) as ValidationTokenPayload & { exp?: number };
+
+    if (payload.exp && Date.now() / 1000 > payload.exp) return null;
+
+    return {
+      valid: payload.valid,
+      tier: payload.tier,
+      features: payload.features,
+      licenseKey: payload.licenseKey,
+    };
+  } catch {
+    return null;
+  }
+}
