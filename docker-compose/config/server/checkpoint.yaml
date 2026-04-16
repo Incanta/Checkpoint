@@ -1,0 +1,3 @@
+api:
+  url:
+    internal: "http://checkpoint-app:13000"

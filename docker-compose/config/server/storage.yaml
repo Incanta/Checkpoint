@@ -1,0 +1,9 @@
+mode: "seaweedfs"
+
+jwt:
+  signing-key: "secret|storage_signing_key"
+
+seaweedfs:
+  stub:
+    enabled: true
+    storage-path: "/app/data"

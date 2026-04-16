@@ -1,0 +1,5 @@
+# Prisma
+# https://www.prisma.io/docs/reference/database-reference/connection-urls#env
+# provider: "sqlite" or "postgresql"
+provider: "sqlite"
+url: "file:/app/data/db.sqlite"
