@@ -56,12 +56,13 @@ seat-prices:
 
 # Storage pricing (for our calculations, must match Stripe catalog price)
 storage:
-  free-tier-gb: 25
+  free-tier-gb: 0
   bucket-size-gb: 50
   bucket-price-cents: 250 # $2.50 per bucket
 
-# Minimum invoice amount in cents — invoices between $0 and this are padded up
-minimum-invoice-cents: 500 # $5.00
+minimum-invoice:
+  enabled: false
+  cents: 500 # $5.00
 
 # Delinquency thresholds
 delinquency:

@@ -10,8 +10,8 @@ import {
   getStripePublishableKey,
   getStripeEnvironment,
   getStripePriceConfig,
-  getTrialDurationDays,
   getStoragePricingConfig,
+  getMinimumInvoiceCents,
 } from "~/server/stripe/client";
 import {
   cancelSubscription,
@@ -76,6 +76,7 @@ export const billingRouter = createTRPCRouter({
       });
 
       const prices = getStripePriceConfig();
+      const minInvoice = getMinimumInvoiceCents();
 
       // Build line items for metered prices
       const tierKey = input.tier.toLowerCase() as "basic" | "pro" | "studio";
@@ -89,7 +90,7 @@ export const billingRouter = createTRPCRouter({
         lineItems.push({ price: cloudPrices[writeKey] });
       if (cloudPrices[readKey]) lineItems.push({ price: cloudPrices[readKey] });
       if (cloudPrices.storage) lineItems.push({ price: cloudPrices.storage });
-      if (cloudPrices["minimum-due"])
+      if (minInvoice !== null && cloudPrices["minimum-due"])
         lineItems.push({ price: cloudPrices["minimum-due"] });
 
       const sessionParams: Parameters<
@@ -148,6 +149,7 @@ export const billingRouter = createTRPCRouter({
       });
 
       const prices = getStripePriceConfig();
+      const minInvoice = getMinimumInvoiceCents();
       const tierKey = input.tier.toLowerCase() as "pro" | "studio";
       const lineItems: Array<{ price: string }> = [];
 
@@ -157,6 +159,8 @@ export const billingRouter = createTRPCRouter({
 
       if (shPrices[writeKey]) lineItems.push({ price: shPrices[writeKey] });
       if (shPrices[readKey]) lineItems.push({ price: shPrices[readKey] });
+      if (minInvoice !== null && prices.cloud["minimum-due"])
+        lineItems.push({ price: prices.cloud["minimum-due"] });
 
       const session = await stripe.checkout.sessions.create({
         customer: customer.id,
@@ -241,6 +245,7 @@ export const billingRouter = createTRPCRouter({
       }
 
       const prices = getStripePriceConfig();
+      const minInvoice = getMinimumInvoiceCents();
       const tierKey = input.tier.toLowerCase() as "basic" | "pro" | "studio";
       const lineItems: Array<{ price: string }> = [];
 
@@ -250,10 +255,10 @@ export const billingRouter = createTRPCRouter({
         const shTierKey = tierKey as "pro" | "studio";
         const writeKey = `${shTierKey}-write` as keyof typeof shPrices;
         const readKey = `${shTierKey}-read` as keyof typeof shPrices;
-        if (shPrices[writeKey])
-          lineItems.push({ price: shPrices[writeKey] });
-        if (shPrices[readKey])
-          lineItems.push({ price: shPrices[readKey] });
+        if (shPrices[writeKey]) lineItems.push({ price: shPrices[writeKey] });
+        if (shPrices[readKey]) lineItems.push({ price: shPrices[readKey] });
+        if (minInvoice !== null && prices.cloud["minimum-due"])
+          lineItems.push({ price: prices.cloud["minimum-due"] });
       } else {
         // Cloud: write/read + storage + minimum-due
         const cloudPrices = prices.cloud;
@@ -263,9 +268,8 @@ export const billingRouter = createTRPCRouter({
           lineItems.push({ price: cloudPrices[writeKey] });
         if (cloudPrices[readKey])
           lineItems.push({ price: cloudPrices[readKey] });
-        if (cloudPrices.storage)
-          lineItems.push({ price: cloudPrices.storage });
-        if (cloudPrices["minimum-due"])
+        if (cloudPrices.storage) lineItems.push({ price: cloudPrices.storage });
+        if (minInvoice !== null && cloudPrices["minimum-due"])
           lineItems.push({ price: cloudPrices["minimum-due"] });
       }
 

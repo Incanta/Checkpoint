@@ -9,9 +9,7 @@ import {
   getSchedulerState,
   runBillingChecks,
 } from "~/server/billing/scheduler";
-import {
-  reportOrgMeters,
-} from "~/server/billing/meter-reporting";
+import { reportOrgMeters } from "~/server/billing/meter-reporting";
 import { calculateStorageCharge } from "~/server/billing/storage-usage";
 import { checkTrialExpiry } from "~/server/billing/trial";
 import { checkDelinquency } from "~/server/billing/delinquency";
@@ -74,6 +72,7 @@ export const billingDevRouter = createTRPCRouter({
         await reportOrgMeters(
           org.id,
           org.stripeCustomerId,
+          storage.totalGB,
           storage.buckets,
           ctx.db,
         );
@@ -100,6 +99,7 @@ export const billingDevRouter = createTRPCRouter({
           await reportOrgMeters(
             org.id,
             org.stripeCustomerId,
+            storage.totalGB,
             storage.buckets,
             ctx.db,
           );

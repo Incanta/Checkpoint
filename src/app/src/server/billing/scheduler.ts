@@ -308,11 +308,12 @@ async function reportMeters(): Promise<void> {
         try {
           // Self-hosted orgs don't have storage
           const storage = org.selfHosted
-            ? { buckets: 0 }
+            ? { buckets: 0, totalGB: 0 }
             : await calculateStorageCharge(org.id, db);
           await reportOrgMeters(
             org.id,
             org.stripeCustomerId,
+            storage.totalGB,
             storage.buckets,
             db,
           );

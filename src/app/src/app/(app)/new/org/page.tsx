@@ -15,10 +15,21 @@ const TIER_FEATURES: Record<string, string[]> = {
   STUDIO: ["Data replicas", "Enterprise SAML"],
 };
 
-const TIER_PRICING: Record<string, { write: number; read: number | string }> = {
-  BASIC: { write: 3, read: "1.50" },
-  PRO: { write: 6, read: 3 },
-  STUDIO: { write: 14, read: 7 },
+const TIER_PRICING_CLOUD: Record<
+  string,
+  { write: number; read: number | string }
+> = {
+  BASIC: { write: 4, read: 2 },
+  PRO: { write: 9, read: 4 },
+  STUDIO: { write: 24, read: 12 },
+};
+
+const TIER_PRICING_SELF_HOSTED: Record<
+  string,
+  { write: number; read: number | string }
+> = {
+  PRO: { write: 4, read: 2 },
+  STUDIO: { write: 9, read: 4 },
 };
 
 export default function NewOrgPage() {
@@ -110,10 +121,9 @@ export default function NewOrgPage() {
     createOrg.error ?? createCheckout.error ?? createSelfHostedCheckout.error;
 
   // Available tiers based on hosting type
-  const availableTiers =
-    isSelfHosted
-      ? (["PRO", "STUDIO"] as const)
-      : (["BASIC", "PRO", "STUDIO"] as const);
+  const availableTiers = isSelfHosted
+    ? (["PRO", "STUDIO"] as const)
+    : (["BASIC", "PRO", "STUDIO"] as const);
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -230,7 +240,9 @@ export default function NewOrgPage() {
                     className={`grid items-start gap-3 ${isSelfHosted ? "grid-cols-2" : "grid-cols-3"}`}
                   >
                     {availableTiers.map((t) => {
-                      const pricing = TIER_PRICING[t]!;
+                      const pricing = isSelfHosted
+                        ? TIER_PRICING_SELF_HOSTED[t]!
+                        : TIER_PRICING_CLOUD[t]!;
                       return (
                         <button
                           key={t}
@@ -272,8 +284,7 @@ export default function NewOrgPage() {
                             ))}
                             {t !== "BASIC" && (
                               <li className="text-[var(--color-text-muted)]">
-                                + all{" "}
-                                {t === "STUDIO" ? "Pro" : "Basic"}{" "}
+                                + all {t === "STUDIO" ? "Pro" : "Basic"}{" "}
                                 features
                               </li>
                             )}
@@ -413,4 +424,3 @@ export default function NewOrgPage() {
     </div>
   );
 }
-

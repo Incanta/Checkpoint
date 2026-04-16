@@ -107,6 +107,7 @@ export async function getOrgUserMeters(
 export async function reportOrgMeters(
   orgId: string,
   stripeCustomerId: string,
+  storageUsageGb: number,
   storageBuckets: number,
   db: PrismaClient,
 ): Promise<void> {
@@ -182,7 +183,7 @@ export async function reportOrgMeters(
 
     let minimumDueCents = 0;
     const minInvoice = getMinimumInvoiceCents();
-    if (subtotal > 0 && subtotal < minInvoice) {
+    if (minInvoice !== null && subtotal > 0 && subtotal < minInvoice) {
       minimumDueCents = minInvoice - subtotal;
     }
 
@@ -213,24 +214,33 @@ export async function reportOrgMeters(
     });
 
     if (storageBuckets > 0) {
+      // if the user canceled during a trial, they get 25 free GB
+      const effectiveBuckets =
+        org.subscriptionStatus === "TRIAL" && org.canceledAt
+          ? Math.max(0, storageUsageGb - 25) /
+            getStoragePricingConfig().bucketSizeGb
+          : storageBuckets;
+
       await stripe.billing.meterEvents.create({
         event_name: meters.storageBuckets,
         timestamp,
         payload: {
-          value: String(storageBuckets),
+          value: String(effectiveBuckets),
           stripe_customer_id: stripeCustomerId,
         },
       });
     }
 
-    await stripe.billing.meterEvents.create({
-      event_name: meters.minimumDue,
-      timestamp,
-      payload: {
-        value: String(minimumDueCents),
-        stripe_customer_id: stripeCustomerId,
-      },
-    });
+    if (minInvoice !== null) {
+      await stripe.billing.meterEvents.create({
+        event_name: meters.minimumDue,
+        timestamp,
+        payload: {
+          value: String(minimumDueCents),
+          stripe_customer_id: stripeCustomerId,
+        },
+      });
+    }
 
     Logger.debug(
       `[Billing] Reported meters for org ${orgId}: write=${writeUsers}, read=${readUsers}${org.selfHosted ? " (self-hosted)" : `, storage=${storageBuckets} buckets`}`,

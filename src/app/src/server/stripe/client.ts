@@ -135,8 +135,12 @@ export function getStoragePricingConfig() {
   };
 }
 
-export function getMinimumInvoiceCents(): number {
-  return config.get<number>("stripe.minimum-invoice-cents") || 500;
+export function getMinimumInvoiceCents(): number | null {
+  const enabled = config.get<boolean>("stripe.minimum-invoice.enabled");
+  if (!enabled) {
+    return null;
+  }
+  return config.get<number>("stripe.minimum-invoice.cents") || 500;
 }
 
 export function getDelinquencyConfig() {
