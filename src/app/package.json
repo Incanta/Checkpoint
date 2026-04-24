@@ -69,7 +69,7 @@
     "@typescript/native-preview": "*",
     "eslint": "*",
     "javascript-obfuscator": "^5.4.1",
-    "postcss": "^8.5.3",
+    "postcss": "^8.5.10",
     "prettier": "*",
     "prettier-plugin-tailwindcss": "^0.6.11",
     "prisma": "^6.5.0",
