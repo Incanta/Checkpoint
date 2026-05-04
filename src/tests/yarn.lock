@@ -30,100 +30,19 @@ __metadata:
     "@checkpointvcs/app": "link:../app"
     "@checkpointvcs/common": "link:../core/common"
     "@checkpointvcs/daemon": "link:../core/daemon"
-    "@trpc/client": "npm:^11.8.1"
-    "@trpc/server": "npm:^11.8.1"
-    "@types/node": "npm:^22.15.0"
-    superjson: "npm:^2.2.2"
-    typescript: "npm:^5.7.3"
-    uuid: "npm:^13.0.0"
+    uuid: "npm:^14.0.0"
+  peerDependencies:
+    "@trpc/client": "*"
+    "@trpc/server": "*"
+    superjson: "*"
   languageName: unknown
   linkType: soft
 
-"@trpc/client@npm:^11.8.1":
-  version: 11.9.0
-  resolution: "@trpc/client@npm:11.9.0"
-  peerDependencies:
-    "@trpc/server": 11.9.0
-    typescript: ">=5.7.2"
-  checksum: 10c0/c63e101a8e51d73d4a105f96dafcb069a7c6a767b01135209982ad1a5e41f6ca5da4b0f1d9bc51482a1a14e345a1d1267e45940ba72e024bb3892eac033b40bf
-  languageName: node
-  linkType: hard
-
-"@trpc/server@npm:^11.8.1":
-  version: 11.9.0
-  resolution: "@trpc/server@npm:11.9.0"
-  peerDependencies:
-    typescript: ">=5.7.2"
-  checksum: 10c0/fda4590b714fb1d39da5250b2b070a8799c223b1fabd0d141909b8bf173bbe208ec33fa648e61899d8702de0eb73018b23ef034bd3ced0de355bcd332839fa25
-  languageName: node
-  linkType: hard
-
-"@types/node@npm:^22.15.0":
-  version: 22.19.7
-  resolution: "@types/node@npm:22.19.7"
-  dependencies:
-    undici-types: "npm:~6.21.0"
-  checksum: 10c0/0a4b13fd51306a72393f145693063e074be1bf884bdc642c879436d2c053ac9d573cc0a0d69867f60b14d3f1b9d03317e8ec0e4377f7527cb645e7b2a5d34045
-  languageName: node
-  linkType: hard
-
-"copy-anything@npm:^4":
-  version: 4.0.5
-  resolution: "copy-anything@npm:4.0.5"
-  dependencies:
-    is-what: "npm:^5.2.0"
-  checksum: 10c0/d0a4a4102334399dae8504a2c2e13f45ad05746a9fd5cc0df349a554e3749a05e8a6d62b3724a8049cd59fc0bbbf4f54c4edc94a428edc76211dffe3ac0af586
-  languageName: node
-  linkType: hard
-
-"is-what@npm:^5.2.0":
-  version: 5.5.0
-  resolution: "is-what@npm:5.5.0"
-  checksum: 10c0/065c8a4ac651988a495cc0211c2754c198788383c9fe1bbfdf6d237c423114a0c5f2fc3e26ad7ea43a63cd4169f4503f584305acbac91706d5308cc14dedd1bd
-  languageName: node
-  linkType: hard
-
-"superjson@npm:^2.2.2":
-  version: 2.2.6
-  resolution: "superjson@npm:2.2.6"
-  dependencies:
-    copy-anything: "npm:^4"
-  checksum: 10c0/b63587656cc27effd12c9e13a66da673a7a1b3e1af41f17820fd37f07a4f29503e1f58eae6bd229039331b475e1be6990336fa887654e6adc80684ae4eed7965
-  languageName: node
-  linkType: hard
-
-"typescript@npm:^5.7.3":
-  version: 5.9.3
-  resolution: "typescript@npm:5.9.3"
-  bin:
-    tsc: bin/tsc
-    tsserver: bin/tsserver
-  checksum: 10c0/6bd7552ce39f97e711db5aa048f6f9995b53f1c52f7d8667c1abdc1700c68a76a308f579cd309ce6b53646deb4e9a1be7c813a93baaf0a28ccd536a30270e1c5
-  languageName: node
-  linkType: hard
-
-"typescript@patch:typescript@npm%3A^5.7.3#optional!builtin<compat/typescript>":
-  version: 5.9.3
-  resolution: "typescript@patch:typescript@npm%3A5.9.3#optional!builtin<compat/typescript>::version=5.9.3&hash=5786d5"
-  bin:
-    tsc: bin/tsc
-    tsserver: bin/tsserver
-  checksum: 10c0/ad09fdf7a756814dce65bc60c1657b40d44451346858eea230e10f2e95a289d9183b6e32e5c11e95acc0ccc214b4f36289dcad4bf1886b0adb84d711d336a430
-  languageName: node
-  linkType: hard
-
-"undici-types@npm:~6.21.0":
-  version: 6.21.0
-  resolution: "undici-types@npm:6.21.0"
-  checksum: 10c0/c01ed51829b10aa72fc3ce64b747f8e74ae9b60eafa19a7b46ef624403508a54c526ffab06a14a26b3120d055e1104d7abe7c9017e83ced038ea5cf52f8d5e04
-  languageName: node
-  linkType: hard
-
-"uuid@npm:^13.0.0":
-  version: 13.0.0
-  resolution: "uuid@npm:13.0.0"
+"uuid@npm:^14.0.0":
+  version: 14.0.0
+  resolution: "uuid@npm:14.0.0"
   bin:
     uuid: dist-node/bin/uuid
-  checksum: 10c0/950e4c18d57fef6c69675344f5700a08af21e26b9eff2bf2180427564297368c538ea11ac9fb2e6528b17fc3966a9fd2c5049361b0b63c7d654f3c550c9b3d67
+  checksum: 10c0/a57ae7794c45005c1a9208989196c5baf79a7679c30f43c1bee9033a2c4d113a2cea216fa6fcc9663b08b0d55635df1a7c6eb7e7f3d21c3e50688c698fa39a50
   languageName: node
   linkType: hard
