@@ -18,7 +18,7 @@
     "@checkpointvcs/app": "link:../app",
     "@checkpointvcs/common": "link:../core/common",
     "@checkpointvcs/daemon": "link:../core/daemon",
-    "uuid": "^13.0.0"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {}
 }
