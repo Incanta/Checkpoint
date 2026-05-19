@@ -219,8 +219,10 @@ export async function reportOrgMeters(
       // if the user canceled during a trial, they get 25 free GB
       const effectiveBuckets =
         org.subscriptionStatus === "TRIAL" && org.canceledAt
-          ? Math.max(0, storageUsageGb - 25) /
-            getStoragePricingConfig().bucketSizeGb
+          ? Math.ceil(
+              Math.max(0, storageUsageGb - 25) /
+                getStoragePricingConfig().bucketSizeGb,
+            )
           : storageBuckets;
 
       await stripe.billing.meterEvents.create({
