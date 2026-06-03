@@ -7138,7 +7138,7 @@ __metadata:
     nanoid: "npm:^5.1.6"
     path-browserify: "npm:^1.0.1"
     primereact: "npm:^10.9.7"
-    react-router: "npm:^7.12.0"
+    react-router: "npm:^7.15.0"
     tailwindcss: "npm:^4.1.18"
     typescript: "npm:*"
     vite: "npm:^7.3.2"
@@ -11749,9 +11749,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-router@npm:^7.12.0":
-  version: 7.13.1
-  resolution: "react-router@npm:7.13.1"
+"react-router@npm:^7.15.0":
+  version: 7.15.0
+  resolution: "react-router@npm:7.15.0"
   dependencies:
     cookie: "npm:^1.0.1"
     set-cookie-parser: "npm:^2.6.0"
@@ -11761,7 +11761,7 @@ __metadata:
   peerDependenciesMeta:
     react-dom:
       optional: true
-  checksum: 10c0/a64c645cede74251f21483fbfad740b36dc5133522d6f53f12317a873a22865fce659d4c2377d5e19c912f85c7b12b88224a2c70d8f70c082496b569cc4abc31
+  checksum: 10c0/ce27ff25a0a53afec7f24385be89b779efd9f04d84c5b90c6a8f3fbbac28fc2f8c5f1bb26aff0588d41a225482365997082808f9e098c565435fad09426de114
   languageName: node
   linkType: hard
 
