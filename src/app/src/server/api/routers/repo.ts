@@ -182,16 +182,16 @@ export const repoRouter = createTRPCRouter({
           Logger.error(
             `Failed to create repo directory in storage: ${JSON.stringify(error)}`,
           );
+          // rollback repo creation if directory creation fails
+          await ctx.db.repoRole.deleteMany({ where: { repoId: repo.id } });
+          await ctx.db.branch.deleteMany({ where: { repoId: repo.id } });
+          await ctx.db.changelist.deleteMany({ where: { repoId: repo.id } });
+          await ctx.db.repo.delete({ where: { id: repo.id } });
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to create storage for the repository",
+          });
         }
-        // rollback repo creation if directory creation fails
-        await ctx.db.repoRole.deleteMany({ where: { repoId: repo.id } });
-        await ctx.db.branch.deleteMany({ where: { repoId: repo.id } });
-        await ctx.db.changelist.deleteMany({ where: { repoId: repo.id } });
-        await ctx.db.repo.delete({ where: { id: repo.id } });
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to create storage for the repository",
-        });
       }
 
       return repo;

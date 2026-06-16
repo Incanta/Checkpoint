@@ -92,6 +92,13 @@ if (serverMode) {
   services = services.filter((s) => s.name === "app" || s.name === "server");
 }
 
+// The license-manager requires `licensing.incanta-key` (gitignored config) to
+// start. It's not exercised by the CLI integration test, and CI doesn't have
+// the key — so skip it in CI / test mode so "All services healthy" can fire.
+if (isCI || testMode) {
+  services = services.filter((s) => s.name !== "license-mgr");
+}
+
 // Track running processes and health status
 const processes = new Map();
 const healthStatus = new Map();
