@@ -18,7 +18,8 @@
     "dev": "node dev.js",
     "dev:agent": "node dev-agent.js",
     "desktop": "cd src/clients/desktop && yarn dev",
-    "migrate": "node scripts/migrate.js"
+    "migrate": "node scripts/migrate.js",
+    "test": "node scripts/test.js"
   },
   "dependencies": {
     "@incanta/config": "^2.1.10",
@@ -52,7 +53,7 @@
     "eslint-plugin-prefer-arrow": "^1.2.3",
     "eslint-plugin-prettier": "^5.5.4",
     "globals": "^16.1.0",
-    "next": "^16.1.7",
+    "next": "^16.2.6",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.27.0"

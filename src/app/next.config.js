@@ -33,6 +33,50 @@ const config = {
       },
     ];
   },
+  // Prevent Node.js-only modules from causing Turbopack compilation errors
+  // in the browser/client bundle (transitively pulled in via type-only imports).
+  turbopack: {
+    resolveAlias: {
+      net: { browser: "./src/stubs/empty-module.js" },
+      tls: { browser: "./src/stubs/empty-module.js" },
+      fs: { browser: "./src/stubs/empty-module.js" },
+      dns: { browser: "./src/stubs/empty-module.js" },
+      http2: { browser: "./src/stubs/empty-module.js" },
+      worker_threads: { browser: "./src/stubs/empty-module.js" },
+      child_process: { browser: "./src/stubs/empty-module.js" },
+      "node:fs": { browser: "./src/stubs/empty-module.js" },
+      "node:net": { browser: "./src/stubs/empty-module.js" },
+      "node:tls": { browser: "./src/stubs/empty-module.js" },
+      "node:dns": { browser: "./src/stubs/empty-module.js" },
+      "node:http2": { browser: "./src/stubs/empty-module.js" },
+      "node:worker_threads": { browser: "./src/stubs/empty-module.js" },
+      "node:child_process": { browser: "./src/stubs/empty-module.js" },
+    },
+  },
+  // Prevent Node.js-only modules from causing webpack compilation errors
+  // in the browser/client bundle (for non-Turbopack builds).
+  webpack: (webpackConfig, { isServer }) => {
+    if (!isServer) {
+      webpackConfig.resolve.fallback = {
+        ...webpackConfig.resolve.fallback,
+        net: false,
+        tls: false,
+        fs: false,
+        dns: false,
+        http2: false,
+        worker_threads: false,
+        child_process: false,
+        "node:fs": false,
+        "node:net": false,
+        "node:tls": false,
+        "node:dns": false,
+        "node:http2": false,
+        "node:worker_threads": false,
+        "node:child_process": false,
+      };
+    }
+    return webpackConfig;
+  },
 };
 
 export default config;
