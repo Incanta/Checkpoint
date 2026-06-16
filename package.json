@@ -20,7 +20,8 @@
     "dev:agent": "node dev-agent.js",
     "desktop": "cd src/clients/desktop && yarn dev",
     "migrate": "node scripts/migrate.js",
-    "test": "node scripts/test.js"
+    "test": "node scripts/test.js",
+    "audit": "yarn npm audit --all --recursive"
   },
   "dependencies": {
     "@incanta/config": "^2.1.16",
