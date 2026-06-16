@@ -37,15 +37,15 @@
     "typecheck": "tsgo --noEmit"
   },
   "peerDependencies": {
-    "@incanta/config": "*",
-    "@trpc/client": "*",
-    "@trpc/server": "*",
-    "njwt": "*",
-    "pretty-bytes": "*",
-    "react": "*",
-    "react-dom": "*",
-    "superjson": "*",
-    "zod": "*"
+    "@incanta/config": "^2.1.16",
+    "@trpc/client": "^11.11.0",
+    "@trpc/server": "^11.11.0",
+    "njwt": "^2.0.1",
+    "pretty-bytes": "^7.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "superjson": "^2.2.6",
+    "zod": "^4.1.1"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "^1.5.3",
@@ -56,9 +56,9 @@
     "@trpc/react-query": "^11.8.1",
     "better-auth": "^1.6.2",
     "chart.js": "^4.5.1",
-    "cross-env": "*",
+    "cross-env": "^10.0.0",
     "next": "^16.2.6",
-    "nodemailer": "^8.0.5",
+    "nodemailer": "^8.0.11",
     "react-chartjs-2": "^5.3.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
@@ -67,15 +67,15 @@
     "stripe": "22.1.0-beta.2"
   },
   "devDependencies": {
-    "@incanta/config": "*",
+    "@incanta/config": "^2.1.16",
     "@tailwindcss/postcss": "^4.1.18",
-    "@types/node": "*",
+    "@types/node": "^25.3.3",
     "@types/nodemailer": "^7.0.11",
-    "@typescript/native-preview": "*",
-    "eslint": "*",
+    "@typescript/native-preview": "^7.0.0-dev.20260304.1",
+    "eslint": "^9.34.0",
     "javascript-obfuscator": "^5.4.1",
     "postcss": "^8.5.10",
-    "prettier": "*",
+    "prettier": "^3.6.2",
     "prettier-plugin-tailwindcss": "^0.6.11",
     "prisma": "^6.5.0",
     "tailwindcss": "^4.1.18"
