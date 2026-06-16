@@ -118,13 +118,36 @@ process.on("SIGINT", () => {
 // ── Main ─────────────────────────────────────────────────────────
 
 const APP_URL = "http://localhost:13000";
-const DAEMON_URL = "http://localhost:13010";
+
+// The daemon may shift its port if 13010 is already in use locally
+// (e.g. another service is squatting on it). It writes the chosen port
+// to ~/.checkpoint/daemon.json on startup.
+function getDaemonPort() {
+  const daemonJson = path.join(os.homedir(), ".checkpoint", "daemon.json");
+  if (fs.existsSync(daemonJson)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(daemonJson, "utf-8"));
+      if (typeof parsed.daemonPort === "number") return parsed.daemonPort;
+    } catch {}
+  }
+  return 13010;
+}
 
 async function main() {
   // ----------------------------------------------------------------
   // Wait for services
   // ----------------------------------------------------------------
   heading("Waiting for services");
+
+  // Wait for the daemon to write its config so we know which port it picked.
+  const daemonJsonPath = path.join(os.homedir(), ".checkpoint", "daemon.json");
+  for (let i = 0; i < 30; i++) {
+    if (fs.existsSync(daemonJsonPath)) break;
+    await sleep(1000);
+  }
+  const daemonPort = getDaemonPort();
+  const DAEMON_URL = `http://localhost:${daemonPort}`;
+  console.log(`  Daemon URL: ${DAEMON_URL}`);
 
   const daemonProbe = `${DAEMON_URL}/workspaces.ops.list.local?batch=1&input=${encodeURIComponent(JSON.stringify({ 0: { json: { daemonId: "probe" } } }))}`;
 
