@@ -23,7 +23,7 @@
     "test": "node scripts/test.js"
   },
   "dependencies": {
-    "@incanta/config": "^2.1.10",
+    "@incanta/config": "^2.1.16",
     "@trpc/client": "^11.11.0",
     "@trpc/server": "^11.11.0",
     "njwt": "^2.0.1",

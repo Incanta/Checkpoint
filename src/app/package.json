@@ -37,7 +37,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "peerDependencies": {
-    "@incanta/config": "^2.1.10",
+    "@incanta/config": "^2.1.16",
     "@trpc/client": "^11.11.0",
     "@trpc/server": "^11.11.0",
     "njwt": "^2.0.1",
@@ -62,7 +62,7 @@
     "shiki": "^3.0.0"
   },
   "devDependencies": {
-    "@incanta/config": "^2.1.10",
+    "@incanta/config": "^2.1.16",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^25.3.3",
     "@types/nodemailer": "^7.0.11",
