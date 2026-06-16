@@ -1739,7 +1739,7 @@ __metadata:
   dependencies:
     "@prisma/client": "npm:*"
     "@types/express": "npm:^5.0.6"
-    "@typescript/native-preview": "npm:*"
+    "@typescript/native-preview": "npm:^7.0.0-dev.20260304.1"
     express: "npm:^5.2.1"
   languageName: unknown
   linkType: soft
