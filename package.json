@@ -21,7 +21,7 @@
     "desktop": "cd src/clients/desktop && yarn dev",
     "migrate": "node scripts/migrate.js",
     "test": "node scripts/test.js",
-    "audit": "yarn npm audit --all --recursive"
+    "audit": "node scripts/audit.js"
   },
   "dependencies": {
     "@incanta/config": "^2.1.16",
