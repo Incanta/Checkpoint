@@ -18,13 +18,13 @@
     "daemon": "cd daemon && yarn start"
   },
   "peerDependencies": {
-    "@incanta/config": "*",
-    "@trpc/client": "*",
-    "@trpc/server": "*",
-    "njwt": "*",
-    "pino": "*",
-    "pino-pretty": "*",
-    "superjson": "*"
+    "@incanta/config": "^2.1.10",
+    "@trpc/client": "^11.11.0",
+    "@trpc/server": "^11.11.0",
+    "njwt": "^2.0.1",
+    "pino": "^10.1.0",
+    "pino-pretty": "^13.1.2",
+    "superjson": "^2.2.6"
   },
   "dependencies": {
     "@checkpointvcs/app": "workspace:*",
@@ -36,7 +36,7 @@
   },
   "devDependencies": {
     "@types/lodash.merge": "^4.6.9",
-    "eslint": "*",
+    "eslint": "^9.34.0",
     "tmp-promise": "^3.0.3"
   }
 }

@@ -10,7 +10,9 @@
     "src/clients/desktop"
   ],
   "scripts": {
-    "postinstall": "cd src/app && yarn db:set-provider && yarn db:types && yarn db:migrate:dev",
+    "postinstall": "node scripts/check-workspace-deps.js && cd src/app && yarn db:set-provider && yarn db:types && yarn db:migrate:dev",
+    "check-workspace-deps": "node scripts/check-workspace-deps.js",
+    "check-workspace-deps:fix": "node scripts/check-workspace-deps.js --fix",
     "lint": "eslint src/app src/core src/clients/desktop",
     "lint:fix": "eslint src/app src/core src/clients/desktop --fix",
     "build": "cd src/app && yarn build:lib && cd ../core && yarn build",
