@@ -32,6 +32,10 @@ export const orgRouter = createTRPCRouter({
             name: true,
           },
         },
+        users: {
+          where: { userId: ctx.session.user.id },
+          select: { role: true },
+        },
       },
     });
   }),
@@ -101,6 +105,38 @@ export const orgRouter = createTRPCRouter({
         ...org,
         repos: filteredRepos,
       };
+    }),
+
+  getAdmins: protectedProcedure
+    .input(z.object({ orgId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const orgUser = await ctx.db.orgUser.findFirst({
+        where: {
+          orgId: input.orgId,
+          userId: ctx.session.user.id,
+        },
+      });
+
+      if (!orgUser) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You do not have access to this organization",
+        });
+      }
+
+      const admins = await ctx.db.orgUser.findMany({
+        where: { orgId: input.orgId, role: "ADMIN" },
+        include: {
+          user: { select: { id: true, name: true, email: true, image: true } },
+        },
+      });
+
+      return admins.map((a) => ({
+        id: a.user.id,
+        name: a.user.name,
+        email: a.user.email,
+        image: a.user.image,
+      }));
     }),
 
   createOrg: protectedProcedure

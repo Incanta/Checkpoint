@@ -1,9 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useMemo } from "react";
 import { api } from "~/trpc/react";
+import {
+  getRestrictedStatus,
+  RESTRICTED_STATUS_LABELS,
+  type RestrictedSubscriptionStatus,
+} from "~/lib/subscription";
+import { ContactAdminModal } from "./contact-admin-modal";
 
 function RepoIcon() {
   return (
@@ -47,10 +53,29 @@ function SearchIcon() {
   );
 }
 
+const RESTRICTED_BADGE_CLASSES: Record<RestrictedSubscriptionStatus, string> = {
+  PAST_DUE:
+    "bg-[var(--color-warning)]/15 text-[var(--color-warning)]",
+  CANCELED:
+    "bg-[var(--color-text-muted)]/15 text-[var(--color-text-muted)]",
+  SUSPENDED:
+    "bg-[var(--color-danger)]/15 text-[var(--color-danger)]",
+  DELETED:
+    "bg-[var(--color-danger)]/15 text-[var(--color-danger)]",
+  TRIAL_EXPIRED:
+    "bg-[var(--color-warning)]/15 text-[var(--color-warning)]",
+};
+
 export function AppSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [filter, setFilter] = useState("");
   const { data: orgs } = api.org.myOrgs.useQuery();
+  const [contactAdmin, setContactAdmin] = useState<{
+    orgId: string;
+    orgName: string;
+    status: RestrictedSubscriptionStatus;
+  } | null>(null);
 
   const filtered = useMemo(() => {
     if (!orgs) return [];
@@ -70,6 +95,24 @@ export function AppSidebar() {
       );
   }, [orgs, filter]);
 
+  const handleRestrictedOrgClick = (org: {
+    id: string;
+    name: string;
+    users: { role: string }[];
+    restricted: RestrictedSubscriptionStatus;
+  }) => {
+    const isAdmin = org.users[0]?.role === "ADMIN";
+    if (isAdmin) {
+      router.push(`/${org.name}/settings/billing`);
+    } else {
+      setContactAdmin({
+        orgId: org.id,
+        orgName: org.name,
+        status: org.restricted,
+      });
+    }
+  };
+
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r border-[var(--color-border-default)] bg-[var(--color-bg-secondary)]">
       {/* Search */}
@@ -88,64 +131,98 @@ export function AppSidebar() {
 
       {/* Org/repo tree */}
       <nav className="flex-1 overflow-y-auto px-2 pb-4">
-        {filtered?.map((org) => (
-          <div key={org.id} className="mb-1">
-            <Link
-              href={`/${org.name}`}
-              className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium no-underline transition-colors ${
-                pathname === `/${org.name}`
-                  ? "bg-[var(--color-bg-overlay)] text-[var(--color-text-primary)]"
-                  : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-text-primary)]"
-              }`}
-            >
+        {filtered?.map((org) => {
+          const restricted = getRestrictedStatus(org);
+          const orgPath = `/${org.name}`;
+          const isActive = pathname === orgPath;
+          const baseClasses = `flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium no-underline transition-colors w-full text-left ${
+            isActive
+              ? "bg-[var(--color-bg-overlay)] text-[var(--color-text-primary)]"
+              : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-text-primary)]"
+          }`;
+
+          const orgLabel = (
+            <>
               <OrgIcon />
               <span className="truncate">{org.name}</span>
-              {org.subscriptionStatus === "TRIAL" && (
+              {restricted ? (
                 <span
-                  title={
-                    org.trialEndsAt
-                      ? `Trial ends ${new Date(org.trialEndsAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
-                      : "Trial active"
-                  }
-                  className="ml-auto shrink-0 rounded-full bg-[var(--color-info)]/15 px-1.5 text-[10px] leading-none font-medium text-[var(--color-info)]"
-                  style={{
-                    paddingTop: "2px",
-                    paddingBottom: "2px",
-                  }}
+                  title={RESTRICTED_STATUS_LABELS[restricted]}
+                  className={`ml-auto shrink-0 rounded-full px-1.5 text-[10px] leading-none font-medium ${RESTRICTED_BADGE_CLASSES[restricted]}`}
+                  style={{ paddingTop: "2px", paddingBottom: "2px" }}
                 >
-                  Trial
+                  {RESTRICTED_STATUS_LABELS[restricted]}
                 </span>
+              ) : (
+                org.subscriptionStatus === "TRIAL" && (
+                  <span
+                    title={
+                      org.trialEndsAt
+                        ? `Trial ends ${new Date(org.trialEndsAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+                        : "Trial active"
+                    }
+                    className="ml-auto shrink-0 rounded-full bg-[var(--color-info)]/15 px-1.5 text-[10px] leading-none font-medium text-[var(--color-info)]"
+                    style={{ paddingTop: "2px", paddingBottom: "2px" }}
+                  >
+                    Trial
+                  </span>
+                )
               )}
-            </Link>
+            </>
+          );
 
-            {org.repos.length > 0 && (
-              <div className="ml-3 border-l border-[var(--color-border-muted)] pl-2">
-                {org.repos.map((repo) => {
-                  const repoPath = `/${org.name}/${repo.name}`;
-                  const pathnameThroughRepo = pathname
-                    .split("/")
-                    .slice(0, 3)
-                    .join("/");
-                  const isActive = pathnameThroughRepo === repoPath;
-                  return (
-                    <Link
-                      key={repo.id}
-                      href={repoPath}
-                      className={`flex items-center gap-2 rounded-md px-2 py-1 text-sm no-underline transition-colors ${
-                        isActive
-                          ? "bg-[var(--color-bg-overlay)] text-[var(--color-text-primary)]"
-                          : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-text-primary)]"
-                      }`}
-                    >
-                      <RepoIcon />
-                      <span className="truncate">{repo.name}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ))}
+          return (
+            <div key={org.id} className="mb-1">
+              {restricted ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleRestrictedOrgClick({
+                      id: org.id,
+                      name: org.name,
+                      users: org.users,
+                      restricted,
+                    })
+                  }
+                  className={baseClasses}
+                >
+                  {orgLabel}
+                </button>
+              ) : (
+                <Link href={orgPath} className={baseClasses}>
+                  {orgLabel}
+                </Link>
+              )}
+
+              {!restricted && org.repos.length > 0 && (
+                <div className="ml-3 border-l border-[var(--color-border-muted)] pl-2">
+                  {org.repos.map((repo) => {
+                    const repoPath = `/${org.name}/${repo.name}`;
+                    const pathnameThroughRepo = pathname
+                      .split("/")
+                      .slice(0, 3)
+                      .join("/");
+                    const isRepoActive = pathnameThroughRepo === repoPath;
+                    return (
+                      <Link
+                        key={repo.id}
+                        href={repoPath}
+                        className={`flex items-center gap-2 rounded-md px-2 py-1 text-sm no-underline transition-colors ${
+                          isRepoActive
+                            ? "bg-[var(--color-bg-overlay)] text-[var(--color-text-primary)]"
+                            : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-text-primary)]"
+                        }`}
+                      >
+                        <RepoIcon />
+                        <span className="truncate">{repo.name}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
 
         {filtered?.length === 0 && (
           <p className="px-2 py-4 text-center text-sm text-[var(--color-text-muted)]">
@@ -153,6 +230,15 @@ export function AppSidebar() {
           </p>
         )}
       </nav>
+
+      {contactAdmin && (
+        <ContactAdminModal
+          orgId={contactAdmin.orgId}
+          orgName={contactAdmin.orgName}
+          status={contactAdmin.status}
+          onClose={() => setContactAdmin(null)}
+        />
+      )}
     </aside>
   );
 }
