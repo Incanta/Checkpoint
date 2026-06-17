@@ -56,7 +56,8 @@ export const repoRouter = createTRPCRouter({
 
       const canWrite = !!(
         orgUser &&
-        (repo.org.defaultRepoAccess === "WRITE" ||
+        (orgUser.role === "ADMIN" ||
+          repo.org.defaultRepoAccess === "WRITE" ||
           repo.org.defaultRepoAccess === "ADMIN" ||
           (repoRole &&
             (repoRole.access === "WRITE" || repoRole.access === "ADMIN")))
@@ -292,28 +293,27 @@ export const repoRouter = createTRPCRouter({
         },
       });
 
-      // Filter repos based on user access
-      // eslint-disable-next-line @typescript-eslint/no-misused-promises
-      const accessibleRepos = repos.filter((repo) => {
-        if (repo.public) {
-          return true;
-        }
+      // Non-MEMBER org users (ADMIN/BILLING) see every repo in the org.
+      if (orgUser.role !== "MEMBER") {
+        return repos;
+      }
 
-        if (orgUser.role !== "MEMBER") {
-          return true;
-        }
-
-        // Check for additional repo roles
-        return ctx.db.repoRole.findFirst({
-          where: {
-            repoId: repo.id,
-            userId: ctx.session.user.id,
-            access: { not: "NONE" },
-          },
-        });
+      // MEMBERs see public repos plus any non-NONE per-repo role they hold.
+      // One query for all of this org's repos avoids the N+1 that the
+      // previous `Array.filter(async predicate)` not only had but also
+      // silently leaked through — Promise return values were treated as
+      // truthy by the synchronous filter.
+      const grantedRoles = await ctx.db.repoRole.findMany({
+        where: {
+          repoId: { in: repos.map((r) => r.id) },
+          userId: ctx.session.user.id,
+          access: { not: "NONE" },
+        },
+        select: { repoId: true },
       });
+      const grantedRepoIds = new Set(grantedRoles.map((r) => r.repoId));
 
-      return accessibleRepos;
+      return repos.filter((repo) => repo.public || grantedRepoIds.has(repo.id));
     }),
 
   getMergePermissions: protectedProcedure

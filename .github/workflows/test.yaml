@@ -38,6 +38,13 @@ jobs:
         run: yarn build
 
       # ----------------------------------------------------------------
+      # Fast in-process router/unit tests (no services running).
+      # See src/tests/src/api/* and src/tests/src/harness/.
+      # ----------------------------------------------------------------
+      - name: Run fast tests
+        run: yarn test
+
+      # ----------------------------------------------------------------
       # Install C++ build dependencies
       # ----------------------------------------------------------------
       - name: Install C++ dependencies
