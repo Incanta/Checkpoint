@@ -32,6 +32,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
@@ -49,12 +52,6 @@ jobs:
       # The addon CMakeLists.txt builds the longtail C library from
       # source (add_subdirectory) and fetches libcurl (FetchContent).
       # ----------------------------------------------------------------
-
-      - name: Prepare yarn
-        working-directory: src/longtail/addon
-        run: |
-          corepack enable
-          corepack prepare
 
       - name: Install addon dependencies
         working-directory: src/longtail/addon
@@ -102,6 +99,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - uses: actions/setup-node@v5
         with:
@@ -177,12 +177,6 @@ jobs:
       # ----------------------------------------------------------------
       # Build TypeScript
       # ----------------------------------------------------------------
-
-      - name: Prepare yarn
-        working-directory: src/longtail/addon
-        run: |
-          corepack enable
-          corepack prepare
 
       - name: Install addon dependencies
         working-directory: src/longtail/addon
