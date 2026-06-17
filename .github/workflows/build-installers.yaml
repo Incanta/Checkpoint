@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 env:
-  NODE_VERSION: "22"
+  NODE_VERSION: "24"
 
 jobs:
   # ============================================================
@@ -23,7 +23,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Determine version
         id: version
@@ -65,7 +65,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Windows build dependencies
         if: runner.os == 'Windows'
@@ -138,10 +138,10 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -205,7 +205,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -262,10 +262,10 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -547,7 +547,7 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download all installer artifacts
         uses: actions/download-artifact@v4
