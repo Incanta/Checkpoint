@@ -67,6 +67,64 @@ function applyDefaults(): void {
   setConfig("email.enabled", false);
   setConfig("email.from.name", "Test");
   setConfig("email.from.address", "noreply@test.local");
+
+  // ─────────────────────────────────────────────────────────────────
+  // Premium-only defaults. Harmless on main (those modules don't read
+  // these keys); required on premium so isStripeEnabled() / billing /
+  // license code don't blow up on missing config.
+  // ─────────────────────────────────────────────────────────────────
+
+  setConfig("stripe.enabled", true);
+  setConfig("stripe.secret-key", "sk_test_dummy");
+  setConfig("stripe.publishable-key", "pk_test_dummy");
+  setConfig("stripe.webhook-secret", "whsec_test_dummy_secret");
+  setConfig("stripe.api-version", "");
+  setConfig("stripe.environment", "sandbox");
+  setConfig("stripe.trial.duration-days", 30);
+  setConfig("stripe.delinquency.suspend-after-days", 5);
+  setConfig("stripe.delinquency.delete-after-days", 14);
+  setConfig("stripe.minimum-invoice.enabled", false);
+  setConfig("stripe.minimum-invoice.cents", 500);
+  setConfig("stripe.storage.free-tier-gb", 0);
+  setConfig("stripe.storage.bucket-size-gb", 50);
+  setConfig("stripe.storage.bucket-price-cents", 250);
+  setConfig("stripe.card-expiry-notify-days", [30, 7]);
+
+  // Meters
+  setConfig("stripe.meters.write-users", "checkpoint_write_users");
+  setConfig("stripe.meters.read-users", "checkpoint_read_users");
+  setConfig("stripe.meters.storage-buckets", "checkpoint_storage_buckets");
+  setConfig("stripe.meters.minimum-due", "checkpoint_minimum_due");
+
+  // Prices (cloud)
+  setConfig("stripe.prices.cloud.studio-write", "price_cloud_studio_write");
+  setConfig("stripe.prices.cloud.studio-read", "price_cloud_studio_read");
+  setConfig("stripe.prices.cloud.pro-write", "price_cloud_pro_write");
+  setConfig("stripe.prices.cloud.pro-read", "price_cloud_pro_read");
+  setConfig("stripe.prices.cloud.basic-write", "price_cloud_basic_write");
+  setConfig("stripe.prices.cloud.basic-read", "price_cloud_basic_read");
+  setConfig("stripe.prices.cloud.storage", "price_cloud_storage");
+  setConfig("stripe.prices.cloud.minimum-due", "price_cloud_minimum_due");
+
+  // Prices (self-hosted)
+  setConfig("stripe.prices.self-hosted.studio-write", "price_sh_studio_write");
+  setConfig("stripe.prices.self-hosted.studio-read", "price_sh_studio_read");
+  setConfig("stripe.prices.self-hosted.pro-write", "price_sh_pro_write");
+  setConfig("stripe.prices.self-hosted.pro-read", "price_sh_pro_read");
+
+  // Seat pricing — meter-reporting reads this as a single nested object.
+  setConfig("stripe.seat-prices", {
+    cloud: {
+      basic: { write: 400, read: 200 },
+      pro: { write: 900, read: 400 },
+      studio: { write: 2400, read: 1200 },
+    },
+    selfHosted: {
+      basic: { write: 0, read: 0 },
+      pro: { write: 400, read: 200 },
+      studio: { write: 900, read: 400 },
+    },
+  });
 }
 
 // Apply defaults at module load so any test that imports the harness without

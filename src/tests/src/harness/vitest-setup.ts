@@ -69,6 +69,15 @@ vi.mock("~/server/storage-service", () => ({
   deleteRepoDirectory: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Premium-only on `main` (the file doesn't exist there). Vitest treats this
+// as a virtual mock when the path can't be resolved, so harmless either way.
+vi.mock("~/server/r2-service", () => ({
+  isR2Enabled: vi.fn().mockReturnValue(false),
+  getBucketUsageR2: vi.fn().mockResolvedValue(0n),
+  createR2Bucket: vi.fn().mockResolvedValue(undefined),
+  deleteR2Bucket: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Shared email mock — `vi.hoisted` runs before any `vi.mock` factory so we
 // can attach the mock to a stable holder accessible to both the route and
 // the asserting test.

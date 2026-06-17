@@ -34,6 +34,11 @@ export interface TestDb {
 // Order matters — leaf tables (those with no incoming FKs) first. If you add
 // a new model to the schema and tests start failing with FK violations,
 // insert it ahead of its parents here.
+//
+// This list is the *union* of tables across main and premium. On a branch
+// where a given table doesn't exist (e.g. Invoice on main, OrgStoragePeak
+// on main), the `DELETE FROM …` throws and the try/catch around each one
+// silently moves on.
 const tableOrder = [
   "Notification",
   "IssueSubscription",
@@ -47,6 +52,13 @@ const tableOrder = [
   "Shelf",
   "MergePermission",
   "ApiToken",
+  "OrgUserActivity",
+  "OrgStoragePeak",
+  "InvoiceItem",
+  "Invoice",
+  "CardExpiryNotification",
+  "LicenseUsageReport",
+  "License",
   "Workspace",
   "Changelist",
   "Branch",
