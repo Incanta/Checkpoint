@@ -133,18 +133,23 @@ export function makeStripeEvent<T>(
   dataObject: T,
   overrides: { id?: string; livemode?: boolean; created?: number } = {},
 ): Stripe.Event {
+  // Cast through `unknown` at the boundary: the Stripe SDK types
+  // `data.object` as a tagged union of every Stripe resource shape and
+  // `type` as a string-literal union of every event name. Tests build
+  // synthetic events with partial payloads and event names the SDK may
+  // not yet know about — those are deliberately not validated here.
   return {
     id: overrides.id ?? `evt_test_${randomUUID()}`,
     object: "event",
     api_version: "2026-03-25.dahlia",
     created: overrides.created ?? Math.floor(Date.now() / 1000),
     data: {
-      object: dataObject as unknown as Stripe.Event.Data.Object,
+      object: dataObject,
       previous_attributes: null,
     },
     livemode: overrides.livemode ?? false,
     pending_webhooks: 0,
     request: { id: null, idempotency_key: null },
-    type: type as Stripe.Event.Type,
-  };
+    type,
+  } as unknown as Stripe.Event;
 }

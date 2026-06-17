@@ -38,12 +38,16 @@ export function buildSignedWebhookRequest<T>(
   const secret = opts.secret ?? TEST_WEBHOOK_SECRET;
   const timestamp = opts.timestamp ?? Math.floor(Date.now() / 1000);
 
+  // Cast through `Parameters<…>[0]`: recent SDK versions made
+  // `WebhookTestHeaderOptions` require `signature` + `cryptoProvider`,
+  // which are useless here (the helper signs synthetic events with the
+  // SDK's default crypto provider). The runtime call works fine.
   const signature = stripe.webhooks.generateTestHeaderString({
     payload: body,
     secret,
     timestamp,
     scheme: "v1",
-  });
+  } as Parameters<typeof stripe.webhooks.generateTestHeaderString>[0]);
 
   const request = new Request(
     opts.url ?? "https://app.local/api/webhooks/stripe",

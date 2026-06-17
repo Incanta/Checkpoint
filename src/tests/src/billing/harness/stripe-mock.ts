@@ -57,9 +57,9 @@ export interface MockStripe {
  * its own vi.fn() mocks, so multiple tests don't share call history.
  */
 export function createStripeMock(): MockStripe {
-  const realWebhooks = new RealStripe("sk_test_dummy", {
-    // Skip API version pinning — webhooks helpers don't depend on it.
-  } as Stripe.StripeConfig).webhooks;
+  // No options needed — webhooks helpers don't depend on API version
+  // pinning or any other constructor config.
+  const realWebhooks = new RealStripe("sk_test_dummy").webhooks;
 
   return {
     customers: {
