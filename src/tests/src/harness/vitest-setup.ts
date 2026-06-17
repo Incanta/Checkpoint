@@ -102,6 +102,45 @@ vi.mock("~/server/auth/config", () => ({
   enabledProviderIds: [],
 }));
 
+// Premium-only modules — virtual on main (vitest creates the mock even
+// when the source file doesn't exist).
+//
+// recordActivity: fire-and-forget billing seat-counter; no test cares about
+//   its DB side-effects, just that callers don't blow up.
+// notifications/subscribeTo*: notification fan-out, fire-and-forget.
+// license-client.assertFeature: gates feature access on tier — pass-through
+//   so tests don't need to seed a license. Override per-test if you want to
+//   exercise the rejection path.
+// @checkpointvcs/longtail-addon: native N-API binding for the storage
+//   engine. Stub out every function the routers reach so the module loads.
+vi.mock("~/server/api/activity", () => ({
+  recordActivity: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("~/server/notifications", () => ({
+  parseMentions: vi.fn().mockReturnValue([]),
+  resolveUsernames: vi.fn().mockResolvedValue([]),
+  subscribeToIssue: vi.fn().mockResolvedValue(undefined),
+  subscribeToPR: vi.fn().mockResolvedValue(undefined),
+  notifyIssueSubscribers: vi.fn().mockResolvedValue(undefined),
+  notifyPRSubscribers: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("~/server/license-client", () => ({
+  assertFeature: vi.fn().mockResolvedValue(undefined),
+  initLicenseClient: vi.fn().mockResolvedValue(undefined),
+  getInstanceTier: vi.fn().mockReturnValue("INCANTA"),
+}));
+
+vi.mock("@checkpointvcs/longtail-addon", () => ({
+  readFileFromVersionAsync: vi.fn().mockReturnValue("handle_test"),
+  pollReadFileHandle: vi
+    .fn()
+    .mockReturnValue({ done: true, data: Buffer.from("") }),
+  freeReadFileHandle: vi.fn(),
+  GetLogLevel: vi.fn().mockReturnValue(0),
+}));
+
 beforeEach(async () => {
   const { resetConfig } = await import("./config");
   resetConfig();
