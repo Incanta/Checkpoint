@@ -17,9 +17,9 @@
     "superjson": "^2.2.6"
   },
   "dependencies": {
-    "@checkpointvcs/app": "link:../app",
-    "@checkpointvcs/common": "link:../core/common",
-    "@checkpointvcs/daemon": "link:../core/daemon",
+    "@checkpointvcs/app": "workspace:*",
+    "@checkpointvcs/common": "workspace:*",
+    "@checkpointvcs/daemon": "workspace:*",
     "uuid": "^14.0.0"
   },
   "devDependencies": {

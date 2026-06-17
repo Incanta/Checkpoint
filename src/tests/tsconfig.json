@@ -8,13 +8,14 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "declaration": true,
-    "declarationMap": true,
-    "outDir": "./dist",
-    "rootDir": "./src",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
+    // The harness imports app modules via `~/*` (resolved to ../app/src/*).
+    // Without `allowJs`, tsc can't see env.js along that chain; without
+    // dropping `rootDir`, every traversed app file errors as "outside
+    // rootDir". `rootDir` and `outDir` are no-ops anyway with `noEmit`.
+    "allowJs": true,
     "types": ["vitest/globals", "node"],
     "paths": {
       "~/*": ["../app/src/*"]
