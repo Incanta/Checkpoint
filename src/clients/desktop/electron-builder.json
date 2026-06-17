@@ -52,11 +52,13 @@
     ],
     "artifactName": "Checkpoint-Windows-x64-${version}-Setup.${ext}",
     "icon": "public/icon.ico",
-    "signingHashAlgorithms": [
-      "sha256"
-    ],
-    "certificateFile": "${env.WINDOWS_CERT_FILE}",
-    "certificatePassword": "${env.WINDOWS_CERT_PASSWORD}"
+    "signtoolOptions": {
+      "signingHashAlgorithms": [
+        "sha256"
+      ],
+      "certificateFile": "${env.WINDOWS_CERT_FILE}",
+      "certificatePassword": "${env.WINDOWS_CERT_PASSWORD}"
+    }
   },
   "nsis": {
     "oneClick": false,
@@ -114,9 +116,11 @@
     "icon": "public/icons",
     "category": "Development",
     "desktop": {
-      "Name": "Checkpoint",
-      "Comment": "Checkpoint Version Control System",
-      "Categories": "Development;VersionControl;"
+      "entry": {
+        "Name": "Checkpoint",
+        "Comment": "Checkpoint Version Control System",
+        "Categories": "Development;VersionControl;"
+      }
     }
   },
   "deb": {
