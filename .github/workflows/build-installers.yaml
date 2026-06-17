@@ -46,7 +46,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          # Pinned to windows-2022 because the CMake config asks for
+          # the "Visual Studio 17 2022" generator. windows-latest is
+          # migrating to windows-2025, which may ship a newer VS only.
+          - os: windows-2022
             platform: win32-x64
             cli_binary: checkpoint.exe
             cli_alias: chk.exe
