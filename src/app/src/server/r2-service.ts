@@ -187,8 +187,7 @@ export async function getBucketUsageR2(bucket: string): Promise<number> {
     );
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-  const data: R2UsageResponse = await response.json();
+  const data = (await response.json()) as R2UsageResponse;
 
   if (!data.success) {
     throw new Error(
