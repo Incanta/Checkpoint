@@ -22,7 +22,19 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Enable Corepack
-        run: corepack enable
+        shell: bash
+        run: |
+          # On Windows the runner ships Yarn 1 at a PATH location that
+          # outranks corepack's default install dir, so setup-node@v5's
+          # cache probe falls back to Yarn 1 and fails on
+          # packageManager: yarn@4. Install the corepack shim alongside
+          # any pre-existing yarn so it overrides directly.
+          yarn_path=$(command -v yarn || true)
+          if [ -n "$yarn_path" ]; then
+            corepack enable --install-directory "$(dirname "$yarn_path")"
+          else
+            corepack enable
+          fi
 
       - uses: actions/setup-node@v5
         with:
