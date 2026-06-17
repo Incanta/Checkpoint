@@ -27,7 +27,7 @@ var (
 	mRestart    *systray.MenuItem
 )
 
-const trayApiVersion = "1.0.0"
+const trayApiVersion = "0.3.0"
 
 type apiVersionInfo struct {
 	CurrentVersion     string `json:"currentVersion"`

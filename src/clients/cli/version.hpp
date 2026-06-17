@@ -4,7 +4,7 @@
 
 namespace checkpoint {
 
-constexpr const char* API_VERSION = "1.0.0";
+constexpr const char* API_VERSION = "0.3.0";
 
 struct VersionInfo {
   std::string currentVersion;
