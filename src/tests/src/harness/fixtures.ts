@@ -4,7 +4,9 @@
 import type { PrismaClient } from "@prisma/client";
 
 let counter = 0;
-function nextId(prefix: string): string {
+/** Process-unique id with a stable prefix. Exposed so premium fixtures can
+ *  reuse the same counter instead of running a parallel one. */
+export function nextId(prefix: string): string {
   counter += 1;
   return `${prefix}_${Date.now()}_${counter}`;
 }

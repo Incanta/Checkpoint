@@ -13,7 +13,7 @@
 // `__checkpointTestDb` setter (see vitest-setup.ts).
 
 import { PrismaClient } from "@prisma/client";
-import { execFileSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -67,22 +67,18 @@ export async function createTestDb(): Promise<TestDb> {
   const dbFile = path.join(dir, "test.db");
   const url = `file:${dbFile.replace(/\\/g, "/")}`;
 
-  execFileSync(
-    "yarn",
-    [
-      "prisma",
-      "db",
-      "push",
-      "--schema",
-      schemaDir,
-      "--skip-generate",
-      "--accept-data-loss",
-    ],
+  // Use `execSync` (string form) instead of `execFileSync` + `shell: true`:
+  // the latter is DEP0190'd because args get concatenated into the shell
+  // command unescaped. The string form picks the shell up correctly on
+  // Windows (where `yarn` is a `.cmd` shim, unreachable via execFileSync
+  // without a shell) without that footgun — our args here are all known
+  // literals plus `schemaDir`, which we double-quote.
+  execSync(
+    `yarn prisma db push --schema "${schemaDir}" --skip-generate --accept-data-loss`,
     {
       cwd: appDir,
       env: { ...process.env, DATABASE_URL: url, DB_PROVIDER: "sqlite" },
       stdio: "pipe",
-      shell: true,
     },
   );
 
