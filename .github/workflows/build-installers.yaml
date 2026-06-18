@@ -275,6 +275,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
+      # Code-signing-method detection. Steps below gate on these. If both
+      # Azure and PFX are configured, Azure wins (it's the modern path).
+      HAS_WIN_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      HAS_WIN_PFX: ${{ secrets.WINDOWS_CERT_BASE64 != '' }}
+      HAS_MAC_CERT: ${{ secrets.MACOS_CERT_BASE64 != '' }}
 
     steps:
       - uses: actions/checkout@v6
@@ -344,7 +349,7 @@ jobs:
       # ---- Code Signing Setup ----
 
       - name: Import Windows signing certificate
-        if: runner.os == 'Windows' && env.WINDOWS_CERT_BASE64 != ''
+        if: runner.os == 'Windows' && env.HAS_WIN_PFX == 'true' && env.HAS_WIN_AZURE != 'true'
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
         shell: pwsh
@@ -459,18 +464,40 @@ jobs:
           "
           rm -rf node_modules
 
-      - name: Strip code signing config if certs not available
+      - name: Configure code signing
         shell: bash
         env:
-          HAS_WIN_CERT: ${{ secrets.WINDOWS_CERT_BASE64 != '' }}
-          HAS_MAC_CERT: ${{ secrets.MACOS_CERT_BASE64 != '' }}
+          # Public, org-specific Azure Trusted Signing identifiers — repo vars,
+          # not secrets. Required when HAS_WIN_AZURE is true. The auth secrets
+          # (AZURE_TENANT_ID / CLIENT_ID / CLIENT_SECRET) are set on the
+          # package step below.
+          AZURE_SIGN_ENDPOINT: ${{ vars.AZURE_SIGN_ENDPOINT }}
+          AZURE_SIGN_ACCOUNT: ${{ vars.AZURE_SIGN_ACCOUNT }}
+          AZURE_SIGN_PROFILE: ${{ vars.AZURE_SIGN_PROFILE }}
+          AZURE_SIGN_PUBLISHER: ${{ vars.AZURE_SIGN_PUBLISHER }}
         run: |
           cd src/clients/desktop
           node -e "
             const fs = require('fs');
             const cfg = JSON.parse(fs.readFileSync('electron-builder.json', 'utf-8'));
-            if (process.env.HAS_WIN_CERT !== 'true' && cfg.win) {
-              delete cfg.win.signtoolOptions;
+            if (cfg.win) {
+              if (process.env.HAS_WIN_AZURE === 'true') {
+                // Azure Trusted Signing — replaces signtool. Cannot coexist with
+                // signtoolOptions, so drop that block.
+                delete cfg.win.signtoolOptions;
+                cfg.win.azureSignOptions = {
+                  endpoint: process.env.AZURE_SIGN_ENDPOINT,
+                  codeSigningAccountName: process.env.AZURE_SIGN_ACCOUNT,
+                  certificateProfileName: process.env.AZURE_SIGN_PROFILE,
+                  publisherName: process.env.AZURE_SIGN_PUBLISHER,
+                };
+              } else if (process.env.HAS_WIN_PFX !== 'true') {
+                // No Windows signing configured — drop signtoolOptions so
+                // electron-builder skips signing instead of asking for a cert.
+                delete cfg.win.signtoolOptions;
+              }
+              // Else: PFX path — keep signtoolOptions; WIN_CSC_LINK and
+              // WIN_CSC_KEY_PASSWORD env vars feed the cert location/password.
             }
             if (process.env.HAS_MAC_CERT !== 'true') {
               if (cfg.mac) {
@@ -526,7 +553,13 @@ jobs:
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
         env:
+          # PFX path (ignored when Azure is selected).
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          # Azure Trusted Signing auth — Entra ID service principal credentials.
+          # Read by Azure.Identity's EnvironmentCredential at sign time.
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         shell: pwsh
         run: |
