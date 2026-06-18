@@ -347,13 +347,13 @@ jobs:
         if: runner.os == 'Windows' && env.WINDOWS_CERT_BASE64 != ''
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         shell: pwsh
         run: |
           $certBytes = [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64)
           $certPath = Join-Path $env:RUNNER_TEMP "signing-cert.pfx"
           [IO.File]::WriteAllBytes($certPath, $certBytes)
-          echo "WINDOWS_CERT_FILE=$certPath" >> $env:GITHUB_ENV
+          # WIN_CSC_LINK is electron-builder's native env var for the cert path.
+          echo "WIN_CSC_LINK=$certPath" >> $env:GITHUB_ENV
 
       - name: Import macOS signing certificate
         if: runner.os == 'macOS' && env.MACOS_CERT_BASE64 != ''
@@ -470,9 +470,7 @@ jobs:
             const fs = require('fs');
             const cfg = JSON.parse(fs.readFileSync('electron-builder.json', 'utf-8'));
             if (process.env.HAS_WIN_CERT !== 'true' && cfg.win) {
-              delete cfg.win.certificateFile;
-              delete cfg.win.certificatePassword;
-              delete cfg.win.signingHashAlgorithms;
+              delete cfg.win.signtoolOptions;
             }
             if (process.env.HAS_MAC_CERT !== 'true') {
               if (cfg.mac) {
@@ -528,7 +526,7 @@ jobs:
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
         env:
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         shell: pwsh
         run: |
@@ -544,7 +542,7 @@ jobs:
       - name: Package installer (macOS)
         if: runner.os == 'macOS'
         env:
-          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          CSC_NAME: ${{ secrets.MACOS_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}

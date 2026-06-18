@@ -55,9 +55,7 @@
     "signtoolOptions": {
       "signingHashAlgorithms": [
         "sha256"
-      ],
-      "certificateFile": "${env.WINDOWS_CERT_FILE}",
-      "certificatePassword": "${env.WINDOWS_CERT_PASSWORD}"
+      ]
     }
   },
   "nsis": {
@@ -83,7 +81,6 @@
     "artifactName": "Checkpoint-macOS-${arch}-${version}.${ext}",
     "icon": "public/icon.icns",
     "category": "public.app-category.developer-tools",
-    "identity": "${env.MACOS_SIGNING_IDENTITY}",
     "hardenedRuntime": true,
     "gatekeeperAssess": false,
     "entitlements": "../../../installer/macos/entitlements.plist",
