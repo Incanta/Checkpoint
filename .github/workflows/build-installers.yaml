@@ -467,14 +467,16 @@ jobs:
       - name: Configure code signing
         shell: bash
         env:
-          # Public, org-specific Azure Trusted Signing identifiers — repo vars,
-          # not secrets. Required when HAS_WIN_AZURE is true. The auth secrets
+          # Public, org-specific Azure Trusted Signing identifiers. Not
+          # sensitive (publisher CN, endpoint, account/profile names show up
+          # in every signed binary), but storing them in secrets is fine too.
+          # Required when HAS_WIN_AZURE is true. The auth secrets
           # (AZURE_TENANT_ID / CLIENT_ID / CLIENT_SECRET) are set on the
           # package step below.
-          AZURE_SIGN_ENDPOINT: ${{ vars.AZURE_SIGN_ENDPOINT }}
-          AZURE_SIGN_ACCOUNT: ${{ vars.AZURE_SIGN_ACCOUNT }}
-          AZURE_SIGN_PROFILE: ${{ vars.AZURE_SIGN_PROFILE }}
-          AZURE_SIGN_PUBLISHER: ${{ vars.AZURE_SIGN_PUBLISHER }}
+          AZURE_SIGN_ENDPOINT: ${{ secrets.AZURE_SIGN_ENDPOINT }}
+          AZURE_SIGN_ACCOUNT: ${{ secrets.AZURE_SIGN_ACCOUNT }}
+          AZURE_SIGN_PROFILE: ${{ secrets.AZURE_SIGN_PROFILE }}
+          AZURE_SIGN_PUBLISHER: ${{ secrets.AZURE_SIGN_PUBLISHER }}
         run: |
           cd src/clients/desktop
           node -e "
