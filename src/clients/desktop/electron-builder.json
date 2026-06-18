@@ -110,7 +110,7 @@
       }
     ],
     "artifactName": "Checkpoint-Linux-amd64-${version}.${ext}",
-    "icon": "public/icons",
+    "icon": "public/icon.png",
     "category": "Development",
     "desktop": {
       "entry": {
