@@ -1,13 +1,26 @@
 #!/bin/bash
-# preremove-linux.sh — Pre-removal script for Checkpoint on Linux
-# Runs before package files are removed
+# preremove-linux.sh — Pre-removal hook for Checkpoint on Linux.
+#
+# This script runs in TWO scenarios:
+#   1. `dpkg -r` / `rpm -e` (full uninstall)
+#   2. `dpkg -i` / `rpm -U` of a newer version (upgrade) — package managers
+#      fire the OLD package's prerm before installing the new files
+#
+# In both cases we need to stop the daemon and kill the running desktop +
+# tray processes so the new package can replace bundled binaries without
+# "Text file busy" or similar EBUSY errors on overwrite.
 
 set -e
 
 BIN_DIR="/usr/local/bin"
 SERVICE_FILE="/etc/systemd/system/checkpoint-daemon@.service"
 
-echo "Removing Checkpoint services..."
+echo "Stopping Checkpoint clients..."
+
+# Kill running desktop + tray processes (pkill returns non-zero when no
+# match — guard with || true so set -e doesn't abort the script).
+pkill -f checkpoint-desktop 2>/dev/null || true
+pkill -f checkpoint-tray 2>/dev/null || true
 
 # Stop all running instances of the daemon service
 for service in $(systemctl list-units --type=service --no-legend | grep "checkpoint-daemon@" | awk '{print $1}'); do

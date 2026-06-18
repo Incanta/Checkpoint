@@ -237,6 +237,18 @@ int main(int argc, char** argv) {
   configCmd.add_argument("value")
       .help("Config value");
 
+  // update (subcommand) — wraps the daemon's GitHub-Releases updater
+  argparse::ArgumentParser updateCmd("update");
+  updateCmd.add_description("Check for and apply Checkpoint updates");
+  updateCmd.add_argument("action")
+      .help("Action: check, install")
+      .default_value(std::string("check"))
+      .nargs(argparse::nargs_pattern::optional);
+  updateCmd.add_argument("--yes", "-y")
+      .help("Skip confirmation prompt for install")
+      .default_value(false)
+      .implicit_value(true);
+
   // ─── Register sub-commands ─────────────────────────────────────
 
   program.add_subparser(statusCmd);
@@ -261,6 +273,7 @@ int main(int argc, char** argv) {
   program.add_subparser(shelfCmd);
   program.add_subparser(artifactCmd);
   program.add_subparser(configCmd);
+  program.add_subparser(updateCmd);
 
   // ─── Parse arguments ──────────────────────────────────────────
 
@@ -317,6 +330,8 @@ int main(int argc, char** argv) {
         std::cerr << artifactCmd;
       } else if (cmd == "config") {
         std::cerr << configCmd;
+      } else if (cmd == "update") {
+        std::cerr << updateCmd;
       } else {
         std::cerr << program;
       }
@@ -330,8 +345,10 @@ int main(int argc, char** argv) {
   // ─── Dispatch commands ─────────────────────────────────────────
 
   try {
-    // Check CLI ↔ Daemon API version compatibility before any command
-    {
+    // Check CLI ↔ Daemon API version compatibility before any command —
+    // EXCEPT `update`, which is how the user recovers from a bad version
+    // mismatch in the first place.
+    if (!program.is_subcommand_used(updateCmd)) {
       int versionResult = checkpoint::checkDaemonVersion();
       if (versionResult != 0) return versionResult;
     }
@@ -500,11 +517,36 @@ int main(int argc, char** argv) {
       }
     }
 
+    if (program.is_subcommand_used(updateCmd)) {
+      auto action = updateCmd.get<std::string>("action");
+      bool yes = updateCmd.get<bool>("--yes");
+      if (action == "check" || action.empty()) {
+        return checkpoint::cmdUpdateCheck();
+      } else if (action == "install") {
+        return checkpoint::cmdUpdateInstall(yes);
+      } else {
+        std::cerr << "error: unknown update action '" << action
+                  << "'. Use 'check' or 'install'." << std::endl;
+        return 1;
+      }
+    }
+
     // No command specified — show help
     std::cout << program;
     return 0;
 
   } catch (const std::exception& err) {
+    std::string msg = err.what();
+    // The daemon's hard-block middleware returns this exact message via tRPC
+    // FORBIDDEN when the running daemon is below the connected server's
+    // minimumDaemonVersion. Render a friendlier prompt instead of a raw error.
+    if (msg.find("update required") != std::string::npos) {
+      std::cerr << "\033[1;31m" << "error: " << "\033[0m"
+                << "\033[31m" << msg << "\033[0m" << std::endl;
+      std::cerr << "  Run `chk update install` to upgrade Checkpoint."
+                << std::endl;
+      return 1;
+    }
     std::cerr << "\033[31m" << "error: " << err.what() << "\033[0m" << std::endl;
     return 1;
   }

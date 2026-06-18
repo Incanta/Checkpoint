@@ -110,6 +110,16 @@ updateText(
 );
 console.log("  updated src/app/src/server/api/api-version.ts");
 
+// Daemon's client-facing API version. The three neighboring constants
+// (DAEMON_MIN_CLIENT_VERSION, DAEMON_RECOMMENDED_CLIENT_VERSION,
+// DAEMON_APP_API_VERSION) are compatibility floors that bump manually.
+updateText(
+  "src/core/daemon/src/api-version.ts",
+  /export const DAEMON_CLIENT_API_VERSION = "[^"]*";/,
+  `export const DAEMON_CLIENT_API_VERSION = "${version}";`,
+);
+console.log("  updated src/core/daemon/src/api-version.ts");
+
 // Unreal plugin descriptor: bump Version (int) and set VersionName to semver.
 // .uplugin files are JSON with tab indentation.
 {

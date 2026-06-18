@@ -20,11 +20,14 @@ import (
 )
 
 var (
-	mStatus     *systray.MenuItem
-	mVersionMsg *systray.MenuItem
-	mStart      *systray.MenuItem
-	mStop       *systray.MenuItem
-	mRestart    *systray.MenuItem
+	mStatus         *systray.MenuItem
+	mVersionMsg     *systray.MenuItem
+	mUpdateStatus   *systray.MenuItem
+	mUpdateDownload *systray.MenuItem
+	mUpdateInstall  *systray.MenuItem
+	mStart          *systray.MenuItem
+	mStop           *systray.MenuItem
+	mRestart        *systray.MenuItem
 )
 
 const trayApiVersion = "0.3.0"
@@ -33,6 +36,18 @@ type apiVersionInfo struct {
 	CurrentVersion     string `json:"currentVersion"`
 	MinimumVersion     string `json:"minimumVersion"`
 	RecommendedVersion string `json:"recommendedVersion"`
+}
+
+// updateStatus mirrors the daemon's UpdateStatus from src/core/daemon/src/updater.ts.
+type updateStatus struct {
+	CurrentVersion          string `json:"currentVersion"`
+	LatestVersion           string `json:"latestVersion"`
+	UpdateAvailable         bool   `json:"updateAvailable"`
+	Checking                bool   `json:"checking"`
+	Downloading             bool   `json:"downloading"`
+	DownloadProgress        int    `json:"downloadProgress"`
+	DownloadedInstallerPath string `json:"downloadedInstallerPath"`
+	LastError               string `json:"lastError"`
 }
 
 func main() {
@@ -48,6 +63,13 @@ func onReady() {
 	mVersionMsg = systray.AddMenuItem("", "Version compatibility status")
 	mVersionMsg.Disable()
 	mVersionMsg.Hide()
+	mUpdateStatus = systray.AddMenuItem("", "Update status")
+	mUpdateStatus.Disable()
+	mUpdateStatus.Hide()
+	mUpdateDownload = systray.AddMenuItem("Download update", "Download the available Checkpoint update")
+	mUpdateDownload.Hide()
+	mUpdateInstall = systray.AddMenuItem("Install update & restart", "Run the installer and restart Checkpoint")
+	mUpdateInstall.Hide()
 	systray.AddSeparator()
 	mStart = systray.AddMenuItem("Start Daemon", "Start the Checkpoint daemon service")
 	mStop = systray.AddMenuItem("Stop Daemon", "Stop the Checkpoint daemon service")
@@ -76,6 +98,10 @@ func onReady() {
 				go handleStop()
 			case <-mRestart.ClickedCh:
 				go handleRestart()
+			case <-mUpdateDownload.ClickedCh:
+				go handleUpdateDownload()
+			case <-mUpdateInstall.ClickedCh:
+				go handleUpdateInstall()
 			case <-mOpenDesktop.ClickedCh:
 				go openDesktopApp()
 			case <-mQuit.ClickedCh:
@@ -161,12 +187,16 @@ func updateDaemonStatus() {
 		mStop.Enable()
 		mRestart.Enable()
 		checkDaemonVersion()
+		pollUpdateStatus()
 	} else {
 		mStatus.SetTitle("Daemon: Stopped")
 		mStart.Enable()
 		mStop.Disable()
 		mRestart.Disable()
 		mVersionMsg.Hide()
+		mUpdateStatus.Hide()
+		mUpdateDownload.Hide()
+		mUpdateInstall.Hide()
 	}
 }
 
@@ -255,6 +285,120 @@ func checkDaemonVersion() {
 	}
 
 	mVersionMsg.Hide()
+}
+
+// pollUpdateStatus queries the daemon's updater.getStatus endpoint and
+// adjusts the three update menu items based on the result. Silent on any
+// error — we don't want a transient daemon hiccup to surface as a tray
+// alert. Called from updateDaemonStatus on the 10-second ticker.
+func pollUpdateStatus() {
+	status, err := getUpdateStatus(getDaemonPort())
+	if err != nil {
+		mUpdateStatus.Hide()
+		mUpdateDownload.Hide()
+		mUpdateInstall.Hide()
+		return
+	}
+
+	if !status.UpdateAvailable {
+		mUpdateStatus.Hide()
+		mUpdateDownload.Hide()
+		mUpdateInstall.Hide()
+		return
+	}
+
+	switch {
+	case status.Downloading:
+		mUpdateStatus.SetTitle(fmt.Sprintf(
+			"Update: downloading %s (%d%%)",
+			status.LatestVersion, status.DownloadProgress,
+		))
+		mUpdateStatus.Show()
+		mUpdateDownload.Hide()
+		mUpdateInstall.Hide()
+	case status.DownloadedInstallerPath != "":
+		mUpdateStatus.SetTitle(fmt.Sprintf(
+			"Update: %s ready to install", status.LatestVersion,
+		))
+		mUpdateStatus.Show()
+		mUpdateDownload.Hide()
+		mUpdateInstall.Show()
+	default:
+		mUpdateStatus.SetTitle(fmt.Sprintf(
+			"Update: %s available", status.LatestVersion,
+		))
+		mUpdateStatus.Show()
+		mUpdateDownload.Show()
+		mUpdateInstall.Hide()
+	}
+}
+
+// getUpdateStatus queries the daemon's updater.getStatus tRPC endpoint and
+// returns the unmarshalled status struct.
+func getUpdateStatus(port int) (updateStatus, error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	url := fmt.Sprintf(
+		"http://127.0.0.1:%d/updater.getStatus?batch=1&input={}", port,
+	)
+	resp, err := client.Get(url)
+	if err != nil {
+		return updateStatus{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return updateStatus{}, err
+	}
+	var batch []struct {
+		Result struct {
+			Data struct {
+				JSON updateStatus `json:"json"`
+			} `json:"data"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &batch); err != nil || len(batch) == 0 {
+		return updateStatus{}, fmt.Errorf("invalid response")
+	}
+	return batch[0].Result.Data.JSON, nil
+}
+
+// daemonMutate POSTs a tRPC mutation with an empty input object. Used by the
+// updater download/apply click handlers.
+func daemonMutate(port int, procedure string) error {
+	url := fmt.Sprintf("http://127.0.0.1:%d/%s?batch=1", port, procedure)
+	body := bytes.NewReader([]byte(`{"0":{"json":{}}}`))
+	req, err := http.NewRequest("POST", url, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
+func handleUpdateDownload() {
+	mUpdateDownload.Disable()
+	if err := daemonMutate(getDaemonPort(), "updater.downloadUpdate"); err != nil {
+		mUpdateStatus.SetTitle(fmt.Sprintf("Update: download failed (%v)", err))
+		mUpdateDownload.Enable()
+		return
+	}
+	// The next pollUpdateStatus tick (≤ 10s) will surface progress and the
+	// "ready to install" transition.
+	mUpdateDownload.Enable()
+}
+
+func handleUpdateInstall() {
+	mUpdateInstall.Disable()
+	// applyUpdate spawns the installer detached and exits the daemon, so the
+	// HTTP request may not return cleanly — treat connection-reset as success.
+	_ = daemonMutate(getDaemonPort(), "updater.applyUpdate")
+	mUpdateStatus.SetTitle("Update: installer launched, restarting...")
 }
 
 // generateIcon creates a 32x32 blue circle PNG as a placeholder tray icon.

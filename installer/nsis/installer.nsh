@@ -17,6 +17,13 @@
 Var DAEMON_EXE
 
 Section "Daemon Service" SEC_DAEMON
+    ; Kill any running Electron desktop + tray processes first. Without this,
+    ; in-place upgrades fail with "file in use" because the running .exe holds
+    ; file locks on its own image and on the bundled binaries we're replacing.
+    nsExec::ExecToLog 'taskkill /f /im Checkpoint.exe'
+    nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
+    Sleep 1000
+
     ; Copy daemon files
     SetOutPath "$INSTDIR\daemon"
     File /r "${BUILD_RESOURCES_DIR}\daemon\*.*"
