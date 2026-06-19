@@ -13,7 +13,7 @@ export async function register() {
       await import("~/server/license-utils");
     await verifyLicenseManagerKey();
 
-    // Initialize license client for self-hosted instances
+    // Initialize the license client (no-op unless this is the license manager)
     const { initLicenseClient, getInstanceTier } =
       await import("~/server/license-client");
     await initLicenseClient();

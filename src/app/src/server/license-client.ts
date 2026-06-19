@@ -1,203 +1,53 @@
-// @obfuscate
-
 import { TRPCError } from "@trpc/server";
 import {
-  getLicenseConfig,
   hasFeature,
   isLicenseManager,
-  resolveManagerPublicKey,
-  verifyValidationToken,
   type LicenseFeature,
   type LicenseTier,
 } from "~/server/license-utils";
 import { db } from "~/server/db";
 import type { PrismaClient } from "@prisma/client";
 import { Logger } from "./logging";
-import { TimeManager } from "./time";
 
-const CACHED_TIER_KEY = Symbol.for("checkpoint.licenseClient.cachedTier");
-const LAST_VALIDATION_KEY = Symbol.for(
-  "checkpoint.licenseClient.lastValidation",
-);
-const VALIDATION_TIMER_KEY = Symbol.for(
-  "checkpoint.licenseClient.validationTimer",
-);
-
-const globalForLicenseClient = globalThis as unknown as {
-  [CACHED_TIER_KEY]?: LicenseTier;
-  [LAST_VALIDATION_KEY]?: number;
-  [VALIDATION_TIMER_KEY]?: ReturnType<typeof setInterval> | null;
-};
-
-function getCachedTier(): LicenseTier {
-  return globalForLicenseClient[CACHED_TIER_KEY] ?? "BASIC";
-}
-function setCachedTier(tier: LicenseTier) {
-  globalForLicenseClient[CACHED_TIER_KEY] = tier;
-}
-function setLastValidation(value: number) {
-  globalForLicenseClient[LAST_VALIDATION_KEY] = value;
-}
-function getValidationTimer(): ReturnType<typeof setInterval> | null {
-  return globalForLicenseClient[VALIDATION_TIMER_KEY] ?? null;
-}
-function setValidationTimer(timer: ReturnType<typeof setInterval> | null) {
-  globalForLicenseClient[VALIDATION_TIMER_KEY] = timer;
-}
-
-const VALIDATION_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const REPORTING_DAY = 2; // 2nd day of month
-
+/**
+ * Returns the license tier applied to the instance as a whole.
+ *
+ * Checkpoint is fully open source: every instance that is not the license
+ * manager has access to all features (INCANTA tier) with no license required
+ * and no user tracking. The license manager (a potential SaaS offering) also
+ * runs unrestricted for itself and gates individual orgs via
+ * {@link getEffectiveTier}.
+ */
 export function getInstanceTier(): LicenseTier {
-  if (isLicenseManager()) {
-    // License manager always returns INCANTA for itself (unrestricted)
-    return "INCANTA";
-  }
-  return getCachedTier();
+  return "INCANTA";
 }
 
-async function validateWithManager(): Promise<LicenseTier> {
-  const config = getLicenseConfig();
-  if (!config.key || !config.secret || !config.managerUrl) {
-    return "BASIC";
-  }
-
-  try {
-    const response = await fetch(`${config.managerUrl}/api/license/validate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: config.key, secret: config.secret }),
-    });
-
-    if (!response.ok) {
-      Logger.warn(`[License] Validation failed: ${response.status}`);
-      return getCachedTier(); // Keep cached tier on failure
-    }
-
-    const data = (await response.json()) as {
-      valid: boolean;
-      tier: LicenseTier;
-      token?: string;
-    };
-
-    if (!data.token) {
-      Logger.warn("[License] Response missing signed token, rejecting");
-      return getCachedTier();
-    }
-
-    const publicKey = await resolveManagerPublicKey();
-    if (!publicKey) {
-      Logger.warn(
-        "[License] Cannot resolve public key from DNS, rejecting",
-      );
-      return getCachedTier();
-    }
-
-    const verified = verifyValidationToken(data.token, publicKey);
-    if (!verified) {
-      Logger.warn(
-        "[License] Signed token verification failed, rejecting",
-      );
-      return getCachedTier();
-    }
-
-    return verified.tier;
-  } catch (error: any) {
-    Logger.warn(
-      `[License] Failed to reach license manager: ${JSON.stringify(error)}`,
-    );
-    return getCachedTier(); // Keep cached tier on network failure
-  }
-}
-
-async function reportUsage(): Promise<void> {
-  const config = getLicenseConfig();
-  if (!config.key || !config.secret || !config.managerUrl) return;
-
-  const now = TimeManager.date();
-  // Report for the previous month
-  let year = now.getUTCFullYear();
-  let month = now.getUTCMonth(); // 0-11, so this is previous month (getUTCMonth() + 1 - 1)
-  if (month === 0) {
-    month = 12;
-    year -= 1;
-  }
-
-  try {
-    // Count distinct active write users and active read users across all orgs
-    const activities = await db.orgUserActivity.findMany({
-      where: { year, month },
-      select: { userId: true, writeCount: true, readCount: true },
-    });
-
-    const writeUsers = new Set<string>();
-    const readUsers = new Set<string>();
-    for (const a of activities) {
-      if (a.writeCount > 0) writeUsers.add(a.userId);
-      if (a.readCount > 0) readUsers.add(a.userId);
-    }
-
-    await fetch(`${config.managerUrl}/api/license/report-usage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        key: config.key,
-        secret: config.secret,
-        year,
-        month,
-        awuCount: writeUsers.size,
-        aruCount: readUsers.size,
-      }),
-    });
-  } catch (error: any) {
-    Logger.warn(`[License] Failed to report usage: ${JSON.stringify(error)}`);
-  }
-}
-
+/**
+ * Initializes the license client.
+ *
+ * Self-hosted instances (anything that is not the license manager) no longer
+ * validate against a license manager or report usage — all features are
+ * enabled unconditionally. This remains a no-op so startup code has a stable
+ * entry point.
+ */
 export async function initLicenseClient(): Promise<void> {
   if (isLicenseManager()) return;
-
-  // Validate on startup
-  setCachedTier(await validateWithManager());
-  setLastValidation(TimeManager.now());
-  Logger.info(`[License] Validated. Tier: ${getCachedTier()}`);
-
-  // Periodic re-validation
-  setValidationTimer(
-    setInterval(() => {
-      void (async () => {
-        setCachedTier(await validateWithManager());
-        setLastValidation(TimeManager.now());
-        Logger.info(`[License] Re-validated. Tier: ${getCachedTier()}`);
-
-        // Report usage on the reporting day
-        const now = TimeManager.date();
-        if (now.getUTCDate() === REPORTING_DAY) {
-          await reportUsage();
-        }
-      })();
-    }, VALIDATION_INTERVAL_MS),
-  );
 }
 
+/** No-op retained for API compatibility; the client no longer runs timers. */
 export function stopLicenseClient(): void {
-  const timer = getValidationTimer();
-  if (timer) {
-    clearInterval(timer);
-    setValidationTimer(null);
-  }
+  // Nothing to tear down.
 }
 
 /**
  * Returns the effective license tier for an org, handling both licensing modes:
  *
- * - **Org license** (cloud/license-manager instance): Each org has its own
- *   `subscriptionTier` managed via the License model. The tier is read from
- *   the org's database record.
+ * - **License manager** (potential SaaS instance): each org has its own
+ *   `subscriptionTier` managed via the License model. The tier is read from the
+ *   org's database record so paid tiers can be enforced per org.
  *
- * - **Instance license** (self-hosted): A single license key covers the
- *   entire instance. All orgs share the same tier, cached from periodic
- *   validation with the license manager. Billed in aggregate (AWU/ARU).
+ * - **Not the license manager** (self-hosted): every org has access to all
+ *   features (INCANTA), with no license and no user tracking.
  *
  * @param orgId - The org to check
  * @param prisma - Optional PrismaClient (defaults to the global db instance)
@@ -217,8 +67,9 @@ export async function getEffectiveTier(
 }
 
 /**
- * Asserts that the given org has access to a feature, throwing a TRPCError
- * if not. Handles both org licenses (cloud) and instance licenses (self-hosted).
+ * Asserts that the given org has access to a feature, throwing a TRPCError if
+ * not. On instances that are not the license manager every feature is
+ * available; on the license manager this gates on the org's subscription tier.
  *
  * @param orgId - The org to check
  * @param feature - The feature to gate on

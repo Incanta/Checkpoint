@@ -1,11 +1,16 @@
 import type { PrismaClient } from "@prisma/client";
 import { getBillingPeriod } from "../billing/billing-period";
 import { TimeManager } from "../time";
+import { isLicenseManager } from "~/server/license-utils";
 
 /**
  * Record a user activity event (read or write) for an org.
  * Uses upsert to create or increment the monthly counter.
  * Fire-and-forget — callers should not await or depend on the result.
+ *
+ * Only the license manager (a potential SaaS offering) tracks per-user
+ * activity, since it bills orgs by active users. Instances that are not the
+ * license manager do no user tracking.
  */
 export async function recordActivity(
   db: PrismaClient,
@@ -15,6 +20,8 @@ export async function recordActivity(
     type: "read" | "write";
   },
 ) {
+  if (!isLicenseManager()) return;
+
   const now = TimeManager.date();
   const isWrite = opts.type === "write";
 

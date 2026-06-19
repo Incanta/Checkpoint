@@ -1,5 +1,3 @@
-// @obfuscate
-
 import crypto from "node:crypto";
 import dns from "node:dns/promises";
 import config from "@incanta/config";
@@ -173,31 +171,11 @@ export function isLicenseManager(): boolean {
   return verified === true;
 }
 
-export function getLicenseConfig() {
-  try {
-    return {
-      isLicenseManager: getLicenseManagerVerified() === true,
-      key: config.get<string>("licensing.key"),
-      secret: config.get<string>("licensing.secret"),
-      managerUrl: config.get<string>("licensing.manager-url"),
-    };
-  } catch {
-    return {
-      isLicenseManager: false,
-      key: "",
-      secret: "",
-      managerUrl: "",
-    };
-  }
-}
-
 // ---------------------------------------------------------------------------
 // JWT verification for signed license validation responses
 // ---------------------------------------------------------------------------
 
-const PUBLIC_KEY_CACHE_KEY = Symbol.for(
-  "checkpoint.licenseManagerPublicKey",
-);
+const PUBLIC_KEY_CACHE_KEY = Symbol.for("checkpoint.licenseManagerPublicKey");
 const PUBLIC_KEY_CACHE_TIME_KEY = Symbol.for(
   "checkpoint.licenseManagerPublicKeyTime",
 );
@@ -265,7 +243,11 @@ export function verifyValidationToken(
     const parts = token.split(".");
     if (parts.length !== 3) return null;
 
-    const [headerB64, payloadB64, signatureB64] = parts as [string, string, string];
+    const [headerB64, payloadB64, signatureB64] = parts as [
+      string,
+      string,
+      string,
+    ];
     const data = `${headerB64}.${payloadB64}`;
     const signature = Buffer.from(signatureB64, "base64url");
 

@@ -1,5 +1,3 @@
-// @obfuscate
-
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import type { Changelist } from "@prisma/client";

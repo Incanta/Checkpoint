@@ -34,9 +34,6 @@ RUN cd src/app && DB_PROVIDER=${DB_PROVIDER} node scripts/set-db-provider.mjs &&
 ENV SKIP_ENV_VALIDATION=1
 RUN cd src/app && yarn build
 
-# Run obfuscation on the standalone output
-RUN cd src/app && node scripts/obfuscate.mjs
-
 # --------------- runner ---------------
 FROM node:24-slim AS runner
 WORKDIR /app
