@@ -7,4 +7,4 @@ export {
   SERVER_API,
   MIN_SERVER_API,
   SERVER_VERSION,
-} from "./versions-generated.js";
+} from "./versions-generated";
