@@ -616,6 +616,14 @@ jobs:
           path: release-assets/
           merge-multiple: true
 
+      - name: Package docker-compose quickstart
+        run: |
+          mkdir -p release-assets
+          # Stable, version-independent name so the tutorial can use a
+          # permanent URL: .../releases/latest/download/checkpoint-docker-compose.tar.gz
+          # Extracting yields a `docker-compose/` directory.
+          tar -czf release-assets/checkpoint-docker-compose.tar.gz docker-compose
+
       - name: List release assets
         run: find release-assets/ -type f | sort
 
@@ -632,5 +640,6 @@ jobs:
             release-assets/**/*.rpm
             release-assets/**/*.pkg
             release-assets/**/*.dmg
+            release-assets/checkpoint-docker-compose.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
