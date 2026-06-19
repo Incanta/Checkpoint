@@ -26,7 +26,7 @@ export function getInstanceTier(): LicenseTier {
  * Initializes the license client.
  *
  * Self-hosted instances (anything that is not the license manager) no longer
- * validate against a license manager or report usage — all features are
+ * validate against a license manager or report usage. All features are
  * enabled unconditionally. This remains a no-op so startup code has a stable
  * entry point.
  */

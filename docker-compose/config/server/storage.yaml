@@ -1,16 +1,16 @@
 # ============================================================================
-# Storage mode — pick ONE of the three setups below. We internally use R2 as it
+# Storage mode. Pick ONE of the three setups below. We internally use R2 as it
 # provides a good balance of performance, reliability (e.g. cloud backup), and cost.
 # If you're a smaller team or just trying Checkpoint out, the default "Filer w/ stub"
 # is likely the easiest to get started with since it just stores the files on the local disk.
 #
-#   1. Filer w/ stub      (default) — server serves files from a local volume.
+#   1. Filer w/ stub      (default): server serves files from a local volume.
 #                           No extra services. Good for trying Checkpoint out and
 #                           smaller deployments.
-#   2. Filer w/ SeaweedFS           — real SeaweedFS cluster (master/volume/filer).
+#   2. Filer w/ SeaweedFS:           real SeaweedFS cluster (master/volume/filer).
 #                           Run with: docker compose --profile seaweedfs up
 #                           Likely only useful for larger deployments.
-#   3. R2                           — Cloudflare R2 object storage.
+#   3. R2:                           Cloudflare R2 object storage.
 #
 # Whatever you choose here MUST match ./config/app/storage.yaml (`mode`).
 # Replace IP_ADDRESS with the host/IP your users reach this machine at.
@@ -49,7 +49,7 @@ seaweedfs:
         path: "/filer"
 
 # ----------------------------------------------------------------------------
-# 2. Filer w/ SeaweedFS — uncomment, set `stub.enabled: false` above, and run
+# 2. Filer w/ SeaweedFS: uncomment, set `stub.enabled: false` above, and run
 #    `docker compose --profile seaweedfs up`. The filer is published on host
 #    port 13002 (-> container 8888) by docker-compose.yaml.
 # ----------------------------------------------------------------------------
@@ -75,7 +75,7 @@ seaweedfs:
 #           path: ""
 
 # ----------------------------------------------------------------------------
-# 3. R2 — set `mode: "r2"` above and fill these in. Secrets come from
+# 3. R2: set `mode: "r2"` above and fill these in. Secrets come from
 #    ./config/.secrets (see the r2_* keys).
 # ----------------------------------------------------------------------------
 r2:

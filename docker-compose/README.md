@@ -39,7 +39,7 @@ Pick one and edit `config/app/storage.yaml` + `config/server/storage.yaml` (thei
 
 Which to pick:
 
-- **Smaller team or just trying Checkpoint out?** Use the default **Filer w/ stub** — it just stores files on the local disk and needs no extra services.
+- **Smaller team or just trying Checkpoint out?** Use the default **Filer w/ stub**. It just stores files on the local disk and needs no extra services.
 - **Larger deployment?** **Filer w/ SeaweedFS** runs a real distributed cluster.
 - **Want a simple cloud-based storage system (what we use internally)?** **R2** gives a good balance of performance, reliability (e.g. cloud backup), and cost.
 
@@ -63,7 +63,7 @@ The filer is published on host port `13002`; set the external filer host to your
 
 ### c. Cloudflare R2
 
-Cloudflare R2 object storage — this is what Incanta uses internally for its balance of performance, reliability, and cost. Set `mode: "r2"` in both storage files, fill `r2.account-id` (a literal) in both, and add the credentials to `config/.secrets`:
+Cloudflare R2 object storage. This is what Incanta uses internally for its balance of performance, reliability, and cost. Set `mode: "r2"` in both storage files, fill `r2.account-id` (a literal) in both, and add the credentials to `config/.secrets`:
 
 ```ini
 r2_access_key_id=...

@@ -1,6 +1,6 @@
 services:
   # ----------------------------------------------------------------
-  # Postgres — application database
+  # Postgres: application database
   # ----------------------------------------------------------------
   # Recommended database for Checkpoint. The credentials below are
   # development defaults: change POSTGRES_PASSWORD before any real use, and
@@ -24,7 +24,7 @@ services:
       retries: 10
 
   # ----------------------------------------------------------------
-  # App — Next.js application (UI + API)
+  # App: Next.js application (UI + API)
   # ----------------------------------------------------------------
   app:
     container_name: checkpoint-app
@@ -42,7 +42,7 @@ services:
       - ./config/.secrets:/app/.secrets:ro
 
   # ----------------------------------------------------------------
-  # Server — Core storage server
+  # Server: Core storage server
   # ----------------------------------------------------------------
   server:
     container_name: checkpoint-server
@@ -60,7 +60,7 @@ services:
       - ./config/.secrets:/app/.secrets:ro
 
   # ----------------------------------------------------------------
-  # SeaweedFS cluster — only started with `--profile seaweedfs`
+  # SeaweedFS cluster: only started with `--profile seaweedfs`
   # ----------------------------------------------------------------
   # Use this profile for the "Filer w/ SeaweedFS" storage mode. See README.md
   # for the matching ./config/server/storage.yaml changes. Not started for the

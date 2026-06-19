@@ -1,6 +1,6 @@
 # Storage mode for the app. MUST match ./config/server/storage.yaml (`mode`).
-#   "seaweedfs" — both the stub and full-SeaweedFS setups use this value.
-#   "r2"        — Cloudflare R2 object storage.
+#   "seaweedfs": both the stub and full-SeaweedFS setups use this value.
+#   "r2":        Cloudflare R2 object storage.
 mode: "seaweedfs" # "seaweedfs" | "r2"
 
 jwt:
@@ -10,7 +10,7 @@ token-expiration-seconds: 3600
 
 # How the app reaches the core server.
 #   internal: the in-network address (Docker service name).
-#   external: the address the browser/clients use — for a LAN quickstart,
+#   external: the address the browser/clients use. For a LAN quickstart,
 #             change IP_ADDRESS to your host's LAN IP address (e.g. 192.168.1.10).
 #             In production, this likely should be https://checkpoint-backend.example.com; it's up
 #             to you to configure TLS termination and reverse proxying if you do that.
