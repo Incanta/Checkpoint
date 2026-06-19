@@ -2,7 +2,7 @@ import { atom } from "jotai";
 import { syncAtom } from "./store";
 
 export interface VersionCheckState {
-  status: "compatible" | "warning" | "incompatible" | "unknown";
+  status: "compatible" | "incompatible" | "unknown";
   message: string | null;
   dismissed: boolean;
 }

@@ -236,9 +236,14 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
 // ═════════════════════════════════════════════════════════════════
 
 /**
- * Checks CLI version against the daemon's version requirements.
+ * Checks the CLI's daemon_api against the connected daemon's min_daemon_api.
  * Returns 0 if compatible, 1 if incompatible (hard block).
- * Prints a warning to stderr if below recommended version.
+ *
+ * The CLI is bundled with the daemon, so in production this check trivially
+ * passes — both sides come from the same versions.json at build time. The
+ * check exists for dev installs that may have mismatched binaries and for
+ * the (separately distributed) Unreal plugin scenario at the API contract
+ * level.
  */
 inline int checkDaemonVersion() {
   int port = getDaemonPort();
@@ -247,30 +252,19 @@ inline int checkDaemonVersion() {
 
   try {
     auto result = client.query("version.check");
-
     if (result.is_null() || !result.is_object()) {
       return 0;  // can't check, allow operation
     }
 
-    std::string minimumVersion = result.value("minimumVersion", "");
-    std::string recommendedVersion = result.value("recommendedVersion", "");
-
-    if (!minimumVersion.empty() && compareVersions(API_VERSION, minimumVersion) < 0) {
+    int minDaemonApi = result.value("minDaemonApi", 0);
+    if (minDaemonApi > 0 && DAEMON_API < minDaemonApi) {
       std::cerr << color::red() << color::bold()
                 << "error: " << color::reset() << color::red()
-                << "CLI version " << API_VERSION
-                << " is below the minimum required version " << minimumVersion
+                << "CLI daemon_api " << DAEMON_API
+                << " is below the daemon's min_daemon_api " << minDaemonApi
                 << ". Please upgrade to continue." << color::reset()
                 << std::endl;
       return 1;
-    }
-
-    if (!recommendedVersion.empty() && compareVersions(API_VERSION, recommendedVersion) < 0) {
-      std::cerr << color::yellow()
-                << "warning: CLI version " << API_VERSION
-                << " is below the recommended version " << recommendedVersion
-                << ". Please consider upgrading." << color::reset()
-                << std::endl;
     }
   } catch (...) {
     // If we can't reach the daemon for version check, don't block the user.
@@ -281,10 +275,46 @@ inline int checkDaemonVersion() {
 }
 
 // ═════════════════════════════════════════════════════════════════
+//  UPDATE BANNER: surface "update available" from the daemon
+// ═════════════════════════════════════════════════════════════════
+
+/**
+ * Print a one-line "update available" banner to stderr if the daemon's
+ * updater reports an update is available. Silent on any error — banner is
+ * informational and must never block the calling command. Called from
+ * `cmdStatus` so we don't spam every CLI invocation.
+ */
+inline void printUpdateBannerIfAvailable() {
+  try {
+    int port = getDaemonPort();
+    std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+    DaemonClient client(baseUrl);
+
+    auto result = client.query("updater.getStatus");
+    if (!result.is_object()) return;
+    if (!result.value("updateAvailable", false)) return;
+
+    std::string current = result.value("currentVersion", "?");
+    std::string latest = result.value("latestVersion", "?");
+    std::cerr << color::yellow() << color::bold()
+              << "⚠ Checkpoint update available: " << color::reset()
+              << color::yellow() << current << " → " << latest
+              << color::reset() << std::endl;
+    std::cerr << color::dim() << "  Run `chk update install` to upgrade."
+              << color::reset() << std::endl;
+    std::cerr << std::endl;
+  } catch (...) {
+    // Daemon unreachable or unexpected payload — skip silently.
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════
 //  COMMAND: status
 // ═════════════════════════════════════════════════════════════════
 
 inline int cmdStatus() {
+  printUpdateBannerIfAvailable();
+
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
@@ -1976,6 +2006,151 @@ inline int cmdUnlink() {
             << "The .checkpoint directory was preserved. Run 'chk init' to re-link."
             << color::reset() << std::endl;
 
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: update check
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdUpdateCheck() {
+  int port = getDaemonPort();
+  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  DaemonClient client(baseUrl);
+
+  // Force a fresh poll against GitHub, then read the resulting status.
+  client.mutate("updater.checkNow", nlohmann::json::object());
+  auto result = client.query("updater.getStatus");
+  if (!result.is_object()) {
+    std::cerr << "error: daemon returned unexpected updater payload" << std::endl;
+    return 1;
+  }
+
+  std::string current = result.value("currentVersion", "?");
+  std::string latest = result.value("latestVersion", "");
+  bool updateAvailable = result.value("updateAvailable", false);
+  std::string lastError = result.value("lastError", "");
+
+  if (!lastError.empty()) {
+    std::cerr << color::red() << "Last check error: " << lastError
+              << color::reset() << std::endl;
+  }
+
+  if (updateAvailable) {
+    std::cout << color::yellow() << color::bold()
+              << "Update available: " << color::reset()
+              << current << " → " << color::green() << latest << color::reset()
+              << std::endl;
+    std::cout << color::dim()
+              << "Run `chk update install` to download and apply."
+              << color::reset() << std::endl;
+    return 0;
+  }
+
+  std::cout << color::green() << "Up to date" << color::reset()
+            << " (" << current;
+  if (!latest.empty() && latest != current) {
+    std::cout << ", latest released: " << latest;
+  }
+  std::cout << ")" << std::endl;
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: update install
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdUpdateInstall(bool autoYes) {
+  int port = getDaemonPort();
+  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  DaemonClient client(baseUrl);
+
+  auto status = client.query("updater.getStatus");
+  if (!status.is_object()) {
+    std::cerr << "error: daemon returned unexpected updater payload" << std::endl;
+    return 1;
+  }
+
+  if (!status.value("updateAvailable", false)) {
+    std::cout << color::green() << "Already up to date" << color::reset()
+              << " (" << status.value("currentVersion", "?") << ")" << std::endl;
+    return 0;
+  }
+
+  std::string current = status.value("currentVersion", "?");
+  std::string latest = status.value("latestVersion", "?");
+
+  if (!autoYes) {
+    std::cout << color::yellow() << "Install update " << color::reset()
+              << current << " → " << color::green() << latest << color::reset()
+              << "?" << std::endl;
+    std::cout << "This stops the daemon, tray, and desktop app and runs the "
+                 "installer. ["
+              << color::bold() << "y" << color::reset() << "/N] ";
+    std::cout.flush();
+    std::string input;
+    std::getline(std::cin, input);
+    if (input != "y" && input != "Y" && input != "yes") {
+      std::cout << "Cancelled." << std::endl;
+      return 0;
+    }
+  }
+
+  // Skip download if we already have an installer ready.
+  bool alreadyDownloaded = !status.value("downloadedInstallerPath", "").empty();
+
+  if (!alreadyDownloaded) {
+    std::cout << "Downloading..." << std::endl;
+    client.mutate("updater.downloadUpdate", nlohmann::json::object());
+
+    int lastProgress = -1;
+    while (true) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      auto cur = client.query("updater.getStatus");
+      if (!cur.is_object()) break;
+
+      std::string err = cur.value("lastError", "");
+      if (!err.empty()) {
+        std::cerr << color::red() << "Download failed: " << err
+                  << color::reset() << std::endl;
+        return 1;
+      }
+
+      int progress = cur.value("downloadProgress", 0);
+      bool downloading = cur.value("downloading", false);
+
+      if (progress != lastProgress) {
+        std::cout << "\r  " << progress << "%" << std::flush;
+        lastProgress = progress;
+      }
+
+      if (!downloading &&
+          !cur.value("downloadedInstallerPath", "").empty()) {
+        std::cout << "\r  100% — done       " << std::endl;
+        break;
+      }
+    }
+  } else {
+    std::cout << "Update already downloaded, applying..." << std::endl;
+  }
+
+  // The daemon spawns the installer detached and then exits, so the RPC may
+  // not return cleanly — a connection error here is the expected success path.
+  std::cout << "Launching installer..." << std::endl;
+  try {
+    client.mutate("updater.applyUpdate", nlohmann::json::object());
+  } catch (const std::exception& err) {
+    std::string msg = err.what();
+    if (msg.find("Failed to connect") == std::string::npos) {
+      std::cerr << color::red() << "Apply failed: " << msg << color::reset()
+                << std::endl;
+      return 1;
+    }
+  }
+
+  std::cout << color::green() << "Installer launched." << color::reset()
+            << " The daemon will restart automatically after installation."
+            << std::endl;
   return 0;
 }
 

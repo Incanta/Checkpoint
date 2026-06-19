@@ -8,7 +8,11 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
-#define API_VERSION TEXT("1.0.0")
+// Integer daemon-API version this Unreal plugin was built against. Bump
+// manually when integrating a newer Checkpoint daemon API. The plugin is
+// distributed independently of the bundled clients (cli/desktop/tray), so
+// this is decoupled from versions.json at the repo root.
+#define UNREAL_DAEMON_API 1
 
 /**
  * HTTP client for communicating with the Checkpoint daemon's tRPC API.
@@ -208,17 +212,20 @@ public:
   // ---- Settings / Workspace-creation API ----
 
   /**
-   * Check daemon API version compatibility.
-   * @param OutCurrentVersion   Daemon's current API version
-   * @param OutMinimumVersion   Minimum client version required
-   * @param OutRecommendedVersion  Recommended client version
-   * @param OutError            Error message if call failed
+   * Fetch the daemon's published version info. The plugin compares its
+   * UNREAL_DAEMON_API constant against OutMinDaemonApi to decide whether
+   * it's compatible.
+   *
+   * @param OutClientVersion   Daemon's user-facing semver (informational)
+   * @param OutDaemonApi       Daemon's current daemon_api integer
+   * @param OutMinDaemonApi    Minimum daemon_api a connecting client must speak
+   * @param OutError           Error message if call failed
    * @return true on success
    */
   bool CheckVersion(
-    FString &OutCurrentVersion,
-    FString &OutMinimumVersion,
-    FString &OutRecommendedVersion,
+    FString &OutClientVersion,
+    int32 &OutDaemonApi,
+    int32 &OutMinDaemonApi,
     FString &OutError
   );
 

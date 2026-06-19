@@ -1,12 +1,11 @@
 import {
   GetAllAuthConfigUsers,
   CreateApiClientAuth,
-  type ApiVersionInfo,
-  checkVersionCompatibility,
+  checkApiVersionCompatibility,
   type VersionCheckResult,
   type AuthConfigUser,
 } from "@checkpointvcs/common";
-import { DAEMON_APP_API_VERSION } from "./api-version.js";
+import { SERVER_API } from "./api-version.js";
 import { Logger } from "./logging.js";
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -18,6 +17,10 @@ export interface AppVersionStatus {
   lastChecked: number;
 }
 
+// Polls every connected app server's version.current endpoint and records
+// whether the daemon's expected SERVER_API still satisfies the server's
+// minServerApi. The hard-block tRPC middleware reads these verdicts and
+// returns FORBIDDEN if any one of them is `incompatible`.
 export class ApiVersionChecker {
   private static instance: ApiVersionChecker | null = null;
   private interval: ReturnType<typeof setInterval> | null = null;
@@ -34,7 +37,7 @@ export class ApiVersionChecker {
 
   public start(): void {
     Logger.info(
-      `Starting API version checker (interval: ${CHECK_INTERVAL_MS / 1000}s, daemon app API version: ${DAEMON_APP_API_VERSION})`,
+      `Starting API version checker (interval: ${CHECK_INTERVAL_MS / 1000}s, daemon's server_api: ${SERVER_API})`,
     );
 
     void this.checkAll();
@@ -70,16 +73,10 @@ export class ApiVersionChecker {
         const client = await CreateApiClientAuth(daemonId);
         const versionInfo = await client.version.current.query();
 
-        const remoteVersion: ApiVersionInfo = {
-          currentVersion: versionInfo.apiVersion,
-          minimumVersion: versionInfo.minimumDaemonVersion,
-          recommendedVersion: versionInfo.recommendedDaemonVersion,
-        };
-
-        const result = checkVersionCompatibility(
-          DAEMON_APP_API_VERSION,
-          remoteVersion,
-        );
+        const result = checkApiVersionCompatibility(SERVER_API, {
+          current: versionInfo.serverApi,
+          minimum: versionInfo.minServerApi,
+        });
 
         const status: AppVersionStatus = {
           endpoint: user.endpoint,
@@ -92,15 +89,11 @@ export class ApiVersionChecker {
 
         if (result.status === "incompatible") {
           Logger.error(
-            `API version incompatible with ${user.endpoint}: ${result.message}`,
-          );
-        } else if (result.status === "warning") {
-          Logger.warn(
-            `API version warning for ${user.endpoint}: ${result.message}`,
+            `Daemon below server's minServerApi at ${user.endpoint}: ${result.message}`,
           );
         } else {
           Logger.info(
-            `API version compatible with ${user.endpoint} (daemon: ${DAEMON_APP_API_VERSION}, app: ${versionInfo.apiVersion})`,
+            `Compatible with ${user.endpoint} (daemon server_api: ${SERVER_API}, server: ${versionInfo.serverApi})`,
           );
         }
       } catch (err) {

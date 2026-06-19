@@ -1,17 +1,29 @@
 #!/bin/bash
-# macOS .pkg preinstall — Stop existing daemon before upgrade
+# macOS .pkg preinstall — Stop daemon, tray, and desktop before upgrade so the
+# new pkg can replace bundled binaries without "Resource busy" errors.
 set -e
 
-PLIST_NAME="com.checkpointvcs.daemon"
+DAEMON_PLIST_NAME="com.checkpointvcs.daemon"
+TRAY_PLIST_NAME="com.checkpointvcs.tray"
 CURRENT_USER="${USER}"
+
+# Kill the Electron desktop app if it's running. pkill returns non-zero when
+# no match is found, which set -e would treat as fatal — guard with || true.
+pkill -f 'Checkpoint.app/Contents/MacOS/Checkpoint' 2>/dev/null || true
 
 if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
     USER_HOME=$(eval echo "~$CURRENT_USER")
-    PLIST_PATH="$USER_HOME/Library/LaunchAgents/${PLIST_NAME}.plist"
 
-    if [ -f "$PLIST_PATH" ]; then
-        sudo -u "$CURRENT_USER" launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    DAEMON_PLIST="$USER_HOME/Library/LaunchAgents/${DAEMON_PLIST_NAME}.plist"
+    if [ -f "$DAEMON_PLIST" ]; then
+        sudo -u "$CURRENT_USER" launchctl unload "$DAEMON_PLIST" 2>/dev/null || true
         echo "Stopped existing daemon service for upgrade"
+    fi
+
+    TRAY_PLIST="$USER_HOME/Library/LaunchAgents/${TRAY_PLIST_NAME}.plist"
+    if [ -f "$TRAY_PLIST" ]; then
+        sudo -u "$CURRENT_USER" launchctl unload "$TRAY_PLIST" 2>/dev/null || true
+        echo "Stopped existing tray for upgrade"
     fi
 fi
 

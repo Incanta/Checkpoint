@@ -46,7 +46,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          # Pinned to windows-2022 because the CMake config asks for
+          # the "Visual Studio 17 2022" generator. windows-latest is
+          # migrating to windows-2025, which may ship a newer VS only.
+          - os: windows-2022
             platform: win32-x64
             cli_binary: checkpoint.exe
             cli_alias: chk.exe
@@ -141,7 +144,19 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Enable Corepack
-        run: corepack enable
+        shell: bash
+        run: |
+          # On Windows the runner ships Yarn 1 at a PATH location that
+          # outranks corepack's default install dir, so setup-node@v5's
+          # cache probe falls back to Yarn 1 and fails on
+          # packageManager: yarn@4. Install the corepack shim alongside
+          # any pre-existing yarn so it overrides directly.
+          yarn_path=$(command -v yarn || true)
+          if [ -n "$yarn_path" ]; then
+            corepack enable --install-directory "$(dirname "$yarn_path")"
+          else
+            corepack enable
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -260,12 +275,29 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
+      # Code-signing-method detection. Steps below gate on these. If both
+      # Azure and PFX are configured, Azure wins (it's the modern path).
+      HAS_WIN_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      HAS_WIN_PFX: ${{ secrets.WINDOWS_CERT_BASE64 != '' }}
+      HAS_MAC_CERT: ${{ secrets.MACOS_CERT_BASE64 != '' }}
 
     steps:
       - uses: actions/checkout@v6
 
       - name: Enable Corepack
-        run: corepack enable
+        shell: bash
+        run: |
+          # On Windows the runner ships Yarn 1 at a PATH location that
+          # outranks corepack's default install dir, so setup-node@v5's
+          # cache probe falls back to Yarn 1 and fails on
+          # packageManager: yarn@4. Install the corepack shim alongside
+          # any pre-existing yarn so it overrides directly.
+          yarn_path=$(command -v yarn || true)
+          if [ -n "$yarn_path" ]; then
+            corepack enable --install-directory "$(dirname "$yarn_path")"
+          else
+            corepack enable
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -317,16 +349,16 @@ jobs:
       # ---- Code Signing Setup ----
 
       - name: Import Windows signing certificate
-        if: runner.os == 'Windows' && env.WINDOWS_CERT_BASE64 != ''
+        if: runner.os == 'Windows' && env.HAS_WIN_PFX == 'true' && env.HAS_WIN_AZURE != 'true'
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         shell: pwsh
         run: |
           $certBytes = [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64)
           $certPath = Join-Path $env:RUNNER_TEMP "signing-cert.pfx"
           [IO.File]::WriteAllBytes($certPath, $certBytes)
-          echo "WINDOWS_CERT_FILE=$certPath" >> $env:GITHUB_ENV
+          # WIN_CSC_LINK is electron-builder's native env var for the cert path.
+          echo "WIN_CSC_LINK=$certPath" >> $env:GITHUB_ENV
 
       - name: Import macOS signing certificate
         if: runner.os == 'macOS' && env.MACOS_CERT_BASE64 != ''
@@ -432,20 +464,42 @@ jobs:
           "
           rm -rf node_modules
 
-      - name: Strip code signing config if certs not available
+      - name: Configure code signing
         shell: bash
         env:
-          HAS_WIN_CERT: ${{ secrets.WINDOWS_CERT_BASE64 != '' }}
-          HAS_MAC_CERT: ${{ secrets.MACOS_CERT_BASE64 != '' }}
+          # Public, org-specific Azure Trusted Signing identifiers. Not
+          # sensitive (publisher CN, endpoint, account/profile names show up
+          # in every signed binary), but storing them in secrets is fine too.
+          # Required when HAS_WIN_AZURE is true. The auth secrets
+          # (AZURE_TENANT_ID / CLIENT_ID / CLIENT_SECRET) are set on the
+          # package step below.
+          AZURE_SIGN_ENDPOINT: ${{ secrets.AZURE_SIGN_ENDPOINT }}
+          AZURE_SIGN_ACCOUNT: ${{ secrets.AZURE_SIGN_ACCOUNT }}
+          AZURE_SIGN_PROFILE: ${{ secrets.AZURE_SIGN_PROFILE }}
+          AZURE_SIGN_PUBLISHER: ${{ secrets.AZURE_SIGN_PUBLISHER }}
         run: |
           cd src/clients/desktop
           node -e "
             const fs = require('fs');
             const cfg = JSON.parse(fs.readFileSync('electron-builder.json', 'utf-8'));
-            if (process.env.HAS_WIN_CERT !== 'true' && cfg.win) {
-              delete cfg.win.certificateFile;
-              delete cfg.win.certificatePassword;
-              delete cfg.win.signingHashAlgorithms;
+            if (cfg.win) {
+              if (process.env.HAS_WIN_AZURE === 'true') {
+                // Azure Trusted Signing — replaces signtool. Cannot coexist with
+                // signtoolOptions, so drop that block.
+                delete cfg.win.signtoolOptions;
+                cfg.win.azureSignOptions = {
+                  endpoint: process.env.AZURE_SIGN_ENDPOINT,
+                  codeSigningAccountName: process.env.AZURE_SIGN_ACCOUNT,
+                  certificateProfileName: process.env.AZURE_SIGN_PROFILE,
+                  publisherName: process.env.AZURE_SIGN_PUBLISHER,
+                };
+              } else if (process.env.HAS_WIN_PFX !== 'true') {
+                // No Windows signing configured — drop signtoolOptions so
+                // electron-builder skips signing instead of asking for a cert.
+                delete cfg.win.signtoolOptions;
+              }
+              // Else: PFX path — keep signtoolOptions; WIN_CSC_LINK and
+              // WIN_CSC_KEY_PASSWORD env vars feed the cert location/password.
             }
             if (process.env.HAS_MAC_CERT !== 'true') {
               if (cfg.mac) {
@@ -501,7 +555,13 @@ jobs:
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
         env:
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          # PFX path (ignored when Azure is selected).
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          # Azure Trusted Signing auth — Entra ID service principal credentials.
+          # Read by Azure.Identity's EnvironmentCredential at sign time.
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         shell: pwsh
         run: |
@@ -517,7 +577,7 @@ jobs:
       - name: Package installer (macOS)
         if: runner.os == 'macOS'
         env:
-          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          CSC_NAME: ${{ secrets.MACOS_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}

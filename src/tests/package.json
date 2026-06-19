@@ -1,6 +1,6 @@
 {
   "name": "@checkpointvcs/tests",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "Full system integration tests for Checkpoint",
   "license": "(Elastic-2.0 OR AGPL-3.0)",
   "private": true,
