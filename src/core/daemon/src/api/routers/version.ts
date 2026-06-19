@@ -1,21 +1,23 @@
 import { publicProcedure, router } from "../trpc.js";
 import {
-  DAEMON_CLIENT_API_VERSION,
-  DAEMON_MIN_CLIENT_VERSION,
-  DAEMON_RECOMMENDED_CLIENT_VERSION,
+  DAEMON_API,
+  MIN_DAEMON_API,
+  CLIENT_VERSION,
 } from "../../api-version.js";
 import { ApiVersionChecker } from "../../api-version-checker.js";
-import type { ApiVersionInfo } from "@checkpointvcs/common";
 
 export const versionRouter = router({
-  check: publicProcedure.query(
-    (): ApiVersionInfo => ({
-      currentVersion: DAEMON_CLIENT_API_VERSION,
-      minimumVersion: DAEMON_MIN_CLIENT_VERSION,
-      recommendedVersion: DAEMON_RECOMMENDED_CLIENT_VERSION,
-    }),
-  ),
+  // Consumed by clients (cli/desktop/tray/unreal) connecting to this daemon.
+  // Each client compares its own DAEMON_API >= minDaemonApi.
+  check: publicProcedure.query(() => ({
+    clientVersion: CLIENT_VERSION,
+    daemonApi: DAEMON_API,
+    minDaemonApi: MIN_DAEMON_API,
+  })),
 
+  // Per-server compatibility verdicts from the daemon's poll of every
+  // connected app server. Used by the desktop UI to surface "this server
+  // is too new for your daemon" warnings.
   appStatuses: publicProcedure.query(() => {
     return ApiVersionChecker.Get().getStatuses();
   }),

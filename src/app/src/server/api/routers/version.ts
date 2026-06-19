@@ -1,26 +1,15 @@
 import { createTRPCRouter } from "~/server/api/trpc";
 import { publicProcedure } from "~/server/api/trpc";
-import {
-  APP_API_VERSION,
-  APP_MIN_DAEMON_VERSION,
-  APP_RECOMMENDED_DAEMON_VERSION,
-} from "../api-version";
-
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-require-imports */
-const packageJson: {
-  version: string;
-} = require("../../../../package.json");
-/* eslint-enable @typescript-eslint/no-require-imports */
-/* eslint-enable @typescript-eslint/no-unsafe-assignment */
+import { SERVER_API, MIN_SERVER_API, SERVER_VERSION } from "../api-version";
 
 export const versionRouter = createTRPCRouter({
-  current: publicProcedure.query(async ({ ctx }) => {
+  current: publicProcedure.query(async () => {
+    // Consumed by daemons connecting to this server to decide whether they
+    // need to update. Daemon compares its own SERVER_API >= minServerApi.
     return {
-      version: packageJson.version,
-      apiVersion: APP_API_VERSION,
-      minimumDaemonVersion: APP_MIN_DAEMON_VERSION,
-      recommendedDaemonVersion: APP_RECOMMENDED_DAEMON_VERSION,
+      serverVersion: SERVER_VERSION,
+      serverApi: SERVER_API,
+      minServerApi: MIN_SERVER_API,
     };
   }),
 });

@@ -4,7 +4,10 @@ import {
   FileStatus,
   FileType,
 } from "@checkpointvcs/daemon";
-import { checkVersionCompatibility } from "@checkpointvcs/common";
+import {
+  checkApiVersionCompatibility,
+  DAEMON_API,
+} from "@checkpointvcs/common";
 import { MockedData } from "../common/mock-data";
 import { User, usersAtom, currentUserAtom } from "../common/state/auth";
 import { store } from "../common/state/store";
@@ -41,8 +44,6 @@ import { exec } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
-
-const API_VERSION = "1.0.0";
 
 const JOB_POLL_INTERVAL_MS = 500;
 
@@ -2511,7 +2512,10 @@ export default class DaemonHandler {
         const client = await CreateDaemonClient();
         const versionInfo = await client.version.check.query();
 
-        const result = checkVersionCompatibility(API_VERSION, versionInfo);
+        const result = checkApiVersionCompatibility(DAEMON_API, {
+          current: versionInfo.daemonApi,
+          minimum: versionInfo.minDaemonApi,
+        });
 
         const current = store.get(versionCheckAtom);
         if (current.dismissed && current.status === result.status) {
@@ -2530,10 +2534,5 @@ export default class DaemonHandler {
 
     setInterval(() => void pollVersionCheck(), VERSION_CHECK_INTERVAL_MS);
     setTimeout(() => void pollVersionCheck(), 10_000);
-
-    ipcOn(this.ipcMain, "version:dismiss", async () => {
-      const current = store.get(versionCheckAtom);
-      store.set(versionCheckAtom, { ...current, dismissed: true });
-    });
   }
 }

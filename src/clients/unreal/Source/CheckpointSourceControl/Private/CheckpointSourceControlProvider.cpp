@@ -29,67 +29,30 @@ void FCheckpointSourceControlProvider::Init(bool bForceConnection) {
   DaemonClient.SetDaemonUrl(Settings.GetDaemonUrl());
 
   if (bForceConnection && bSettingsOk) {
-    // Check API version compatibility before proceeding
+    // Check daemon-API compatibility before proceeding. The plugin is
+    // distributed independently and its UNREAL_DAEMON_API may lag behind the
+    // installed daemon — we only hard-block when below the daemon's stated
+    // minimum.
     {
-      FString CurrentVersion, MinVersion, RecommendedVersion, VersionError;
+      FString DaemonClientVersion, VersionError;
+      int32 RemoteDaemonApi = 0;
+      int32 RemoteMinDaemonApi = 0;
       if (DaemonClient.CheckVersion(
-            CurrentVersion, MinVersion, RecommendedVersion, VersionError
+            DaemonClientVersion, RemoteDaemonApi, RemoteMinDaemonApi, VersionError
           )) {
-        // Parse and compare versions (simple string compare works for semver)
-        auto ParseVersion = [](const FString &V) -> TArray<int32> {
-          TArray<int32> Parts;
-          FString Clean = V;
-          if (Clean.StartsWith(TEXT("v"))) Clean = Clean.Mid(1);
-          TArray<FString> Segments;
-          Clean.ParseIntoArray(Segments, TEXT("."));
-          for (const FString &S : Segments) {
-            Parts.Add(FCString::Atoi(*S));
-          }
-          return Parts;
-        };
-
-        auto CompareVersions =
-          [&ParseVersion](const FString &A, const FString &B) -> int32 {
-          TArray<int32> VA = ParseVersion(A);
-          TArray<int32> VB = ParseVersion(B);
-          int32 MaxLen = FMath::Max(VA.Num(), VB.Num());
-          for (int32 I = 0; I < MaxLen; I++) {
-            int32 NA = I < VA.Num() ? VA[I] : 0;
-            int32 NB = I < VB.Num() ? VB[I] : 0;
-            if (NA > NB) return 1;
-            if (NA < NB) return -1;
-          }
-          return 0;
-        };
-
-        if (!MinVersion.IsEmpty() &&
-            CompareVersions(API_VERSION, MinVersion) < 0) {
+        if (RemoteMinDaemonApi > 0 && UNREAL_DAEMON_API < RemoteMinDaemonApi) {
           bServerAvailable = false;
           UE_LOG(
             LogCheckpointSourceControl,
             Error,
             TEXT(
-              "Checkpoint plugin version %s is below the minimum required "
-              "daemon version %s. Please upgrade the plugin."
+              "Checkpoint plugin daemon_api %d is below the daemon's "
+              "min_daemon_api %d. Please upgrade the plugin."
             ),
-            *API_VERSION,
-            *MinVersion
+            UNREAL_DAEMON_API,
+            RemoteMinDaemonApi
           );
           return;
-        }
-
-        if (!RecommendedVersion.IsEmpty() &&
-            CompareVersions(API_VERSION, RecommendedVersion) < 0) {
-          UE_LOG(
-            LogCheckpointSourceControl,
-            Warning,
-            TEXT(
-              "Checkpoint plugin version %s is below the recommended version "
-              "%s. Please consider upgrading."
-            ),
-            *API_VERSION,
-            *RecommendedVersion
-          );
         }
       }
     }

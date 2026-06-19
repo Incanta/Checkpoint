@@ -1,52 +1,88 @@
-// Sets the project version across every version-bearing file in one shot.
+// Source of truth for all versions in this repo is `./versions.json`. This
+// script bumps the user-facing semver versions (server_version + client_version)
+// in that file, then propagates them to every place a version is required:
 //
-// Updates:
-//   - ./VERSION
-//   - "version" field in 6 workspace package.json files (app, core, core/common,
-//     core/daemon, core/server, clients/desktop). The longtail addon ships on
-//     its own release cadence and is intentionally NOT touched.
-//   - API_VERSION in src/clients/cli/version.hpp
-//   - trayApiVersion in src/clients/tray/main.go
-//   - APP_API_VERSION in src/app/src/server/api/api-version.ts. The neighboring
-//     APP_MIN_DAEMON_VERSION and APP_RECOMMENDED_DAEMON_VERSION are bumped
-//     manually and intentionally NOT touched.
-//   - VersionName (semver) and Version (auto-incremented int) in
-//     src/clients/unreal/CheckpointSourceControl.uplugin
+//   - workspace package.json files (split by server vs. client)
+//   - generated TypeScript constants (src/core/common/src/versions-generated.ts)
+//   - generated C++ header (src/clients/cli/version.hpp)
+//   - generated Go file (src/clients/tray/version.go)
+//   - Unreal plugin descriptor (Version int auto-incremented, VersionName set)
 //
-// Usage: node scripts/set-version.js <semver>
-//   e.g. node scripts/set-version.js 0.4.0
+// The four integer API versions (server_api, min_server_api, daemon_api,
+// min_daemon_api) are NOT touched — they're bumped manually in versions.json
+// when there's an actual wire-format break.
+//
+// Usage:
+//   node scripts/set-version.js <semver>            # bumps both server + client
+//   node scripts/set-version.js --client <semver>   # bumps client only
+//   node scripts/set-version.js --server <semver>   # bumps server only
+//   (combine --client and --server to set them independently)
 
 const fs = require("fs");
 const path = require("path");
 
 const repoRoot = path.resolve(__dirname, "..");
+const versionsJsonPath = path.join(repoRoot, "versions.json");
 
-const version = process.argv[2];
-if (!version) {
-  console.error("usage: node scripts/set-version.js <semver>");
+// ─── Argument parsing ───────────────────────────────────────────────
+
+const args = process.argv.slice(2);
+let positional = null;
+let clientArg = null;
+let serverArg = null;
+
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a === "--client") {
+    clientArg = args[++i];
+  } else if (a === "--server") {
+    serverArg = args[++i];
+  } else if (a.startsWith("--client=")) {
+    clientArg = a.slice("--client=".length);
+  } else if (a.startsWith("--server=")) {
+    serverArg = a.slice("--server=".length);
+  } else if (!a.startsWith("--")) {
+    positional = a;
+  }
+}
+
+if (!positional && !clientArg && !serverArg) {
+  console.error(
+    "usage: node scripts/set-version.js <semver> [--client <x>] [--server <x>]",
+  );
   process.exit(1);
 }
-if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(version)) {
-  console.error(`invalid semver: ${version}`);
-  process.exit(1);
+
+const semverRe = /^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/;
+function assertSemver(v, label) {
+  if (!semverRe.test(v)) {
+    console.error(`invalid semver for ${label}: ${v}`);
+    process.exit(1);
+  }
 }
 
-const PACKAGE_JSONS = [
-  "src/app/package.json",
-  "src/core/package.json",
-  "src/core/common/package.json",
-  "src/core/daemon/package.json",
-  "src/core/server/package.json",
-  "src/clients/desktop/package.json",
-];
+// Resolve final values: explicit flags win, else positional applies to both.
+const newClient = clientArg ?? positional;
+const newServer = serverArg ?? positional;
+if (newClient) assertSemver(newClient, "client_version");
+if (newServer) assertSemver(newServer, "server_version");
+
+// ─── Read versions.json ─────────────────────────────────────────────
+
+const versions = JSON.parse(fs.readFileSync(versionsJsonPath, "utf8"));
+
+if (newClient) versions.client_version = newClient;
+if (newServer) versions.server_version = newServer;
+
+// ─── Helpers ─────────────────────────────────────────────────────────
 
 function read(rel) {
   return fs.readFileSync(path.join(repoRoot, rel), "utf8");
 }
 function write(rel, content) {
   fs.writeFileSync(path.join(repoRoot, rel), content);
+  console.log(`  wrote ${rel}`);
 }
-
 function updateJson(rel, mutate, indent) {
   const raw = read(rel);
   const trailingNewline = raw.endsWith("\n") ? "\n" : "";
@@ -55,73 +91,115 @@ function updateJson(rel, mutate, indent) {
   write(rel, JSON.stringify(data, null, indent) + trailingNewline);
 }
 
-function updateText(rel, pattern, replacement) {
-  const raw = read(rel);
-  if (!pattern.test(raw)) {
-    throw new Error(`pattern not found in ${rel}: ${pattern}`);
-  }
-  write(rel, raw.replace(pattern, replacement));
-}
+// ─── Write versions.json ─────────────────────────────────────────────
 
-console.log(`Setting version to ${version}`);
+console.log(
+  `Setting versions: server=${versions.server_version}, client=${versions.client_version}`,
+);
+write("versions.json", JSON.stringify(versions, null, 2) + "\n");
 
-// VERSION file
-{
-  const raw = read("VERSION");
-  const trailingNewline = raw.endsWith("\n") ? "\n" : "";
-  write("VERSION", version + trailingNewline);
-  console.log("  updated VERSION");
-}
+// ─── Workspace package.json files ───────────────────────────────────
 
-// Workspace package.json files (2-space indent).
-for (const rel of PACKAGE_JSONS) {
+const SERVER_PACKAGES = [
+  "src/app/package.json",
+  "src/core/server/package.json",
+];
+const CLIENT_PACKAGES = [
+  "src/core/package.json",
+  "src/core/common/package.json",
+  "src/core/daemon/package.json",
+  "src/clients/desktop/package.json",
+];
+
+for (const rel of SERVER_PACKAGES) {
   updateJson(
     rel,
     (pkg) => {
-      pkg.version = version;
+      pkg.version = versions.server_version;
     },
     2,
   );
-  console.log(`  updated ${rel}`);
+}
+for (const rel of CLIENT_PACKAGES) {
+  updateJson(
+    rel,
+    (pkg) => {
+      pkg.version = versions.client_version;
+    },
+    2,
+  );
 }
 
-// CLI version header.
-updateText(
+// ─── Generated TypeScript constants (consumed via @checkpointvcs/common) ───
+
+write(
+  "src/core/common/src/versions-generated.ts",
+  `// AUTO-GENERATED by scripts/set-version.js — do not edit manually.
+// Source of truth: versions.json at the repo root.
+//
+// User-facing semver versions:
+//   SERVER_VERSION — src/app + src/core/server share this
+//   CLIENT_VERSION — src/core/daemon + src/clients/{desktop,cli,tray} share this
+//
+// Integer API versions. Bump only when there's an actual wire-format break:
+//   SERVER_API     — current server API the running server speaks
+//   MIN_SERVER_API — minimum server-API a connecting daemon must speak
+//   DAEMON_API     — current daemon API the running daemon speaks
+//   MIN_DAEMON_API — minimum daemon-API a connecting client must speak
+
+export const SERVER_VERSION = ${JSON.stringify(versions.server_version)};
+export const CLIENT_VERSION = ${JSON.stringify(versions.client_version)};
+export const SERVER_API = ${versions.server_api};
+export const MIN_SERVER_API = ${versions.min_server_api};
+export const DAEMON_API = ${versions.daemon_api};
+export const MIN_DAEMON_API = ${versions.min_daemon_api};
+`,
+);
+
+// ─── Generated C++ header for the CLI ───────────────────────────────
+
+write(
   "src/clients/cli/version.hpp",
-  /constexpr const char\* API_VERSION = "[^"]*";/,
-  `constexpr const char* API_VERSION = "${version}";`,
-);
-console.log("  updated src/clients/cli/version.hpp");
+  `// AUTO-GENERATED by scripts/set-version.js — do not edit manually.
+// Source of truth: versions.json at the repo root.
+#pragma once
 
-// Tray version constant.
-updateText(
-  "src/clients/tray/main.go",
-  /const trayApiVersion = "[^"]*"/,
-  `const trayApiVersion = "${version}"`,
-);
-console.log("  updated src/clients/tray/main.go");
+namespace checkpoint {
 
-// App API version. The two neighboring daemon-version constants are bumped
-// manually on a different cadence — only APP_API_VERSION is touched here.
-updateText(
-  "src/app/src/server/api/api-version.ts",
-  /export const APP_API_VERSION = "[^"]*";/,
-  `export const APP_API_VERSION = "${version}";`,
-);
-console.log("  updated src/app/src/server/api/api-version.ts");
+// User-facing semver version of the bundled client installation.
+constexpr const char* CLIENT_VERSION = ${JSON.stringify(versions.client_version)};
 
-// Daemon's client-facing API version. The three neighboring constants
-// (DAEMON_MIN_CLIENT_VERSION, DAEMON_RECOMMENDED_CLIENT_VERSION,
-// DAEMON_APP_API_VERSION) are compatibility floors that bump manually.
-updateText(
-  "src/core/daemon/src/api-version.ts",
-  /export const DAEMON_CLIENT_API_VERSION = "[^"]*";/,
-  `export const DAEMON_CLIENT_API_VERSION = "${version}";`,
-);
-console.log("  updated src/core/daemon/src/api-version.ts");
+// Integer daemon-API version this CLI was built against. Compared against
+// the daemon's min_daemon_api at connect time.
+constexpr int DAEMON_API = ${versions.daemon_api};
 
-// Unreal plugin descriptor: bump Version (int) and set VersionName to semver.
-// .uplugin files are JSON with tab indentation.
+}  // namespace checkpoint
+`,
+);
+
+// ─── Generated Go file for the tray ─────────────────────────────────
+
+write(
+  "src/clients/tray/version.go",
+  `// AUTO-GENERATED by scripts/set-version.js — do not edit manually.
+// Source of truth: versions.json at the repo root.
+package main
+
+// User-facing semver version of the bundled client installation.
+const ClientVersion = ${JSON.stringify(versions.client_version)}
+
+// Integer daemon-API version this tray was built against. Compared against
+// the daemon's min_daemon_api at connect time.
+const DaemonAPI = ${versions.daemon_api}
+`,
+);
+
+// ─── Unreal plugin descriptor ───────────────────────────────────────
+// The plugin's API_VERSION (in CheckpointDaemonClient.h) is managed
+// independently — the Unreal plugin has its own release cadence and may run
+// against an older daemon_api than the current versions.json. This script
+// only bumps the descriptor's VersionName (semver shown in the editor) and
+// auto-increments the integer Version (Unreal's required ascending counter).
 {
   const rel = "src/clients/unreal/CheckpointSourceControl.uplugin";
   let nextVersion;
@@ -131,12 +209,12 @@ console.log("  updated src/core/daemon/src/api-version.ts");
       const current = typeof data.Version === "number" ? data.Version : 0;
       nextVersion = current + 1;
       data.Version = nextVersion;
-      data.VersionName = version;
+      data.VersionName = versions.client_version;
     },
     "\t",
   );
   console.log(
-    `  updated ${rel} (Version=${nextVersion}, VersionName=${version})`,
+    `  Unreal plugin: Version=${nextVersion}, VersionName=${versions.client_version}`,
   );
 }
 

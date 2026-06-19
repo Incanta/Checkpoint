@@ -236,9 +236,14 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
 // ═════════════════════════════════════════════════════════════════
 
 /**
- * Checks CLI version against the daemon's version requirements.
+ * Checks the CLI's daemon_api against the connected daemon's min_daemon_api.
  * Returns 0 if compatible, 1 if incompatible (hard block).
- * Prints a warning to stderr if below recommended version.
+ *
+ * The CLI is bundled with the daemon, so in production this check trivially
+ * passes — both sides come from the same versions.json at build time. The
+ * check exists for dev installs that may have mismatched binaries and for
+ * the (separately distributed) Unreal plugin scenario at the API contract
+ * level.
  */
 inline int checkDaemonVersion() {
   int port = getDaemonPort();
@@ -247,30 +252,19 @@ inline int checkDaemonVersion() {
 
   try {
     auto result = client.query("version.check");
-
     if (result.is_null() || !result.is_object()) {
       return 0;  // can't check, allow operation
     }
 
-    std::string minimumVersion = result.value("minimumVersion", "");
-    std::string recommendedVersion = result.value("recommendedVersion", "");
-
-    if (!minimumVersion.empty() && compareVersions(API_VERSION, minimumVersion) < 0) {
+    int minDaemonApi = result.value("minDaemonApi", 0);
+    if (minDaemonApi > 0 && DAEMON_API < minDaemonApi) {
       std::cerr << color::red() << color::bold()
                 << "error: " << color::reset() << color::red()
-                << "CLI version " << API_VERSION
-                << " is below the minimum required version " << minimumVersion
+                << "CLI daemon_api " << DAEMON_API
+                << " is below the daemon's min_daemon_api " << minDaemonApi
                 << ". Please upgrade to continue." << color::reset()
                 << std::endl;
       return 1;
-    }
-
-    if (!recommendedVersion.empty() && compareVersions(API_VERSION, recommendedVersion) < 0) {
-      std::cerr << color::yellow()
-                << "warning: CLI version " << API_VERSION
-                << " is below the recommended version " << recommendedVersion
-                << ". Please consider upgrading." << color::reset()
-                << std::endl;
     }
   } catch (...) {
     // If we can't reach the daemon for version check, don't block the user.

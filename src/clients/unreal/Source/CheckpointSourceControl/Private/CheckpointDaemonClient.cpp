@@ -267,9 +267,9 @@ bool FCheckpointDaemonClient::PollJob(
 // ---- High-level API methods ----
 
 bool FCheckpointDaemonClient::CheckVersion(
-  FString &OutCurrentVersion,
-  FString &OutMinimumVersion,
-  FString &OutRecommendedVersion,
+  FString &OutClientVersion,
+  int32 &OutDaemonApi,
+  int32 &OutMinDaemonApi,
   FString &OutError
 ) {
   TSharedPtr<FJsonObject> Result;
@@ -278,9 +278,9 @@ bool FCheckpointDaemonClient::CheckVersion(
   }
 
   if (Result.IsValid()) {
-    Result->TryGetStringField(TEXT("currentVersion"), OutCurrentVersion);
-    Result->TryGetStringField(TEXT("minimumVersion"), OutMinimumVersion);
-    Result->TryGetStringField(TEXT("recommendedVersion"), OutRecommendedVersion);
+    Result->TryGetStringField(TEXT("clientVersion"), OutClientVersion);
+    Result->TryGetNumberField(TEXT("daemonApi"), OutDaemonApi);
+    Result->TryGetNumberField(TEXT("minDaemonApi"), OutMinDaemonApi);
     return true;
   }
 

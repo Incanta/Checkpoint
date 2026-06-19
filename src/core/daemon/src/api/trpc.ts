@@ -17,7 +17,7 @@ const t = initTRPC.context<TRPCContext>().create({
 
 /**
  * Hard-block middleware: when any connected server reports the daemon below
- * its minimumDaemonVersion (verdict from ApiVersionChecker), every procedure
+ * its min_server_api (verdict from ApiVersionChecker), every procedure
  * returns FORBIDDEN — EXCEPT updater.* and version.*, which clients need to
  * recover from this state.
  *
@@ -32,7 +32,7 @@ const versionGateMiddleware = t.middleware(({ next, path }) => {
       if (status.result.status === "incompatible") {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: `daemon below minimumVersion; update required (${status.endpoint}: ${status.result.message})`,
+          message: `daemon below server's min_server_api; update required (${status.endpoint}: ${status.result.message})`,
         });
       }
     }

@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
 
   // ─── Top-level parser ──────────────────────────────────────────
 
-  argparse::ArgumentParser program(programName, "1.0.0");
+  argparse::ArgumentParser program(programName, checkpoint::CLIENT_VERSION);
   program.add_description("Checkpoint version control CLI");
 
   // ─── Sub-commands ──────────────────────────────────────────────
