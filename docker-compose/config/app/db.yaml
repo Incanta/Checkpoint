@@ -1,5 +1,9 @@
 # Prisma
 # https://www.prisma.io/docs/reference/database-reference/connection-urls#env
-# provider: "sqlite" or "postgresql"
-provider: "sqlite"
-url: "file:/app/data/db.sqlite"
+# provider: "sqlite" or "postgresql" — this quickstart uses postgresql.
+#
+# The full connection string lives in ./config/.secrets as `database_url`
+# (a whole-value secret). Its password MUST match POSTGRES_PASSWORD in
+# docker-compose.yaml.
+provider: "postgresql"
+url: "secret|database_url"

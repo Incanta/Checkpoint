@@ -1,17 +1,43 @@
 services:
   # ----------------------------------------------------------------
+  # Postgres — application database
+  # ----------------------------------------------------------------
+  # Recommended database for Checkpoint. The credentials below are
+  # development defaults: change POSTGRES_PASSWORD before any real use, and
+  # keep it in sync with `database_url` in ./config/.secrets.
+  postgres:
+    container_name: checkpoint-postgres
+    image: postgres:17-alpine
+    restart: unless-stopped
+    networks:
+      - checkpoint
+    environment:
+      POSTGRES_USER: checkpoint
+      POSTGRES_PASSWORD: checkpoint
+      POSTGRES_DB: checkpoint
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U checkpoint -d checkpoint"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ----------------------------------------------------------------
   # App — Next.js application (UI + API)
   # ----------------------------------------------------------------
   app:
     container_name: checkpoint-app
-    image: ghcr.io/incanta/checkpoint-app:latest-sqlite
+    image: ghcr.io/incanta/checkpoint-app:latest-postgres
     restart: unless-stopped
     networks:
       - checkpoint
     ports:
       - "13000:13000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
-      - app-data:/app/data
       - ./config/app:/app/config
       - ./config/.secrets:/app/.secrets:ro
 
@@ -27,13 +53,67 @@ services:
     ports:
       - "13001:13001"
     volumes:
+      # `storage-data` volume is only used by the SeaweedFS "stub" storage mode (the default).
+      # Harmless for the R2 and full-SeaweedFS modes.
       - storage-data:/app/data
       - ./config/server:/app/config
       - ./config/.secrets:/app/.secrets:ro
 
+  # ----------------------------------------------------------------
+  # SeaweedFS cluster — only started with `--profile seaweedfs`
+  # ----------------------------------------------------------------
+  # Use this profile for the "Filer w/ SeaweedFS" storage mode. See README.md
+  # for the matching ./config/server/storage.yaml changes. Not started for the
+  # default stub mode or the R2 mode.
+  seaweed-master:
+    container_name: checkpoint-seaweed-master
+    image: chrislusf/seaweedfs:latest
+    restart: unless-stopped
+    profiles: ["seaweedfs"]
+    networks:
+      - checkpoint
+    command: "master -ip=seaweed-master -mdir=/data"
+    volumes:
+      - seaweed-master-data:/data
+
+  seaweed-volume:
+    container_name: checkpoint-seaweed-volume
+    image: chrislusf/seaweedfs:latest
+    restart: unless-stopped
+    profiles: ["seaweedfs"]
+    networks:
+      - checkpoint
+    command: "volume -mserver=seaweed-master:9333 -ip=seaweed-volume -dir=/data -max=0"
+    depends_on:
+      - seaweed-master
+    volumes:
+      - seaweed-volume-data:/data
+
+  seaweed-filer:
+    container_name: checkpoint-seaweed-filer
+    image: chrislusf/seaweedfs:latest
+    restart: unless-stopped
+    profiles: ["seaweedfs"]
+    networks:
+      - checkpoint
+    # Publish the filer so the Checkpoint CLI/daemon on user machines can reach
+    # it directly (the external filer URL the server hands out). Internal
+    # server-to-filer traffic stays on the `checkpoint` network.
+    ports:
+      - "13002:8888"
+    command: "filer -master=seaweed-master:9333 -ip=seaweed-filer"
+    depends_on:
+      - seaweed-master
+      - seaweed-volume
+    volumes:
+      - seaweed-filer-data:/data
+
 volumes:
-  app-data:
+  postgres-data:
   storage-data:
+  seaweed-master-data:
+  seaweed-volume-data:
+  seaweed-filer-data:
 
 networks:
   checkpoint:
