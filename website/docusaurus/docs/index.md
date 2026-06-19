@@ -19,7 +19,9 @@ Traditional version control systems like Git were designed for source code. Chec
 
 ## Getting Started
 
-Check out the documentation sections in the sidebar to learn more about setting up and using Checkpoint.
+New here? Follow the **[Quickstart](./quickstart.md)** to self-host a Checkpoint server with Docker Compose and install the desktop client.
+
+Or check out the other documentation sections in the sidebar to learn more about setting up and using Checkpoint.
 
 ## Need Help?
 
