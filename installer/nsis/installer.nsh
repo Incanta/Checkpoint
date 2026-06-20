@@ -1,22 +1,20 @@
-; installer.nsh — NSIS custom script for Checkpoint installer
-; Handles daemon service registration, CLI PATH setup, and cleanup
+; installer.nsh: NSIS custom script for Checkpoint installer.
+; Handles daemon service registration, CLI PATH setup, tray autostart, and
+; cleanup.
 ;
-; NOTE: This file is included by electron-builder BEFORE the main template,
-; so we must explicitly include LogicLib for ${If}/${EndIf} macros.
-; MUI2.nsh and nsDialogs.nsh are NOT needed here (loaded by the template).
+; IMPORTANT: this logic MUST live in the customInstall / customUnInstall macros,
+; not in standalone Section blocks. electron-builder includes this file before
+; its own main install Section, so any Section we declare here runs BEFORE
+; electron-builder removes the previously installed version. On a reinstall or
+; upgrade that means the old uninstaller runs *after* our setup and clobbers it
+; (deletes the service, kills the tray, removes the autostart key). The macros
+; are invoked by electron-builder at the right point: customInstall after the
+; old version is removed and new files are extracted, customUnInstall during
+; uninstall.
 
 !include "LogicLib.nsh"
 
-; ============================================================
-; Installation Sections (only for installer pass)
-; ============================================================
-
-!ifndef BUILD_UNINSTALLER
-
-; Custom variables
-Var DAEMON_EXE
-
-Section "Daemon Service" SEC_DAEMON
+!macro customInstall
     ; Kill any running Electron desktop + tray processes first. Without this,
     ; in-place upgrades fail with "file in use" because the running .exe holds
     ; file locks on its own image and on the bundled binaries we're replacing.
@@ -24,93 +22,63 @@ Section "Daemon Service" SEC_DAEMON
     nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
     Sleep 1000
 
-    ; Copy daemon files
+    ; ---- Daemon service ----
     SetOutPath "$INSTDIR\daemon"
     File /r "${BUILD_RESOURCES_DIR}\daemon\*.*"
 
-    StrCpy $DAEMON_EXE "$INSTDIR\daemon\checkpoint-daemon.exe"
-
-    ; Stop existing service if running
+    ; Replace any existing service (also self-heals if the old uninstaller did
+    ; not run for some reason).
     nsExec::ExecToLog 'sc.exe stop CheckpointDaemon'
     Sleep 2000
     nsExec::ExecToLog 'sc.exe delete CheckpointDaemon'
     Sleep 1000
 
-    ; Install as Windows Service running as current user
-    nsExec::ExecToLog 'sc.exe create CheckpointDaemon binPath= "$DAEMON_EXE" DisplayName= "Checkpoint VCS Daemon" start= auto'
+    nsExec::ExecToLog 'sc.exe create CheckpointDaemon binPath= "$INSTDIR\daemon\checkpoint-daemon.exe" DisplayName= "Checkpoint VCS Daemon" start= auto'
     nsExec::ExecToLog 'sc.exe description CheckpointDaemon "Checkpoint version control system daemon"'
     nsExec::ExecToLog 'sc.exe failure CheckpointDaemon reset= 86400 actions= restart/5000/restart/10000/restart/30000'
-
-    ; Start the service
     nsExec::ExecToLog 'sc.exe start CheckpointDaemon'
-SectionEnd
 
-Section "Tray Application" SEC_TRAY
-    ; Copy tray binary
+    ; ---- Tray application ----
     SetOutPath "$INSTDIR\tray"
     File "${BUILD_RESOURCES_DIR}\tray\checkpoint-tray.exe"
 
-    ; Register tray auto-start on login
+    ; Register tray auto-start on login.
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" \
         "CheckpointTray" '"$INSTDIR\tray\checkpoint-tray.exe"'
 
-    ; Launch tray now
+    ; Launch tray now.
     Exec '"$INSTDIR\tray\checkpoint-tray.exe"'
-SectionEnd
 
-Section "CLI Tools" SEC_CLI
-    ; Copy CLI binaries
+    ; ---- CLI tools ----
     SetOutPath "$INSTDIR\cli"
     File "${BUILD_RESOURCES_DIR}\cli\checkpoint.exe"
     File "${BUILD_RESOURCES_DIR}\cli\chk.exe"
 
-    ; Add CLI directory to user PATH
+    ; Add CLI directory to user PATH.
     EnVar::AddValue "PATH" "$INSTDIR\cli"
     Pop $0
     ${If} $0 != 0
         DetailPrint "Warning: Could not add CLI to PATH (error: $0)"
     ${EndIf}
-SectionEnd
+!macroend
 
-!endif ; BUILD_UNINSTALLER
-
-; ============================================================
-; Uninstallation Sections (only for uninstaller build pass)
-; ============================================================
-
-!ifdef BUILD_UNINSTALLER
-
-Section "un.Daemon Service"
-    ; Stop and remove the Windows service
+!macro customUnInstall
+    ; ---- Daemon service ----
     nsExec::ExecToLog 'sc.exe stop CheckpointDaemon'
     Sleep 2000
     nsExec::ExecToLog 'sc.exe delete CheckpointDaemon'
-
-    ; Remove daemon files
     RMDir /r "$INSTDIR\daemon"
-SectionEnd
 
-Section "un.Tray Application"
-    ; Kill running tray process
+    ; ---- Tray application ----
     nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
     Sleep 500
-
-    ; Remove auto-start registry entry
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "CheckpointTray"
-
-    ; Remove tray files
     Delete "$INSTDIR\tray\checkpoint-tray.exe"
     RMDir "$INSTDIR\tray"
-SectionEnd
 
-Section "un.CLI Tools"
-    ; Remove CLI directory from PATH
+    ; ---- CLI tools ----
     EnVar::DeleteValue "PATH" "$INSTDIR\cli"
-
-    ; Remove CLI files
     Delete "$INSTDIR\cli\checkpoint.exe"
     Delete "$INSTDIR\cli\chk.exe"
     RMDir "$INSTDIR\cli"
-SectionEnd
-
-!endif ; BUILD_UNINSTALLER
+!macroend
