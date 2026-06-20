@@ -79,7 +79,19 @@ func onReady() {
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "Quit the tray application")
 
-	go updateDaemonStatus()
+	// On Windows the daemon is launched and supervised by the tray (there is no
+	// Windows service), so start it if it isn't already running. On macOS/Linux
+	// launchd/systemd normally start it; the running check keeps this a no-op
+	// there.
+	go func() {
+		if !isDaemonRunning() {
+			if err := startDaemonService(); err != nil {
+				logTray("auto-start daemon failed: %v", err)
+			}
+			time.Sleep(2 * time.Second)
+		}
+		updateDaemonStatus()
+	}()
 
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)

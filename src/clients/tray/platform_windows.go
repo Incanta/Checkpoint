@@ -8,14 +8,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 )
 
-const serviceName = "CheckpointDaemon"
-
-// runServiceCmd runs a service-control command and folds its combined output
-// into the returned error, so failures (e.g. SCM error 1053) are visible to
-// the caller instead of being discarded.
-func runServiceCmd(name string, args ...string) error {
+// runProcessCmd runs a command and folds its combined output into the returned
+// error, so failures are visible to the caller instead of being discarded.
+func runProcessCmd(name string, args ...string) error {
 	out, err := exec.Command(name, args...).CombinedOutput()
 	if err != nil {
 		if msg := strings.TrimSpace(string(out)); msg != "" {
@@ -26,16 +25,90 @@ func runServiceCmd(name string, args ...string) error {
 	return nil
 }
 
-func startDaemonService() error {
-	return runServiceCmd("net", "start", serviceName)
+// daemonExePath locates checkpoint-daemon.exe. The installer lays the tray out
+// at <INSTDIR>\tray\checkpoint-tray.exe and the daemon at
+// <INSTDIR>\daemon\checkpoint-daemon.exe, so we resolve relative to our own
+// executable first, then fall back to known install locations.
+func daemonExePath() (string, error) {
+	if exe, err := os.Executable(); err == nil {
+		candidates := []string{
+			filepath.Join(filepath.Dir(exe), "..", "daemon", "checkpoint-daemon.exe"),
+			filepath.Join(filepath.Dir(exe), "checkpoint-daemon.exe"),
+		}
+		for _, c := range candidates {
+			if _, e := os.Stat(c); e == nil {
+				return filepath.Clean(c), nil
+			}
+		}
+	}
+	bases := []string{
+		os.Getenv("PROGRAMFILES"),
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs"),
+	}
+	for _, base := range bases {
+		if base == "" {
+			continue
+		}
+		c := filepath.Join(base, "Checkpoint", "daemon", "checkpoint-daemon.exe")
+		if _, e := os.Stat(c); e == nil {
+			return c, nil
+		}
+	}
+	return "", fmt.Errorf("checkpoint-daemon.exe not found")
 }
 
+// startDaemonService launches the daemon as a detached child process. On
+// Windows the daemon is a per-user process, NOT a Windows service: it is a Node
+// SEA (a plain console app) that cannot satisfy the Service Control Manager,
+// which is what produced "error 1053: the service did not respond". Its
+// stdout/stderr are captured to ~/.checkpoint/logs/daemon-process.log so even
+// early/native crashes are visible (the daemon also writes its own daemon.log).
+func startDaemonService() error {
+	if isDaemonRunning() {
+		return nil
+	}
+
+	exe, err := daemonExePath()
+	if err != nil {
+		return err
+	}
+
+	dir := logsDir()
+	_ = os.MkdirAll(dir, 0o755)
+	logFile, err := os.OpenFile(
+		filepath.Join(dir, "daemon-process.log"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+		0o644,
+	)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command(exe)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	// CREATE_NO_WINDOW: the tray is a GUI app (-H windowsgui); don't pop a
+	// console window for the child.
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		return err
+	}
+	// The child has its own inherited handle; release ours.
+	logFile.Close()
+	return nil
+}
+
+// stopDaemonService terminates any running daemon process.
 func stopDaemonService() error {
-	return runServiceCmd("net", "stop", serviceName)
+	return runProcessCmd("taskkill", "/f", "/im", "checkpoint-daemon.exe")
 }
 
 func restartDaemonService() error {
 	_ = stopDaemonService()
+	// Give the OS a moment to release the listening port before relaunching.
+	time.Sleep(1 * time.Second)
 	return startDaemonService()
 }
 

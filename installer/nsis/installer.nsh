@@ -1,52 +1,45 @@
 ; installer.nsh: NSIS custom script for Checkpoint installer.
-; Handles daemon service registration, CLI PATH setup, tray autostart, and
-; cleanup.
+; Lays down the daemon, tray, and CLI binaries, registers tray autostart, and
+; cleans up on uninstall.
+;
+; The daemon is NOT installed as a Windows service. It is a Node SEA (a plain
+; console app) that cannot satisfy the Service Control Manager, so `sc.exe`
+; registration produced "error 1053: the service did not respond". Instead the
+; tray (auto-started on login) launches and supervises the daemon as a per-user
+; process, which also matches the daemon's per-user data model (~/.checkpoint).
 ;
 ; IMPORTANT: this logic MUST live in the customInstall / customUnInstall macros,
-; not in standalone Section blocks. electron-builder includes this file before
-; its own main install Section, so any Section we declare here runs BEFORE
-; electron-builder removes the previously installed version. On a reinstall or
-; upgrade that means the old uninstaller runs *after* our setup and clobbers it
-; (deletes the service, kills the tray, removes the autostart key). The macros
-; are invoked by electron-builder at the right point: customInstall after the
-; old version is removed and new files are extracted, customUnInstall during
-; uninstall.
+; not standalone Section blocks. electron-builder includes this file before its
+; own main install Section, so any Section we declare here would run BEFORE
+; electron-builder removes the previously installed version, and the old
+; uninstaller would then clobber our setup. The macros run at the right point:
+; customInstall after the old version is removed and new files are extracted,
+; customUnInstall during uninstall.
 
 !include "LogicLib.nsh"
 
 !macro customInstall
-    ; Kill any running Electron desktop + tray processes first. Without this,
-    ; in-place upgrades fail with "file in use" because the running .exe holds
-    ; file locks on its own image and on the bundled binaries we're replacing.
+    ; Kill any running Checkpoint processes first. Without this, in-place
+    ; upgrades fail with "file in use" because the running binaries hold locks
+    ; on the files we're replacing.
     nsExec::ExecToLog 'taskkill /f /im Checkpoint.exe'
     nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
+    nsExec::ExecToLog 'taskkill /f /im checkpoint-daemon.exe'
     Sleep 1000
 
-    ; ---- Daemon service ----
+    ; ---- Daemon binaries (launched by the tray, not a service) ----
     SetOutPath "$INSTDIR\daemon"
     File /r "${BUILD_RESOURCES_DIR}\daemon\*.*"
-
-    ; Replace any existing service (also self-heals if the old uninstaller did
-    ; not run for some reason).
-    nsExec::ExecToLog 'sc.exe stop CheckpointDaemon'
-    Sleep 2000
-    nsExec::ExecToLog 'sc.exe delete CheckpointDaemon'
-    Sleep 1000
-
-    nsExec::ExecToLog 'sc.exe create CheckpointDaemon binPath= "$INSTDIR\daemon\checkpoint-daemon.exe" DisplayName= "Checkpoint VCS Daemon" start= auto'
-    nsExec::ExecToLog 'sc.exe description CheckpointDaemon "Checkpoint version control system daemon"'
-    nsExec::ExecToLog 'sc.exe failure CheckpointDaemon reset= 86400 actions= restart/5000/restart/10000/restart/30000'
-    nsExec::ExecToLog 'sc.exe start CheckpointDaemon'
 
     ; ---- Tray application ----
     SetOutPath "$INSTDIR\tray"
     File "${BUILD_RESOURCES_DIR}\tray\checkpoint-tray.exe"
 
-    ; Register tray auto-start on login.
+    ; Register tray auto-start on login. The tray starts the daemon.
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" \
         "CheckpointTray" '"$INSTDIR\tray\checkpoint-tray.exe"'
 
-    ; Launch tray now.
+    ; Launch the tray now (it will start the daemon).
     Exec '"$INSTDIR\tray\checkpoint-tray.exe"'
 
     ; ---- CLI tools ----
@@ -63,20 +56,20 @@
 !macroend
 
 !macro customUnInstall
-    ; ---- Daemon service ----
-    nsExec::ExecToLog 'sc.exe stop CheckpointDaemon'
-    Sleep 2000
-    nsExec::ExecToLog 'sc.exe delete CheckpointDaemon'
+    ; Stop the tray and daemon processes.
+    nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
+    nsExec::ExecToLog 'taskkill /f /im checkpoint-daemon.exe'
+    Sleep 500
+
+    ; Remove tray auto-start.
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "CheckpointTray"
+
+    ; ---- Remove installed files ----
     RMDir /r "$INSTDIR\daemon"
 
-    ; ---- Tray application ----
-    nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
-    Sleep 500
-    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "CheckpointTray"
     Delete "$INSTDIR\tray\checkpoint-tray.exe"
     RMDir "$INSTDIR\tray"
 
-    ; ---- CLI tools ----
     EnVar::DeleteValue "PATH" "$INSTDIR\cli"
     Delete "$INSTDIR\cli\checkpoint.exe"
     Delete "$INSTDIR\cli\chk.exe"
