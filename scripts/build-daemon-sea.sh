@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-daemon-sea.sh — Build Checkpoint Daemon as a Node.js Single Executable Application
+# build-daemon-sea.sh: Build Checkpoint Daemon as a Node.js Single Executable Application
 # Usage: ./scripts/build-daemon-sea.sh [--output <dir>]
 #
 # Requires: Node.js 22+, yarn, esbuild, postject
@@ -11,7 +11,9 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DAEMON_DIR="$ROOT_DIR/src/core/daemon"
 OUTPUT_DIR="${1:-$DAEMON_DIR/dist-sea}"
 
-VERSION=$(cat "$ROOT_DIR/VERSION")
+# Source of truth for versions is versions.json (client_version is the
+# user-facing desktop/daemon semver).
+VERSION=$(node -e "console.log(require(process.argv[1]).client_version)" "$ROOT_DIR/versions.json")
 PLATFORM=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 
@@ -73,8 +75,9 @@ else
   echo "The daemon will not function without the native addon."
 fi
 
-# Copy VERSION file
-cp "$ROOT_DIR/VERSION" "$OUTPUT_DIR/VERSION"
+# Write VERSION file (consumed by the daemon's runtime version fallback in
+# updater.ts) from the versions.json client_version resolved above.
+printf '%s' "$VERSION" > "$OUTPUT_DIR/VERSION"
 
 echo ""
 echo "=== Daemon SEA build complete ==="

@@ -17,7 +17,9 @@ if (-not $OutputDir) {
     $OutputDir = Join-Path $DaemonDir "dist-sea"
 }
 
-$Version = (Get-Content (Join-Path $RootDir "VERSION") -Raw).Trim()
+# Source of truth for versions is versions.json (client_version is the
+# user-facing desktop/daemon semver).
+$Version = (Get-Content (Join-Path $RootDir "versions.json") -Raw | ConvertFrom-Json).client_version
 
 Write-Host "=== Building Checkpoint Daemon SEA v${Version} (win32-x64) ===" -ForegroundColor Cyan
 
@@ -94,8 +96,9 @@ if (Test-Path $PrebuiltSrc) {
     Write-Warning "The daemon will not function without the native addon."
 }
 
-# Copy VERSION file
-Copy-Item (Join-Path $RootDir "VERSION") (Join-Path $OutputDir "VERSION") -Force
+# Write VERSION file (consumed by the daemon's runtime version fallback in
+# updater.ts) from the versions.json client_version resolved above.
+Set-Content -Path (Join-Path $OutputDir "VERSION") -Value $Version -NoNewline
 
 Write-Host ""
 Write-Host "=== Daemon SEA build complete ===" -ForegroundColor Green

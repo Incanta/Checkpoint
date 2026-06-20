@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version_override:
-        description: "Version override (leave empty to use VERSION file)"
+        description: "Version override (leave empty to use client_version from versions.json)"
         required: false
         type: string
 
@@ -31,7 +31,7 @@ jobs:
           if [ -n "${{ inputs.version_override }}" ]; then
             echo "version=${{ inputs.version_override }}" >> "$GITHUB_OUTPUT"
           else
-            echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+            echo "version=$(jq -r '.client_version' versions.json)" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Print version

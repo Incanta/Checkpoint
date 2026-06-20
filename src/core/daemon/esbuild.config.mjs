@@ -4,10 +4,11 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const version = readFileSync(
-  path.resolve(__dirname, "../../../VERSION"),
-  "utf-8",
-).trim();
+// Source of truth for versions is versions.json (client_version is the
+// user-facing desktop/daemon semver).
+const version = JSON.parse(
+  readFileSync(path.resolve(__dirname, "../../../versions.json"), "utf-8"),
+).client_version;
 
 await build({
   entryPoints: [path.resolve(__dirname, "src/bin.ts")],
@@ -23,7 +24,7 @@ await build({
   external: ["*.node", "better-sqlite3"],
   banner: {
     js: [
-      `// Checkpoint Daemon v${version} — Single Executable Application bundle`,
+      `// Checkpoint Daemon v${version} (Single Executable Application bundle)`,
       `const __CHECKPOINT_VERSION__ = ${JSON.stringify(version)};`,
       // Make require() available in the CJS bundle for native addon loading
       `const { createRequire } = require("module");`,
