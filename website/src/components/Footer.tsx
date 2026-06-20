@@ -17,7 +17,7 @@ export default function Footer() {
             <span className="text-sm text-muted">
               Built by{" "}
               <a
-                href="https://github.com/Incanta"
+                href="https://incanta.dev"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-foreground hover:text-primary transition-colors"

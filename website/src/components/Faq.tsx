@@ -25,7 +25,7 @@ const faqs = [
         </strong>
         <br />
         <br />
-        Rest assured, if you&apos;re a commercial studio using Checkpoint
+        Rest assured, if you&apos;re a commercial studio using Checkpoint{" "}
         <strong>internally</strong>, you can do so freely under the Elastic
         License 2.0; you won&apos;t have any payment or open source obligations.
         You could probably treat it like you would for MIT-licensed software.
