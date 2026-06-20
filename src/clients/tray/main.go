@@ -120,7 +120,7 @@ func handleStart() {
 	mStatus.SetTitle("Daemon: Starting...")
 	if err := startDaemonService(); err != nil {
 		logTray("start daemon failed: %v", err)
-		mStatus.SetTitle(fmt.Sprintf("Daemon: Error (%v)", err))
+		mStatus.SetTitle("Daemon: Error")
 		mStart.Enable()
 		return
 	}
@@ -134,7 +134,7 @@ func handleStop() {
 	mStatus.SetTitle("Daemon: Stopping...")
 	if err := stopDaemonService(); err != nil {
 		logTray("stop daemon failed: %v", err)
-		mStatus.SetTitle(fmt.Sprintf("Daemon: Error (%v)", err))
+		mStatus.SetTitle("Daemon: Error")
 		mStop.Enable()
 		mRestart.Enable()
 		return
@@ -150,7 +150,7 @@ func handleRestart() {
 	mStatus.SetTitle("Daemon: Restarting...")
 	if err := restartDaemonService(); err != nil {
 		logTray("restart daemon failed: %v", err)
-		mStatus.SetTitle(fmt.Sprintf("Daemon: Error (%v)", err))
+		mStatus.SetTitle("Daemon: Error")
 	}
 	time.Sleep(3 * time.Second)
 	updateDaemonStatus()
@@ -280,10 +280,10 @@ func checkDaemonVersion() {
 	// Tray is bundled with the daemon, so this check trivially passes in
 	// production, but it is kept for dev installs that may have mismatched binaries.
 	if info.MinDaemonAPI > 0 && trayDaemonAPI < info.MinDaemonAPI {
-		mVersionMsg.SetTitle(fmt.Sprintf(
-			"⚠ Upgrade required (tray daemon_api %d < daemon's min %d)",
-			trayDaemonAPI, info.MinDaemonAPI,
-		))
+		logTray("daemon API version %d is too old for this tray (requires ≥ %d)",
+			info.DaemonAPI, info.MinDaemonAPI,
+		)
+		mVersionMsg.SetTitle("⚠ Upgrade required")
 		mVersionMsg.Show()
 		return
 	}
@@ -388,7 +388,8 @@ func daemonMutate(port int, procedure string) error {
 func handleUpdateDownload() {
 	mUpdateDownload.Disable()
 	if err := daemonMutate(getDaemonPort(), "updater.downloadUpdate"); err != nil {
-		mUpdateStatus.SetTitle(fmt.Sprintf("Update: download failed (%v)", err))
+		logTray("failed to start update download: %v", err)
+		mUpdateStatus.SetTitle("Update: download failed")
 		mUpdateDownload.Enable()
 		return
 	}
