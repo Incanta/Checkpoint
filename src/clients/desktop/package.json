@@ -2,6 +2,7 @@
   "name": "desktop",
   "private": true,
   "version": "0.3.0",
+  "description": "Checkpoint desktop client",
   "type": "module",
   "main": "dist/main/main.js",
   "homepage": "https://checkpointvcs.com",

@@ -93,7 +93,7 @@
     "allowRootDirectory": false,
     "scripts": "../../../installer/macos/scripts"
   },
-  "afterSign": "../../../installer/macos/notarize.cjs",
+  "afterSign": "build/notarize.cjs",
   "linux": {
     "target": [
       {
