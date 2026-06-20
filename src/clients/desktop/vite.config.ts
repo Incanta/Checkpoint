@@ -6,6 +6,17 @@ import tailwindcss from "@tailwindcss/vite";
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // Relative base so the packaged app's index.html references assets as
+  // "./assets/..." which resolve correctly under file:// (an absolute "/"
+  // base resolves to the drive root and is blocked as a local resource).
+  base: "./",
+  build: {
+    // The main process (src/main/main.ts) loads dist/renderer/index.html, so
+    // the renderer must build there. The electron plugin emits main/preload to
+    // dist/main separately.
+    outDir: "dist/renderer",
+    emptyOutDir: true,
+  },
   plugins: [
     react(),
     tailwindcss(),
