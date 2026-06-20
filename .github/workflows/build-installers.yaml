@@ -2,11 +2,6 @@ name: Build Installers
 
 on:
   workflow_dispatch:
-    inputs:
-      version_override:
-        description: "Version override (leave empty to use client_version from versions.json)"
-        required: false
-        type: string
 
 permissions:
   contents: write
@@ -27,12 +22,7 @@ jobs:
 
       - name: Determine version
         id: version
-        run: |
-          if [ -n "${{ inputs.version_override }}" ]; then
-            echo "version=${{ inputs.version_override }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=$(jq -r '.client_version' versions.json)" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "version=$(jq -r '.client_version' versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Print version
         run: echo "Building version ${{ steps.version.outputs.version }}"
