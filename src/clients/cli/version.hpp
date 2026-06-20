@@ -5,7 +5,7 @@
 namespace checkpoint {
 
 // User-facing semver version of the bundled client installation.
-constexpr const char* CLIENT_VERSION = "0.3.0";
+constexpr const char* CLIENT_VERSION = "0.3.1";
 
 // Integer daemon-API version this CLI was built against. Compared against
 // the daemon's min_daemon_api at connect time.
