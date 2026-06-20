@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"strings"
 )
 
 func serviceUnit() string {
@@ -16,16 +17,33 @@ func serviceUnit() string {
 	return "checkpoint-daemon"
 }
 
+// runServiceCmd runs a service-control command and folds its combined output
+// into the returned error so failures are visible to the caller.
+func runServiceCmd(name string, args ...string) error {
+	out, err := exec.Command(name, args...).CombinedOutput()
+	if err != nil {
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+		return err
+	}
+	return nil
+}
+
 func startDaemonService() error {
-	return exec.Command("systemctl", "start", serviceUnit()).Run()
+	return runServiceCmd("systemctl", "start", serviceUnit())
 }
 
 func stopDaemonService() error {
-	return exec.Command("systemctl", "stop", serviceUnit()).Run()
+	return runServiceCmd("systemctl", "stop", serviceUnit())
 }
 
 func restartDaemonService() error {
-	return exec.Command("systemctl", "restart", serviceUnit()).Run()
+	return runServiceCmd("systemctl", "restart", serviceUnit())
+}
+
+func openPath(p string) {
+	_ = exec.Command("xdg-open", p).Start()
 }
 
 func openDesktopApp() {

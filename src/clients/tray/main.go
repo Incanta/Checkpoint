@@ -75,6 +75,7 @@ func onReady() {
 	mRestart = systray.AddMenuItem("Restart Daemon", "Restart the Checkpoint daemon service")
 	systray.AddSeparator()
 	mOpenDesktop := systray.AddMenuItem("Open Desktop App", "Open Checkpoint Desktop")
+	mViewLogs := systray.AddMenuItem("View Logs", "Open the Checkpoint log folder")
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "Quit the tray application")
 
@@ -103,6 +104,8 @@ func onReady() {
 				go handleUpdateInstall()
 			case <-mOpenDesktop.ClickedCh:
 				go openDesktopApp()
+			case <-mViewLogs.ClickedCh:
+				go openLogs()
 			case <-mQuit.ClickedCh:
 				systray.Quit()
 			}
@@ -116,6 +119,7 @@ func handleStart() {
 	mStart.Disable()
 	mStatus.SetTitle("Daemon: Starting...")
 	if err := startDaemonService(); err != nil {
+		logTray("start daemon failed: %v", err)
 		mStatus.SetTitle(fmt.Sprintf("Daemon: Error (%v)", err))
 		mStart.Enable()
 		return
@@ -129,6 +133,7 @@ func handleStop() {
 	mRestart.Disable()
 	mStatus.SetTitle("Daemon: Stopping...")
 	if err := stopDaemonService(); err != nil {
+		logTray("stop daemon failed: %v", err)
 		mStatus.SetTitle(fmt.Sprintf("Daemon: Error (%v)", err))
 		mStop.Enable()
 		mRestart.Enable()
@@ -144,10 +149,49 @@ func handleRestart() {
 	mStart.Disable()
 	mStatus.SetTitle("Daemon: Restarting...")
 	if err := restartDaemonService(); err != nil {
+		logTray("restart daemon failed: %v", err)
 		mStatus.SetTitle(fmt.Sprintf("Daemon: Error (%v)", err))
 	}
 	time.Sleep(3 * time.Second)
 	updateDaemonStatus()
+}
+
+// logsDir returns the Checkpoint log directory (~/.checkpoint/logs), matching
+// where the daemon writes daemon.log.
+func logsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".checkpoint", "logs")
+	}
+	return filepath.Join(home, ".checkpoint", "logs")
+}
+
+// openLogs opens the Checkpoint log folder in the OS file manager.
+func openLogs() {
+	dir := logsDir()
+	_ = os.MkdirAll(dir, 0o755)
+	openPath(dir)
+}
+
+// logTray appends a timestamped line to ~/.checkpoint/logs/tray.log. Used to
+// record service-control failures (e.g. a daemon that won't start) so they are
+// visible via "View Logs" even when the daemon itself never produced a log.
+func logTray(format string, args ...any) {
+	dir := logsDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(
+		filepath.Join(dir, "tray.log"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+		0o644,
+	)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	line := fmt.Sprintf(format, args...)
+	fmt.Fprintf(f, "%s %s\n", time.Now().Format(time.RFC3339), line)
 }
 
 func getDaemonPort() int {
@@ -234,7 +278,7 @@ func checkDaemonVersion() {
 	info := batch[0].Result.Data.JSON
 
 	// Tray is bundled with the daemon, so this check trivially passes in
-	// production — but kept for dev installs that may have mismatched binaries.
+	// production, but it is kept for dev installs that may have mismatched binaries.
 	if info.MinDaemonAPI > 0 && trayDaemonAPI < info.MinDaemonAPI {
 		mVersionMsg.SetTitle(fmt.Sprintf(
 			"⚠ Upgrade required (tray daemon_api %d < daemon's min %d)",
@@ -249,8 +293,8 @@ func checkDaemonVersion() {
 
 // pollUpdateStatus queries the daemon's updater.getStatus endpoint and
 // adjusts the three update menu items based on the result. Silent on any
-// error — we don't want a transient daemon hiccup to surface as a tray
-// alert. Called from updateDaemonStatus on the 10-second ticker.
+// error (we don't want a transient daemon hiccup to surface as a tray
+// alert). Called from updateDaemonStatus on the 10-second ticker.
 func pollUpdateStatus() {
 	status, err := getUpdateStatus(getDaemonPort())
 	if err != nil {
@@ -356,7 +400,7 @@ func handleUpdateDownload() {
 func handleUpdateInstall() {
 	mUpdateInstall.Disable()
 	// applyUpdate spawns the installer detached and exits the daemon, so the
-	// HTTP request may not return cleanly — treat connection-reset as success.
+	// HTTP request may not return cleanly; treat connection-reset as success.
 	_ = daemonMutate(getDaemonPort(), "updater.applyUpdate")
 	mUpdateStatus.SetTitle("Update: installer launched, restarting...")
 }

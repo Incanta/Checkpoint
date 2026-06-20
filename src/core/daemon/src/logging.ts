@@ -1,6 +1,7 @@
 import pino, { type Logger as PinoLogger } from "pino";
 import fs from "fs";
 import path from "path";
+import { homedir } from "os";
 import { format } from "date-fns";
 import pretty from "pino-pretty"; // this ensures pkg will bundle it
 import { DaemonConfig } from "./daemon-config.js";
@@ -78,12 +79,17 @@ export async function InitLogger(): Promise<void> {
     },
   ];
 
-  const logToFile = config.logging.logFile.enabled;
+  // Always write a daemon log file so the tray's "View Logs" action and
+  // support workflows have something to inspect, even when the daemon fails
+  // early. A relative configured path is resolved under ~/.checkpoint rather
+  // than process.cwd(), which is unpredictable when the daemon runs as a
+  // system service (e.g. C:\Windows\System32).
+  const logToFile = true;
   if (logToFile) {
-    const logFilePath = path.resolve(
-      process.cwd(),
-      config.logging.logFile.path,
-    );
+    const configuredPath = config.logging.logFile.path;
+    const logFilePath = path.isAbsolute(configuredPath)
+      ? configuredPath
+      : path.join(homedir(), ".checkpoint", configuredPath);
     const extName = path.extname(logFilePath);
 
     fs.mkdirSync(path.dirname(logFilePath), { recursive: true });
