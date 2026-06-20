@@ -21,7 +21,9 @@ await build({
   minify: false,
   // Native .node addons cannot be bundled into a single JS file.
   // They must be shipped alongside the SEA binary and loaded at runtime.
-  external: ["*.node", "better-sqlite3"],
+  // better-sqlite3 is handled by the plugin below (it must be loaded via
+  // createRequire from disk, not the SEA's built-in-only require()).
+  external: ["*.node"],
   banner: {
     js: [
       `// Checkpoint Daemon v${version} (Single Executable Application bundle)`,
@@ -109,6 +111,26 @@ await build({
               loader: "js",
             };
           },
+        );
+
+        // better-sqlite3 is a native module that ships in node_modules/ next to
+        // the SEA executable. The SEA's built-in require() only resolves core
+        // modules, so load it via createRequire rooted at the executable dir.
+        build.onResolve({ filter: /^better-sqlite3$/ }, (args) => ({
+          path: args.path,
+          namespace: "sea-external-module",
+        }));
+
+        build.onLoad(
+          { filter: /.*/, namespace: "sea-external-module" },
+          (args) => ({
+            contents: `
+              const { createRequire } = require("module");
+              const seaRequire = createRequire(process.execPath);
+              module.exports = seaRequire(${JSON.stringify(args.path)});
+            `,
+            loader: "js",
+          }),
         );
       },
     },

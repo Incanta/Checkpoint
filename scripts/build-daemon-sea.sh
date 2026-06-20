@@ -75,6 +75,10 @@ else
   echo "The daemon will not function without the native addon."
 fi
 
+# Copy better-sqlite3 (+ its native deps) next to the SEA so the daemon can
+# require it at runtime (it is external to the JS bundle; see esbuild.config.mjs).
+node "$ROOT_DIR/scripts/copy-sea-node-modules.mjs" "$OUTPUT_DIR"
+
 # Write VERSION file (consumed by the daemon's runtime version fallback in
 # updater.ts) from the versions.json client_version resolved above.
 printf '%s' "$VERSION" > "$OUTPUT_DIR/VERSION"

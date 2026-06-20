@@ -96,6 +96,10 @@ if (Test-Path $PrebuiltSrc) {
     Write-Warning "The daemon will not function without the native addon."
 }
 
+# Copy better-sqlite3 (+ its native deps) next to the SEA so the daemon can
+# require it at runtime (it is external to the JS bundle; see esbuild.config.mjs).
+node (Join-Path $RootDir "scripts\copy-sea-node-modules.mjs") $OutputDir
+
 # Write VERSION file (consumed by the daemon's runtime version fallback in
 # updater.ts) from the versions.json client_version resolved above.
 Set-Content -Path (Join-Path $OutputDir "VERSION") -Value $Version -NoNewline

@@ -6,3 +6,4 @@ dist
 wk*
 tsconfig.tsbuildinfo
 /server/data
+daemon-bundle.cjs
