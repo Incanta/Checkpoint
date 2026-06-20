@@ -4,11 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -58,7 +54,7 @@ func main() {
 }
 
 func onReady() {
-	systray.SetIcon(generateIcon())
+	systray.SetIcon(trayIconData)
 	systray.SetTooltip("Checkpoint VCS")
 
 	mStatus = systray.AddMenuItem("Daemon: Checking...", "Daemon status")
@@ -365,29 +361,5 @@ func handleUpdateInstall() {
 	mUpdateStatus.SetTitle("Update: installer launched, restarting...")
 }
 
-// generateIcon creates a 32x32 blue circle PNG as a placeholder tray icon.
-func generateIcon() []byte {
-	const size = 32
-	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	cx, cy, r := float64(size)/2, float64(size)/2, float64(size)/2-1
-	fill := color.RGBA{R: 59, G: 130, B: 246, A: 255}
-
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			dx, dy := float64(x)-cx+0.5, float64(y)-cy+0.5
-			dist := math.Sqrt(dx*dx + dy*dy)
-			if dist <= r {
-				if dist > r-1 {
-					alpha := uint8(255 * (r - dist))
-					img.Set(x, y, color.RGBA{R: fill.R, G: fill.G, B: fill.B, A: alpha})
-				} else {
-					img.Set(x, y, fill)
-				}
-			}
-		}
-	}
-
-	var buf bytes.Buffer
-	_ = png.Encode(&buf, img)
-	return buf.Bytes()
-}
+// The tray icon is embedded per-platform (ICO on Windows, PNG elsewhere) in
+// icon_windows.go / icon_other.go as trayIconData.
