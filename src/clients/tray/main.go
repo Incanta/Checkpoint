@@ -57,6 +57,10 @@ func onReady() {
 	systray.SetIcon(trayIconData)
 	systray.SetTooltip("Checkpoint VCS")
 
+	mVersion := systray.AddMenuItem("Checkpoint v"+trayClientVersion, "Installed Checkpoint version")
+	mVersion.Disable()
+	systray.AddSeparator()
+
 	mStatus = systray.AddMenuItem("Daemon: Checking...", "Daemon status")
 	mStatus.Disable()
 	mVersionMsg = systray.AddMenuItem("", "Version compatibility status")
