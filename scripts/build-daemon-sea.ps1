@@ -1,4 +1,4 @@
-# build-daemon-sea.ps1 — Build Checkpoint Daemon as a Node.js Single Executable Application
+# build-daemon-sea.ps1: Build Checkpoint Daemon as a Node.js Single Executable Application
 # Usage: .\scripts\build-daemon-sea.ps1 [-OutputDir <path>]
 #
 # Requires: Node.js 22+, yarn, esbuild, postject
@@ -44,13 +44,38 @@ Write-Host "[4/5] Creating SEA binary..." -ForegroundColor Yellow
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 
 $BinaryName = "checkpoint-daemon.exe"
+$BinaryPath = Join-Path $OutputDir $BinaryName
 $NodeBin = (Get-Command node).Source
 
-Copy-Item $NodeBin (Join-Path $OutputDir $BinaryName) -Force
+Copy-Item $NodeBin $BinaryPath -Force
+
+# Remove the Authenticode signature inherited from the official node.exe before
+# injecting the SEA blob. Node's SEA docs require this on Windows: leaving the
+# signature in place leaves a dangling certificate table, so a later re-sign
+# (e.g. electron-builder's Azure Trusted Signing) fails with SignTool error
+# 0x800700C1 (bad EXE format). This mirrors the codesign --remove-signature
+# step the Unix build script does on macOS.
+$signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -match "\\x64\\" } |
+    Sort-Object FullName -Descending |
+    Select-Object -First 1
+if ($null -ne $signtool) {
+    Write-Host "Removing inherited node.exe signature using $($signtool.FullName)"
+    try {
+        & $signtool.FullName remove /s $BinaryPath
+    } catch {
+        # node.exe ships signed, so this should succeed; tolerate an
+        # already-unsigned binary rather than failing the build.
+        Write-Warning "signtool remove reported: $_; continuing"
+    }
+    $global:LASTEXITCODE = 0
+} else {
+    Write-Warning "signtool.exe not found; skipping signature removal. Re-signing the daemon may fail with 0x800700C1."
+}
 
 # Inject the SEA blob
 $BlobPath = Join-Path $DaemonDir "daemon-sea.blob"
-npx postject (Join-Path $OutputDir $BinaryName) NODE_SEA_BLOB $BlobPath `
+npx postject $BinaryPath NODE_SEA_BLOB $BlobPath `
     --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
 
 # Step 5: Copy longtail addon

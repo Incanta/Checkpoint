@@ -484,7 +484,7 @@ jobs:
             const cfg = JSON.parse(fs.readFileSync('electron-builder.json', 'utf-8'));
             if (cfg.win) {
               if (process.env.HAS_WIN_AZURE === 'true') {
-                // Azure Trusted Signing — replaces signtool. Cannot coexist with
+                // Azure Trusted Signing: replaces signtool. Cannot coexist with
                 // signtoolOptions, so drop that block.
                 delete cfg.win.signtoolOptions;
                 cfg.win.azureSignOptions = {
@@ -494,11 +494,11 @@ jobs:
                   publisherName: process.env.AZURE_SIGN_PUBLISHER,
                 };
               } else if (process.env.HAS_WIN_PFX !== 'true') {
-                // No Windows signing configured — drop signtoolOptions so
+                // No Windows signing configured, so drop signtoolOptions and
                 // electron-builder skips signing instead of asking for a cert.
                 delete cfg.win.signtoolOptions;
               }
-              // Else: PFX path — keep signtoolOptions; WIN_CSC_LINK and
+              // Else: PFX path, keep signtoolOptions; WIN_CSC_LINK and
               // WIN_CSC_KEY_PASSWORD env vars feed the cert location/password.
             }
             if (process.env.HAS_MAC_CERT !== 'true') {
@@ -557,7 +557,7 @@ jobs:
         env:
           # PFX path (ignored when Azure is selected).
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-          # Azure Trusted Signing auth — Entra ID service principal credentials.
+          # Azure Trusted Signing auth: Entra ID service principal credentials.
           # Read by Azure.Identity's EnvironmentCredential at sign time.
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -577,12 +577,19 @@ jobs:
       - name: Package installer (macOS)
         if: runner.os == 'macOS'
         env:
-          CSC_NAME: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          # Raw secret; the cert-type prefix is stripped below. electron-builder
+          # 26 rejects a CSC_NAME that includes "Developer ID Application:" /
+          # "Developer ID Installer:" and chooses the matching cert itself.
+          CSC_NAME_RAW: ${{ secrets.MACOS_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
           cd src/clients/desktop
+          identity="$CSC_NAME_RAW"
+          identity="${identity#Developer ID Application: }"
+          identity="${identity#Developer ID Installer: }"
+          export CSC_NAME="$identity"
           npx electron-builder --mac pkg --${{ matrix.electron_arch }} --publish never
 
       - name: Upload installer artifacts
