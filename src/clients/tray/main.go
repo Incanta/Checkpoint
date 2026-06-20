@@ -134,6 +134,7 @@ func onExit() {}
 func handleStart() {
 	mStart.Disable()
 	mStatus.SetTitle("Daemon: Starting...")
+	logTray("start: requested")
 	if err := startDaemonService(); err != nil {
 		logTray("start daemon failed: %v", err)
 		mStatus.SetTitle("Daemon: Error")

@@ -65,6 +65,7 @@ func daemonExePath() (string, error) {
 // early/native crashes are visible (the daemon also writes its own daemon.log).
 func startDaemonService() error {
 	if isDaemonRunning() {
+		logTray("start: daemon already responding on port %d; nothing to launch", getDaemonPort())
 		return nil
 	}
 
@@ -95,8 +96,22 @@ func startDaemonService() error {
 		logFile.Close()
 		return err
 	}
-	// The child has its own inherited handle; release ours.
-	logFile.Close()
+
+	logTray("start: launched %s (pid %d); output -> daemon-process.log", exe, cmd.Process.Pid)
+
+	// Observe the child so an immediate crash is recorded (we don't otherwise
+	// wait on it; the daemon is meant to be long-running). The log file is
+	// closed only after the process exits so its final output is captured.
+	go func() {
+		waitErr := cmd.Wait()
+		logFile.Close()
+		if waitErr != nil {
+			logTray("daemon process exited: %v (see daemon-process.log)", waitErr)
+		} else {
+			logTray("daemon process exited cleanly")
+		}
+	}()
+
 	return nil
 }
 
