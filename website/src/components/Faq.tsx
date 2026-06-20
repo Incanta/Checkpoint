@@ -1,20 +1,61 @@
 "use client";
 
-import { JSX, useState } from "react";
+import { type JSX, useState } from "react";
 
 const faqs = [
   {
-    question: "Do you support large binary files like textures, meshes, or video?",
-    answer:
-      (<span>
-        That's exactly what Checkpoint is built for. There are no artificial
-        file size limits. Large binaries are stored and transferred efficiently
-        without bloating history, unlike systems that bolt on LFS as an afterthought.
-      </span>),
-  }
+    question:
+      "Do you support large binary files like textures, meshes, or video?",
+    answer: (
+      <span>
+        That&apos;s exactly what Checkpoint is built for. There are no
+        artificial file size limits. Large binaries are stored and transferred
+        efficiently without bloating history, unlike systems that bolt on LFS as
+        an afterthought.
+      </span>
+    ),
+  },
+  {
+    question:
+      "Why the dual licensing? How does it compare to something like MIT? Can I use it for commercial projects?",
+    answer: (
+      <span>
+        <strong>
+          This is not legal advice; read the licenses for full details.
+        </strong>
+        <br />
+        <br />
+        Rest assured, if you&apos;re a commercial studio using Checkpoint
+        <strong>internally</strong>, you can do so freely under the Elastic
+        License 2.0; you won&apos;t have any payment or open source obligations.
+        You could probably treat it like you would for MIT-licensed software.
+        <br />
+        <br />
+        The Elastic License 2.0 primarily restricts you from having a hosted
+        service of Checkpoint to third parties. If you need to do this, you can
+        do so under the OSI-approved AGPLv3 license.{" "}
+        <strong>
+          NOTE: This license has more copyleft restrictions which may require
+          you to open source more than you want. Please consult with a lawyer to
+          see if it fits your use case.
+        </strong>
+        <br />
+        <br />
+        We chose this dual licensing approach to prevent the large VCS hosting
+        providers from financially benefiting from Checkpoint without
+        significantly contributing back to the community.
+      </span>
+    ),
+  },
 ];
 
-function FaqItem({ question, answer }: { question: string; answer: JSX.Element }) {
+function FaqItem({
+  question,
+  answer,
+}: {
+  question: string;
+  answer: JSX.Element;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -32,7 +73,11 @@ function FaqItem({ question, answer }: { question: string; answer: JSX.Element }
           stroke="currentColor"
           strokeWidth={2}
         >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19 9l-7 7-7-7"
+          />
         </svg>
       </button>
 
@@ -81,7 +126,11 @@ export default function Faq() {
         {/* Accordion */}
         <div className="space-y-3">
           {faqs.map((faq) => (
-            <FaqItem key={faq.question} question={faq.question} answer={faq.answer} />
+            <FaqItem
+              key={faq.question}
+              question={faq.question}
+              answer={faq.answer}
+            />
           ))}
         </div>
       </div>
