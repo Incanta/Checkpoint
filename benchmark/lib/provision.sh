@@ -84,6 +84,11 @@ export SERVER_PUBLIC_IP CLIENT_PUBLIC_IP
 wait_for_ssh "$SERVER_PUBLIC_IP"
 wait_for_ssh "$CLIENT_PUBLIC_IP"
 
+# Let cloud-init / unattended-upgrades finish so later apt use does not race the
+# boot-time apt lock.
+wait_for_apt "$SERVER_PUBLIC_IP"
+wait_for_apt "$CLIENT_PUBLIC_IP"
+
 log "provisioning complete"
 log "  server: public=${SERVER_PUBLIC_IP} private=${SERVER_PRIVATE_IP}"
 log "  client: public=${CLIENT_PUBLIC_IP}"

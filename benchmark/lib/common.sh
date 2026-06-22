@@ -159,6 +159,28 @@ wait_for_ssh() { # host [tries]
   die "ssh never became ready on ${host}"
 }
 
+# Wait until a freshly-booted droplet is done with its boot-time apt activity.
+# cloud-init (and unattended-upgrades it triggers) holds the dpkg/apt lock for a
+# while after SSH is reachable, so any apt use before this races and fails with
+# "Could not get lock /var/lib/apt/lists/lock". Block on cloud-init completion
+# and then on the dpkg frontend lock being free.
+wait_for_apt() { # host
+  local host="$1"
+  log "waiting for cloud-init + apt lock on ${host}"
+  _ssh "$host" "bash -seuo pipefail" <<'EOF'
+cloud-init status --wait >/dev/null 2>&1 || true
+for i in $(seq 1 60); do
+  # -n: try once without blocking; succeeds (and immediately releases) only when
+  # no other process holds the apt/dpkg frontend lock.
+  if flock -n /var/lib/dpkg/lock-frontend true 2>/dev/null; then
+    echo "apt is free"; exit 0
+  fi
+  echo "  apt busy, waiting... ($i/60)"; sleep 5
+done
+echo "apt lock still held after timeout" >&2; exit 1
+EOF
+}
+
 # ----------------------------------------------------------------------------
 # DigitalOcean Spaces URL parsing
 #
