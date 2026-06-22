@@ -25,11 +25,9 @@ function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  return [
-    h > 0 ? `${h}h` : null,
-    m > 0 ? `${m}m` : null,
-    `${s}s`,
-  ].filter(Boolean).join(" ");
+  return [h > 0 ? `${h}h` : null, m > 0 ? `${m}m` : null, `${s}s`]
+    .filter(Boolean)
+    .join(" ");
 }
 
 const benchmarks: BenchmarkGroup[] = [
@@ -41,21 +39,31 @@ const benchmarks: BenchmarkGroup[] = [
         label: "Submit (Upload)",
         entries: [
           { name: "Checkpoint", seconds: 859, isUs: true },
-          { name: "Perforce", seconds: 3198, segments: [
-            { label: "p4 add", seconds: 1172 },
-            { label: "p4 submit", seconds: 2026 },
-          ] },
-          { name: "* Gitea", seconds: 6007, segments: [
-            { label: "git add", seconds: 1797 },
-            { label: "git commit", seconds: 700 },
-            { label: "git push", seconds: 3510 },
-          ] },
+          { name: "Lore", seconds: 1527 },
+          {
+            name: "Perforce",
+            seconds: 3198,
+            segments: [
+              { label: "p4 add", seconds: 1172 },
+              { label: "p4 submit", seconds: 2026 },
+            ],
+          },
+          {
+            name: "* Gitea",
+            seconds: 6007,
+            segments: [
+              { label: "git add", seconds: 1797 },
+              { label: "git commit", seconds: 700 },
+              { label: "git push", seconds: 3510 },
+            ],
+          },
         ],
       },
       {
         label: "Pull (Sync)",
         entries: [
           { name: "Checkpoint", seconds: 512, isUs: true },
+          { name: "Lore", seconds: 584 },
           { name: "Perforce", seconds: 621 },
           { name: "* Gitea", seconds: 2350 },
         ],
@@ -72,16 +80,24 @@ const benchmarks: BenchmarkGroup[] = [
           { name: "Checkpoint (R2)", seconds: 1824, isUs: true },
           { name: "Diversion", seconds: 2358 },
           { name: "Unity Version Control", seconds: 1213 },
-          { name: "* GitHub", seconds: 14030, segments: [
-            { label: "git add", seconds: 1797 },
-            { label: "git commit", seconds: 700 },
-            { label: "git push", seconds: 11533 },
-          ] },
-          { name: "* Azure Repos", seconds: 8632, segments: [
-            { label: "git add", seconds: 1797 },
-            { label: "git commit", seconds: 700 },
-            { label: "git push", seconds: 6430 },
-          ] },
+          {
+            name: "* GitHub",
+            seconds: 14030,
+            segments: [
+              { label: "git add", seconds: 1797 },
+              { label: "git commit", seconds: 700 },
+              { label: "git push", seconds: 11533 },
+            ],
+          },
+          {
+            name: "* Azure Repos",
+            seconds: 8632,
+            segments: [
+              { label: "git add", seconds: 1797 },
+              { label: "git commit", seconds: 700 },
+              { label: "git push", seconds: 6430 },
+            ],
+          },
         ],
       },
       {
@@ -92,24 +108,15 @@ const benchmarks: BenchmarkGroup[] = [
           { name: "Unity Version Control", seconds: 713 },
           { name: "* GitHub", seconds: 6251 },
           { name: "* Azure Repos", seconds: 3438 },
-
         ],
       },
     ],
   },
 ];
 
-const SEGMENT_COLORS_US = [
-  "bg-primary",
-  "bg-primary-light",
-  "bg-accent",
-];
+const SEGMENT_COLORS_US = ["bg-primary", "bg-primary-light", "bg-accent"];
 
-const SEGMENT_COLORS = [
-  "bg-white/10",
-  "bg-white/[0.35]",
-  "bg-white/[0.2]",
-];
+const SEGMENT_COLORS = ["bg-white/10", "bg-white/[0.35]", "bg-white/[0.2]"];
 
 function Bar({ entry, maxSeconds }: { entry: Entry; maxSeconds: number }) {
   const pct = (entry.seconds / maxSeconds) * 100;
@@ -117,14 +124,19 @@ function Bar({ entry, maxSeconds }: { entry: Entry; maxSeconds: number }) {
 
   return (
     <div className="flex items-center gap-4">
-      <span className={`w-28 shrink-0 text-sm font-medium text-right ${entry.isUs ? "text-primary-light" : "text-muted"}`}>
+      <span
+        className={`w-28 shrink-0 text-sm font-medium text-right ${entry.isUs ? "text-primary-light" : "text-muted"}`}
+      >
         {entry.name}
       </span>
       <div className="flex-1">
         <div className="relative h-9 rounded-lg overflow-hidden bg-surface">
           {entry.segments ? (
             /* Segmented bar */
-            <div className="absolute inset-y-0 left-0 flex rounded-lg overflow-hidden" style={{ width: `${pct}%` }}>
+            <div
+              className="absolute inset-y-0 left-0 flex rounded-lg overflow-hidden"
+              style={{ width: `${pct}%` }}
+            >
               {entry.segments.map((seg, i) => {
                 const segPct = (seg.seconds / entry.seconds) * 100;
                 return (
@@ -156,8 +168,13 @@ function Bar({ entry, maxSeconds }: { entry: Entry; maxSeconds: number }) {
         {entry.segments && (
           <div className="flex gap-3 mt-1.5 pl-1">
             {entry.segments.map((seg, i) => (
-              <span key={seg.label} className="flex items-center gap-1.5 text-[11px] text-muted">
-                <span className={`inline-block w-2 h-2 rounded-sm ${colors[i % colors.length]}`} />
+              <span
+                key={seg.label}
+                className="flex items-center gap-1.5 text-[11px] text-muted"
+              >
+                <span
+                  className={`inline-block w-2 h-2 rounded-sm ${colors[i % colors.length]}`}
+                />
                 {seg.label}: {formatTime(seg.seconds)}
               </span>
             ))}
@@ -193,7 +210,8 @@ export default function PerformanceMetrics() {
             >
               Project Titan
             </a>{" "}
-            gameplay template.<br/>
+            gameplay template.
+            <br />
             ~44 GB across ~190K files
           </p>
         </div>
@@ -202,7 +220,7 @@ export default function PerformanceMetrics() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {benchmarks.map((group) => {
             const maxSeconds = Math.max(
-              ...group.tests.flatMap((t) => t.entries.map((e) => e.seconds))
+              ...group.tests.flatMap((t) => t.entries.map((e) => e.seconds)),
             );
             return (
               <div key={group.category} className="glass rounded-2xl p-8">
@@ -237,12 +255,13 @@ export default function PerformanceMetrics() {
 
         {/* Footnote */}
         <p className="mt-8 text-center text-xs text-muted/50">
-          Benchmarks performed using Checkpoint CLI. LAN tests used a local server.
-          Cloud tests used a US West client connecting to a US East storage server
-          with 2 Gbps upload speeds. We could not control where the Git servers were
-          for GitHub and Azure Repos, and likely were also US West.<br/>
-          * Git struggled with the large number of small LFS files (due to Unreal
-          Engine World Partition), causing very long push/pull times.
+          Benchmarks performed using Checkpoint CLI. LAN tests used a local
+          server. Cloud tests used a US West client connecting to a US East
+          storage server with 2 Gbps upload speeds. We could not control where
+          the Git servers were for GitHub and Azure Repos, and likely were also
+          US West.
+          <br />* Git struggled with the large number of small LFS files (due to
+          Unreal Engine World Partition), causing very long push/pull times.
         </p>
       </div>
     </section>
