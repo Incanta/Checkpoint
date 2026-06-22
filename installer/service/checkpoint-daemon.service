@@ -6,7 +6,7 @@ After=network.target
 [Service]
 Type=simple
 User=%i
-ExecStart=/opt/Checkpoint/resources/daemon/checkpoint-daemon
+ExecStart=/opt/Checkpoint/resources/daemon/checkpoint-daemon /opt/Checkpoint/resources/daemon/daemon-bundle.cjs
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production

@@ -5,9 +5,17 @@
     <key>Label</key>
     <string>com.checkpointvcs.daemon</string>
 
+    <!--
+      checkpoint-daemon is a portable Node.js runtime; it runs daemon-bundle.cjs.
+      /usr/local/bin/checkpoint-daemon is a symlink into the app bundle
+      (see installer/macos/scripts/postinstall); node resolves it to its real
+      location so the bundle's native modules load from the daemon dir. The
+      bundle path must be the real path inside the app bundle.
+    -->
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/checkpoint-daemon</string>
+        <string>/Applications/Checkpoint.app/Contents/Resources/daemon/daemon-bundle.cjs</string>
     </array>
 
     <key>RunAtLoad</key>

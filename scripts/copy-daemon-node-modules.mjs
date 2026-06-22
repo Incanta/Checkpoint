@@ -1,13 +1,13 @@
-// Copies the native runtime modules the daemon SEA needs into
-// <dist-sea>/node_modules so the packaged executable can require("better-sqlite3")
+// Copies the native runtime modules the daemon needs into
+// <dist-daemon>/node_modules so the bundle can require("better-sqlite3")
 // at runtime. better-sqlite3 is a native module (a .node binary) and cannot be
-// bundled into the single-file JS blob, so esbuild leaves it external and the
-// SEA loads it from disk next to the executable (see esbuild.config.mjs).
+// bundled into the single-file JS bundle, so esbuild leaves it external and the
+// daemon loads it from disk next to the runtime (see esbuild.config.mjs).
 //
 // Run per-platform during the daemon build so the platform-correct
 // better_sqlite3.node (built by `yarn install`) is the one that ships.
 //
-// Usage: node scripts/copy-sea-node-modules.mjs <dist-sea-dir>
+// Usage: node scripts/copy-daemon-node-modules.mjs <dist-daemon-dir>
 import { createRequire } from "module";
 import fs from "fs";
 import path from "path";
@@ -16,7 +16,9 @@ const require = createRequire(import.meta.url);
 
 const outDir = process.argv[2];
 if (!outDir) {
-  console.error("usage: node scripts/copy-sea-node-modules.mjs <dist-sea-dir>");
+  console.error(
+    "usage: node scripts/copy-daemon-node-modules.mjs <dist-daemon-dir>",
+  );
   process.exit(1);
 }
 

@@ -1,6 +1,7 @@
 node_modules
 lib
 dist
+dist-daemon
 /.data/*
 !/.data/seaweed-config
 wk*

@@ -2,9 +2,10 @@
 ; Lays down the daemon, tray, and CLI binaries, registers tray autostart, and
 ; cleans up on uninstall.
 ;
-; The daemon is NOT installed as a Windows service. It is a Node SEA (a plain
-; console app) that cannot satisfy the Service Control Manager, so `sc.exe`
-; registration produced "error 1053: the service did not respond". Instead the
+; The daemon is NOT installed as a Windows service. It is a portable Node.js
+; runtime (checkpoint-daemon.exe) running daemon-bundle.cjs, a plain console app
+; that cannot satisfy the Service Control Manager, so `sc.exe` registration
+; produced "error 1053: the service did not respond". Instead the
 ; tray (auto-started on login) launches and supervises the daemon as a per-user
 ; process, which also matches the daemon's per-user data model (~/.checkpoint).
 ;

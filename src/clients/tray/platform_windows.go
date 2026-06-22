@@ -58,11 +58,12 @@ func daemonExePath() (string, error) {
 }
 
 // startDaemonService launches the daemon as a detached child process. On
-// Windows the daemon is a per-user process, NOT a Windows service: it is a Node
-// SEA (a plain console app) that cannot satisfy the Service Control Manager,
-// which is what produced "error 1053: the service did not respond". Its
-// stdout/stderr are captured to ~/.checkpoint/logs/daemon-process.log so even
-// early/native crashes are visible (the daemon also writes its own daemon.log).
+// Windows the daemon is a per-user process, NOT a Windows service: it is a
+// portable Node.js runtime (checkpoint-daemon.exe) running daemon-bundle.cjs, a
+// plain console app that cannot satisfy the Service Control Manager, which is
+// what produced "error 1053: the service did not respond". Its stdout/stderr
+// are captured to ~/.checkpoint/logs/daemon-process.log so even early/native
+// crashes are visible (the daemon also writes its own daemon.log).
 func startDaemonService() error {
 	if isDaemonRunning() {
 		logTray("start: daemon already responding on port %d; nothing to launch", getDaemonPort())
@@ -85,7 +86,10 @@ func startDaemonService() error {
 		return err
 	}
 
-	cmd := exec.Command(exe)
+	// The daemon runtime is a portable node renamed to checkpoint-daemon.exe;
+	// it runs daemon-bundle.cjs, which ships alongside it in the daemon dir.
+	bundle := filepath.Join(filepath.Dir(exe), "daemon-bundle.cjs")
+	cmd := exec.Command(exe, bundle)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	// CREATE_NO_WINDOW: the tray is a GUI app (-H windowsgui); don't pop a

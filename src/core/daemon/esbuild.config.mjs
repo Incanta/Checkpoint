@@ -20,13 +20,13 @@ await build({
   sourcemap: false,
   minify: false,
   // Native .node addons cannot be bundled into a single JS file.
-  // They must be shipped alongside the SEA binary and loaded at runtime.
-  // better-sqlite3 is handled by the plugin below (it must be loaded via
-  // createRequire from disk, not the SEA's built-in-only require()).
+  // They must be shipped alongside the daemon runtime and loaded at runtime.
+  // better-sqlite3 is handled by the plugin below (it is loaded via
+  // createRequire from disk next to the runtime, not from the JS bundle).
   external: ["*.node"],
   banner: {
     js: [
-      `// Checkpoint Daemon v${version} (Single Executable Application bundle)`,
+      `// Checkpoint Daemon v${version} (esbuild bundle, run by portable Node.js)`,
       `const __CHECKPOINT_VERSION__ = ${JSON.stringify(version)};`,
       // Make require() available in the CJS bundle for native addon loading
       `const { createRequire } = require("module");`,
@@ -55,9 +55,9 @@ await build({
         build.onLoad(
           { filter: /.*/, namespace: "longtail-addon" },
           (args) => {
-            // At runtime in the SEA binary, process.execPath points to the
-            // daemon binary. The .node addon will be in a lib/ subdirectory
-            // next to it (or in the same directory).
+            // At runtime, process.execPath points to the daemon runtime
+            // (checkpoint-daemon). The .node addon will be in a lib/
+            // subdirectory next to it (or in the same directory).
             const isSubpath = args.path !== "@checkpointvcs/longtail-addon";
             if (isSubpath) {
               // Handle sub-path imports like @checkpointvcs/longtail-addon/types
@@ -114,8 +114,8 @@ await build({
         );
 
         // better-sqlite3 is a native module that ships in node_modules/ next to
-        // the SEA executable. The SEA's built-in require() only resolves core
-        // modules, so load it via createRequire rooted at the executable dir.
+        // the daemon runtime. Load it via createRequire rooted at the runtime's
+        // directory (process.execPath) so it resolves regardless of cwd.
         build.onResolve({ filter: /^better-sqlite3$/ }, (args) => ({
           path: args.path,
           namespace: "sea-external-module",
