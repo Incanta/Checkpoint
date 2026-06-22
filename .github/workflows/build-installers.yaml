@@ -101,7 +101,7 @@ jobs:
           fi
 
       - name: Upload CLI artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cli-${{ matrix.platform }}
           path: |
@@ -186,7 +186,7 @@ jobs:
           .\${{ matrix.build_script }}
 
       - name: Upload Daemon artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: daemon-${{ matrix.platform }}
           path: src/core/daemon/dist-daemon/
@@ -242,7 +242,7 @@ jobs:
         run: cp installer/linux/checkpoint-tray.desktop src/clients/tray/
 
       - name: Upload tray artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tray-${{ matrix.platform }}
           path: |
@@ -592,7 +592,7 @@ jobs:
           npx electron-builder --mac pkg --${{ matrix.electron_arch }} --publish never
 
       - name: Upload installer artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installer-${{ matrix.platform }}
           path: |
