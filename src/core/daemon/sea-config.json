@@ -1,7 +1,0 @@
-{
-  "main": "daemon-bundle.cjs",
-  "output": "daemon-sea.blob",
-  "disableExperimentalSEAWarning": true,
-  "useSnapshot": false,
-  "useCodeCache": false
-}

@@ -36,7 +36,7 @@ export class ApiVersionChecker {
   }
 
   public start(): void {
-    Logger.info(
+    Logger.debug(
       `Starting API version checker (interval: ${CHECK_INTERVAL_MS / 1000}s, daemon's server_api: ${SERVER_API})`,
     );
 
@@ -92,7 +92,7 @@ export class ApiVersionChecker {
             `Daemon below server's minServerApi at ${user.endpoint}: ${result.message}`,
           );
         } else {
-          Logger.info(
+          Logger.trace(
             `Compatible with ${user.endpoint} (daemon server_api: ${SERVER_API}, server: ${versionInfo.serverApi})`,
           );
         }
