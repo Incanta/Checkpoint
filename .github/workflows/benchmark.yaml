@@ -1,0 +1,111 @@
+name: VCS Benchmark
+
+# Coordinator workflow: provisions two DigitalOcean droplets (server + client)
+# per VCS, runs the benchmark over SSH, then tears everything down. All run
+# parameters come from the version-controlled benchmark/config.json, not from
+# dispatch inputs, so every run is reproducible from git history.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Read the committed config and turn the `vcs` list into a job matrix.
+  # --------------------------------------------------------------------------
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.cfg.outputs.matrix }}
+      region: ${{ steps.cfg.outputs.region }}
+      droplet_size: ${{ steps.cfg.outputs.droplet_size }}
+      data_volume_gb: ${{ steps.cfg.outputs.data_volume_gb }}
+      tarball_url: ${{ steps.cfg.outputs.tarball_url }}
+      checkpoint_version: ${{ steps.cfg.outputs.checkpoint_version }}
+      keep_droplets: ${{ steps.cfg.outputs.keep_droplets }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse benchmark/config.json
+        id: cfg
+        run: |
+          node -e '
+            const fs = require("fs");
+            const c = JSON.parse(fs.readFileSync("benchmark/config.json", "utf8"));
+            const out = process.env.GITHUB_OUTPUT;
+            const set = (k, v) => fs.appendFileSync(out, `${k}=${v}\n`);
+            const vcs = Array.isArray(c.vcs) && c.vcs.length ? c.vcs : ["checkpoint"];
+            set("matrix", JSON.stringify(vcs));
+            set("region", c.region || "nyc3");
+            set("droplet_size", c.droplet_size || "c-8");
+            set("data_volume_gb", String(c.data_volume_gb || 200));
+            set("tarball_url", c.tarball_url || "");
+            set("checkpoint_version", c.checkpoint_version || "");
+            set("keep_droplets", String(!!c.keep_droplets));
+          '
+
+  # --------------------------------------------------------------------------
+  # One benchmark run per VCS, each with its own isolated droplet pair.
+  # --------------------------------------------------------------------------
+  benchmark:
+    needs: config
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        vcs: ${{ fromJson(needs.config.outputs.matrix) }}
+    env:
+      REGION: ${{ needs.config.outputs.region }}
+      DROPLET_SIZE: ${{ needs.config.outputs.droplet_size }}
+      DATA_VOLUME_GB: ${{ needs.config.outputs.data_volume_gb }}
+      TARBALL_URL: ${{ needs.config.outputs.tarball_url }}
+      CHECKPOINT_VERSION: ${{ needs.config.outputs.checkpoint_version }}
+      SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+      SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set run tag
+        run: echo "RUN_TAG=bench-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.vcs }}" >> "$GITHUB_ENV"
+
+      - name: Install + authenticate doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Generate ephemeral SSH key and register with DigitalOcean
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keygen -t ed25519 -f ~/.ssh/bench_key -N "" -C "$RUN_TAG"
+          FP=$(doctl compute ssh-key import "$RUN_TAG" \
+            --public-key-file ~/.ssh/bench_key.pub \
+            --format FingerPrint --no-header)
+          echo "SSH_FINGERPRINT=$FP" >> "$GITHUB_ENV"
+
+      - name: Provision droplets
+        env:
+          SSH_FINGERPRINT: ${{ env.SSH_FINGERPRINT }}
+        run: bash benchmark/lib/provision.sh
+
+      - name: Run benchmark
+        run: bash benchmark/run-benchmark.sh --vcs "${{ matrix.vcs }}" --out "timings.${{ matrix.vcs }}.json"
+
+      - name: Render summary
+        if: always()
+        run: |
+          if [ -f "timings.${{ matrix.vcs }}.json" ]; then
+            node benchmark/summarize.js "timings.${{ matrix.vcs }}.json" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload timings artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timings-${{ matrix.vcs }}
+          path: timings.${{ matrix.vcs }}.json
+          if-no-files-found: warn
+
+      - name: Teardown droplets
+        if: always() && needs.config.outputs.keep_droplets != 'true'
+        run: bash benchmark/lib/teardown.sh
