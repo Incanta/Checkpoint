@@ -85,7 +85,7 @@ mkdir -p config
 cat > config/.secrets <<SECRETS
 betterauth_secret=$(openssl rand -hex 32)
 storage_signing_key=$(openssl rand -hex 32)
-database_url=postgresql://checkpoint:checkpoint@postgres:5432/checkpoint
+database_url=file:///app/data/db.sqlite
 SECRETS
 
 # Enable the headless dev-login endpoint on the app.
@@ -97,7 +97,7 @@ AUTH
 
 # Pin image tags when a version is requested; otherwise keep compose defaults.
 if [ -n "$VERSION" ]; then
-  sed -i "s#checkpoint-app:latest-postgres#checkpoint-app:${VERSION}-postgres#" docker-compose.yaml
+  sed -i "s#checkpoint-app:latest-sqlite#checkpoint-app:${VERSION}-sqlite#" docker-compose.yaml
   sed -i "s#checkpoint-server:latest#checkpoint-server:${VERSION}#" docker-compose.yaml
 fi
 
