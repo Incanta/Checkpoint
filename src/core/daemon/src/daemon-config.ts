@@ -93,7 +93,7 @@ export class DaemonConfig {
         compressionAlgo: "zstd",
         enableMmapIndexing: false,
         enableMmapBlockStore: false,
-        enableBlockCache: true,
+        enableBlockCache: false,
         logLevel: "off",
       },
     };
