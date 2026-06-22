@@ -130,7 +130,7 @@ apt-get update -y
 # Node 24 (NodeSource) + toolchain for the native longtail addon and the CLI.
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 apt-get install -y nodejs build-essential cmake python3 libssl-dev git \
-  libcurl4-openssl-dev nlohmann-json3-dev pkg-config awscli curl
+  libcurl4-openssl-dev nlohmann-json3-dev pkg-config curl
 corepack enable
 node --version
 EOF
@@ -217,13 +217,17 @@ EOF
 # Payload
 # ----------------------------------------------------------------------------
 adapter_prepare_payload() {
+  # parse_spaces_url gives us SPACES_REGION for the SigV4 signing string. We
+  # fetch the private object with curl's native AWS SigV4 support (no awscli;
+  # the awscli apt package was dropped in Ubuntu 24.04). curl signs against the
+  # URL host, so the original TARBALL_URL is passed straight through.
   parse_spaces_url "$TARBALL_URL"
   on_client "mkdir -p ${TREE_DIR}"
 
   payload_phase payload_download -- on_client \
-    "AWS_ACCESS_KEY_ID='${SPACES_ACCESS_KEY_ID}' AWS_SECRET_ACCESS_KEY='${SPACES_SECRET_ACCESS_KEY}' \
-     aws s3 cp 's3://${SPACES_BUCKET}/${SPACES_KEY}' '${WORK_DIR}/payload.tar.gz' \
-     --endpoint-url '${SPACES_ENDPOINT}'"
+    "curl -fsS --aws-sigv4 'aws:amz:${SPACES_REGION}:s3' \
+       --user '${SPACES_ACCESS_KEY_ID}:${SPACES_SECRET_ACCESS_KEY}' \
+       -o '${WORK_DIR}/payload.tar.gz' '${TARBALL_URL}'"
 
   payload_phase payload_extract -- on_client \
     "tar xf '${WORK_DIR}/payload.tar.gz' -C '${TREE_DIR}'"
