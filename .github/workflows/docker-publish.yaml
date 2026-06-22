@@ -1,13 +1,8 @@
 name: Docker Publish
-run-name: Docker Publish ${{ inputs.version }}
+run-name: Docker Publish ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Version tag (e.g., 1.2.3)"
-        required: true
-        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -16,9 +11,16 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
+      version: ${{ steps.version.outputs.version }}
       app_image: ${{ steps.vars.outputs.app_image }}
       server_image: ${{ steps.vars.outputs.server_image }}
     steps:
+      - uses: actions/checkout@v6
+
+      - name: Determine version
+        id: version
+        run: echo "version=$(jq -r '.server_version' versions.json)" >> "$GITHUB_OUTPUT"
+
       - name: Set lowercase image names
         id: vars
         run: |
@@ -62,7 +64,7 @@ jobs:
           build-args: |
             DB_PROVIDER=${{ matrix.db_provider }}
           tags: |
-            ${{ env.REGISTRY }}/${{ needs.setup.outputs.app_image }}:${{ inputs.version }}-${{ matrix.tag }}
+            ${{ env.REGISTRY }}/${{ needs.setup.outputs.app_image }}:${{ needs.setup.outputs.version }}-${{ matrix.tag }}
             ${{ env.REGISTRY }}/${{ needs.setup.outputs.app_image }}:latest-${{ matrix.tag }}
           platforms: linux/amd64
           cache-from: type=gha,scope=app-${{ matrix.tag }}
@@ -95,7 +97,7 @@ jobs:
           file: src/core/server/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ needs.setup.outputs.server_image }}:${{ inputs.version }}
+            ${{ env.REGISTRY }}/${{ needs.setup.outputs.server_image }}:${{ needs.setup.outputs.version }}
             ${{ env.REGISTRY }}/${{ needs.setup.outputs.server_image }}:latest
           platforms: linux/amd64
           cache-from: type=gha,scope=server
