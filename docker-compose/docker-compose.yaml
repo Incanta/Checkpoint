@@ -5,38 +5,38 @@ services:
   # Recommended database for Checkpoint. The credentials below are
   # development defaults: change POSTGRES_PASSWORD before any real use, and
   # keep it in sync with `database_url` in ./config/.secrets.
-  postgres:
-    container_name: checkpoint-postgres
-    image: postgres:17-alpine
-    restart: unless-stopped
-    networks:
-      - checkpoint
-    environment:
-      POSTGRES_USER: checkpoint
-      POSTGRES_PASSWORD: checkpoint
-      POSTGRES_DB: checkpoint
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U checkpoint -d checkpoint"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+  # postgres:
+  #   container_name: checkpoint-postgres
+  #   image: postgres:17-alpine
+  #   restart: unless-stopped
+  #   networks:
+  #     - checkpoint
+  #   environment:
+  #     POSTGRES_USER: checkpoint
+  #     POSTGRES_PASSWORD: checkpoint
+  #     POSTGRES_DB: checkpoint
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U checkpoint -d checkpoint"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 10
 
   # ----------------------------------------------------------------
   # App: Next.js application (UI + API)
   # ----------------------------------------------------------------
   app:
     container_name: checkpoint-app
-    image: ghcr.io/incanta/checkpoint-app:latest-postgres
+    image: ghcr.io/incanta/checkpoint-app:latest-sqlite
     restart: unless-stopped
     networks:
       - checkpoint
     ports:
       - "13000:13000"
-    depends_on:
-      postgres:
-        condition: service_healthy
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
     volumes:
       - ./config/app:/app/config
       - ./config/.secrets:/app/.secrets:ro
@@ -109,7 +109,7 @@ services:
       - seaweed-filer-data:/data
 
 volumes:
-  postgres-data:
+  # postgres-data:
   storage-data:
   seaweed-master-data:
   seaweed-volume-data:
