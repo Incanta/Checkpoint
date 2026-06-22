@@ -19,6 +19,59 @@
 
 !include "LogicLib.nsh"
 
+; URL for the Microsoft Visual C++ x64 Redistributable. This "aka.ms" permalink
+; always resolves to the latest 14.x (VS 2015-2022) redist, whose runtime is
+; backward compatible.
+!define VCREDIST_URL "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+
+; EnsureVCRedist: the longtail addon (longtail_addon.node) and better-sqlite3
+; are MSVC-built native modules that dynamically link the Visual C++ runtime
+; (vcruntime140.dll / msvcp140.dll). Without that runtime the daemon crashes at
+; startup with a cryptic "DLL not found". This checks for the x64 runtime and,
+; if missing, offers to download and install it before the tray/daemon launch.
+Function EnsureVCRedist
+    ; The x64 redist records itself in the 64-bit registry view; this installer
+    ; is 32-bit, so switch views for the read, then switch back.
+    SetRegView 64
+    ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
+    SetRegView 32
+
+    ${If} $0 == 1
+        DetailPrint "Visual C++ x64 Redistributable already installed."
+        Return
+    ${EndIf}
+
+    MessageBox MB_YESNO|MB_ICONQUESTION \
+        "Checkpoint requires the Microsoft Visual C++ x64 Redistributable, which is not installed.$\n$\nDownload and install it now? Checkpoint will not run without it." \
+        IDYES vcredist_download IDNO vcredist_skip
+
+    vcredist_download:
+        DetailPrint "Downloading Microsoft Visual C++ Redistributable..."
+        INetC::get /CAPTION "Checkpoint Setup" \
+            /BANNER "Downloading the Microsoft Visual C++ Redistributable...$\nThis is required for Checkpoint to run." \
+            "${VCREDIST_URL}" "$PLUGINSDIR\vc_redist.x64.exe" /END
+        Pop $1
+        ${If} $1 != "OK"
+            MessageBox MB_OK|MB_ICONEXCLAMATION \
+                "Could not download the Visual C++ Redistributable ($1).$\n$\nInstall it manually from:$\n${VCREDIST_URL}$\n$\nCheckpoint will not start until it is installed."
+            Return
+        ${EndIf}
+        DetailPrint "Installing Microsoft Visual C++ Redistributable..."
+        ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /passive /norestart' $2
+        ; 0 = success; 3010 = success, reboot required; 1638 = newer already present.
+        ${If} $2 != 0
+        ${AndIf} $2 != 3010
+        ${AndIf} $2 != 1638
+            MessageBox MB_OK|MB_ICONEXCLAMATION \
+                "The Visual C++ Redistributable installer exited with code $2.$\n$\nIf Checkpoint fails to start, install it manually from:$\n${VCREDIST_URL}"
+        ${EndIf}
+        Return
+
+    vcredist_skip:
+        MessageBox MB_OK|MB_ICONEXCLAMATION \
+            "Skipped. Checkpoint requires the Visual C++ x64 Redistributable and will not start until it is installed.$\n$\nGet it from:$\n${VCREDIST_URL}"
+FunctionEnd
+
 !macro customInstall
     ; Kill any running Checkpoint processes first. Without this, in-place
     ; upgrades fail with "file in use" because the running binaries hold locks
@@ -27,6 +80,10 @@
     nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
     nsExec::ExecToLog 'taskkill /f /im checkpoint-daemon.exe'
     Sleep 1000
+
+    ; Ensure the Visual C++ runtime is present before the tray launches the
+    ; daemon, which loads the native longtail addon and better-sqlite3.
+    Call EnsureVCRedist
 
     ; ---- Daemon binaries (launched by the tray, not a service) ----
     SetOutPath "$INSTDIR\daemon"

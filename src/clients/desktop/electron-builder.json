@@ -129,7 +129,8 @@
       "libxtst6",
       "xdg-utils",
       "libatspi2.0-0",
-      "libuuid1"
+      "libuuid1",
+      "libssl3"
     ],
     "afterInstall": "../../../installer/scripts/postinstall-linux.sh",
     "afterRemove": "../../../installer/scripts/preremove-linux.sh"
@@ -142,7 +143,8 @@
       "libXScrnSaver",
       "libXtst",
       "xdg-utils",
-      "at-spi2-core"
+      "at-spi2-core",
+      "openssl-libs"
     ],
     "afterInstall": "../../../installer/scripts/postinstall-linux.sh",
     "afterRemove": "../../../installer/scripts/preremove-linux.sh"
