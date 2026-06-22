@@ -33,8 +33,11 @@ ENV_FILE="${PROVISION_ENV_FILE:-${GITHUB_ENV:-/dev/stdout}}"
 emit() { echo "$1=$2" >>"$ENV_FILE"; }
 
 log "creating VPC ${RUN_TAG} in ${REGION}"
-VPC_ID="$(doctl vpcs create --name "$RUN_TAG" --region "$REGION" \
-  --format ID --no-header)"
+# `doctl vpcs` is a top-level command and does not support --format/--no-header
+# (unlike the `compute` subcommands), so request JSON and parse the id.
+VPC_ID="$(doctl vpcs create --name "$RUN_TAG" --region "$REGION" -o json \
+  | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{process.stdout.write(JSON.parse(d)[0].id)})')"
+[ -n "$VPC_ID" ] || die "failed to create VPC"
 emit VPC_ID "$VPC_ID"
 
 log "creating ${DATA_VOLUME_GB}GiB data volume ${VOLUME_NAME}"
