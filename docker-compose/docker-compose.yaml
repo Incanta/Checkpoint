@@ -38,6 +38,7 @@ services:
     #   postgres:
     #     condition: service_healthy
     volumes:
+      - app-data:/app/data
       - ./config/app:/app/config
       - ./config/.secrets:/app/.secrets:ro
 
@@ -110,6 +111,7 @@ services:
 
 volumes:
   # postgres-data:
+  app-data:
   storage-data:
   seaweed-master-data:
   seaweed-volume-data:
