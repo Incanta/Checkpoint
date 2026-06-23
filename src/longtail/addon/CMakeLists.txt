@@ -66,7 +66,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(curl)
 
 # --------------------------------------------------------------------------
-# Wrapper source files — compiled directly into the addon
+# Wrapper source files, compiled directly into the addon
 # --------------------------------------------------------------------------
 
 set(WRAPPER_DIR "${CMAKE_SOURCE_DIR}/../wrapper")
@@ -80,9 +80,16 @@ file(GLOB WRAPPER_SOURCES
 # Addon target
 # --------------------------------------------------------------------------
 
+# NOTE: ${CMAKE_JS_SRC} is required on Windows. It points to
+# win_delay_load_hook.cc, which redirects the addon's delay-loaded "node.exe"
+# N-API imports to the host process (GetModuleHandle(NULL)). Without it, an
+# addon built with /DELAYLOAD:NODE.EXE running under a renamed node host
+# (checkpoint-daemon.exe) calls LoadLibraryA("node.exe"), loading a SECOND
+# Node/V8 runtime and segfaulting on the first napi_* call.
 add_library(${PROJECT_NAME} SHARED
   src/longtail-addon.cpp
   ${WRAPPER_SOURCES}
+  ${CMAKE_JS_SRC}
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
