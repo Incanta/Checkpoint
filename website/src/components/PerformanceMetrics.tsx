@@ -79,7 +79,6 @@ const benchmarks: BenchmarkGroup[] = [
         entries: [
           { name: "Checkpoint (R2)", seconds: 1824, isUs: true },
           { name: "Diversion", seconds: 2358 },
-          { name: "Unity Version Control", seconds: 1213 },
           {
             name: "* GitHub",
             seconds: 14030,
@@ -105,7 +104,6 @@ const benchmarks: BenchmarkGroup[] = [
         entries: [
           { name: "Checkpoint (R2)", seconds: 1520, isUs: true },
           { name: "Diversion", seconds: 1470 },
-          { name: "Unity Version Control", seconds: 713 },
           { name: "* GitHub", seconds: 6251 },
           { name: "* Azure Repos", seconds: 3438 },
         ],
