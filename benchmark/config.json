@@ -1,5 +1,5 @@
 {
-  "tarball_url": "https://incantagames.sfo3.digitaloceanspaces.com/checkpoint/project-titan.tar.gz",
+  "tarball_url": "https://incantagames.sfo3.digitaloceanspaces.com/checkpoint/lyra.tar.gz",
   "region": "sfo3",
   "droplet_size": "c-8",
   "data_volume_gb": 400,
