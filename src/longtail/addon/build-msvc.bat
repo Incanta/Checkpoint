@@ -8,24 +8,34 @@ REM Usage: build-msvc.bat [debug]
 set "BUILD_TYPE=Release"
 if /i "%1"=="debug" set "BUILD_TYPE=Debug"
 
-REM Find Visual Studio
+REM Find Visual Studio. Prefer vswhere (ships at a fixed location with every
+REM VS 2017+ install and on all GitHub windows runners); it is agnostic to
+REM edition, version, and install path, unlike hardcoded directory checks.
 set "VSINSTALL="
-if exist "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" (
-    set "VSINSTALL=C:\Program Files\Microsoft Visual Studio\2022\Community"
-    goto :found_vs
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if exist "!VSWHERE!" (
+    for /f "usebackq tokens=*" %%i in (`"!VSWHERE!" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%i"
 )
-if exist "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" (
-    set "VSINSTALL=C:\Program Files\Microsoft Visual Studio\2022\Professional"
-    goto :found_vs
-)
-if exist "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" (
-    set "VSINSTALL=C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
-    goto :found_vs
-)
-echo ERROR: Cannot find Visual Studio installation
-exit /b 1
 
-:found_vs
+REM Fallback to well-known install paths if vswhere is unavailable or finds nothing
+if not defined VSINSTALL (
+    for %%E in (Community Professional Enterprise BuildTools) do (
+        if exist "C:\Program Files\Microsoft Visual Studio\2022\%%E\VC\Auxiliary\Build\vcvars64.bat" (
+            set "VSINSTALL=C:\Program Files\Microsoft Visual Studio\2022\%%E"
+        )
+    )
+)
+
+if not defined VSINSTALL (
+    echo ERROR: Cannot find Visual Studio installation
+    exit /b 1
+)
+
+if not exist "!VSINSTALL!\VC\Auxiliary\Build\vcvars64.bat" (
+    echo ERROR: vcvars64.bat not found under !VSINSTALL!
+    exit /b 1
+)
+
 echo Using Visual Studio at: !VSINSTALL!
 call "!VSINSTALL!\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 
@@ -85,7 +95,7 @@ if not exist "!BUILD_DIR!\CMakeCache.txt" (
 ) else (
     findstr /C:"CMAKE_GENERATOR:INTERNAL=NMake Makefiles" "!BUILD_DIR!\CMakeCache.txt" >nul 2>&1
     if errorlevel 1 (
-        echo Detected stale build config ^(wrong generator^) — reconfiguring...
+        echo Detected stale build config ^(wrong generator^), reconfiguring...
         rmdir /s /q "!BUILD_DIR!"
         mkdir "!BUILD_DIR!"
         set "NEED_CONFIGURE=1"

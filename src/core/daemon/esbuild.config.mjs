@@ -35,7 +35,12 @@ await build({
   },
   define: {
     "process.env.CHECKPOINT_VERSION": JSON.stringify(version),
+    // CJS output replaces `import.meta` with `{}`, so `import.meta.url` becomes
+    // undefined and breaks deps like `open` that call fileURLToPath on it at
+    // load time. Map it to the injected `importMetaUrl` binding instead.
+    "import.meta.url": "importMetaUrl",
   },
+  inject: [path.resolve(__dirname, "import-meta-url-shim.mjs")],
   plugins: [
     {
       name: "native-addon-resolver",
