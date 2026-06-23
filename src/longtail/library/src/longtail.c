@@ -823,7 +823,7 @@ static uint32_t Longtail_MakeLogFields(struct Longtail_LogContextFmt_Private* lo
     uint32_t fields_left = *fields_left_ptr;
     char* char_buffer = *char_buffer_ptr;
     uint32_t chars_left = *chars_left_ptr;
-    for (size_t f = 0; (f < log_context->field_count) && (f < fields_left > 0) && (chars_left > 1); ++f)
+    for (size_t f = 0; (f < log_context->field_count) && (fields_left > 0) && (chars_left > 1); ++f)
     {
         struct Longtail_LogFieldFmt_Private* log_field_fmt = &log_context->fields[f];
         field->name = log_field_fmt->name;
