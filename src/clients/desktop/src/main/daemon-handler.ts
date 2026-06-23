@@ -10,6 +10,7 @@ import {
 } from "@checkpointvcs/common";
 import { MockedData } from "../common/mock-data";
 import { User, usersAtom, currentUserAtom } from "../common/state/auth";
+import { daemonConnectionAtom } from "../common/state/daemon";
 import { store } from "../common/state/store";
 import { Channels, ipcOn, ipcSend, ipcHandle } from "./channels";
 import {
@@ -46,6 +47,10 @@ import { promisify } from "util";
 const execAsync = promisify(exec);
 
 const JOB_POLL_INTERVAL_MS = 500;
+
+// How long to wait between attempts to reach the daemon while it is
+// unreachable. The renderer shows a "connecting" screen during this time.
+const DAEMON_CONNECT_RETRY_MS = 1500;
 
 interface DaemonJobResult {
   status: string;
@@ -119,32 +124,13 @@ export default class DaemonHandler {
   public async init(webContents: Electron.WebContents): Promise<void> {
     this.webContents = webContents;
 
-    if (this.isMocked) {
-      store.set(usersAtom, []);
-    } else {
-      const client = await CreateDaemonClient();
-
-      const users = await client.auth.getUsers.query();
-      const usersValue = users.users.map((user) => ({
-        daemonId: user.daemonId,
-        endpoint: user.endpoint,
-        details: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          username: user.username,
-          image: user.image ?? null,
-        },
-        auth: undefined,
-      }));
-
-      store.set(usersAtom, usersValue);
-
-      // TODO remember the last active user
-      if (usersValue.length > 0) {
-        store.set(currentUserAtom, usersValue[0]);
+    ipcOn(this.ipcMain, "app:open-external", async (_event, data) => {
+      try {
+        await shell.openExternal(data.url);
+      } catch (error) {
+        console.error("Failed to open external URL:", error);
       }
-    }
+    });
 
     ipcOn(this.ipcMain, "auth:login", async (_event, data) => {
       this.handleLogin(data);
@@ -360,6 +346,61 @@ export default class DaemonHandler {
 
     // API version compatibility checker
     this.initVersionCheckHandlers();
+
+    // Establish the daemon connection in the background, retrying until the
+    // daemon answers. The renderer shows a "connecting" screen meanwhile.
+    void this.connectToDaemon();
+  }
+
+  /**
+   * Connects to the local daemon and loads the user list. Retries
+   * indefinitely while the daemon is unreachable so the app recovers
+   * automatically once the daemon is started (e.g. from the tray). The
+   * renderer observes `daemonConnectionAtom` to show a connecting screen.
+   */
+  private async connectToDaemon(): Promise<void> {
+    if (this.isMocked) {
+      store.set(usersAtom, []);
+      store.set(daemonConnectionAtom, "connected");
+      return;
+    }
+
+    store.set(daemonConnectionAtom, "connecting");
+
+    for (;;) {
+      try {
+        const client = await CreateDaemonClient();
+
+        const users = await client.auth.getUsers.query();
+        const usersValue = users.users.map((user) => ({
+          daemonId: user.daemonId,
+          endpoint: user.endpoint,
+          details: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            username: user.username,
+            image: user.image ?? null,
+          },
+          auth: undefined,
+        }));
+
+        store.set(usersAtom, usersValue);
+
+        // TODO remember the last active user
+        if (usersValue.length > 0) {
+          store.set(currentUserAtom, usersValue[0]);
+        }
+
+        store.set(daemonConnectionAtom, "connected");
+        return;
+      } catch (error) {
+        console.error("Could not reach the daemon, retrying shortly:", error);
+        await new Promise((resolve) =>
+          setTimeout(resolve, DAEMON_CONNECT_RETRY_MS),
+        );
+      }
+    }
   }
 
   private async handleLogin(data: Channels["auth:login"]): Promise<void> {

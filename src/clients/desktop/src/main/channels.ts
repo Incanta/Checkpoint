@@ -25,6 +25,9 @@ export type Channels = {
   "state:get": null;
   "atom:value": { key: string; value: any };
 
+  // Open a URL in the user's default browser.
+  "app:open-external": { url: string };
+
   "auth:login": { daemonId: string; endpoint: string };
   "auth:logout": { daemonId: string };
   "auth:logout:success": null;
