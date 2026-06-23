@@ -471,8 +471,15 @@ inline int cmdAdd(const std::vector<std::string>& files) {
       // files instead of collapsing it.  Treat the path as a glob to
       // find all pending children.  Fully untracked child directories
       // appear as single Directory/Local entries (no further recursion needed).
+      //
+      // The workspace root resolves to "." (or "" when passed explicitly);
+      // it is never a key in pending.files, and the "./" prefix would match
+      // nothing. Use an empty prefix so it matches every pending file, which
+      // makes `chk add .` stage the whole (non-ignored) tree.
       std::string prefix = p;
-      if (!prefix.empty() && prefix.back() != '/') {
+      if (prefix == "." || prefix.empty()) {
+        prefix = "";
+      } else if (prefix.back() != '/') {
         prefix += '/';
       }
 
