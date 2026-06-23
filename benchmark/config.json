@@ -5,7 +5,8 @@
   "data_volume_gb": 200,
   "vcs": [
     "checkpoint",
-    "lore"
+    "lore",
+    "gitea"
   ],
   "checkpoint_version": "",
   "keep_droplets": false

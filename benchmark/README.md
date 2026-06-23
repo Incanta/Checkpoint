@@ -10,8 +10,9 @@ The GitHub Actions runner is only a **coordinator**: it provisions, orchestrates
 over SSH, collects timings, and tears the droplets down. The 50GB workload lives
 on the droplets, never on the runner.
 
-Scope today: **Checkpoint** and **Lore** (Epic Games' Lore VCS) are implemented
-end-to-end. `perforce` and `gitea` are fast-fail stubs (see `adapters/*.sh`).
+Scope today: **Checkpoint**, **Lore** (Epic Games' Lore VCS), and **Gitea**
+(git + Git LFS) are implemented end-to-end. `perforce` is a fast-fail stub (see
+`adapters/*.sh`).
 
 ## How to run
 
@@ -110,6 +111,14 @@ needed.
 - **Server**: `loreserver` runs non-demo from a small TOML config (cert + a node-local store under `/var/lib/lore/store`). QUIC and gRPC share `:41337`; HTTP health is `:41339/health_check`. Like Checkpoint, the server uses its base disk (the data volume is the client's), so a full 50GB run would want a dedicated server volume too.
 - **TLS**: the client URL uses the plain `lore://` scheme. Lore only verifies the server certificate when the scheme ends in `s` (`lores://`), so `lore://` skips verification, the same trust model the official quickstart uses. That avoids distributing a CA to reach the server over the private VPC IP. The server still presents a self-signed cert (private IP in the SAN).
 - **Ignore file**: `.loreignore`, gitignore-style patterns.
+
+## Gitea adapter notes
+
+- **Install**: server is the official `gitea/gitea` Docker image (SQLite, LFS server on, install lock set); client uses `git` + `git-lfs` from apt.
+- **Auth**: HTTP basic, stored once in `/root/.git-credentials` so neither `git` nor `git-lfs` prompts. The benchmark user is created with `gitea admin user create`; the repo is created over the API.
+- **LFS**: large binary asset types (a representative Unreal set: `*.uasset`, `*.umap`, textures, audio, models, etc.) are routed through Git LFS via a committed `.gitattributes`. Source/config files stay as normal git objects, matching a real Unreal-on-git workflow. Files whose extensions are not in that list go through plain git, so adjust `.gitattributes` in the adapter if a payload has other large types.
+- **Phases**: git separates local commit from network push, so all three are timed: `add_all` = `git add -A` (runs the LFS clean filter), `commit_all` = `git commit`, `submit_all` = `git push` (LFS objects upload here).
+- **Disk**: git-lfs keeps a local object cache (`.git/lfs/objects`) on top of the working copy, so a tracked tree costs roughly 2x its size on the client, and the fresh pull doubles that again. Budget a larger `data_volume_gb` for Gitea than for Checkpoint/Lore at the same payload size. Like the others, the server uses its base disk for repo + LFS storage; a full 50GB run would want a dedicated server volume.
 
 ## Notes, costs, and caveats
 
