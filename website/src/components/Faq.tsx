@@ -136,18 +136,6 @@ export default function Faq() {
           <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
             Frequently asked questions
           </h2>
-          <p className="text-muted text-lg">
-            Still have questions?{" "}
-            <a
-              href="https://github.com/Incanta/Checkpoint/discussions"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary-light hover:underline"
-            >
-              Ask on GitHub
-            </a>
-            .
-          </p>
         </div>
 
         {/* Accordion */}
