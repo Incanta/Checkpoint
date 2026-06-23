@@ -1,12 +1,16 @@
 "use client";
 
 import { type JSX, useState } from "react";
+import CloudInterestModal from "./CloudInterestModal";
 
-const faqs = [
+const faqs: {
+  question: string;
+  answer: (props: { onSubmitInterest: () => void }) => JSX.Element;
+}[] = [
   {
     question:
       "Do you support large binary files like textures, meshes, or video?",
-    answer: (
+    answer: () => (
       <span>
         That&apos;s exactly what Checkpoint is built for. There are no
         artificial file size limits. Large binaries are stored and transferred
@@ -18,7 +22,7 @@ const faqs = [
   {
     question:
       "Why the dual licensing? How does it compare to something like MIT? Can I use it for commercial projects?",
-    answer: (
+    answer: () => (
       <span>
         <strong>
           This is not legal advice; read the licenses for full details.
@@ -47,14 +51,35 @@ const faqs = [
       </span>
     ),
   },
+  {
+    question: "Will there be a managed cloud service for Checkpoint?",
+    answer: ({ onSubmitInterest }) => (
+      <span>
+        This is something we&apos;re actively exploring. You&apos;ll see some
+        references to a hosted service in the source code, but we&apos;ve paused
+        development to focus on the self-hosted experience and see if
+        there&apos;s enough demand for a managed service.{" "}
+        <button
+          type="button"
+          onClick={onSubmitInterest}
+          className="text-primary-light hover:underline"
+        >
+          Register your interest
+        </button>{" "}
+        to help us gauge demand.
+      </span>
+    ),
+  },
 ];
 
 function FaqItem({
   question,
   answer,
+  onSubmitInterest,
 }: {
   question: string;
-  answer: JSX.Element;
+  answer: (props: { onSubmitInterest: () => void }) => JSX.Element;
+  onSubmitInterest: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -86,7 +111,7 @@ function FaqItem({
       >
         <div className="overflow-hidden">
           <p className="px-6 pb-5 text-sm text-muted leading-relaxed">
-            {answer}
+            {answer({ onSubmitInterest })}
           </p>
         </div>
       </div>
@@ -95,6 +120,8 @@ function FaqItem({
 }
 
 export default function Faq() {
+  const [modalOpen, setModalOpen] = useState(false);
+
   return (
     <section id="faq" className="relative py-32 overflow-hidden">
       {/* Divider glow */}
@@ -130,10 +157,16 @@ export default function Faq() {
               key={faq.question}
               question={faq.question}
               answer={faq.answer}
+              onSubmitInterest={() => setModalOpen(true)}
             />
           ))}
         </div>
       </div>
+
+      <CloudInterestModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+      />
     </section>
   );
 }
