@@ -139,13 +139,15 @@ EOF
 }
 
 adapter_submit_ignore() {
-  on_client "cd ${TREE_DIR} && p4 -c ${WS_MAIN} submit -d 'benchmark: ignore file'"
+  on_client "cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} submit -d 'benchmark: ignore file'"
 }
 
 adapter_add_all() {
   # reconcile -a opens every workspace file not yet in the depot for add,
-  # honoring P4IGNORE. This is the heavy staging step.
-  on_client "cd ${TREE_DIR} && p4 -c ${WS_MAIN} reconcile -a"
+  # honoring P4IGNORE. This is the heavy staging step. -q suppresses the
+  # per-file "opened for add" lines (one per file would flood the CI log on a
+  # tree this size); errors still print.
+  on_client "cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} reconcile -a"
 }
 
 adapter_commit_all() {
@@ -153,7 +155,8 @@ adapter_commit_all() {
 }
 
 adapter_submit_all() {
-  on_client "cd ${TREE_DIR} && p4 -c ${WS_MAIN} submit -d 'benchmark: full tree'"
+  # -q suppresses the per-file submit lines (see add_all).
+  on_client "cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} submit -d 'benchmark: full tree'"
 }
 
 adapter_pull_elsewhere() {
@@ -165,6 +168,7 @@ mkdir -p "${PULL_DIR}"
 p4 --field "Root=${PULL_DIR}" \
    --field "View=//${DEPOT}/... //${WS}/..." \
    client -o "${WS}" | p4 client -i
-p4 -c "${WS}" sync
+# -q suppresses the per-file "added as ..." lines from the full sync.
+p4 -q -c "${WS}" sync
 EOF
 }
