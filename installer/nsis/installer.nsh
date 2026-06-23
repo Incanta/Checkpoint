@@ -47,13 +47,16 @@ Function EnsureVCRedist
 
     vcredist_download:
         DetailPrint "Downloading Microsoft Visual C++ Redistributable..."
-        INetC::get /CAPTION "Checkpoint Setup" \
-            /BANNER "Downloading the Microsoft Visual C++ Redistributable...$\nThis is required for Checkpoint to run." \
-            "${VCREDIST_URL}" "$PLUGINSDIR\vc_redist.x64.exe" /END
+        ; Download with curl.exe, which ships in Windows 10 1803+ and Windows 11.
+        ; This avoids depending on the INetC NSIS plugin, which is not part of
+        ; electron-builder's bundled NSIS plugin set (makensis aborts with
+        ; "Plugin not found, cannot call INetC::get" when it is referenced).
+        nsExec::ExecToLog 'curl.exe -L --fail --silent --show-error \
+            -o "$PLUGINSDIR\vc_redist.x64.exe" "${VCREDIST_URL}"'
         Pop $1
-        ${If} $1 != "OK"
+        ${If} $1 != 0
             MessageBox MB_OK|MB_ICONEXCLAMATION \
-                "Could not download the Visual C++ Redistributable ($1).$\n$\nInstall it manually from:$\n${VCREDIST_URL}$\n$\nCheckpoint will not start until it is installed."
+                "Could not download the Visual C++ Redistributable (curl exit $1).$\n$\nInstall it manually from:$\n${VCREDIST_URL}$\n$\nCheckpoint will not start until it is installed."
             Return
         ${EndIf}
         DetailPrint "Installing Microsoft Visual C++ Redistributable..."
