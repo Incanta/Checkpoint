@@ -24,21 +24,37 @@
 ; backward compatible.
 !define VCREDIST_URL "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
-; EnsureVCRedist: the longtail addon (longtail_addon.node) and better-sqlite3
-; are MSVC-built native modules that dynamically link the Visual C++ runtime
-; (vcruntime140.dll / msvcp140.dll). Without that runtime the daemon crashes at
-; startup with a cryptic "DLL not found". This checks for the x64 runtime and,
-; if missing, offers to download and install it before the tray/daemon launch.
-Function EnsureVCRedist
-    ; The x64 redist records itself in the 64-bit registry view; this installer
-    ; is 32-bit, so switch views for the read, then switch back.
+!macro customInstall
+    ; Kill any running Checkpoint processes first. Without this, in-place
+    ; upgrades fail with "file in use" because the running binaries hold locks
+    ; on the files we're replacing.
+    nsExec::ExecToLog 'taskkill /f /im Checkpoint.exe'
+    nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
+    nsExec::ExecToLog 'taskkill /f /im checkpoint-daemon.exe'
+    Sleep 1000
+
+    ; ---- Ensure the Visual C++ x64 runtime is present ----
+    ; The longtail addon (longtail_addon.node) and better-sqlite3 are MSVC-built
+    ; native modules that dynamically link the Visual C++ runtime (vcruntime140.dll
+    ; / msvcp140.dll). Without it the daemon crashes at startup with a cryptic
+    ; "DLL not found", so check for the x64 runtime and, if missing, offer to
+    ; download and install it before the tray launches the daemon.
+    ;
+    ; This is inlined rather than a separate Function: electron-builder's NSIS
+    ; build treats warnings as errors, and a Function called only from an
+    ; !insertmacro'd hook is reported as unreferenced (warning 6010), which fails
+    ; the build. Returns are therefore Gotos to vcredist_done so they skip only
+    ; the VC check, not the rest of customInstall.
+    ;
+    ; The x64 redist records itself in the 64-bit registry view; this installer is
+    ; 32-bit, so switch views for the read, then switch back.
     SetRegView 64
     ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
     SetRegView 32
 
     ${If} $0 == 1
         DetailPrint "Visual C++ x64 Redistributable already installed."
-        Return
+        Goto vcredist_done
     ${EndIf}
 
     MessageBox MB_YESNO|MB_ICONQUESTION \
@@ -49,15 +65,13 @@ Function EnsureVCRedist
         DetailPrint "Downloading Microsoft Visual C++ Redistributable..."
         ; Download with curl.exe, which ships in Windows 10 1803+ and Windows 11.
         ; This avoids depending on the INetC NSIS plugin, which is not part of
-        ; electron-builder's bundled NSIS plugin set (makensis aborts with
-        ; "Plugin not found, cannot call INetC::get" when it is referenced).
-        nsExec::ExecToLog 'curl.exe -L --fail --silent --show-error \
-            -o "$PLUGINSDIR\vc_redist.x64.exe" "${VCREDIST_URL}"'
+        ; electron-builder's bundled NSIS plugin set.
+        nsExec::ExecToLog 'curl.exe -L --fail --silent --show-error -o "$PLUGINSDIR\vc_redist.x64.exe" "${VCREDIST_URL}"'
         Pop $1
         ${If} $1 != 0
             MessageBox MB_OK|MB_ICONEXCLAMATION \
                 "Could not download the Visual C++ Redistributable (curl exit $1).$\n$\nInstall it manually from:$\n${VCREDIST_URL}$\n$\nCheckpoint will not start until it is installed."
-            Return
+            Goto vcredist_done
         ${EndIf}
         DetailPrint "Installing Microsoft Visual C++ Redistributable..."
         ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /passive /norestart' $2
@@ -68,25 +82,13 @@ Function EnsureVCRedist
             MessageBox MB_OK|MB_ICONEXCLAMATION \
                 "The Visual C++ Redistributable installer exited with code $2.$\n$\nIf Checkpoint fails to start, install it manually from:$\n${VCREDIST_URL}"
         ${EndIf}
-        Return
+        Goto vcredist_done
 
     vcredist_skip:
         MessageBox MB_OK|MB_ICONEXCLAMATION \
             "Skipped. Checkpoint requires the Visual C++ x64 Redistributable and will not start until it is installed.$\n$\nGet it from:$\n${VCREDIST_URL}"
-FunctionEnd
 
-!macro customInstall
-    ; Kill any running Checkpoint processes first. Without this, in-place
-    ; upgrades fail with "file in use" because the running binaries hold locks
-    ; on the files we're replacing.
-    nsExec::ExecToLog 'taskkill /f /im Checkpoint.exe'
-    nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
-    nsExec::ExecToLog 'taskkill /f /im checkpoint-daemon.exe'
-    Sleep 1000
-
-    ; Ensure the Visual C++ runtime is present before the tray launches the
-    ; daemon, which loads the native longtail addon and better-sqlite3.
-    Call EnsureVCRedist
+    vcredist_done:
 
     ; ---- Daemon binaries (launched by the tray, not a service) ----
     SetOutPath "$INSTDIR\daemon"
