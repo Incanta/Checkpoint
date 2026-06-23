@@ -48,6 +48,31 @@ ADAPTER_SUPPORTS_COMMIT="false"
 : "${TARBALL_URL:?TARBALL_URL not set}"
 export SERVER_PUBLIC_IP SERVER_PRIVATE_IP CLIENT_PUBLIC_IP
 
+# On any non-zero exit (a failed phase aborts under `set -e`), grab droplet-side
+# state before the workflow's teardown step destroys the droplets. This tells us
+# whether a phase that died with the SSH transport code (rc=255) was actually an
+# out-of-memory kill / disk-full on the droplet rather than a connection drop.
+# Both droplets are still up here; teardown is a later, separate workflow step.
+dump_diagnostics() {
+  local rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  log "!!! benchmark exited rc=${rc}; capturing droplet diagnostics before teardown"
+  local entry label host
+  for entry in "client:${CLIENT_PUBLIC_IP:-}" "server:${SERVER_PUBLIC_IP:-}"; do
+    label="${entry%%:*}"; host="${entry#*:}"
+    [ -n "$host" ] || continue
+    log "----- diagnostics: ${label} (${host}) -----"
+    _ssh "$host" "bash -s" <<'DIAG' 2>&1 || true
+echo "== uptime / load =="; uptime
+echo "== memory =="; free -h
+echo "== disk =="; df -h /data / 2>/dev/null
+echo "== OOM / kill events (dmesg) =="; dmesg 2>/dev/null | grep -iE 'out of memory|killed process|oom-kill' | tail -20
+echo "== tail dmesg =="; dmesg 2>/dev/null | tail -20
+DIAG
+  done
+}
+trap dump_diagnostics EXIT
+
 # Repo root on the coordinator (one level up from benchmark/), and an optional
 # version pin, both consumed by adapters.
 export REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
