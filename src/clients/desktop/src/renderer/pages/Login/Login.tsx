@@ -11,7 +11,7 @@ const ACCENT = "#646cff";
 export default function Login(): React.ReactElement {
   const [daemonId] = useState(nanoid());
   const user = useAtomValue(currentUserAtom);
-  const [url, setUrl] = useState("http://localhost:13000");
+  const [url, setUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [focused, setFocused] = useState(false);
   const navigate = useNavigate();
@@ -172,7 +172,7 @@ export default function Login(): React.ReactElement {
               <input
                 id="login-server-url"
                 type="text"
-                placeholder="https://your-server.example.com"
+                placeholder="http://your-server-ip:13000"
                 value={url}
                 disabled={isBusy}
                 autoFocus
