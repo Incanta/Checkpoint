@@ -1,6 +1,6 @@
 {
   "name": "@checkpointvcs/common",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "",
   "main": "lib/index.js",
   "license": "(Elastic-2.0 OR AGPL-3.0)",

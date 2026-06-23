@@ -1,6 +1,6 @@
 {
   "name": "@checkpointvcs/core",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "license": "(Elastic-2.0 OR AGPL-3.0)",
   "private": true,
   "workspaces": [
