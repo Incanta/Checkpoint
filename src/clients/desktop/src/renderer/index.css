@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes cp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 #root {
   width: 100% !important;
   height: 100% !important;

@@ -18,7 +18,7 @@ export default function Loading(): React.ReactElement {
     }
 
     navigate(
-      users.length === 0 ? "/welcome" : workspace ? "/workspace" : "/dashboard",
+      users.length === 0 ? "/login" : workspace ? "/workspace" : "/dashboard",
     );
   }, [connection, users, workspace, navigate]);
 

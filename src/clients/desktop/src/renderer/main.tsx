@@ -7,7 +7,6 @@ import "./index.css";
 import "tailwindcss";
 import "file-icon-vectors/dist/file-icon-square-o.min.css";
 import Loading from "./pages/Loading/Loading";
-import Welcome from "./pages/Welcome/Welcome";
 import Login from "./pages/Login/Login";
 import Dashboard from "./pages/Dashboard/Dashboard";
 import Workspace from "./pages/Workspace/Workspace";
@@ -47,7 +46,6 @@ if (popoutType === "file-history") {
           <Routes>
             <Route path="/" element={<Loading />} />
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/welcome" element={<Welcome />} />
             <Route path="/login" element={<Login />} />
             <Route path="/workspace" element={<Workspace />} />
           </Routes>

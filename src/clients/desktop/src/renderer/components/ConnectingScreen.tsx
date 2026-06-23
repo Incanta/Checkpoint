@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAtomValue } from "jotai";
 import { daemonConnectionAtom } from "../../common/state/daemon";
 import { ipc } from "../pages/ipc";
+import Spinner from "./Spinner";
 
 // How long to wait before suggesting the daemon may not be running.
 const SLOW_CONNECT_THRESHOLD_MS = 5000;
@@ -9,24 +10,6 @@ const SLOW_CONNECT_THRESHOLD_MS = 5000;
 // Docs page explaining how to start the daemon from the system tray.
 // NOTE: this page does not exist yet and needs to be authored.
 const DAEMON_DOCS_URL = "https://checkpointvcs.com/docs/desktop/start-daemon";
-
-function Spinner(): React.ReactElement {
-  return (
-    <div
-      style={{
-        width: "48px",
-        height: "48px",
-        borderRadius: "50%",
-        background:
-          "conic-gradient(from 90deg, rgba(100,108,255,0) 0%, #646cff 100%)",
-        WebkitMask:
-          "radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px))",
-        mask: "radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px))",
-        animation: "cp-connecting-spin 0.9s linear infinite",
-      }}
-    />
-  );
-}
 
 export default function ConnectingScreen(): React.ReactElement {
   const connection = useAtomValue(daemonConnectionAtom);
@@ -58,7 +41,7 @@ export default function ConnectingScreen(): React.ReactElement {
         alignItems: "center",
         justifyContent: "center",
         gap: "1.5rem",
-        padding: "2rem",
+        padding: 0,
         backgroundColor: "var(--color-app-bg)",
         color: "var(--color-text-primary)",
         userSelect: "none",
@@ -144,9 +127,6 @@ export default function ConnectingScreen(): React.ReactElement {
       )}
 
       <style>{`
-        @keyframes cp-connecting-spin {
-          to { transform: rotate(360deg); }
-        }
         @keyframes cp-connecting-fade-in {
           from { opacity: 0; transform: translateY(4px); }
           to { opacity: 1; transform: translateY(0); }
