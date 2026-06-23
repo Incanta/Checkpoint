@@ -121,8 +121,14 @@ write_timings_json() {
 # ----------------------------------------------------------------------------
 
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/bench_key}"
+# ServerAliveInterval/CountMax send keepalive probes during long-running remote
+# commands that produce no output (e.g. extracting a 50GB tarball). Without
+# them the TCP connection is torn down by an idle NAT/firewall and the command
+# dies with "client_loop: send disconnect: Broken pipe" (rc=255). 30s probes,
+# up to 240 missed before giving up -> tolerates ~2h of output silence.
 SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-          -o ConnectTimeout=15 -o LogLevel=ERROR)
+          -o ConnectTimeout=15 -o LogLevel=ERROR \
+          -o ServerAliveInterval=30 -o ServerAliveCountMax=240)
 
 _ssh() { # host cmd...
   local host="$1"; shift
