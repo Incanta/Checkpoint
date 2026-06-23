@@ -1,6 +1,6 @@
 {
   "name": "@checkpointvcs/app",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "minDesktopVersion": "0.1.0",
   "private": true,
   "type": "module",
