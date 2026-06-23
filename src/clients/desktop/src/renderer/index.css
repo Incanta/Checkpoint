@@ -8,6 +8,11 @@
   }
 }
 
+/* Hide the centered window title in the custom titlebar. */
+.cet-title {
+  display: none !important;
+}
+
 #root {
   width: 100% !important;
   height: 100% !important;

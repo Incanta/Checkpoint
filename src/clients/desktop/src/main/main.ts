@@ -7,6 +7,7 @@ import {
   attachTitlebarToWindow,
 } from "@incanta/custom-electron-titlebar/main";
 import DaemonHandler from "./daemon-handler";
+import { setupApplicationMenu } from "./menu";
 import { ipcOn } from "./channels";
 
 const require = createRequire(import.meta.url);
@@ -49,6 +50,10 @@ function createWindow() {
   });
 
   attachTitlebarToWindow(win);
+
+  // Install the menu the titlebar renders, before the renderer loads and
+  // requests it over IPC.
+  setupApplicationMenu();
 
   // win.setBounds({ x: 1920 + 1920 / 2 - 600 / 2, y: -300 });
   win.setMinimumSize(940, 530);
