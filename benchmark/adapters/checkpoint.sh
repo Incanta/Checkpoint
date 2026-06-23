@@ -273,7 +273,10 @@ adapter_submit_ignore() {
 }
 
 adapter_add_all() {
-  on_client "cd ${TREE_DIR} && ${CHK} add ."
+  # `chk add .` prints "  + <path>" for every staged file plus a count, which
+  # floods the CI log on a tree this size, and chk has no quiet flag. Drop
+  # stdout; errors go to stderr and the exit code still propagates.
+  on_client "cd ${TREE_DIR} && ${CHK} add . >/dev/null"
 }
 
 adapter_commit_all() {

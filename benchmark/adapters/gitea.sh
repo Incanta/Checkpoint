@@ -183,26 +183,34 @@ EOF
 
 adapter_submit_ignore() {
   # First revision: commit + push the ignore + LFS attributes (setup, one phase).
-  on_client "cd ${TREE_DIR} && git commit -m 'benchmark: ignore + lfs attributes' && git push -u origin main"
+  # -q on both: `git commit` otherwise lists every created file ("create mode
+  # ...") and push streams per-object progress, flooding the CI log on a tree
+  # this size. Errors still surface.
+  on_client "cd ${TREE_DIR} && git commit -q -m 'benchmark: ignore + lfs attributes' && git push -q -u origin main"
 }
 
 adapter_add_all() {
   # `git add -A` runs the LFS clean filter on matched files, writing pointers and
   # caching objects under .git/lfs/objects. This is the heavy local staging step.
+  # (git add is silent by default; the per-file "create mode" lines come from
+  # commit, which is quieted below.)
   on_client "cd ${TREE_DIR} && git add -A"
 }
 
 adapter_commit_all() {
-  on_client "cd ${TREE_DIR} && git commit -m 'benchmark: full tree'"
+  # -q suppresses the per-file "create mode ..." summary.
+  on_client "cd ${TREE_DIR} && git commit -q -m 'benchmark: full tree'"
 }
 
 adapter_submit_all() {
   # git push uploads the commit; the LFS pre-push hook uploads the cached objects.
-  on_client "cd ${TREE_DIR} && git push"
+  # -q drops the per-object progress stream.
+  on_client "cd ${TREE_DIR} && git push -q"
 }
 
 adapter_pull_elsewhere() {
   # Fresh clone into a new directory: fetches git objects then LFS objects via the
   # smudge filter, so it measures a full materialization over the network.
-  on_client "rm -rf ${PULL_DIR} && git clone '${GIT_REMOTE}' ${PULL_DIR}"
+  # -q drops the clone/checkout/LFS progress stream.
+  on_client "rm -rf ${PULL_DIR} && git clone -q '${GIT_REMOTE}' ${PULL_DIR}"
 }
