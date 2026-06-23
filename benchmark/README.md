@@ -10,9 +10,9 @@ The GitHub Actions runner is only a **coordinator**: it provisions, orchestrates
 over SSH, collects timings, and tears the droplets down. The 50GB workload lives
 on the droplets, never on the runner.
 
-Scope today: **Checkpoint**, **Lore** (Epic Games' Lore VCS), and **Gitea**
-(git + Git LFS) are implemented end-to-end. `perforce` is a fast-fail stub (see
-`adapters/*.sh`).
+Scope today: all four adapters are implemented end-to-end: **Checkpoint**,
+**Lore** (Epic Games' Lore VCS), **Gitea** (git + Git LFS), and **Perforce**
+(Helix Core). See `adapters/*.sh`.
 
 ## How to run
 
@@ -120,6 +120,14 @@ needed.
 - **Phases**: git separates local commit from network push, so all three are timed: `add_all` = `git add -A` (runs the LFS clean filter), `commit_all` = `git commit`, `submit_all` = `git push` (LFS objects upload here).
 - **Disk**: git-lfs keeps a local object cache (`.git/lfs/objects`) on top of the working copy, so a tracked tree costs roughly 2x its size on the client, and the fresh pull doubles that again. Budget a larger `data_volume_gb` for Gitea than for Checkpoint/Lore at the same payload size. Like the others, the server uses its base disk for repo + LFS storage; a full 50GB run would want a dedicated server volume.
 
+## Perforce adapter notes
+
+- **Install**: server is the `helix-p4d` package from Perforce's APT repo, configured headless via `configure-helix-p4d.sh` (plaintext `:1666`, a superuser); client is the `helix-cli` package (`p4`). A fresh p4d auto-creates the default `//depot`.
+- **Auth**: connection settings persist in `~/.p4enviro` (`p4 set P4PORT/P4USER`), and a login ticket in `~/.p4tickets` is obtained from the superuser password so commands never prompt. Plaintext (no SSL/`p4 trust`) over the private VPC IP.
+- **Phases**: Perforce has no separate local commit, so `commit_all` is `null` (same as Checkpoint). `add_all` = `p4 reconcile -a` (opens every new, non-ignored file for add, honoring `P4IGNORE`), `submit_all` = `p4 submit` (upload + server archive in one step).
+- **Ignore file**: `.p4ignore` (set via `P4IGNORE`), gitignore-style patterns.
+- **Pull**: a second client workspace rooted at a fresh directory, then `p4 sync` to materialize the head revision. The server stores depot archives on its base disk; a full 50GB run would want a dedicated server volume.
+
 ## Notes, costs, and caveats
 
 - **Client is built from source**, not installed from a `.deb`: the installer
@@ -138,10 +146,7 @@ needed.
 ## Verifying before a full run
 
 - Lint: `bash -n` the scripts and `node --check benchmark/summarize.js`.
-- Stub path: set `vcs: ["perforce"]` and dispatch to confirm provision +
-  fast-fail + teardown without a full build.
-- Smoke run: set `vcs: ["checkpoint"]` with a **small** `tarball_url` to validate
-  the whole path cheaply before pointing it at the real 50GB object.
+- Smoke run: set `vcs` to the adapter under test with a **small** `tarball_url` to validate the whole path (provision, server up, client setup, ignore + full submit, pull, summary, teardown) cheaply before pointing it at the real 50GB object. All four adapters are implemented, so there is no longer a fast-fail stub path.
 - After any run, confirm no leaks:
   `doctl compute droplet list --tag-name bench-<run_id>-<attempt>-checkpoint`
   (and the same for volumes / the SSH key) should be empty.

@@ -6,7 +6,8 @@
   "vcs": [
     "checkpoint",
     "lore",
-    "gitea"
+    "gitea",
+    "perforce"
   ],
   "checkpoint_version": "",
   "keep_droplets": false
