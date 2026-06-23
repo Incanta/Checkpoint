@@ -10,8 +10,8 @@ The GitHub Actions runner is only a **coordinator**: it provisions, orchestrates
 over SSH, collects timings, and tears the droplets down. The 50GB workload lives
 on the droplets, never on the runner.
 
-Scope today: **Checkpoint** is implemented end-to-end. `perforce`, `gitea`, and
-`lore` are fast-fail stubs (see `adapters/*.sh`).
+Scope today: **Checkpoint** and **Lore** (Epic Games' Lore VCS) are implemented
+end-to-end. `perforce` and `gitea` are fast-fail stubs (see `adapters/*.sh`).
 
 ## How to run
 
@@ -102,8 +102,14 @@ needed.
 }
 ```
 
-`commit_all` is `null` for Checkpoint because it has no separate local commit
-(`add` stages, `submit` publishes). Git-based adapters will record it.
+`commit_all` is `null` for Checkpoint because it has no separate local commit (`add` stages, `submit` publishes). **Lore** records `commit_all` as a real phase: `add` is `lore stage --scan .`, `commit_all` is `lore commit`, and `submit_all` is `lore push`.
+
+## Lore adapter notes
+
+- **Install**: prebuilt `lore` CLI and `loreserver` binaries from the public EpicGames/lore GitHub releases (the official `install.sh`), no build step.
+- **Server**: `loreserver` runs non-demo from a small TOML config (cert + a node-local store under `/var/lib/lore/store`). QUIC and gRPC share `:41337`; HTTP health is `:41339/health_check`. Like Checkpoint, the server uses its base disk (the data volume is the client's), so a full 50GB run would want a dedicated server volume too.
+- **TLS**: the client URL uses the plain `lore://` scheme. Lore only verifies the server certificate when the scheme ends in `s` (`lores://`), so `lore://` skips verification, the same trust model the official quickstart uses. That avoids distributing a CA to reach the server over the private VPC IP. The server still presents a self-signed cert (private IP in the SAN).
+- **Ignore file**: `.loreignore`, gitignore-style patterns.
 
 ## Notes, costs, and caveats
 
