@@ -20,9 +20,10 @@
 
 ADAPTER_SUPPORTS_COMMIT="false"
 
-# Server identity / layout.
+# Server identity / layout. P4ROOT (depot archives + db) lives on the attached
+# server volume (/data) so a full 50GB submit does not fill the base disk.
 P4_INSTANCE="master"
-P4ROOT="/opt/perforce/servers/master"
+P4ROOT="/data/perforce/servers/master"
 P4_SUPERUSER="super"
 # Must satisfy Helix's strong-password policy (length + mixed classes).
 P4_PASSWD="BenchPass123!"
@@ -56,6 +57,10 @@ EOF
 
   log "configuring + starting p4d (instance=${P4_INSTANCE}, plaintext :1666)"
   on_server "PASSWD='${P4_PASSWD}' bash -seuo pipefail" <<EOF
+# Ensure P4ROOT on the server volume exists and is owned by the service user
+# before configure writes the server db/archives there.
+mkdir -p ${P4ROOT}
+chown -R perforce:perforce /data/perforce
 /opt/perforce/sbin/configure-helix-p4d.sh ${P4_INSTANCE} -n \
   -p 1666 -r ${P4ROOT} -u ${P4_SUPERUSER} -P "\${PASSWD}"
 p4dctl status ${P4_INSTANCE} || p4dctl start ${P4_INSTANCE}

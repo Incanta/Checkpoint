@@ -44,6 +44,7 @@ ADAPTER_SUPPORTS_COMMIT="false"
 : "${SERVER_PRIVATE_IP:?provision did not set SERVER_PRIVATE_IP}"
 : "${CLIENT_PUBLIC_IP:?provision did not set CLIENT_PUBLIC_IP}"
 : "${VOLUME_NAME:?provision did not set VOLUME_NAME}"
+: "${SERVER_VOLUME_NAME:?provision did not set SERVER_VOLUME_NAME}"
 : "${TARBALL_URL:?TARBALL_URL not set}"
 export SERVER_PUBLIC_IP SERVER_PRIVATE_IP CLIENT_PUBLIC_IP
 
@@ -66,8 +67,9 @@ log "server private=${SERVER_PRIVATE_IP} public=${SERVER_PUBLIC_IP}; client=${CL
 # ----------------------------------------------------------------------------
 # Setup (untimed)
 # ----------------------------------------------------------------------------
-log "--- mounting client data volume ---"
+log "--- mounting data volumes ---"
 prepare_client_storage
+prepare_server_storage
 
 log "--- server setup ---"
 adapter_server_setup

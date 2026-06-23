@@ -24,22 +24,20 @@ Scope today: all four adapters are implemented end-to-end: **Checkpoint**,
      "tarball_url": "https://<bucket>.<region>.digitaloceanspaces.com/<key>",
      "region": "sfo3",
      "droplet_size": "c-8",
-     "data_volume_gb": 200,
+     "data_volume_gb": 400,
+     "server_volume_gb": 200,
      "vcs": ["checkpoint"],
      "checkpoint_version": "",
      "keep_droplets": false
    }
    ```
 
-   - `tarball_url`: a **private** DigitalOcean Spaces object (virtual-hosted or
-     path style). The client authenticates with the Spaces keys to download it.
-   - `vcs`: list; each entry runs as an isolated matrix job with its own droplet
-     pair. Stubs fail fast.
-   - `checkpoint_version`: empty uses the compose `latest` images and the source
-     at `HEAD`; set it to pin server image tags.
-   - `keep_droplets`: `true` skips teardown (for debugging). **This leaves
-     droplets, the volume, and the VPC running and billing until you delete them
-     manually.**
+   - `tarball_url`: a **private** DigitalOcean Spaces object (virtual-hosted or path style). The client authenticates with the Spaces keys to download it.
+   - `data_volume_gb`: size of the **client** volume (working copy plus per-VCS caches; LFS roughly doubles it for Gitea, and the fresh pull doubles it again).
+   - `server_volume_gb`: size of the **server** volume mounted at `/data`, where every adapter keeps its backend storage (the submitted payload, stored once).
+   - `vcs`: list; each entry runs as an isolated matrix job with its own droplet pair.
+   - `checkpoint_version`: empty uses the compose `latest` images and the source at `HEAD`; set it to pin server image tags.
+   - `keep_droplets`: `true` skips teardown (for debugging). **This leaves both droplets, both volumes, and the VPC running and billing until you delete them manually.**
 
 2. Commit the config change (so the run is reproducible from history).
 
@@ -59,13 +57,12 @@ needed.
 
 ## What the run does
 
-1. **Provision** (`lib/provision.sh`): a VPC, two `ubuntu-24-04-x64` droplets in
-   it, and a block-storage volume attached to the client (mounted at `/data`).
-   All resources are tagged `bench-<run_id>-<attempt>-<vcs>`.
-2. **Server setup** (Checkpoint): install Docker, deploy the repo's
-   `docker-compose/` bundle (app `:13000`, server `:13001`, Postgres) with the
-   private IP templated in, secrets generated, and dev-login enabled. Storage
-   uses the default filer-stub mode.
+1. **Provision** (`lib/provision.sh`): a VPC, two `ubuntu-24-04-x64` droplets in it, and two block-storage volumes, one attached to the client and one to the server, each mounted at `/data` on its droplet. All resources are tagged `bench-<run_id>-<attempt>-<vcs>`.
+2. **Server setup** (Checkpoint): install Docker, point its `data-root` at the
+   server volume (`/data/docker`) so the named volumes land there, then deploy
+   the repo's `docker-compose/` bundle (app `:13000`, server `:13001`, Postgres)
+   with the private IP templated in, secrets generated, and dev-login enabled.
+   Storage uses the default filer-stub mode.
 3. **Client setup** (Checkpoint): build the CLI (CMake) and daemon (Node) from
    the repo source shipped via `git archive` of `HEAD`, start the daemon, then
    authenticate headlessly (devLogin to an API token, written to
@@ -108,7 +105,7 @@ needed.
 ## Lore adapter notes
 
 - **Install**: prebuilt `lore` CLI and `loreserver` binaries from the public EpicGames/lore GitHub releases (the official `install.sh`), no build step.
-- **Server**: `loreserver` runs non-demo from a small TOML config (cert + a node-local store under `/var/lib/lore/store`). QUIC and gRPC share `:41337`; HTTP health is `:41339/health_check`. Like Checkpoint, the server uses its base disk (the data volume is the client's), so a full 50GB run would want a dedicated server volume too.
+- **Server**: `loreserver` runs non-demo from a small TOML config (cert + a node-local store under `/data/lore-store` on the server volume). QUIC and gRPC share `:41337`; HTTP health is `:41339/health_check`.
 - **TLS**: the client URL uses the plain `lore://` scheme. Lore only verifies the server certificate when the scheme ends in `s` (`lores://`), so `lore://` skips verification, the same trust model the official quickstart uses. That avoids distributing a CA to reach the server over the private VPC IP. The server still presents a self-signed cert (private IP in the SAN).
 - **Ignore file**: `.loreignore`, gitignore-style patterns.
 
@@ -118,7 +115,7 @@ needed.
 - **Auth**: HTTP basic, stored once in `/root/.git-credentials` so neither `git` nor `git-lfs` prompts. The benchmark user is created with `gitea admin user create`; the repo is created over the API.
 - **LFS**: large binary asset types (a representative Unreal set: `*.uasset`, `*.umap`, textures, audio, models, etc.) are routed through Git LFS via a committed `.gitattributes`. Source/config files stay as normal git objects, matching a real Unreal-on-git workflow. Files whose extensions are not in that list go through plain git, so adjust `.gitattributes` in the adapter if a payload has other large types.
 - **Phases**: git separates local commit from network push, so all three are timed: `add_all` = `git add -A` (runs the LFS clean filter), `commit_all` = `git commit`, `submit_all` = `git push` (LFS objects upload here).
-- **Disk**: git-lfs keeps a local object cache (`.git/lfs/objects`) on top of the working copy, so a tracked tree costs roughly 2x its size on the client, and the fresh pull doubles that again. Budget a larger `data_volume_gb` for Gitea than for Checkpoint/Lore at the same payload size. Like the others, the server uses its base disk for repo + LFS storage; a full 50GB run would want a dedicated server volume.
+- **Disk**: git-lfs keeps a local object cache (`.git/lfs/objects`) on top of the working copy, so a tracked tree costs roughly 2x its size on the client, and the fresh pull doubles that again. Budget a larger `data_volume_gb` for Gitea than for Checkpoint/Lore at the same payload size. The server's repo + LFS storage (`/data/gitea`) lives on the server volume.
 
 ## Perforce adapter notes
 
@@ -126,7 +123,7 @@ needed.
 - **Auth**: connection settings persist in `~/.p4enviro` (`p4 set P4PORT/P4USER`), and a login ticket in `~/.p4tickets` is obtained from the superuser password so commands never prompt. Plaintext (no SSL/`p4 trust`) over the private VPC IP.
 - **Phases**: Perforce has no separate local commit, so `commit_all` is `null` (same as Checkpoint). `add_all` = `p4 reconcile -a` (opens every new, non-ignored file for add, honoring `P4IGNORE`), `submit_all` = `p4 submit` (upload + server archive in one step).
 - **Ignore file**: `.p4ignore` (set via `P4IGNORE`), gitignore-style patterns.
-- **Pull**: a second client workspace rooted at a fresh directory, then `p4 sync` to materialize the head revision. The server stores depot archives on its base disk; a full 50GB run would want a dedicated server volume.
+- **Pull**: a second client workspace rooted at a fresh directory, then `p4 sync` to materialize the head revision. `P4ROOT` (db + depot archives) lives under `/data/perforce` on the server volume.
 
 ## Notes, costs, and caveats
 
@@ -134,14 +131,8 @@ needed.
   releases are GitHub _drafts_ with non-anonymous asset URLs, so building from
   the repo `HEAD` (as `test.yaml` does) is the reliable path. Server still uses
   the published GHCR images.
-- **Disk sizing**: 50GB download + extraction needs >=150-200GB; hence the
-  client volume and `data_volume_gb`. The **server** currently uses its droplet
-  base disk for filer-stub storage; for a real 50GB submit it likely needs its
-  own large volume too. That is the next thing to add if a full run fills the
-  server disk. Start with the smoke run below.
-- **Cost**: each matrix job runs two droplets plus a volume for the duration of
-  the build + benchmark. Pick `droplet_size`/`data_volume_gb` accordingly and
-  remember `keep_droplets: true` keeps billing until manual cleanup.
+- **Disk sizing**: the droplet base disk is small (a `c-8` ships ~25GB), so all bulk storage is on the attached volumes. The **client** volume (`data_volume_gb`) holds the download, the extracted tree, per-VCS caches, and the fresh pull, so size it well above the payload (the committed default is 400GiB for a ~50GB payload). The **server** volume (`server_volume_gb`) holds the submitted payload once; 150-200GiB is comfortable. Every adapter mounts its volume at `/data` and keeps its backend there.
+- **Cost**: each matrix job runs two droplets plus two volumes for the duration of the build + benchmark. Pick `droplet_size`, `data_volume_gb`, and `server_volume_gb` accordingly, and remember `keep_droplets: true` keeps billing until manual cleanup.
 
 ## Verifying before a full run
 

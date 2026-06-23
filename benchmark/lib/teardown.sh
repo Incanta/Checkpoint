@@ -5,8 +5,8 @@
 # present, and also sweeps by RUN_TAG as a backstop in case provisioning died
 # partway through.
 #
-# Reads (all optional): SERVER_ID, CLIENT_ID, VOL_ID, VPC_ID, RUN_TAG,
-# SSH_FINGERPRINT. doctl must be authenticated.
+# Reads (all optional): SERVER_ID, CLIENT_ID, VOL_ID, SERVER_VOL_ID, VPC_ID,
+# RUN_TAG, SSH_FINGERPRINT. doctl must be authenticated.
 
 set -uo pipefail
 
@@ -26,14 +26,15 @@ else
   [ -n "${CLIENT_ID:-}" ] && try doctl compute droplet delete "$CLIENT_ID" --force
 fi
 
-# 2. Volume: must wait until the droplet release detaches it before delete.
-if [ -n "${VOL_ID:-}" ]; then
+# 2. Volumes: must wait until the droplet release detaches them before delete.
+for vid in "${VOL_ID:-}" "${SERVER_VOL_ID:-}"; do
+  [ -n "$vid" ] || continue
   for i in $(seq 1 12); do
-    doctl compute volume delete "$VOL_ID" --force && break
-    log "  volume still attached, retrying delete ($i/12)..."
+    doctl compute volume delete "$vid" --force && break
+    log "  volume $vid still attached, retrying delete ($i/12)..."
     sleep 10
   done
-fi
+done
 
 # 3. VPC: only deletable once it has no members; retry after droplets drain.
 if [ -n "${VPC_ID:-}" ]; then

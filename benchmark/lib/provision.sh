@@ -12,6 +12,7 @@
 #   REGION             DO region slug (e.g. nyc3)
 #   DROPLET_SIZE       DO size slug (e.g. c-8)
 #   DATA_VOLUME_GB     size of the client data volume, in GiB
+#   SERVER_VOLUME_GB   size of the server data volume, in GiB
 #   SSH_FINGERPRINT    fingerprint of the uploaded ephemeral SSH key
 #
 # doctl must already be authenticated (doctl auth init) before calling this.
@@ -22,12 +23,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-: "${RUN_TAG:?}" "${REGION:?}" "${DROPLET_SIZE:?}" "${DATA_VOLUME_GB:?}" "${SSH_FINGERPRINT:?}"
+: "${RUN_TAG:?}" "${REGION:?}" "${DROPLET_SIZE:?}" "${DATA_VOLUME_GB:?}" "${SERVER_VOLUME_GB:?}" "${SSH_FINGERPRINT:?}"
 
 IMAGE="ubuntu-24-04-x64"
 SERVER_NAME="${RUN_TAG}-server"
 CLIENT_NAME="${RUN_TAG}-client"
-VOLUME_NAME="${RUN_TAG}-data"
+VOLUME_NAME="${RUN_TAG}-data"           # client working set
+SERVER_VOLUME_NAME="${RUN_TAG}-srv"     # server-side backend storage
 ENV_FILE="${PROVISION_ENV_FILE:-${GITHUB_ENV:-/dev/stdout}}"
 
 emit() { echo "$1=$2" >>"$ENV_FILE"; }
@@ -40,11 +42,17 @@ VPC_ID="$(doctl vpcs create --name "$RUN_TAG" --region "$REGION" -o json \
 [ -n "$VPC_ID" ] || die "failed to create VPC"
 emit VPC_ID "$VPC_ID"
 
-log "creating ${DATA_VOLUME_GB}GiB data volume ${VOLUME_NAME}"
+log "creating ${DATA_VOLUME_GB}GiB client data volume ${VOLUME_NAME}"
 VOL_ID="$(doctl compute volume create "$VOLUME_NAME" --region "$REGION" \
   --size "${DATA_VOLUME_GB}GiB" --fs-type ext4 --format ID --no-header)"
 emit VOL_ID "$VOL_ID"
 emit VOLUME_NAME "$VOLUME_NAME"
+
+log "creating ${SERVER_VOLUME_GB}GiB server data volume ${SERVER_VOLUME_NAME}"
+SERVER_VOL_ID="$(doctl compute volume create "$SERVER_VOLUME_NAME" --region "$REGION" \
+  --size "${SERVER_VOLUME_GB}GiB" --fs-type ext4 --format ID --no-header)"
+emit SERVER_VOL_ID "$SERVER_VOL_ID"
+emit SERVER_VOLUME_NAME "$SERVER_VOLUME_NAME"
 
 log "creating droplets ${SERVER_NAME} and ${CLIENT_NAME} (size=${DROPLET_SIZE})"
 # Create both droplets in one call; --wait blocks until they are active.
@@ -78,6 +86,9 @@ emit CLIENT_PUBLIC_IP "$CLIENT_PUBLIC_IP"
 
 log "attaching volume ${VOLUME_NAME} to client (${CLIENT_ID})"
 doctl compute volume-action attach "$VOL_ID" "$CLIENT_ID" --wait >/dev/null
+
+log "attaching volume ${SERVER_VOLUME_NAME} to server (${SERVER_ID})"
+doctl compute volume-action attach "$SERVER_VOL_ID" "$SERVER_ID" --wait >/dev/null
 
 # Export for wait_for_ssh in this process.
 export SERVER_PUBLIC_IP CLIENT_PUBLIC_IP

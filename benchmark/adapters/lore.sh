@@ -30,10 +30,11 @@ INSTALL_SH="https://raw.githubusercontent.com/EpicGames/lore/main/scripts/instal
 REPO_NAME="bench-repo"
 LORE_URL="lore://${SERVER_PRIVATE_IP}:41337/${REPO_NAME}"
 
-# Server-side layout.
+# Server-side layout. The store lives on the attached server volume (/data) so a
+# full 50GB submit does not fill the droplet base disk.
 LORE_CFG_DIR="/opt/loreserver/config"
 LORE_CERT_DIR="/opt/loreserver/certs"
-LORE_STORE_DIR="/var/lib/lore/store"
+LORE_STORE_DIR="/data/lore-store"
 
 # ----------------------------------------------------------------------------
 # Server

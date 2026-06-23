@@ -54,7 +54,9 @@ EOF
   log "starting gitea container (sqlite, LFS on, install locked)"
   on_server "PRIV='${SERVER_PRIVATE_IP}' bash -seuo pipefail" <<EOF
 docker rm -f gitea >/dev/null 2>&1 || true
-mkdir -p /var/lib/gitea
+# Gitea's /data (repos + LFS objects) lives on the attached server volume so a
+# full 50GB push does not fill the droplet base disk.
+mkdir -p /data/gitea
 docker run -d --name gitea --restart=always \
   -e USER_UID=1000 -e USER_GID=1000 \
   -e GITEA__server__ROOT_URL="http://\${PRIV}:3000/" \
@@ -63,7 +65,7 @@ docker run -d --name gitea --restart=always \
   -e GITEA__security__INSTALL_LOCK=true \
   -e GITEA__service__DISABLE_REGISTRATION=true \
   -e GITEA__database__DB_TYPE=sqlite3 \
-  -v /var/lib/gitea:/data \
+  -v /data/gitea:/data \
   -p 3000:3000 \
   gitea/gitea:${GITEA_IMAGE_TAG}
 

@@ -231,16 +231,20 @@ parse_spaces_url() { # url
 }
 
 # ----------------------------------------------------------------------------
-# Client data volume
+# Data volumes
 #
-# The attached DigitalOcean block-storage volume appears at a stable by-id
-# path derived from the volume name. Format (once) and mount it at /data.
+# Each droplet gets its own attached DigitalOcean block-storage volume (the
+# client's working set, the server's backend storage). A volume appears at a
+# stable by-id path derived from its name. Format (once) and mount it at /data.
 # ----------------------------------------------------------------------------
 
-prepare_client_storage() {
-  local dev="/dev/disk/by-id/scsi-0DO_Volume_${VOLUME_NAME:?VOLUME_NAME not set}"
-  log "preparing /data on client from ${dev}"
-  on_client_script <<EOF
+# _prepare_storage <runner-fn> <volume-name>: mount the named volume at /data on
+# whichever droplet <runner-fn> (on_client_script / on_server_script) targets.
+_prepare_storage() {
+  local runner="$1" volname="$2"
+  local dev="/dev/disk/by-id/scsi-0DO_Volume_${volname}"
+  log "preparing /data from ${dev} (via ${runner})"
+  "$runner" <<EOF
 dev="${dev}"
 for i in \$(seq 1 30); do [ -b "\$dev" ] && break; echo "waiting for volume device..."; sleep 2; done
 [ -b "\$dev" ] || { echo "volume device \$dev not present"; exit 1; }
@@ -253,4 +257,12 @@ mountpoint -q /data || mount -o discard,defaults "\$dev" /data
 mkdir -p /data/work
 df -h /data
 EOF
+}
+
+prepare_client_storage() {
+  _prepare_storage on_client_script "${VOLUME_NAME:?VOLUME_NAME not set}"
+}
+
+prepare_server_storage() {
+  _prepare_storage on_server_script "${SERVER_VOLUME_NAME:?SERVER_VOLUME_NAME not set}"
 }

@@ -22,6 +22,7 @@ jobs:
       region: ${{ steps.cfg.outputs.region }}
       droplet_size: ${{ steps.cfg.outputs.droplet_size }}
       data_volume_gb: ${{ steps.cfg.outputs.data_volume_gb }}
+      server_volume_gb: ${{ steps.cfg.outputs.server_volume_gb }}
       tarball_url: ${{ steps.cfg.outputs.tarball_url }}
       checkpoint_version: ${{ steps.cfg.outputs.checkpoint_version }}
       keep_droplets: ${{ steps.cfg.outputs.keep_droplets }}
@@ -40,6 +41,7 @@ jobs:
             set("region", c.region || "nyc3");
             set("droplet_size", c.droplet_size || "c-8");
             set("data_volume_gb", String(c.data_volume_gb || 200));
+            set("server_volume_gb", String(c.server_volume_gb || 200));
             set("tarball_url", c.tarball_url || "");
             set("checkpoint_version", c.checkpoint_version || "");
             set("keep_droplets", String(!!c.keep_droplets));
@@ -59,6 +61,7 @@ jobs:
       REGION: ${{ needs.config.outputs.region }}
       DROPLET_SIZE: ${{ needs.config.outputs.droplet_size }}
       DATA_VOLUME_GB: ${{ needs.config.outputs.data_volume_gb }}
+      SERVER_VOLUME_GB: ${{ needs.config.outputs.server_volume_gb }}
       TARBALL_URL: ${{ needs.config.outputs.tarball_url }}
       CHECKPOINT_VERSION: ${{ needs.config.outputs.checkpoint_version }}
       SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}

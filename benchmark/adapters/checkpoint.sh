@@ -61,6 +61,20 @@ docker --version
 docker compose version
 EOF
 
+  log "relocating docker data-root to the server volume (/data)"
+  # The compose stack stores its data in named volumes (the big one is the
+  # server's storage-data). Point Docker's data-root at the attached server
+  # volume so a full submit lands on /data, not the small base disk. Done before
+  # any image pull / container start so nothing has to migrate.
+  on_server_script <<'EOF'
+mkdir -p /data/docker /etc/docker
+cat > /etc/docker/daemon.json <<JSON
+{ "data-root": "/data/docker" }
+JSON
+systemctl restart docker
+docker info --format 'docker data-root: {{.DockerRootDir}}'
+EOF
+
   log "copying docker-compose bundle to server"
   on_server "rm -rf /opt/checkpoint-compose && mkdir -p /opt/checkpoint-compose"
   # Ship only the tracked docker-compose subtree; --strip-components drops the
