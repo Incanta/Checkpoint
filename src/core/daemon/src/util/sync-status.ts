@@ -181,8 +181,11 @@ export async function checkSyncStatus(
         }
       }
     } catch {
-      // If we can't resolve paths, just use the file IDs
-      resolvedNewOnRemote.push(...newOnRemote);
+      // If we can't resolve paths, just use the file IDs. Push in a loop rather
+      // than spreading (newOnRemote can hold tens of thousands of IDs on a large
+      // pull, and `push(...newOnRemote)` would throw "Maximum call stack size
+      // exceeded").
+      for (const id of newOnRemote) resolvedNewOnRemote.push(id);
     }
   }
 

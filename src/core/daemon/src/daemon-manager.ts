@@ -1038,9 +1038,13 @@ export class DaemonManager {
 
     // Walk recursively, skipping ignored/hidden paths.
     // Untracked directories get a single directory entry instead of recursion.
-    const walk = async (dir: string): Promise<Dirent[]> => {
-      const results: Dirent[] = [];
-
+    // Accumulate every discovered file into one shared array. Pushing into a
+    // single accumulator (rather than returning per-directory arrays and
+    // merging them with `push(...subResults)`) avoids spreading a huge array as
+    // call arguments, which throws "Maximum call stack size exceeded" once the
+    // tree is fully tracked and large (tens of thousands of files).
+    const diskFiles: Dirent[] = [];
+    const walk = async (dir: string): Promise<void> => {
       const entries = await fs.readdir(dir, { withFileTypes: true });
 
       const promises = entries.map(async (entry) => {
@@ -1081,19 +1085,16 @@ export class DaemonManager {
             }
             return;
           }
-          const subResults = await walk(fullPath);
-          results.push(...subResults);
+          await walk(fullPath);
         } else {
-          results.push(entry);
+          diskFiles.push(entry);
         }
       });
 
       await Promise.all(promises);
-
-      return results;
     };
 
-    const diskFiles = await walk(workspace.localPath);
+    await walk(workspace.localPath);
 
     // Get checkouts from API for checked-out file status
     const client = await CreateApiClientAuth(workspace.daemonId);
