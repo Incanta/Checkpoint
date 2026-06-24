@@ -10,9 +10,9 @@ The GitHub Actions runner is only a **coordinator**: it provisions, orchestrates
 over SSH, collects timings, and tears the droplets down. The 50GB workload lives
 on the droplets, never on the runner.
 
-Scope today: all four adapters are implemented end-to-end: **Checkpoint**,
-**Lore** (Epic Games' Lore VCS), **Gitea** (git + Git LFS), and **Perforce**
-(Helix Core). See `adapters/*.sh`.
+Scope today: five adapters are implemented end-to-end: **Checkpoint**, **Lore**
+(Epic Games' Lore VCS), **Gitea** (git + Git LFS), **Perforce** (Helix Core),
+and **Ark** (Ark VCS). See `adapters/*.sh`.
 
 ## How to run
 
@@ -133,6 +133,13 @@ needed.
 - **Phases**: Perforce has no separate local commit, so `commit_all` is `null` (same as Checkpoint). `add_all` = `p4 reconcile -a` (opens every new, non-ignored file for add, honoring `P4IGNORE`), `submit_all` = `p4 submit` (upload + server archive in one step).
 - **Ignore file**: `.p4ignore` (set via `P4IGNORE`), gitignore-style patterns.
 - **Pull**: a second client workspace rooted at a fresh directory, then `p4 sync` to materialize the head revision. `P4ROOT` (db + depot archives) lives under `/data/perforce` on the server volume.
+
+## Ark adapter notes
+
+- **Install**: server and client are the same `ark` binary from the published Linux zip. The server runs `ark server -path /data/ark -port 9000 -allow_dv_upgrade true -allow_non_empty_path true` (data on the server volume); the client uses `ark init`/`changes`/`commit`/`get-latest`.
+- **Model**: centralized with a shelve-then-commit flow. `ark commit` uploads (shelves) the changelist and marks it committed in one step, so `commit_all` is `null` (like Checkpoint/Perforce). Change detection is automatic, so `add` maps to `ark changes` (workspace scan) and `submit` to `ark commit` (the upload).
+- **Ignore file**: `.ark_ignore` (`*` globs, `!` negation, `#` comments).
+- **Caveats (may need a CI iteration)**: the CLI prompts for a password with no flag/env, so the adapter feeds it over a pseudo-tty via `script`; `ark commit` needs a `-ws_cl` id which the adapter parses from `ark changes` (best-effort, adjust to the real output if needed); and the server's auto-generated self-signed cert is assumed to be trusted on connect. These are documented inline in `adapters/ark.sh`.
 
 ## Notes, costs, and caveats
 

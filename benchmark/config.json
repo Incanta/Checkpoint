@@ -9,7 +9,8 @@
     "checkpoint",
     "lore",
     "gitea",
-    "perforce"
+    "perforce",
+    "ark"
   ],
   "checkpoint_version": "",
   "keep_droplets": false
