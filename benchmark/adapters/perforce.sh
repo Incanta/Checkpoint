@@ -82,21 +82,25 @@ apt-get install -y helix-cli
 p4 -V | head -2
 EOF
 
-  log "configuring p4 env + password auth (no expiring tickets)"
+  log "configuring p4 env + password auth (security level 0, no tickets)"
   on_client "PORT='${P4PORT_PRIV}' PU='${P4_SUPERUSER}' PW='${P4_PASSWD}' bash -seuo pipefail" <<'EOF'
 p4 set P4PORT="${PORT}"
 p4 set P4USER="${PU}"
 p4 set P4IGNORE=.p4ignore
-# configure-helix-p4d sets security level 3, which requires login tickets, and
-# those tickets expire mid-run (a long submit followed by a fresh command was
-# failing with "P4PASSWD invalid or unset", and bumping the group timeout did
-# not help). Authenticate once with a ticket to administer the server, then drop
-# to security level 2 and store the password in the p4 environment: at level <=2
-# every command authenticates with P4PASSWD directly, so there are no tickets to
-# expire for the rest of the run.
+# configure-helix-p4d sets a high security level that requires login tickets,
+# and those tickets expire mid-run: a long submit followed by a fresh command
+# fails with "P4PASSWD invalid or unset". Group-timeout bumps and security
+# level 2 did not fix it (p4 still preferred the expired ticket). So:
+#   1. log in once (needed to administer the server at the configured level),
+#   2. drop to security level 0 (legacy: password auth, no tickets required),
+#   3. store the password in the p4 environment, and
+#   4. log out to delete the ticket, so every later command authenticates
+#      directly with P4PASSWD and there is nothing to expire.
+# See https://help.perforce.com/helix-core/server-apps/p4sag/2025.1/Content/P4SAG/security-levels.html
 echo "${PW}" | p4 login
-p4 configure set security=2
+p4 configure set security=0
 p4 set P4PASSWD="${PW}"
+p4 logout >/dev/null 2>&1 || true
 p4 info
 EOF
 }
