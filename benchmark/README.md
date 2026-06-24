@@ -75,10 +75,12 @@ needed.
 5. **Benchmark** (timed): `add` + submit the ignore file, then `add` the full
    tree, `submit` it, run `status` on the clean tree (its own phase, not part of
    the submit total), and `pull` it into a fresh workspace.
-6. **Small-update storage delta** (untimed, only if `small_change_file` is set):
-   measure the server store size, make a ~100-byte change to that file, submit
-   it, let the server flush, measure again, and record the byte delta. This runs
-   outside any timer, so it never affects the timing metrics.
+6. **Small update** (only if `small_change_file` is set): measure the server
+   store size, make a ~100-byte change to that file, then submit it. The submit
+   is timed on its own (the `update_submit` phase). The server store is then
+   measured again and the byte delta recorded. The storage measurement and
+   settle wait stay outside the timer, so only the submit itself is timed and no
+   other metric is affected.
 7. **Report**: a Markdown table in the job summary plus a `timings-<vcs>.json`
    artifact.
 8. **Teardown** (`lib/teardown.sh`): destroys everything by ID with a tag sweep
@@ -96,7 +98,8 @@ needed.
     "commit_all": null,
     "submit_all": 5102,
     "status": 30,
-    "pull_elsewhere": 4310
+    "pull_elsewhere": 4310,
+    "update_submit": 8
   },
   "payload": { "payload_download": 600, "payload_extract": 120 },
   "storage": { "update_delta_bytes": 65536 },

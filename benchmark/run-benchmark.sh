@@ -171,7 +171,9 @@ measure_small_update_delta() {
   local before after
   before="$(server_storage_bytes)" || return 1
   log "server storage before update: ${before} bytes"
-  adapter_update || return 1
+  # Time only the submit of the small change (its own phase). The storage
+  # measurement and settle sleep stay outside the timer so they never affect it.
+  time_phase update_submit -- adapter_update || return 1
   # Let the server flush async writes (e.g. Lore's flush_delay) before measuring.
   on_server "sync" || true
   sleep "${STORAGE_SETTLE_SECONDS:-20}"

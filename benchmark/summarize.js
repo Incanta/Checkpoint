@@ -35,6 +35,7 @@ const TOTAL_ROW = ["__submit_total__", "Total (through submit)"];
 const POST_PHASES = [
   ["status", "Status (clean workspace)"],
   ["pull_elsewhere", "Pull into fresh workspace"],
+  ["update_submit", "Small-change submit"],
 ];
 
 const PAYLOAD_PHASES = [
