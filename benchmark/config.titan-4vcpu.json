@@ -5,6 +5,7 @@
   "droplet_size": "m-4vcpu-32gb",
   "data_volume_gb": 400,
   "server_volume_gb": 200,
+  "client_swap_gb": 32,
   "resource_interval_s": 30,
   "chart_label_every": "minute",
   "vcs": [

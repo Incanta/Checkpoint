@@ -276,6 +276,44 @@ prepare_server_storage() {
   _prepare_storage on_server_script "${SERVER_VOLUME_NAME:?SERVER_VOLUME_NAME not set}"
 }
 
+# ensure_client_swap <size_gb>: create + enable a swap file on the client so a
+# memory-hungry client (e.g. the Lore CLI staging/committing a huge tree) spills
+# to disk instead of being OOM-killed. No-op when size_gb is 0/empty. The swap
+# file lives on the attached /data volume (guaranteed space). NOTE: swap is far
+# slower than RAM, so any phase that actually touches it reports inflated timings;
+# this is a "complete the run" lever, not a free one. Must run after /data is
+# mounted (prepare_client_storage).
+ensure_client_swap() { # size_gb
+  local gb="${1:-0}"
+  case "$gb" in '' | 0 | *[!0-9]*) return 0 ;; esac
+  log "enabling ${gb}GiB swap on client (/data/swapfile) to avoid OOM kills"
+  on_client "GB='${gb}' bash -seuo pipefail" <<'EOF'
+if swapon --show=NAME --noheadings 2>/dev/null | grep -qx /data/swapfile; then
+  echo "swap already enabled"; free -h; exit 0
+fi
+make_swap() { # method
+  rm -f /data/swapfile
+  if [ "$1" = fallocate ]; then
+    fallocate -l "${GB}G" /data/swapfile
+  else
+    dd if=/dev/zero of=/data/swapfile bs=1M count="$((GB * 1024))" status=none
+  fi
+  chmod 600 /data/swapfile
+  mkswap /data/swapfile >/dev/null && swapon /data/swapfile
+}
+# fallocate is instant on ext4; if the resulting file has holes (some setups),
+# swapon rejects it, so fall back to a full dd-written file.
+if ! make_swap fallocate 2>/dev/null; then
+  echo "fallocate swapfile unusable; rebuilding with dd (slower)"
+  swapoff /data/swapfile 2>/dev/null || true
+  make_swap dd
+fi
+# Keep RAM as the fast path; only swap under genuine memory pressure.
+sysctl -w vm.swappiness=10 >/dev/null 2>&1 || true
+swapon --show; free -h
+EOF
+}
+
 # ----------------------------------------------------------------------------
 # Small-update storage measurement
 # ----------------------------------------------------------------------------

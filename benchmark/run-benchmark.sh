@@ -99,6 +99,9 @@ log "server private=${SERVER_PRIVATE_IP} public=${SERVER_PUBLIC_IP}; client=${CL
 # ----------------------------------------------------------------------------
 log "--- mounting data volumes ---"
 prepare_client_storage
+# Optional client swap (config client_swap_gb) so a memory-hungry client (e.g.
+# Lore on a large tree) spills to disk instead of being OOM-killed. 0 = disabled.
+ensure_client_swap "${CLIENT_SWAP_GB:-0}"
 prepare_server_storage
 
 log "--- server setup ---"
