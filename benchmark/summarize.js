@@ -251,6 +251,101 @@ function resourceCharts(run) {
   return `#### ${run.vcs}\n\n${cpu}\n\n${ram}\n`;
 }
 
+// Color palette for the combined (one-series-per-VCS) charts, paired with an
+// emoji dot so the legend is readable in Markdown (mermaid xychart has no
+// built-in legend). Cycles if there are more VCS than entries.
+const COMBINED_PALETTE = [
+  { hex: "#1f77b4", dot: "🔵" }, // blue
+  { hex: "#2ca02c", dot: "🟢" }, // green
+  { hex: "#ff7f0e", dot: "🟠" }, // orange
+  { hex: "#d62728", dot: "🔴" }, // red
+  { hex: "#9467bd", dot: "🟣" }, // purple
+  { hex: "#8c564b", dot: "🟤" }, // brown
+];
+
+// Linearly resample `values` (samples evenly spaced in time across the whole
+// full-submit window) onto a grid of `g` points spanning 0%..100% of that
+// window. This normalizes runs of different durations onto a common x-axis where
+// the last point is "task complete". n==1 -> flat; n==0 -> [].
+function resampleSeries(values, g) {
+  const n = values.length;
+  if (n === 0) return [];
+  if (n === 1) return Array.from({ length: g }, () => values[0]);
+  const out = [];
+  for (let i = 0; i < g; i++) {
+    const f = (i / (g - 1)) * (n - 1); // fractional source index
+    const lo = Math.floor(f);
+    const hi = Math.ceil(f);
+    out.push(values[lo] + (values[hi] - values[lo]) * (f - lo));
+  }
+  return out;
+}
+
+// Four combined charts (client CPU, client RAM, server CPU, server RAM), each
+// overlaying one line per VCS against "% of task complete" so durations align.
+// Returns "" unless at least two runs have resource samples (it is a comparison
+// view; single runs are already covered by the per-VCS charts above).
+function combinedResourceCharts(runs) {
+  const withRes = runs.filter((r) => {
+    const x = r.resources;
+    return (
+      x &&
+      Array.isArray(x.client) &&
+      Array.isArray(x.server) &&
+      Math.min(x.client.length, x.server.length) > 0
+    );
+  });
+  if (withRes.length < 2) return "";
+
+  const G = 21; // 0%, 5%, ... 100%
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const palette = withRes.map((_, i) => COMBINED_PALETTE[i % COMBINED_PALETTE.length]);
+  const init =
+    '%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "' +
+    palette.map((p) => p.hex).join(", ") +
+    '"}}}}%%';
+  const legend = withRes.map((r, i) => `${palette[i].dot} ${r.vcs}`).join(", ");
+
+  const metrics = [
+    { title: "Client CPU %", side: "client", field: "cpu_pct", unit: "CPU %", max: 100 },
+    { title: "Client RAM GB", side: "client", field: "ram_gb", unit: "GB", max: null },
+    { title: "Server CPU %", side: "server", field: "cpu_pct", unit: "CPU %", max: 100 },
+    { title: "Server RAM GB", side: "server", field: "ram_gb", unit: "GB", max: null },
+  ];
+
+  const blocks = metrics.map((m) => {
+    const series = withRes.map((r) => {
+      const n = Math.min(r.resources.client.length, r.resources.server.length);
+      const vals = r.resources[m.side].slice(0, n).map((s) => num(s[m.field]));
+      return resampleSeries(vals, G);
+    });
+    let yMax = m.max;
+    if (yMax == null) yMax = Math.max(1, Math.ceil(Math.max(...series.flat())));
+    const lines = series
+      .map((s) => `    line [${s.map((v) => parseFloat(v.toFixed(2))).join(", ")}]`)
+      .join("\n");
+    return [
+      "```mermaid",
+      init,
+      "xychart-beta",
+      `    title "${m.title} vs % of task complete (all VCS)"`,
+      '    x-axis "% of task complete" 0 --> 100',
+      `    y-axis "${m.unit}" 0 --> ${yMax}`,
+      lines,
+      "```",
+    ].join("\n");
+  });
+
+  return (
+    "## Resource usage, normalized by task progress (all VCS)\n\n" +
+    `_Series: ${legend}. The x-axis is the percentage of each VCS's full-submit ` +
+    "elapsed time (100% = submit complete), so runs of different durations line " +
+    "up for comparison._\n\n" +
+    blocks.join("\n\n") +
+    "\n"
+  );
+}
+
 const out = [];
 out.push("## VCS Benchmark Results\n");
 out.push(vcsTable());
@@ -277,6 +372,12 @@ if (hasStorage) {
 const verify = verifyTable();
 if (verify) {
   out.push(verify);
+  out.push("");
+}
+
+const combined = combinedResourceCharts(runs);
+if (combined) {
+  out.push(combined);
   out.push("");
 }
 

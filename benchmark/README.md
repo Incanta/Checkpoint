@@ -102,10 +102,14 @@ needed.
    other metric is affected.
 8. **Report**: Markdown tables in the job summary (including the pull-verification
    table, which should show identical hashes across VCS), plus Mermaid `xychart`
-   resource graphs (CPU% and RAM, two line series each: blue = client, green =
-   server; x-axis in minutes). Artifacts: `timings.<vcs>.json` (timings +
-   embedded resource samples + verification) and `resources.<vcs>.json` (raw
-   CPU/RAM samples).
+   resource graphs. Per VCS: CPU% and RAM, two line series each (blue = client,
+   green = server; x-axis in minutes). In the **combined** summary (more than one
+   VCS): four cross-VCS comparison charts (client CPU, client RAM, server CPU,
+   server RAM), each overlaying one line per VCS against "% of task complete"
+   (the full-submit window resampled 0-100%), so runs of different durations line
+   up; a color/emoji legend maps each line to its VCS. Artifacts:
+   `timings.<vcs>.json` (timings + embedded resource samples + verification) and
+   `resources.<vcs>.json` (raw CPU/RAM samples).
 9. **Teardown** (`lib/teardown.sh`): destroys everything by ID with a tag sweep
    backstop. Runs even on failure unless `keep_droplets` is true.
 
