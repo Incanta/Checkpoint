@@ -332,6 +332,7 @@ EOF
 }
 
 stop_resource_sampler() { # host pidfile
+  log "stopping resource sampler on ${$1}"
   _ssh "$1" "PIDF='${2}' bash -seuo pipefail" <<'EOF' || true
 [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null || true
 EOF
@@ -340,23 +341,30 @@ EOF
 # finalize_resources <timings_json> <vcs> <interval>: read the fetched client and
 # server JSONL, write a consolidated resources.<vcs>.json artifact, and embed the
 # samples into the timings JSON (so summarize.js can chart them).
-finalize_resources() { # timings_json vcs interval
-  local out="$1" vcs="$2" interval="${3:-30}"
+finalize_resources() { # timings_json vcs interval label_every
+  local out="$1" vcs="$2" interval="${3:-30}" label_every="${4:-minute}"
   node -e '
     const fs = require("fs");
-    const [timings, cf, sf, resOut, interval] = process.argv.slice(1);
+    const [timings, cf, sf, resOut, interval, labelEvery] = process.argv.slice(1);
     const rd = (p) => {
       try { return fs.readFileSync(p, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); }
       catch { return []; }
     };
-    const res = { interval_s: Number(interval), client: rd(cf), server: rd(sf) };
+    // label_every controls the chart x-axis labeling in summarize.js:
+    // "minute" labels only whole-minute marks, "sample" labels every sample.
+    const res = {
+      interval_s: Number(interval),
+      label_every: labelEvery === "sample" ? "sample" : "minute",
+      client: rd(cf),
+      server: rd(sf),
+    };
     fs.writeFileSync(resOut, JSON.stringify(res, null, 2) + "\n");
     try {
       const j = JSON.parse(fs.readFileSync(timings, "utf8"));
       j.resources = res;
       fs.writeFileSync(timings, JSON.stringify(j, null, 2) + "\n");
     } catch (e) {}
-  ' "$out" "resources.${vcs}.client.jsonl" "resources.${vcs}.server.jsonl" "resources.${vcs}.json" "$interval"
+  ' "$out" "resources.${vcs}.client.jsonl" "resources.${vcs}.server.jsonl" "resources.${vcs}.json" "$interval" "$label_every"
   log "wrote resources.${vcs}.json (client + server samples)"
 }
 

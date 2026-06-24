@@ -26,6 +26,8 @@ and **Ark** (Ark VCS). See `adapters/*.sh`.
      "droplet_size": "c-8",
      "data_volume_gb": 400,
      "server_volume_gb": 200,
+     "resource_interval_s": 30,
+     "chart_label_every": "minute",
      "small_change_file": "",
      "vcs": ["checkpoint"],
      "checkpoint_version": "",
@@ -36,6 +38,8 @@ and **Ark** (Ark VCS). See `adapters/*.sh`.
    - `tarball_url`: a **private** DigitalOcean Spaces object (virtual-hosted or path style). The client authenticates with the Spaces keys to download it.
    - `data_volume_gb`: size of the **client** volume (working copy plus per-VCS caches; LFS roughly doubles it for Gitea, and the fresh pull doubles it again).
    - `server_volume_gb`: size of the **server** volume mounted at `/data`, where every adapter keeps its backend storage (the submitted payload, stored once).
+   - `resource_interval_s`: how often (seconds) the CPU/RAM sampler polls both droplets across the full-tree publish (add + commit + submit). Default 30. Smaller values give finer-grained resource charts at the cost of more samples; values larger than the full-submit duration may yield no samples. Omitted = 30.
+   - `chart_label_every`: x-axis labeling for the resource charts. `"minute"` (default) uses a continuous numeric time axis that Mermaid labels at round-minute marks (sample points are still plotted at their true times, but without a tick per sample); `"sample"` uses a categorical axis with a labeled tick at every sample (minutes, trailing zeros trimmed), denser but useful for short runs. Any other value falls back to `"minute"`.
    - `small_change_file`: relative path (under the payload tree) of a file to make a ~100-byte change to after the initial submit. The run then submits that change and records how many bytes the **server** store grew (delta/dedup efficiency). Empty = skip this stage. Pick a large binary asset to make the difference meaningful. This stage is untimed; it only affects the storage-delta metric, never the timing metrics.
    - `vcs`: list; each entry runs as an isolated matrix job with its own droplet pair.
    - `checkpoint_version`: empty uses the compose `latest` images and the source at `HEAD`; set it to pin server image tags.

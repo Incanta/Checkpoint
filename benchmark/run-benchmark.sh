@@ -143,7 +143,12 @@ log "--- step: full tree ---"
 # submit phase would miss it entirely; spanning the sequence captures it for all.
 RES_REMOTE="/tmp/bench-resources.jsonl"
 RES_PID="/tmp/bench-sampler.pid"
-RES_INTERVAL=30
+# Sampling cadence (seconds) for the CPU/RAM resource sampler. Configurable via
+# benchmark/config.json (resource_interval_s), passed through as RES_INTERVAL.
+RES_INTERVAL="${RES_INTERVAL:-30}"
+# Chart x-axis labeling for the resource charts: "minute" (label whole-minute
+# marks only) or "sample" (label every sample). config.json chart_label_every.
+CHART_LABEL_EVERY="${CHART_LABEL_EVERY:-minute}"
 start_resource_sampler "$CLIENT_PUBLIC_IP" "$RES_REMOTE" "$RES_PID" "$RES_INTERVAL"
 start_resource_sampler "$SERVER_PUBLIC_IP" "$RES_REMOTE" "$RES_PID" "$RES_INTERVAL"
 
@@ -219,6 +224,6 @@ fi
 # Emit results
 # ----------------------------------------------------------------------------
 write_timings_json "$OUT" "$VCS"
-finalize_resources "$OUT" "$VCS" "${RES_INTERVAL:-30}"
+finalize_resources "$OUT" "$VCS" "${RES_INTERVAL:-30}" "${CHART_LABEL_EVERY:-minute}"
 finalize_verify "$OUT" "${PULL_HASH:-}" "${PULL_COUNT:-0}" "${PULL_BYTES:-0}"
 log "=== benchmark complete: ${VCS} ==="

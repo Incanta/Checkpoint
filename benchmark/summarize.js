@@ -194,29 +194,41 @@ function verifyTable() {
 // Render CPU and RAM full-submit charts for one run as Mermaid xychart-beta
 // blocks, each with two line series (client = blue, server = green). The init
 // directive pins those colors so the title's legend is accurate. The x-axis is
-// in minutes, labeled only at whole-minute marks (blank in between). Returns ""
-// if the run has no resource samples.
+// in minutes; labeling follows the run's resources.label_every (see below).
+// Returns "" if the run has no resource samples.
 function resourceCharts(run) {
   const r = run.resources;
   if (!r || !Array.isArray(r.client) || !Array.isArray(r.server)) return "";
   const n = Math.min(r.client.length, r.server.length);
   if (n === 0) return "";
   const step = Number(r.interval_s) || 30;
-  // One x label per sample; show the minute number only at whole-minute marks.
-  // Non-mark ticks use a single space, not "": mermaid's xychart string token
-  // requires at least one character, so an empty "" fails to parse on GitHub
-  // ("Expecting 'STR' ... got 'COMMA'"). A space renders blank but parses.
-  const xlabels = Array.from({ length: n }, (_, i) => {
-    const sec = i * step;
-    return sec % 60 === 0 ? `"${sec / 60}"` : '" "';
-  });
+  const labelEvery = r.label_every === "sample" ? "sample" : "minute";
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
   const cCpu = r.client.slice(0, n).map((s) => num(s.cpu_pct));
   const sCpu = r.server.slice(0, n).map((s) => num(s.cpu_pct));
   const cRam = r.client.slice(0, n).map((s) => num(s.ram_gb));
   const sRam = r.server.slice(0, n).map((s) => num(s.ram_gb));
   const ramMax = Math.max(1, Math.ceil(Math.max(...cRam, ...sRam)));
-  const xaxis = `[${xlabels.join(", ")}]`;
+  // The x-axis spec depends on the label mode:
+  // - "sample": a CATEGORICAL axis with one label per sample (minutes, trailing
+  //   zeros trimmed). Every sample gets its own labeled tick, which is the point
+  //   of this mode.
+  // - "minute": a NUMERIC axis 0 --> <total minutes>. Mermaid then auto-labels
+  //   at round marks and spreads the n points evenly (point i lands at
+  //   i*step/60 min, its true time). A categorical axis cannot do this: it draws
+  //   a tick per entry, so blank in-between labels still render as stray points.
+  let xaxis;
+  if (labelEvery === "sample") {
+    const xlabels = Array.from(
+      { length: n },
+      (_, i) => `"${parseFloat(((i * step) / 60).toFixed(2))}"`,
+    );
+    xaxis = `[${xlabels.join(", ")}]`;
+  } else {
+    const maxMin = parseFloat((((n - 1) * step) / 60).toFixed(2)) ||
+      parseFloat((step / 60).toFixed(2));
+    xaxis = `0 --> ${maxMin}`;
+  }
   // Pin series colors: line 1 (client) blue, line 2 (server) green.
   const init =
     '%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#1f77b4, #2ca02c"}}}}%%';
