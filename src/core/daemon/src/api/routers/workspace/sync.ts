@@ -16,6 +16,9 @@ export const syncRouter = router({
         workspaceId: z.string(),
         changelistId: z.number().nullable(),
         filePaths: z.array(z.string()).nullable(),
+        // When true, skip progress/step callbacks entirely (no per-tick
+        // callback overhead). Used by the CLI's --no-progress flag.
+        noProgress: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -107,15 +110,20 @@ export const syncRouter = router({
       (async () => {
         manager.beginVcsOperation(workspace.id);
         try {
+          const reportProgress = !input.noProgress;
           const mergeResult = await pull(
             workspaceInfo,
             repo.orgId,
             input.changelistId,
             input.filePaths,
             undefined,
-            (step) => jobManager.updateStep(job.id, step),
-            (step, done, total) =>
-              jobManager.updateProgress(job.id, done, total),
+            reportProgress
+              ? (step) => jobManager.updateStep(job.id, step)
+              : undefined,
+            reportProgress
+              ? (step, done, total) =>
+                  jobManager.updateProgress(job.id, done, total)
+              : undefined,
           );
 
           Logger.debug(

@@ -362,6 +362,9 @@ export const pendingRouter = router({
         ),
         shelfName: z.string().optional(),
         keepCheckedOut: z.boolean().optional(),
+        // When true, skip progress/step callbacks entirely (no per-tick
+        // callback overhead). Used by the CLI's --no-progress flag.
+        noProgress: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -456,6 +459,7 @@ export const pendingRouter = router({
             );
           }
 
+          const reportProgress = !input.noProgress;
           await submit(
             workspaceInfo,
             repo.orgId,
@@ -464,9 +468,13 @@ export const pendingRouter = router({
             workspace.id,
             input.keepCheckedOut ?? false,
             undefined,
-            (step) => jobManager.updateStep(job.id, step),
-            (step, done, total) =>
-              jobManager.updateProgress(job.id, done, total),
+            reportProgress
+              ? (step) => jobManager.updateStep(job.id, step)
+              : undefined,
+            reportProgress
+              ? (step, done, total) =>
+                  jobManager.updateProgress(job.id, done, total)
+              : undefined,
             input.shelfName ? input.shelfName : undefined,
           );
 

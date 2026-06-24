@@ -101,10 +101,18 @@ int main(int argc, char** argv) {
   submitCmd.add_argument("--message", "-m")
       .help("Submission message")
       .required();
+  submitCmd.add_argument("--no-progress")
+      .help("Disable the progress bar (also skips progress callbacks entirely)")
+      .default_value(false)
+      .implicit_value(true);
 
   // pull
   argparse::ArgumentParser pullCmd("pull");
   pullCmd.add_description("Sync changes from remote");
+  pullCmd.add_argument("--no-progress")
+      .help("Disable the progress bar (also skips progress callbacks entirely)")
+      .default_value(false)
+      .implicit_value(true);
 
   // log
   argparse::ArgumentParser logCmd("log");
@@ -370,11 +378,12 @@ int main(int argc, char** argv) {
 
     if (program.is_subcommand_used(submitCmd)) {
       auto message = submitCmd.get<std::string>("--message");
-      return checkpoint::cmdSubmit(message);
+      bool noProgress = submitCmd.get<bool>("--no-progress");
+      return checkpoint::cmdSubmit(message, noProgress);
     }
 
     if (program.is_subcommand_used(pullCmd)) {
-      return checkpoint::cmdPull();
+      return checkpoint::cmdPull(pullCmd.get<bool>("--no-progress"));
     }
 
     if (program.is_subcommand_used(logCmd)) {

@@ -273,7 +273,7 @@ IGN"
 }
 
 adapter_submit_ignore() {
-  on_client "cd ${TREE_DIR} && ${CHK} submit --message 'benchmark: ignore file'"
+  on_client "cd ${TREE_DIR} && ${CHK} submit --no-progress --message 'benchmark: ignore file'"
 }
 
 adapter_add_all() {
@@ -288,11 +288,11 @@ adapter_commit_all() {
 }
 
 adapter_submit_all() {
-  on_client "cd ${TREE_DIR} && ${CHK} submit --message 'benchmark: full tree'"
+  on_client "cd ${TREE_DIR} && ${CHK} submit --no-progress --message 'benchmark: full tree'"
 }
 
 adapter_pull_elsewhere() {
-  on_client "mkdir -p ${PULL_DIR} && cd ${PULL_DIR} && ${CHK} init ${ORG_NAME}/${REPO_NAME} && ${CHK} pull"
+  on_client "mkdir -p ${PULL_DIR} && cd ${PULL_DIR} && ${CHK} init ${ORG_NAME}/${REPO_NAME} && ${CHK} pull --no-progress"
 }
 
 # Small-update: change ~100 bytes of one file and submit. Untimed; the harness
@@ -300,5 +300,5 @@ adapter_pull_elsewhere() {
 adapter_update() {
   client_append_bytes "${TREE_DIR}/${SMALL_CHANGE_FILE}" 100
   on_client "cd ${TREE_DIR} && ${CHK} add '${SMALL_CHANGE_FILE}' >/dev/null"
-  on_client "cd ${TREE_DIR} && ${CHK} submit --message 'benchmark: small update'"
+  on_client "cd ${TREE_DIR} && ${CHK} submit --no-progress --message 'benchmark: small update'"
 }

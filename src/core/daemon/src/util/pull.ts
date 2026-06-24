@@ -245,16 +245,25 @@ export async function pull(
       throw new Error("Failed to create longtail handle");
     }
 
-    const { status } = await pollHandle(handle, {
-      onStep: (step) => {
-        lastStep = step;
-        onStep?.(step);
-      },
-      onProgress: (step, done, total) => {
-        onProgress?.(step, done, total);
-      },
+    // Only wire callbacks when a consumer wants progress; otherwise pollHandle
+    // skips per-tick callback work and polls coarsely (no callback overhead).
+    const pollOptions: Parameters<typeof pollHandle>[1] = {
       onTokenRefresh: refreshStorageToken,
-    });
+    };
+    if (onStep) {
+      pollOptions.onStep = (step) => {
+        lastStep = step;
+        onStep(step);
+      };
+    }
+    if (onProgress) {
+      pollOptions.onProgress = (step, done, total) =>
+        onProgress(step, done, total);
+    }
+    if (!onStep && !onProgress) {
+      pollOptions.intervalMs = 250;
+    }
+    const { status } = await pollHandle(handle, pollOptions);
 
     Logger.debug(
       `Longtail pull for version index ${versionIndex} completed with status: ${status.error === 0 ? "success" : "failure"}. Last step: ${lastStep}`,
@@ -333,15 +342,21 @@ export async function pull(
           break;
         }
 
-        const { status } = await pollHandle(handle, {
-          onStep: (step) => {
-            onStep?.(`[artifacts] ${step}`);
-          },
-          onProgress: (step, done, total) => {
-            onProgress?.(`[artifacts] ${step}`, done, total);
-          },
+        const artifactPollOptions: Parameters<typeof pollHandle>[1] = {
           onTokenRefresh: refreshStorageToken,
-        });
+        };
+        if (onStep) {
+          artifactPollOptions.onStep = (step) =>
+            onStep(`[artifacts] ${step}`);
+        }
+        if (onProgress) {
+          artifactPollOptions.onProgress = (step, done, total) =>
+            onProgress(`[artifacts] ${step}`, done, total);
+        }
+        if (!onStep && !onProgress) {
+          artifactPollOptions.intervalMs = 250;
+        }
+        const { status } = await pollHandle(handle, artifactPollOptions);
 
         freeHandle(handle);
 

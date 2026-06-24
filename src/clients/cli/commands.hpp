@@ -169,7 +169,8 @@ struct JobResult {
   std::string error;      // present when failed
 };
 
-inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
+inline JobResult pollJob(DaemonClient& client, const std::string& jobId,
+                         bool showProgress = true) {
   std::string lastStep;
   uint32_t lastDone = 0;
   auto stepStart = std::chrono::steady_clock::now();
@@ -184,7 +185,7 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
                                   ? job["currentStep"].get<std::string>()
                                   : "";
 
-    if (!currentStep.empty() && currentStep != lastStep) {
+    if (showProgress && !currentStep.empty() && currentStep != lastStep) {
       if (hadProgress) {
         // Clear the progress line and move to next line
         renderProgressBar(1, 1, stepStart);
@@ -206,7 +207,7 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
       progressDone = job["progress"].value("done", (uint32_t)0);
     }
 
-    if (progressTotal > 0 && progressDone != lastDone) {
+    if (showProgress && progressTotal > 0 && progressDone != lastDone) {
       lastDone = progressDone;
       hadProgress = true;
       renderProgressBar(progressDone, progressTotal, stepStart);
@@ -227,7 +228,9 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId) {
       return {status, nullptr, errMsg};
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    // Poll less aggressively when not rendering a progress bar.
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(showProgress ? 500 : 1000));
   }
 }
 
@@ -618,7 +621,7 @@ inline int cmdRestore(const std::vector<std::string>& files, bool staged) {
 //  COMMAND: submit (push a version)
 // ═════════════════════════════════════════════════════════════════
 
-inline int cmdSubmit(const std::string& message) {
+inline int cmdSubmit(const std::string& message, bool noProgress = false) {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
@@ -671,6 +674,7 @@ inline int cmdSubmit(const std::string& message) {
       {"workspaceId", ws.id},
       {"message", message},
       {"modifications", modifications},
+      {"noProgress", noProgress},
   };
 
   // Note: submit is a mutation in the daemon API (sends input as POST body)
@@ -684,7 +688,7 @@ inline int cmdSubmit(const std::string& message) {
 
   std::cout << "Submitting " << stagedCount << " file(s)..." << std::endl;
 
-  auto jobResult = pollJob(client, jobId);
+  auto jobResult = pollJob(client, jobId, !noProgress);
 
   if (jobResult.status == "failed") {
     std::cerr << color::red() << "error: " << jobResult.error
@@ -707,7 +711,7 @@ inline int cmdSubmit(const std::string& message) {
 //  COMMAND: pull (sync changes down)
 // ═════════════════════════════════════════════════════════════════
 
-inline int cmdPull() {
+inline int cmdPull(bool noProgress = false) {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
@@ -739,6 +743,7 @@ inline int cmdPull() {
       {"workspaceId", ws.id},
       {"changelistId", nullptr},
       {"filePaths", nullptr},
+      {"noProgress", noProgress},
   };
 
   auto pullResult = client.mutate("workspaces.sync.pull", pullInput);
@@ -749,7 +754,7 @@ inline int cmdPull() {
     return 1;
   }
 
-  auto jobResult = pollJob(client, jobId);
+  auto jobResult = pollJob(client, jobId, !noProgress);
 
   if (jobResult.status == "failed") {
     std::cerr << color::red() << "error: " << jobResult.error

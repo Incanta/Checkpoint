@@ -135,14 +135,11 @@ export async function submit(
     throw new Error("Failed to create longtail handle");
   }
 
-  const { status, result } = await pollHandle(handle, {
-    onStep: (step) => {
-      console.log(`[submit] Step: ${step}`);
-      onStep?.(step);
-    },
-    onProgress: (step, done, total) => {
-      onProgress?.(step, done, total);
-    },
+  // Only wire progress callbacks when a consumer asked for them. When both are
+  // omitted (e.g. the CLI passed --no-progress), pollHandle skips all per-tick
+  // callback work and polls coarsely just to detect completion, so there is no
+  // callback overhead at all.
+  const pollOptions: Parameters<typeof pollHandle>[1] = {
     onTokenRefresh: async () => {
       console.log("[submit] Token refresh requested by native addon");
       const newToken = await client.storage.getToken.query({
@@ -160,7 +157,21 @@ export async function submit(
         }),
       };
     },
-  });
+  };
+  if (onStep) {
+    pollOptions.onStep = (step) => {
+      console.log(`[submit] Step: ${step}`);
+      onStep(step);
+    };
+  }
+  if (onProgress) {
+    pollOptions.onProgress = (step, done, total) => onProgress(step, done, total);
+  }
+  if (!onStep && !onProgress) {
+    pollOptions.intervalMs = 250;
+  }
+
+  const { status, result } = await pollHandle(handle, pollOptions);
 
   if (status.error !== 0) {
     console.log(
