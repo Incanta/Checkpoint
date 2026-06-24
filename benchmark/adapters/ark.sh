@@ -43,7 +43,10 @@ SERVER_STORAGE_PATH="${ARK_DATA_DIR}"
 # an unquoted heredoc, same pattern as the Perforce adapter's apt-repo helper).
 _ark_install='export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y curl unzip util-linux ca-certificates
+# The ark binary is a GUI-capable app linked against OpenGL/X11 at load time, so
+# even the headless `server`/CLI subcommands need these libs present to start.
+apt-get install -y curl unzip util-linux ca-certificates \
+  libgl1 libx11-6 libxcursor1 libxrandr2 libxinerama1 libxi6 libxxf86vm1 libxkbcommon0
 curl -fsSL -o /tmp/ark.zip "'"${ARK_ZIP_URL}"'"
 rm -rf /opt/ark && mkdir -p /opt/ark
 unzip -q -o /tmp/ark.zip -d /opt/ark
@@ -52,6 +55,11 @@ arkbin="$(find /opt/ark -type f -name ark | head -1)"
 [ -n "$arkbin" ] || { echo "ark binary not found in zip:"; find /opt/ark -maxdepth 3 | head -50; exit 1; }
 chmod +x "$arkbin"
 ln -sf "$arkbin" /usr/local/bin/ark
+# Fail clearly (and list them) if any shared library is still missing, so the
+# set above can be extended without guessing.
+if ldd /usr/local/bin/ark 2>/dev/null | grep -q "not found"; then
+  echo "ark is missing shared libraries:"; ldd /usr/local/bin/ark | grep "not found"; exit 1
+fi
 echo "installed ark -> $arkbin"'
 
 # ----------------------------------------------------------------------------
