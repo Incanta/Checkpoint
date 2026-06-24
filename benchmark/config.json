@@ -1,6 +1,6 @@
 {
-  "tarball_url": "https://incantagames.sfo3.digitaloceanspaces.com/checkpoint/lyra.tar.gz",
-  "small_change_file": "Content/Effects/Textures/Flipbooks/SmokeSwirl_3_Flipbook_CHANNELPACK.uasset",
+  "tarball_url": "https://incantagames.sfo3.digitaloceanspaces.com/checkpoint/project-titan.tar.gz",
+  "small_change_file": "Content/Environment/Arctic/Meshes/Iktu_Temple/Temple/SM_Iktu_Temple_ColumnBLOCKOUT.uasset",
   "region": "sfo3",
   "droplet_size": "c-8",
   "data_volume_gb": 400,
