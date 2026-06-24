@@ -156,6 +156,9 @@ copy_to_client() { # local_path remote_path
 copy_to_server() { # local_path remote_path
   scp "${SSH_OPTS[@]}" -r "$1" "root@${SERVER_PUBLIC_IP:?}:$2"
 }
+copy_from_host() { # host remote_path local_path
+  scp "${SSH_OPTS[@]}" "root@${1}:${2}" "${3}"
+}
 
 # Poll until SSH on a host accepts a command (used after droplet creation).
 wait_for_ssh() { # host [tries]
@@ -290,4 +293,69 @@ server_storage_bytes() {
 # on the client (the small change whose server-side storage cost we measure).
 client_append_bytes() {
   on_client "head -c ${2} /dev/urandom >> '${1}'"
+}
+
+# ----------------------------------------------------------------------------
+# System resource sampling (CPU% + RAM GB) during a phase
+#
+# A tiny detached sampler runs on a droplet and appends one JSON line per
+# interval: { t: elapsed_s, cpu_pct: 0-100, ram_gb: used }. CPU% is derived from
+# /proc/stat deltas (whole-system, all vCPUs); RAM is (MemTotal-MemAvailable).
+# JSONL is robust to an abrupt kill. Both droplets write to the same remote path;
+# the coordinator fetches each to a distinct local file.
+# ----------------------------------------------------------------------------
+
+start_resource_sampler() { # host remote_out pidfile interval
+  local host="$1" out="$2" pidf="$3" interval="${4:-30}"
+  log "starting resource sampler on ${host} (every ${interval}s)"
+  _ssh "$host" "OUT='${out}' PIDF='${pidf}' INTERVAL='${interval}' bash -seuo pipefail" <<'EOF'
+cat > /tmp/bench-sampler.sh <<'SAMP'
+#!/usr/bin/env bash
+out="$1"; interval="$2"
+: > "$out"
+snap() { awk '/^cpu /{tot=0; for (i=2; i<=NF; i++) tot+=$i; print tot, ($5 + $6)}' /proc/stat; }
+read -r pt pi < <(snap)
+start=$(date +%s)
+while true; do
+  sleep "$interval"
+  read -r ct ci < <(snap)
+  dt=$((ct - pt)); di=$((ci - pi)); pt=$ct; pi=$ci
+  cpu=0; [ "$dt" -gt 0 ] && cpu=$(( ((dt - di) * 100) / dt ))
+  used=$(awk '/^MemTotal/{t=$2} /^MemAvailable/{a=$2} END{printf "%.2f", (t - a) / 1048576}' /proc/meminfo)
+  printf '{"t":%d,"cpu_pct":%d,"ram_gb":%s}\n' "$(( $(date +%s) - start ))" "$cpu" "$used" >> "$out"
+done
+SAMP
+chmod +x /tmp/bench-sampler.sh
+nohup /tmp/bench-sampler.sh "$OUT" "$INTERVAL" >/dev/null 2>&1 &
+echo $! > "$PIDF"
+EOF
+}
+
+stop_resource_sampler() { # host pidfile
+  _ssh "$1" "PIDF='${2}' bash -seuo pipefail" <<'EOF' || true
+[ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null || true
+EOF
+}
+
+# finalize_resources <timings_json> <vcs> <interval>: read the fetched client and
+# server JSONL, write a consolidated resources.<vcs>.json artifact, and embed the
+# samples into the timings JSON (so summarize.js can chart them).
+finalize_resources() { # timings_json vcs interval
+  local out="$1" vcs="$2" interval="${3:-30}"
+  node -e '
+    const fs = require("fs");
+    const [timings, cf, sf, resOut, interval] = process.argv.slice(1);
+    const rd = (p) => {
+      try { return fs.readFileSync(p, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); }
+      catch { return []; }
+    };
+    const res = { interval_s: Number(interval), client: rd(cf), server: rd(sf) };
+    fs.writeFileSync(resOut, JSON.stringify(res, null, 2) + "\n");
+    try {
+      const j = JSON.parse(fs.readFileSync(timings, "utf8"));
+      j.resources = res;
+      fs.writeFileSync(timings, JSON.stringify(j, null, 2) + "\n");
+    } catch (e) {}
+  ' "$out" "resources.${vcs}.client.jsonl" "resources.${vcs}.server.jsonl" "resources.${vcs}.json" "$interval"
+  log "wrote resources.${vcs}.json (client + server samples)"
 }

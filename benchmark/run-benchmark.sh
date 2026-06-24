@@ -143,7 +143,20 @@ if [ "$ADAPTER_SUPPORTS_COMMIT" = "true" ]; then
 else
   record_null_phase commit_all
 fi
+
+# Sample system CPU/RAM on both droplets during the (heavy) full submit.
+RES_REMOTE="/tmp/bench-resources.jsonl"
+RES_PID="/tmp/bench-sampler.pid"
+RES_INTERVAL=30
+start_resource_sampler "$CLIENT_PUBLIC_IP" "$RES_REMOTE" "$RES_PID" "$RES_INTERVAL"
+start_resource_sampler "$SERVER_PUBLIC_IP" "$RES_REMOTE" "$RES_PID" "$RES_INTERVAL"
+
 time_phase submit_all -- adapter_submit_all
+
+stop_resource_sampler "$CLIENT_PUBLIC_IP" "$RES_PID"
+stop_resource_sampler "$SERVER_PUBLIC_IP" "$RES_PID"
+copy_from_host "$CLIENT_PUBLIC_IP" "$RES_REMOTE" "resources.${VCS}.client.jsonl" || true
+copy_from_host "$SERVER_PUBLIC_IP" "$RES_REMOTE" "resources.${VCS}.server.jsonl" || true
 
 # Status of the (now clean) workspace, timed on its own. This measures how long
 # each VCS takes to compute "what changed" over the full tree; it is a separate
@@ -196,4 +209,5 @@ fi
 # Emit results
 # ----------------------------------------------------------------------------
 write_timings_json "$OUT" "$VCS"
+finalize_resources "$OUT" "$VCS" "${RES_INTERVAL:-30}"
 log "=== benchmark complete: ${VCS} ==="

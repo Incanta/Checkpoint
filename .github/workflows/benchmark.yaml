@@ -109,7 +109,11 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: timings-${{ matrix.vcs }}
-          path: timings.${{ matrix.vcs }}.json
+          # timings.<vcs>.json (with resources embedded for the charts) plus the
+          # standalone resources.<vcs>.json (raw CPU/RAM samples).
+          path: |
+            timings.${{ matrix.vcs }}.json
+            resources.${{ matrix.vcs }}.json
           if-no-files-found: warn
 
       - name: Teardown droplets
@@ -137,7 +141,9 @@ jobs:
       - name: Render combined summary
         run: |
           shopt -s nullglob
-          files=(all-timings/*.json)
+          # Only the timings.*.json files (which carry the embedded resources);
+          # the standalone resources.*.json are raw-sample artifacts, not runs.
+          files=(all-timings/timings.*.json)
           if [ ${#files[@]} -eq 0 ]; then
             echo "No timings artifacts were produced (all benchmark jobs failed before writing results)." >> "$GITHUB_STEP_SUMMARY"
             exit 0

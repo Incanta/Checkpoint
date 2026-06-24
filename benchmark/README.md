@@ -74,15 +74,19 @@ needed.
    tree (both timed, reported separately from the VCS operations).
 5. **Benchmark** (timed): `add` + submit the ignore file, then `add` the full
    tree, `submit` it, run `status` on the clean tree (its own phase, not part of
-   the submit total), and `pull` it into a fresh workspace.
+   the submit total), and `pull` it into a fresh workspace. During the full
+   `submit`, a lightweight sampler records whole-system CPU% and used RAM (GB) on
+   both droplets every 30s (from `/proc`), for the resource charts.
 6. **Small update** (only if `small_change_file` is set): measure the server
    store size, make a ~100-byte change to that file, then submit it. The submit
    is timed on its own (the `update_submit` phase). The server store is then
    measured again and the byte delta recorded. The storage measurement and
    settle wait stay outside the timer, so only the submit itself is timed and no
    other metric is affected.
-7. **Report**: a Markdown table in the job summary plus a `timings-<vcs>.json`
-   artifact.
+7. **Report**: Markdown tables in the job summary, plus Mermaid `xychart`
+   resource graphs (CPU% and RAM, two line series each: client and server,
+   during the submit). Artifacts: `timings.<vcs>.json` (timings + embedded
+   resource samples) and `resources.<vcs>.json` (raw CPU/RAM samples).
 8. **Teardown** (`lib/teardown.sh`): destroys everything by ID with a tag sweep
    backstop. Runs even on failure unless `keep_droplets` is true.
 
@@ -103,6 +107,11 @@ needed.
   },
   "payload": { "payload_download": 600, "payload_extract": 120 },
   "storage": { "update_delta_bytes": 65536 },
+  "resources": {
+    "interval_s": 30,
+    "client": [{ "t": 0, "cpu_pct": 80, "ram_gb": 3.1 }],
+    "server": [{ "t": 0, "cpu_pct": 20, "ram_gb": 1.2 }]
+  },
   "meta": {
     "run_tag": "...",
     "region": "...",
