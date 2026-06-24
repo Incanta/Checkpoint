@@ -332,7 +332,7 @@ EOF
 }
 
 stop_resource_sampler() { # host pidfile
-  log "stopping resource sampler on ${$1}"
+  log "stopping resource sampler on ${1}"
   _ssh "$1" "PIDF='${2}' bash -seuo pipefail" <<'EOF' || true
 [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null || true
 EOF
