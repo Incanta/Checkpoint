@@ -73,7 +73,8 @@ needed.
 4. **Payload**: download the Spaces tarball to `/data` and extract into the work
    tree (both timed, reported separately from the VCS operations).
 5. **Benchmark** (timed): `add` + submit the ignore file, then `add` the full
-   tree, `submit` it, and `pull` it into a fresh workspace.
+   tree, `submit` it, run `status` on the clean tree (its own phase, not part of
+   the submit total), and `pull` it into a fresh workspace.
 6. **Small-update storage delta** (untimed, only if `small_change_file` is set):
    measure the server store size, make a ~100-byte change to that file, submit
    it, let the server flush, measure again, and record the byte delta. This runs
@@ -94,6 +95,7 @@ needed.
     "add_all": 1240,
     "commit_all": null,
     "submit_all": 5102,
+    "status": 30,
     "pull_elsewhere": 4310
   },
   "payload": { "payload_download": 600, "payload_extract": 120 },

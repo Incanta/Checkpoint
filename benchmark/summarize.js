@@ -32,7 +32,10 @@ const SUBMIT_PHASES = [
 // Synthetic row: sum of the SUBMIT_PHASES above (the full write path). Rendered
 // right below "Submit all files".
 const TOTAL_ROW = ["__submit_total__", "Total (through submit)"];
-const POST_PHASES = [["pull_elsewhere", "Pull into fresh workspace"]];
+const POST_PHASES = [
+  ["status", "Status (clean workspace)"],
+  ["pull_elsewhere", "Pull into fresh workspace"],
+];
 
 const PAYLOAD_PHASES = [
   ["payload_download", "Download tarball"],

@@ -174,6 +174,12 @@ adapter_submit_all() {
   on_client "cd ${TREE_DIR} && ${LORE} push"
 }
 
+adapter_status() {
+  # --scan forces a filesystem walk so this is comparable to git/chk/p4 status
+  # (plain `lore status` only reads cached dirty flags and would be ~instant).
+  on_client "cd ${TREE_DIR} && ${LORE} status --scan >/dev/null"
+}
+
 adapter_pull_elsewhere() {
   # Fresh clone into a new directory with its own local store, so the pull must
   # fetch every fragment from the server (no local dedup via a shared store).

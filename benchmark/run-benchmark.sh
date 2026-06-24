@@ -145,6 +145,12 @@ else
 fi
 time_phase submit_all -- adapter_submit_all
 
+# Status of the (now clean) workspace, timed on its own. This measures how long
+# each VCS takes to compute "what changed" over the full tree; it is a separate
+# phase and is NOT part of the submit total.
+log "--- step: status ---"
+time_phase status -- adapter_status
+
 log "--- step: pull into a fresh workspace ---"
 time_phase pull_elsewhere -- adapter_pull_elsewhere
 

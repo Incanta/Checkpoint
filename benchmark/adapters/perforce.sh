@@ -181,6 +181,11 @@ exit 1
 EOF
 }
 
+adapter_status() {
+  # `p4 status` reconciles in preview mode, scanning the workspace for changes.
+  on_client "cd ${TREE_DIR} && p4 -c ${WS_MAIN} status >/dev/null"
+}
+
 adapter_pull_elsewhere() {
   # Second workspace rooted at a fresh directory, then sync the head revision so
   # the pull downloads every file from the server.

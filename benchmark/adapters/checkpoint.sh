@@ -291,6 +291,11 @@ adapter_submit_all() {
   on_client "cd ${TREE_DIR} && ${CHK} submit --no-progress --message 'benchmark: full tree'"
 }
 
+adapter_status() {
+  # Status of the clean post-submit tree (scans the workspace for changes).
+  on_client "cd ${TREE_DIR} && ${CHK} status >/dev/null"
+}
+
 adapter_pull_elsewhere() {
   on_client "mkdir -p ${PULL_DIR} && cd ${PULL_DIR} && ${CHK} init ${ORG_NAME}/${REPO_NAME} && ${CHK} pull --no-progress"
 }

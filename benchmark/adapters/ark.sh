@@ -172,6 +172,11 @@ ${_ark_commit_remote}
 EOF
 }
 
+adapter_status() {
+  # Ark's status equivalent: detect/list workspace changes (scans the tree).
+  on_client "cd ${TREE_DIR} && ${ARK} changes >/dev/null"
+}
+
 adapter_pull_elsewhere() {
   # Fresh workspace in a new directory, then download the latest content. init
   # re-authenticates the existing admin (password over pseudo-tty).

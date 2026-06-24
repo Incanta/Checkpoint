@@ -236,6 +236,11 @@ git push --no-thin --no-verify
 EOF
 }
 
+adapter_status() {
+  # Scans the working tree (and runs LFS filters) to report changes.
+  on_client "cd ${TREE_DIR} && git status >/dev/null"
+}
+
 adapter_pull_elsewhere() {
   # Fresh clone into a new directory: fetches git objects then LFS objects via the
   # smudge filter, so it measures a full materialization over the network.
