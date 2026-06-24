@@ -1,12 +1,12 @@
 "use client";
 
 import Image from "next/image";
-import { COMING_SOON } from "@/config";
 import Link from "next/link";
 import { useState } from "react";
 
 const navLinks = [
   { label: "Features", href: "#features" },
+  { label: "Host a Server", href: "/docs/quickstart" },
   // { label: "Docs", href: "/docs" },
   // { label: "Blog", href: "/blog" },
   { label: "Contact", href: "/contact" },
@@ -66,21 +66,12 @@ export default function Navbar() {
                 )}
               </a>
             ))}
-            {COMING_SOON ? (
-              <a
-                href="#"
-                className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-white transition-all hover:bg-primary-light hover:shadow-lg hover:shadow-primary/25"
-              >
-                Get Started
-              </a>
-            ) : (
-              <a
-                href="https://app.checkpointvcs.com"
-                className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-white transition-all hover:bg-primary-light hover:shadow-lg hover:shadow-primary/25"
-              >
-                Get Started
-              </a>
-            )}
+            <Link
+              href="/download"
+              className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-white transition-all hover:bg-primary-light hover:shadow-lg hover:shadow-primary/25"
+            >
+              Download
+            </Link>
           </div>
 
           {/* Mobile hamburger */}
@@ -129,22 +120,13 @@ export default function Navbar() {
               {link.label}
             </a>
           ))}
-          {COMING_SOON ? (
-            <a
-              href="#"
-              className="block w-full text-center rounded-full bg-primary px-5 py-2 text-sm font-medium text-white transition-all hover:bg-primary-light"
-              onClick={() => setMobileOpen(false)}
-            >
-              Get Started
-            </a>
-          ) : (
-            <a
-              href="https://app.checkpointvcs.com"
-              className="block w-full text-center rounded-full bg-primary px-5 py-2 text-sm font-medium text-white transition-all hover:bg-primary-light"
-            >
-              Get Started
-            </a>
-          )}
+          <Link
+            href="/download"
+            className="block w-full text-center rounded-full bg-primary px-5 py-2 text-sm font-medium text-white transition-all hover:bg-primary-light"
+            onClick={() => setMobileOpen(false)}
+          >
+            Download
+          </Link>
         </div>
       )}
     </nav>
