@@ -103,6 +103,10 @@ git config --global user.email "${GE}"
 git config --global init.defaultBranch main
 git config --global credential.helper store
 git config --global lfs.concurrenttransfers 8
+# Retry individual transient LFS transfer failures internally before the whole
+# transfer is reported as failed (default is low). This is the first line of
+# defense against the occasional object upload that 404s a later clone.
+git config --global lfs.transfer.maxretries 10
 # Store HTTP basic creds so git AND git-lfs authenticate without prompting.
 umask 077
 printf 'http://%s:%s@%s:3000\n' "${GU}" "${GP}" "${PRIV}" > /root/.git-credentials
@@ -206,18 +210,30 @@ adapter_commit_all() {
 }
 
 adapter_submit_all() {
-  # The normal `git push` re-runs the git-lfs pre-push hook, which aborts with a
-  # spurious "missing object" warning even though the repo fscks clean. So upload
-  # the LFS objects explicitly, then push refs with --no-verify (skip the hook,
-  # LFS is already uploaded) and --no-thin (send a complete pack). Note: `git lfs
-  # push` prints that same benign warning and exits non-zero despite uploading
-  # everything, so its exit code is tolerated; the subsequent `git push` is the
-  # source of truth (and Gitea validates LFS objects server-side on receive, so
-  # a genuinely missing object would make the push fail here).
+  # Upload the LFS objects explicitly, then push refs with --no-verify (skip the
+  # pre-push hook, which is noisy on a tree this size) and --no-thin (complete
+  # pack). The LFS upload is AUTHORITATIVE: a plain `git push` of the pointer
+  # files does NOT verify that the referenced LFS objects exist on Gitea (it
+  # accepts the pointers regardless), so an incomplete upload here is never caught
+  # at push time and instead surfaces as a 404 in a later clone's smudge filter.
+  # So we retry `git lfs push` and FAIL the phase if it never completes, rather
+  # than pushing pointers for objects that are not on the server.
   on_client "TREE_DIR='${TREE_DIR}' bash -seuo pipefail" <<'EOF'
 cd "${TREE_DIR}"
-git lfs push --all origin main \
-  || echo "note: git lfs push exited non-zero (benign 'missing object' scan warning); upload still completed"
+# Surface any object missing from the LOCAL LFS cache (retrying can't fix those;
+# this turns a silent gap into a visible diagnostic).
+git lfs fsck || echo "note: git lfs fsck reported issues (see above)"
+# Authoritative upload of all LFS objects, with retries for transient failures.
+attempt=1; max=5
+until git lfs push --all origin main; do
+  if [ "$attempt" -ge "$max" ]; then
+    echo "ERROR: git lfs push --all failed after ${max} attempts; aborting before" \
+         "pushing pointers (server would be missing objects)." >&2
+    exit 1
+  fi
+  echo "git lfs push attempt ${attempt} failed; retrying in 5s..." >&2
+  attempt=$((attempt + 1)); sleep 5
+done
 git push --no-thin --no-verify
 EOF
 }
@@ -230,8 +246,16 @@ adapter_update() {
 cd "${TREE_DIR}"
 git add -- "${FILE}"
 git commit -q -m 'benchmark: small update'
-git lfs push --all origin main \
-  || echo "note: git lfs push exited non-zero (benign 'missing object' scan warning); upload still completed"
+# Authoritative LFS upload before pushing the pointer (see adapter_submit_all).
+attempt=1; max=5
+until git lfs push --all origin main; do
+  if [ "$attempt" -ge "$max" ]; then
+    echo "ERROR: git lfs push --all failed after ${max} attempts" >&2
+    exit 1
+  fi
+  echo "git lfs push attempt ${attempt} failed; retrying in 5s..." >&2
+  attempt=$((attempt + 1)); sleep 5
+done
 git push --no-thin --no-verify
 EOF
 }
