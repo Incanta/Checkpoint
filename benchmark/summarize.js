@@ -251,16 +251,22 @@ function resourceCharts(run) {
   return `#### ${run.vcs}\n\n${cpu}\n\n${ram}\n`;
 }
 
-// Color palette for the combined (one-series-per-VCS) charts, paired with an
-// emoji dot so the legend is readable in Markdown (mermaid xychart has no
-// built-in legend). Cycles if there are more VCS than entries.
+// Fixed per-VCS colors for the combined (one-series-per-VCS) charts, each with
+// an emoji dot so the legend is readable in Markdown (mermaid xychart has no
+// built-in legend). A VCS not listed here falls back to COMBINED_PALETTE below,
+// assigned in run order.
+const VCS_COLORS = {
+  lore: { hex: "#2ca02c", dot: "🟢" }, // green
+  checkpoint: { hex: "#9467bd", dot: "🟣" }, // purple
+  ark: { hex: "#8c564b", dot: "🟤" }, // brown
+  perforce: { hex: "#1f77b4", dot: "🔵" }, // blue
+  gitea: { hex: "#f1c40f", dot: "🟡" }, // yellow
+};
 const COMBINED_PALETTE = [
-  { hex: "#1f77b4", dot: "🔵" }, // blue
-  { hex: "#2ca02c", dot: "🟢" }, // green
   { hex: "#ff7f0e", dot: "🟠" }, // orange
   { hex: "#d62728", dot: "🔴" }, // red
-  { hex: "#9467bd", dot: "🟣" }, // purple
-  { hex: "#8c564b", dot: "🟤" }, // brown
+  { hex: "#17becf", dot: "🩵" }, // cyan
+  { hex: "#e377c2", dot: "🩷" }, // pink
 ];
 
 // Linearly resample `values` (samples evenly spaced in time across the whole
@@ -299,7 +305,10 @@ function combinedResourceCharts(runs) {
 
   const G = 21; // 0%, 5%, ... 100%
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-  const palette = withRes.map((_, i) => COMBINED_PALETTE[i % COMBINED_PALETTE.length]);
+  let fb = 0;
+  const palette = withRes.map(
+    (r) => VCS_COLORS[r.vcs] || COMBINED_PALETTE[fb++ % COMBINED_PALETTE.length],
+  );
   const init =
     '%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "' +
     palette.map((p) => p.hex).join(", ") +
