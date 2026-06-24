@@ -203,25 +203,31 @@ adapter_commit_all() {
 }
 
 adapter_submit_all() {
-  # git push uploads the commit; the LFS pre-push hook uploads the cached objects.
-  # -q drops the per-object progress stream. On failure (e.g. the recurring
-  # "missing object" push error), dump targeted git diagnostics so we can see
-  # whether it is a gitlink/submodule entry or genuine object-DB breakage,
-  # rather than guessing, then propagate the failure.
+  # The default `git push` re-runs the git-lfs pre-push hook, which on the second
+  # (thin-pack) push aborts with a spurious "missing object" even though the repo
+  # fscks clean (gitlink count 0, no submodules). So instead: upload the LFS
+  # objects explicitly, then push refs with --no-verify (skip the failing hook,
+  # LFS is already uploaded) and --no-thin (send a complete pack so the server
+  # never has to resolve a delta base it might be missing). On failure, dump
+  # targeted diagnostics including whether the "missing" OID is actually local.
   on_client "TREE_DIR='${TREE_DIR}' bash -seuo pipefail" <<'EOF'
 cd "${TREE_DIR}"
-if git push -q; then exit 0; fi
-echo "=== git push failed; diagnostics ===" >&2
-echo "--- gitlink (mode 160000 / submodule) index entries ---" >&2
-git ls-files -s | awk '$1=="160000"{print}' | head -20 >&2
-echo "gitlink count: $(git ls-files -s | awk '$1=="160000"' | wc -l)" >&2
-echo "--- .gitmodules ---" >&2
-{ [ -f .gitmodules ] && cat .gitmodules; } >&2 || echo "(no .gitmodules)" >&2
-echo "--- HEAD / branch ---" >&2
-git rev-parse HEAD @ origin/main 2>&1 | head >&2 || true
-echo "--- git fsck (missing/broken, first 40) ---" >&2
-git fsck --full 2>&1 | grep -iE 'missing|broken' | head -40 >&2 || true
-exit 1
+rc=0
+git lfs push --all origin main || rc=$?
+git push --no-thin --no-verify || rc=$?
+[ "$rc" -eq 0 ] && exit 0
+
+echo "=== submit failed (rc=${rc}); diagnostics ==="
+out=$(git push --no-thin --no-verify 2>&1 || true)
+printf '%s\n' "$out"
+oid=$(printf '%s\n' "$out" | grep -oE 'missing object: [0-9a-f]{40}' | awk '{print $NF}' | head -1)
+if [ -n "$oid" ]; then
+  echo "--- is reported missing oid ${oid} present locally? ---"
+  if git cat-file -t "$oid"; then git cat-file -s "$oid"; else echo "(genuinely missing locally)"; fi
+fi
+echo "gitlink count: $(git ls-files -s | awk '$1=="160000"' | wc -l)"
+git fsck --full 2>&1 | grep -iE 'missing|broken' | head -20 || true
+exit "${rc}"
 EOF
 }
 
