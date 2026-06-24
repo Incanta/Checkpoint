@@ -112,3 +112,40 @@ jobs:
       - name: Teardown droplets
         if: always() && needs.config.outputs.keep_droplets != 'true'
         run: bash benchmark/lib/teardown.sh
+
+  # --------------------------------------------------------------------------
+  # Combine every per-VCS timings artifact into one comparison table. Runs even
+  # if some matrix jobs failed, summarizing whatever artifacts were produced.
+  # --------------------------------------------------------------------------
+  combine:
+    needs: benchmark
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download all timings artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: timings-*
+          path: all-timings
+          merge-multiple: true
+
+      - name: Render combined summary
+        run: |
+          shopt -s nullglob
+          files=(all-timings/*.json)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No timings artifacts were produced (all benchmark jobs failed before writing results)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # summarize.js already renders one column per VCS when given multiple
+          # files, so the combined table is just every artifact passed at once.
+          node benchmark/summarize.js "${files[@]}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload combined timings
+        uses: actions/upload-artifact@v7
+        with:
+          name: timings-combined
+          path: all-timings/*.json
+          if-no-files-found: warn
