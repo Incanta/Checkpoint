@@ -82,21 +82,21 @@ apt-get install -y helix-cli
 p4 -V | head -2
 EOF
 
-  log "configuring p4 env + obtaining a non-expiring login ticket"
+  log "configuring p4 env + password auth (no expiring tickets)"
   on_client "PORT='${P4PORT_PRIV}' PU='${P4_SUPERUSER}' PW='${P4_PASSWD}' bash -seuo pipefail" <<'EOF'
 p4 set P4PORT="${PORT}"
 p4 set P4USER="${PU}"
 p4 set P4IGNORE=.p4ignore
-# Initial login (default ticket timeout) so we can administer the server.
-# If P4PORT did not persist this fails fast (it would try localhost:1666).
+# configure-helix-p4d sets security level 3, which requires login tickets, and
+# those tickets expire mid-run (a long submit followed by a fresh command was
+# failing with "P4PASSWD invalid or unset", and bumping the group timeout did
+# not help). Authenticate once with a ticket to administer the server, then drop
+# to security level 2 and store the password in the p4 environment: at level <=2
+# every command authenticates with P4PASSWD directly, so there are no tickets to
+# expire for the rest of the run.
 echo "${PW}" | p4 login
-# Put the superuser in a group with an unlimited ticket timeout. The default
-# timeout can be shorter than a multi-hour benchmark, so a long submit can
-# outlive the ticket and the next command fails with "P4PASSWD invalid or
-# unset". A single login then covers the whole run.
-p4 --field "Users=${PU}" --field "Timeout=unlimited" group -o bench-unlimited | p4 group -i
-# Re-login so the active ticket picks up the new unlimited timeout.
-echo "${PW}" | p4 login
+p4 configure set security=2
+p4 set P4PASSWD="${PW}"
 p4 info
 EOF
 }
