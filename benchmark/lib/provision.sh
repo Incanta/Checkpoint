@@ -36,21 +36,42 @@ emit() { echo "$1=$2" >>"$ENV_FILE"; }
 
 log "creating VPC ${RUN_TAG} in ${REGION}"
 # `doctl vpcs` is a top-level command and does not support --format/--no-header
-# (unlike the `compute` subcommands), so request JSON and parse the id.
-VPC_ID="$(doctl vpcs create --name "$RUN_TAG" --region "$REGION" -o json \
-  | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{process.stdout.write(JSON.parse(d)[0].id)})')"
-[ -n "$VPC_ID" ] || die "failed to create VPC"
+# (unlike the `compute` subcommands), so request JSON and parse the id. The call
+# can fail transiently (API rate limits when several matrix jobs provision at
+# once) or be refused (VPC quota reached, e.g. leftover VPCs from prior failed
+# runs), so retry with backoff and, on persistent failure, surface doctl's
+# actual output instead of crashing on an unexpected JSON shape.
+VPC_ID=""
+for attempt in 1 2 3 4 5; do
+  vpc_err="$(mktemp)"
+  vpc_json="$(doctl vpcs create --name "$RUN_TAG" --region "$REGION" -o json 2>"$vpc_err")" || true
+  VPC_ID="$(printf '%s' "$vpc_json" | node -e '
+    let d = "";
+    process.stdin.on("data", (c) => (d += c)).on("end", () => {
+      try {
+        const j = JSON.parse(d);
+        if (Array.isArray(j) && j[0] && j[0].id) process.stdout.write(j[0].id);
+      } catch (e) {}
+    })')"
+  if [ -n "$VPC_ID" ]; then rm -f "$vpc_err"; break; fi
+  log "  VPC create attempt ${attempt}/5 failed: $(cat "$vpc_err"; printf '%s' "$vpc_json" | head -c 300)"
+  rm -f "$vpc_err"
+  sleep $(( attempt * 5 ))
+done
+[ -n "$VPC_ID" ] || die "failed to create VPC after 5 attempts (see errors above; check VPC quota and clean up leaked VPCs from prior failed runs)"
 emit VPC_ID "$VPC_ID"
 
 log "creating ${DATA_VOLUME_GB}GiB client data volume ${VOLUME_NAME}"
 VOL_ID="$(doctl compute volume create "$VOLUME_NAME" --region "$REGION" \
   --size "${DATA_VOLUME_GB}GiB" --fs-type ext4 --format ID --no-header)"
+[ -n "$VOL_ID" ] || die "failed to create client data volume ${VOLUME_NAME}"
 emit VOL_ID "$VOL_ID"
 emit VOLUME_NAME "$VOLUME_NAME"
 
 log "creating ${SERVER_VOLUME_GB}GiB server data volume ${SERVER_VOLUME_NAME}"
 SERVER_VOL_ID="$(doctl compute volume create "$SERVER_VOLUME_NAME" --region "$REGION" \
   --size "${SERVER_VOLUME_GB}GiB" --fs-type ext4 --format ID --no-header)"
+[ -n "$SERVER_VOL_ID" ] || die "failed to create server data volume ${SERVER_VOLUME_NAME}"
 emit SERVER_VOL_ID "$SERVER_VOL_ID"
 emit SERVER_VOLUME_NAME "$SERVER_VOLUME_NAME"
 
