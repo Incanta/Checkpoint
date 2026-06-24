@@ -1,0 +1,4 @@
+# The active config is generated at run time by copying the selected profile
+# (config.<profile>.json) to config.json. Profiles are version-controlled;
+# the copied active file is not.
+config.json

@@ -16,8 +16,7 @@ and **Ark** (Ark VCS). See `adapters/*.sh`.
 
 ## How to run
 
-1. Edit `config.json` (this is the single, version-controlled source of truth
-   for a run, intentionally not a dispatch input):
+1. Edit a config **profile**. Each profile is a version-controlled file named `config.<profile>.json` (e.g. `config.lyra.json`), and the run's methodology comes from the selected profile, not from free-form dispatch inputs. Copy an existing profile to `config.<name>.json` to make a new one. There is no special "default" file: the default profile is whichever name the workflow's `profile` input declares as its `default` (currently `lyra`). At run time the workflow copies the chosen profile to `config.json` (which is git-ignored, since it is a generated copy). Profile shape:
 
    ```json
    {
@@ -45,10 +44,14 @@ and **Ark** (Ark VCS). See `adapters/*.sh`.
    - `checkpoint_version`: empty uses the compose `latest` images and the source at `HEAD`; set it to pin server image tags.
    - `keep_droplets`: `true` skips teardown (for debugging). **This leaves both droplets, both volumes, and the VPC running and billing until you delete them manually.**
 
-2. Commit the config change (so the run is reproducible from history).
+2. Commit the profile change (so the run is reproducible from history). To add a
+   brand-new profile, also add its `<name>` to the `profile` input's `options`
+   list in `.github/workflows/benchmark.yaml` so it appears in the dropdown.
 
-3. Run the **VCS Benchmark** workflow (Actions tab, "Run workflow"). There are
-   no dispatch inputs by design.
+3. Run the **VCS Benchmark** workflow (Actions tab, "Run workflow") and pick a
+   profile from the **profile** dropdown (defaults to `lyra`). The only dispatch
+   input is this profile selector; all run parameters still come from the
+   committed profile file.
 
 ## Required repository secrets
 

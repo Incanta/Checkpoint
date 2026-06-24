@@ -1,0 +1,19 @@
+{
+  "tarball_url": "https://incantagames.sfo3.digitaloceanspaces.com/checkpoint/lyra.tar.gz",
+  "small_change_file": "Content/Effects/Textures/Flipbooks/SmokeSwirl_3_Flipbook_CHANNELPACK.uasset",
+  "region": "sfo3",
+  "droplet_size": "m-8vcpu-64gb",
+  "data_volume_gb": 400,
+  "server_volume_gb": 200,
+  "resource_interval_s": 1,
+  "chart_label_every": "sample",
+  "vcs": [
+    "checkpoint",
+    "lore",
+    "gitea",
+    "perforce",
+    "ark"
+  ],
+  "checkpoint_version": "",
+  "keep_droplets": false
+}

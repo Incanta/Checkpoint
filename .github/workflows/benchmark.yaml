@@ -1,12 +1,26 @@
 name: VCS Benchmark
+run-name: VCS Benchmark (${{ inputs.profile }})
 
 # Coordinator workflow: provisions two DigitalOcean droplets (server + client)
 # per VCS, runs the benchmark over SSH, then tears everything down. All run
-# parameters come from the version-controlled benchmark/config.json, not from
-# dispatch inputs, so every run is reproducible from git history.
+# parameters come from a version-controlled config profile
+# (benchmark/config.<profile>.json), selected via the `profile` dispatch input
+# and copied to benchmark/config.json at run time, so every run is reproducible
+# from git history. The profile selector is the only dispatch input.
 
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: "Config profile to run (benchmark/config.<profile>.json)"
+        type: choice
+        # The default profile is whichever name is set here (and listed first
+        # below). Add an entry to `options` for each committed
+        # benchmark/config.<name>.json you want selectable from this dropdown.
+        default: titan
+        options:
+          - titan
+          - lyra
 
 permissions:
   contents: read
@@ -31,6 +45,23 @@ jobs:
       keep_droplets: ${{ steps.cfg.outputs.keep_droplets }}
     steps:
       - uses: actions/checkout@v6
+      - name: Select config profile
+        env:
+          PROFILE: ${{ inputs.profile }}
+        run: |
+          # Fallback matches the input's default above, for non-UI dispatches
+          # (e.g. the API) that send no profile value.
+          profile="${PROFILE:-lyra}"
+          src="benchmark/config.${profile}.json"
+          if [ ! -f "$src" ]; then
+            echo "::error::config profile '${profile}' not found (${src})."
+            echo "Available profiles:" >&2
+            ls benchmark/config.*.json >&2 || true
+            exit 1
+          fi
+          cp "$src" benchmark/config.json
+          echo "Using config profile '${profile}' (${src}):"
+          cat benchmark/config.json
       - name: Parse benchmark/config.json
         id: cfg
         run: |
