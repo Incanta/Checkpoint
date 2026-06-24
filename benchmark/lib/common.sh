@@ -359,3 +359,50 @@ finalize_resources() { # timings_json vcs interval
   ' "$out" "resources.${vcs}.client.jsonl" "resources.${vcs}.server.jsonl" "resources.${vcs}.json" "$interval"
   log "wrote resources.${vcs}.json (client + server samples)"
 }
+
+# ----------------------------------------------------------------------------
+# Pull verification
+#
+# Cheap, deterministic fingerprint of the pulled tree to confirm every VCS
+# actually materialized the full payload (and the same payload). It hashes a
+# sorted "<relative path>\t<size>" manifest of every payload file, excluding VCS
+# metadata dirs and per-VCS ignore/config files, so the same payload yields the
+# same hash across all VCS. Metadata only (no byte reads), so it is cheap; it
+# catches missing/truncated/extra files but not same-size byte corruption.
+# ----------------------------------------------------------------------------
+
+# compute_pull_manifest <remote_dir>: prints "<sha256> <file_count> <total_bytes>".
+compute_pull_manifest() { # remote_dir
+  on_client "DIR='${1}' bash -seuo pipefail" <<'EOF'
+cd "${DIR}" 2>/dev/null || { echo "MISSING 0 0"; exit 0; }
+manifest="$(find . \
+  -type d \( -name .git -o -name .checkpoint -o -name .lore -o -name .ark -o -name .p4root \) -prune -o \
+  -type f \
+    ! -name .chkignore ! -name .loreignore ! -name .gitignore ! -name .gitattributes \
+    ! -name .p4ignore ! -name .ark_ignore ! -name .ark_config ! -name .ark_lock \
+    -printf '%P\t%s\n' \
+  | LC_ALL=C sort)"
+hash="$(printf '%s' "$manifest" | sha256sum | cut -d' ' -f1)"
+count="$(printf '%s\n' "$manifest" | sed '/^$/d' | wc -l | tr -d ' ')"
+bytes="$(printf '%s\n' "$manifest" | awk -F'\t' '{s+=$2} END{printf "%d", s}')"
+printf '%s %s %s\n' "$hash" "$count" "$bytes"
+EOF
+}
+
+# finalize_verify <timings_json> <hash> <count> <bytes>: embed the pull manifest
+# fingerprint into the timings JSON for the summaries.
+finalize_verify() { # timings_json hash count bytes
+  node -e '
+    const fs = require("fs");
+    const [out, hash, count, bytes] = process.argv.slice(1);
+    try {
+      const j = JSON.parse(fs.readFileSync(out, "utf8"));
+      j.verify = {
+        pull_manifest_sha256: hash,
+        pull_file_count: Number(count) || 0,
+        pull_bytes: Number(bytes) || 0,
+      };
+      fs.writeFileSync(out, JSON.stringify(j, null, 2) + "\n");
+    } catch (e) {}
+  ' "$1" "$2" "$3" "$4"
+}

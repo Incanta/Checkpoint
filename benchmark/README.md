@@ -80,17 +80,26 @@ needed.
    for the resource charts. It spans all three phases because the heavy work
    lands in different phases per VCS (e.g. Lore commits locally then pushes in
    seconds).
-6. **Small update** (only if `small_change_file` is set): measure the server
+6. **Pull verification** (right after the pull, untimed): a cheap deterministic
+   fingerprint of the pulled tree, the sha256 of a sorted `path\tsize` manifest
+   of every payload file (VCS metadata and per-VCS ignore/config files
+   excluded). The same payload yields the same hash across all VCS, so a
+   mismatch or a smaller file count flags a VCS that did not materialize the
+   full content. Metadata only (no byte reads), so it is cheap; it catches
+   missing/truncated/extra files but not same-size byte corruption.
+7. **Small update** (only if `small_change_file` is set): measure the server
    store size, make a ~100-byte change to that file, then submit it. The submit
    is timed on its own (the `update_submit` phase). The server store is then
    measured again and the byte delta recorded. The storage measurement and
    settle wait stay outside the timer, so only the submit itself is timed and no
    other metric is affected.
-7. **Report**: Markdown tables in the job summary, plus Mermaid `xychart`
+8. **Report**: Markdown tables in the job summary (including the pull-verification
+   table, which should show identical hashes across VCS), plus Mermaid `xychart`
    resource graphs (CPU% and RAM, two line series each: blue = client, green =
    server; x-axis in minutes). Artifacts: `timings.<vcs>.json` (timings +
-   embedded resource samples) and `resources.<vcs>.json` (raw CPU/RAM samples).
-8. **Teardown** (`lib/teardown.sh`): destroys everything by ID with a tag sweep
+   embedded resource samples + verification) and `resources.<vcs>.json` (raw
+   CPU/RAM samples).
+9. **Teardown** (`lib/teardown.sh`): destroys everything by ID with a tag sweep
    backstop. Runs even on failure unless `keep_droplets` is true.
 
 ## Output schema (`timings.<vcs>.json`)
@@ -114,6 +123,11 @@ needed.
     "interval_s": 30,
     "client": [{ "t": 0, "cpu_pct": 80, "ram_gb": 3.1 }],
     "server": [{ "t": 0, "cpu_pct": 20, "ram_gb": 1.2 }]
+  },
+  "verify": {
+    "pull_manifest_sha256": "…",
+    "pull_file_count": 193925,
+    "pull_bytes": 52821000000
   },
   "meta": {
     "run_tag": "...",

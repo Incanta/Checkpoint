@@ -169,6 +169,14 @@ time_phase status -- adapter_status
 log "--- step: pull into a fresh workspace ---"
 time_phase pull_elsewhere -- adapter_pull_elsewhere
 
+# Verify the pull actually materialized the full payload (and the same payload
+# as every other VCS) with a cheap deterministic manifest hash. Non-fatal: a
+# hiccup here must not discard the run's results.
+log "--- verifying pulled contents (manifest hash) ---"
+PULL_VERIFY="$(compute_pull_manifest "$PULL_DIR" 2>/dev/null || echo "ERROR 0 0")"
+read -r PULL_HASH PULL_COUNT PULL_BYTES <<< "$PULL_VERIFY"
+log "pulled content: sha256=${PULL_HASH} files=${PULL_COUNT} bytes=${PULL_BYTES}"
+
 # ----------------------------------------------------------------------------
 # Small-update server-storage delta (untimed: storage only, never timing)
 #
@@ -212,4 +220,5 @@ fi
 # ----------------------------------------------------------------------------
 write_timings_json "$OUT" "$VCS"
 finalize_resources "$OUT" "$VCS" "${RES_INTERVAL:-30}"
+finalize_verify "$OUT" "${PULL_HASH:-}" "${PULL_COUNT:-0}" "${PULL_BYTES:-0}"
 log "=== benchmark complete: ${VCS} ==="

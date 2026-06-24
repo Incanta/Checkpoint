@@ -161,6 +161,36 @@ function storageTable() {
 
 const hasStorage = runs.some((r) => r.storage && Object.keys(r.storage).length > 0);
 
+// Pull-verification table: the manifest fingerprint of each pulled tree. The
+// hashes should be identical across VCS (same payload); a mismatch or a smaller
+// file count/byte total flags a VCS that did not materialize the full content.
+function verifyTable() {
+  if (!runs.some((r) => r.verify && r.verify.pull_manifest_sha256)) return "";
+  const header = ["Pulled content", ...runs.map((r) => r.vcs)];
+  const sep = header.map(() => "---");
+  const lines = [`| ${header.join(" | ")} |`, `| ${sep.join(" | ")} |`];
+  const short = (h) => (h ? "`" + String(h).slice(0, 16) + "`" : "");
+  lines.push(
+    `| Manifest SHA-256 | ${runs.map((r) => short(r.verify && r.verify.pull_manifest_sha256)).join(" | ")} |`,
+  );
+  lines.push(
+    `| Files | ${runs.map((r) => (r.verify && r.verify.pull_file_count != null ? r.verify.pull_file_count : "")).join(" | ")} |`,
+  );
+  lines.push(
+    `| Bytes | ${runs.map((r) => fmtBytes(r.verify && r.verify.pull_bytes)).join(" | ")} |`,
+  );
+  let note = "";
+  if (runs.length > 1) {
+    const hashes = runs.map((r) => r.verify && r.verify.pull_manifest_sha256);
+    const allMatch =
+      hashes.every(Boolean) && hashes.every((h) => h === hashes[0]);
+    note = allMatch
+      ? "\n_All VCS pulled identical content (manifest hashes match)._"
+      : "\n_Manifest hashes differ: the pulled content is NOT identical across VCS._";
+  }
+  return `### Pull verification (manifest of paths + sizes; VCS metadata excluded)\n\n${lines.join("\n")}\n${note}`;
+}
+
 // Render CPU and RAM full-submit charts for one run as Mermaid xychart-beta
 // blocks, each with two line series (client = blue, server = green). The init
 // directive pins those colors so the title's legend is accurate. The x-axis is
@@ -226,6 +256,12 @@ if (hasStorage) {
         "column (negative = more)._",
     );
   }
+  out.push("");
+}
+
+const verify = verifyTable();
+if (verify) {
+  out.push(verify);
   out.push("");
 }
 
