@@ -24,6 +24,8 @@ ADAPTER_SUPPORTS_COMMIT="false"
 # server volume (/data) so a full 50GB submit does not fill the base disk.
 P4_INSTANCE="master"
 P4ROOT="/data/perforce/servers/master"
+# Server-side store root (db + depot archives), for the small-update delta.
+SERVER_STORAGE_PATH="/data/perforce"
 P4_SUPERUSER="super"
 # Must satisfy Helix's strong-password policy (length + mixed classes).
 P4_PASSWD="BenchPass123!"
@@ -171,4 +173,12 @@ p4 --field "Root=${PULL_DIR}" \
 # -q suppresses the per-file "added as ..." lines from the full sync.
 p4 -q -c "${WS}" sync
 EOF
+}
+
+# Small-update: open one file for edit, change ~100 bytes, and submit. Perforce
+# stores a new revision of the (binary) file, typically the whole file again.
+adapter_update() {
+  on_client "cd ${TREE_DIR} && p4 -c ${WS_MAIN} edit '${SMALL_CHANGE_FILE}'"
+  client_append_bytes "${TREE_DIR}/${SMALL_CHANGE_FILE}" 100
+  on_client "cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} submit -d 'benchmark: small update'"
 }

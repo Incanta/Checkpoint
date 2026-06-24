@@ -21,6 +21,10 @@ SRC_DIR="/opt/checkpoint-src"
 CHK="${SRC_DIR}/src/clients/cli/build/chk"
 DAEMON_DIR="${SRC_DIR}/src/core/daemon"
 
+# Server-side backend storage lives under Docker's data-root (relocated to the
+# server volume); used to measure the small-update storage delta.
+SERVER_STORAGE_PATH="/data/docker"
+
 # Checkpoint identifiers used for the benchmark.
 ORG_NAME="bench-org"
 REPO_NAME="bench-repo"
@@ -289,4 +293,12 @@ adapter_submit_all() {
 
 adapter_pull_elsewhere() {
   on_client "mkdir -p ${PULL_DIR} && cd ${PULL_DIR} && ${CHK} init ${ORG_NAME}/${REPO_NAME} && ${CHK} pull"
+}
+
+# Small-update: change ~100 bytes of one file and submit. Untimed; the harness
+# only measures the server storage delta around this.
+adapter_update() {
+  client_append_bytes "${TREE_DIR}/${SMALL_CHANGE_FILE}" 100
+  on_client "cd ${TREE_DIR} && ${CHK} add '${SMALL_CHANGE_FILE}' >/dev/null"
+  on_client "cd ${TREE_DIR} && ${CHK} submit --message 'benchmark: small update'"
 }

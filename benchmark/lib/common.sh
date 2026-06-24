@@ -72,8 +72,12 @@ payload_phase() { _timed "payload" "$@"; }
 # output schema stays consistent across adapters.
 record_null_phase() { record_timing "vcs" "$1" "null"; }
 
+# record_storage <name> <value>: a non-timing measurement (e.g. bytes), kept in
+# its own group so it is never mixed into the timed phase table.
+record_storage() { record_timing "storage" "$1" "$2"; }
+
 # write_timings_json <out_file> <vcs>
-# Emits { vcs, phases:{...}, payload:{...}, meta:{...} } using Node.
+# Emits { vcs, phases:{...}, payload:{...}, storage:{...}, meta:{...} } via Node.
 write_timings_json() {
   local out="$1" vcs="$2"
   local meta_run_tag="${RUN_TAG:-}"
@@ -89,16 +93,18 @@ write_timings_json() {
   } | node -e '
     const fs = require("fs");
     const rows = fs.readFileSync(0, "utf8").split("\n").filter(Boolean);
-    const phases = {}, payload = {};
+    const phases = {}, payload = {}, storage = {};
     for (const line of rows) {
       const [group, name, value] = line.split("\t");
       const v = value === "null" ? null : Number(value);
-      (group === "payload" ? payload : phases)[name] = v;
+      const bucket = group === "payload" ? payload : group === "storage" ? storage : phases;
+      bucket[name] = v;
     }
     const out = {
       vcs: process.argv[1],
       phases,
       payload,
+      storage,
       meta: {
         run_tag: process.argv[2] || null,
         region: process.argv[3] || null,
@@ -265,4 +271,23 @@ prepare_client_storage() {
 
 prepare_server_storage() {
   _prepare_storage on_server_script "${SERVER_VOLUME_NAME:?SERVER_VOLUME_NAME not set}"
+}
+
+# ----------------------------------------------------------------------------
+# Small-update storage measurement
+# ----------------------------------------------------------------------------
+
+# server_storage_bytes: actual disk usage (bytes) of the server's backend store.
+# Adapters set SERVER_STORAGE_PATH to their store dir under /data; defaults to
+# the whole server volume. Used to measure how much a tiny change costs on the
+# server (delta/dedup efficiency), so it is NOT a timing measurement.
+server_storage_bytes() {
+  local path="${SERVER_STORAGE_PATH:-/data}"
+  on_server "sync; du -sB1 '${path}' 2>/dev/null | cut -f1"
+}
+
+# client_append_bytes <abs_path> <count>: append <count> random bytes to a file
+# on the client (the small change whose server-side storage cost we measure).
+client_append_bytes() {
+  on_client "head -c ${2} /dev/urandom >> '${1}'"
 }

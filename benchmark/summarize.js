@@ -38,6 +38,9 @@ const PAYLOAD_PHASES = [
   ["payload_download", "Download tarball"],
   ["payload_extract", "Extract tarball"],
 ];
+const STORAGE_ROWS = [
+  ["update_delta_bytes", "Server storage delta (small update)"],
+];
 
 function fmt(seconds) {
   if (seconds === undefined) return "";
@@ -56,6 +59,23 @@ function fmt(seconds) {
 
 // Value for a (run, key), where the synthetic total key sums the submit phases
 // (null/missing phases count as 0 so the elapsed total stays comparable).
+function fmtBytes(bytes) {
+  if (bytes === undefined) return "";
+  if (bytes === null) return "n/a";
+  const n = Number(bytes);
+  if (!Number.isFinite(n)) return String(bytes);
+  const neg = n < 0 ? "-" : "";
+  let x = Math.abs(n);
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let i = 0;
+  while (x >= 1024 && i < units.length - 1) {
+    x /= 1024;
+    i++;
+  }
+  const human = i === 0 ? `${x} B` : `${x.toFixed(1)} ${units[i]}`;
+  return `${neg}${human} (${n} B)`;
+}
+
 function phaseValue(run, key) {
   const phases = run.phases || {};
   if (key === "__submit_total__") {
@@ -116,6 +136,27 @@ function payloadTable() {
   return `### Payload preparation (untimed against the VCS)\n\n${lines.join("\n")}\n`;
 }
 
+// Server-side storage growth from a tiny (~100-byte) change to one file, in
+// bytes, with the Checkpoint comparison. Lower is better (smaller = more
+// efficient delta/dedup). Not a timing measurement.
+function storageTable() {
+  const header = ["Metric", ...runs.map((r) => (r === baseline ? `${r.vcs} (baseline)` : r.vcs))];
+  const sep = header.map(() => "---");
+  const lines = [`| ${header.join(" | ")} |`, `| ${sep.join(" | ")} |`];
+  for (const [key, label] of STORAGE_ROWS) {
+    const cells = runs.map((r) => {
+      const v = (r.storage || {})[key];
+      let s = fmtBytes(v);
+      if (r !== baseline && baseline) s += pctVsCheckpoint((baseline.storage || {})[key], v);
+      return s;
+    });
+    lines.push(`| ${label} | ${cells.join(" | ")} |`);
+  }
+  return `### Server storage delta (small update)\n\n${lines.join("\n")}\n`;
+}
+
+const hasStorage = runs.some((r) => r.storage && Object.keys(r.storage).length > 0);
+
 const out = [];
 out.push("## VCS Benchmark Results\n");
 out.push(vcsTable());
@@ -128,6 +169,16 @@ if (baseline && runs.length > 1) {
 out.push("");
 out.push(payloadTable());
 out.push("");
+if (hasStorage) {
+  out.push(storageTable());
+  if (baseline && runs.length > 1) {
+    out.push(
+      "_Percent vs Checkpoint: `(N%)` means Checkpoint stored N% less than that " +
+        "column (negative = more)._",
+    );
+  }
+  out.push("");
+}
 
 const meta = runs[0] && runs[0].meta ? runs[0].meta : {};
 out.push("### Run metadata\n");

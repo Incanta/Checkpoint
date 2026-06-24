@@ -39,6 +39,9 @@ REPO_NAME="bench-repo"
 # Clone/remote URL the client uses (server's private VPC IP).
 GIT_REMOTE="http://${SERVER_PRIVATE_IP}:3000/${GITEA_USER}/${REPO_NAME}.git"
 
+# Server-side store (repos + LFS objects), for the small-update storage delta.
+SERVER_STORAGE_PATH="/data/gitea"
+
 # ----------------------------------------------------------------------------
 # Server
 # ----------------------------------------------------------------------------
@@ -213,6 +216,20 @@ adapter_submit_all() {
   # a genuinely missing object would make the push fail here).
   on_client "TREE_DIR='${TREE_DIR}' bash -seuo pipefail" <<'EOF'
 cd "${TREE_DIR}"
+git lfs push --all origin main \
+  || echo "note: git lfs push exited non-zero (benign 'missing object' scan warning); upload still completed"
+git push --no-thin --no-verify
+EOF
+}
+
+# Small-update: change ~100 bytes of one file and push a new commit. A change to
+# an LFS-tracked file produces a whole new LFS object (LFS does not delta).
+adapter_update() {
+  client_append_bytes "${TREE_DIR}/${SMALL_CHANGE_FILE}" 100
+  on_client "TREE_DIR='${TREE_DIR}' FILE='${SMALL_CHANGE_FILE}' bash -seuo pipefail" <<'EOF'
+cd "${TREE_DIR}"
+git add -- "${FILE}"
+git commit -q -m 'benchmark: small update'
 git lfs push --all origin main \
   || echo "note: git lfs push exited non-zero (benign 'missing object' scan warning); upload still completed"
 git push --no-thin --no-verify

@@ -36,6 +36,9 @@ LORE_CFG_DIR="/opt/loreserver/config"
 LORE_CERT_DIR="/opt/loreserver/certs"
 LORE_STORE_DIR="/data/lore-store"
 
+# Server-side store dir, for the small-update storage delta measurement.
+SERVER_STORAGE_PATH="${LORE_STORE_DIR}"
+
 # ----------------------------------------------------------------------------
 # Server
 # ----------------------------------------------------------------------------
@@ -175,4 +178,11 @@ adapter_pull_elsewhere() {
   # Fresh clone into a new directory with its own local store, so the pull must
   # fetch every fragment from the server (no local dedup via a shared store).
   on_client "rm -rf ${PULL_DIR} && cd ${WORK_DIR} && ${LORE} clone '${LORE_URL}' ${PULL_DIR}"
+}
+
+# Small-update: change ~100 bytes of one file and publish a new revision.
+adapter_update() {
+  client_append_bytes "${TREE_DIR}/${SMALL_CHANGE_FILE}" 100
+  on_client "cd ${TREE_DIR} && ${LORE} stage '${SMALL_CHANGE_FILE}'"
+  on_client "cd ${TREE_DIR} && ${LORE} commit 'benchmark: small update' && ${LORE} push"
 }

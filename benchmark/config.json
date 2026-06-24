@@ -4,6 +4,7 @@
   "droplet_size": "c-8",
   "data_volume_gb": 400,
   "server_volume_gb": 200,
+  "small_change_file": "",
   "vcs": [
     "checkpoint",
     "lore",

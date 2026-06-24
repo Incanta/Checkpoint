@@ -83,6 +83,11 @@ export WORK_DIR="/data/work"
 export TREE_DIR="${WORK_DIR}/tree"        # extracted payload + repo lives here
 export PULL_DIR="${WORK_DIR}/pull"        # fresh workspace for the final pull
 
+# Optional: relative path (under TREE_DIR) of a file to make a small change to
+# after the initial submit, to measure the server-side storage cost of a tiny
+# update. Empty -> the update stage is skipped.
+export SMALL_CHANGE_FILE="${SMALL_CHANGE_FILE:-}"
+
 # shellcheck source=/dev/null
 source "$ADAPTER"
 
@@ -142,6 +147,32 @@ time_phase submit_all -- adapter_submit_all
 
 log "--- step: pull into a fresh workspace ---"
 time_phase pull_elsewhere -- adapter_pull_elsewhere
+
+# ----------------------------------------------------------------------------
+# Small-update server-storage delta (untimed: storage only, never timing)
+#
+# Make a ~100-byte change to one file, submit it, and record how many bytes the
+# server's backend store grew. This measures delta/dedup efficiency (chunk-level
+# dedup vs whole-file re-store) and must not perturb the timing metrics, so the
+# update runs outside any time_phase.
+# ----------------------------------------------------------------------------
+if [ -n "${SMALL_CHANGE_FILE}" ]; then
+  log "--- step: small update + server storage delta (${SMALL_CHANGE_FILE}) ---"
+  before_bytes="$(server_storage_bytes)"
+  log "server storage before update: ${before_bytes} bytes"
+
+  adapter_update
+
+  # Let the server flush async writes (e.g. Lore's flush_delay) before measuring.
+  on_server "sync" || true
+  sleep "${STORAGE_SETTLE_SECONDS:-20}"
+
+  after_bytes="$(server_storage_bytes)"
+  log "server storage after update:  ${after_bytes} bytes"
+  record_storage update_delta_bytes "$(( after_bytes - before_bytes ))"
+else
+  log "--- skipping small update (config small_change_file is empty) ---"
+fi
 
 # ----------------------------------------------------------------------------
 # Emit results

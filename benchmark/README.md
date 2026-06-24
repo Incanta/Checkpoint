@@ -26,6 +26,7 @@ Scope today: all four adapters are implemented end-to-end: **Checkpoint**,
      "droplet_size": "c-8",
      "data_volume_gb": 400,
      "server_volume_gb": 200,
+     "small_change_file": "",
      "vcs": ["checkpoint"],
      "checkpoint_version": "",
      "keep_droplets": false
@@ -35,6 +36,7 @@ Scope today: all four adapters are implemented end-to-end: **Checkpoint**,
    - `tarball_url`: a **private** DigitalOcean Spaces object (virtual-hosted or path style). The client authenticates with the Spaces keys to download it.
    - `data_volume_gb`: size of the **client** volume (working copy plus per-VCS caches; LFS roughly doubles it for Gitea, and the fresh pull doubles it again).
    - `server_volume_gb`: size of the **server** volume mounted at `/data`, where every adapter keeps its backend storage (the submitted payload, stored once).
+   - `small_change_file`: relative path (under the payload tree) of a file to make a ~100-byte change to after the initial submit. The run then submits that change and records how many bytes the **server** store grew (delta/dedup efficiency). Empty = skip this stage. Pick a large binary asset to make the difference meaningful. This stage is untimed; it only affects the storage-delta metric, never the timing metrics.
    - `vcs`: list; each entry runs as an isolated matrix job with its own droplet pair.
    - `checkpoint_version`: empty uses the compose `latest` images and the source at `HEAD`; set it to pin server image tags.
    - `keep_droplets`: `true` skips teardown (for debugging). **This leaves both droplets, both volumes, and the VPC running and billing until you delete them manually.**
@@ -72,9 +74,13 @@ needed.
    tree (both timed, reported separately from the VCS operations).
 5. **Benchmark** (timed): `add` + submit the ignore file, then `add` the full
    tree, `submit` it, and `pull` it into a fresh workspace.
-6. **Report**: a Markdown table in the job summary plus a `timings-<vcs>.json`
+6. **Small-update storage delta** (untimed, only if `small_change_file` is set):
+   measure the server store size, make a ~100-byte change to that file, submit
+   it, let the server flush, measure again, and record the byte delta. This runs
+   outside any timer, so it never affects the timing metrics.
+7. **Report**: a Markdown table in the job summary plus a `timings-<vcs>.json`
    artifact.
-7. **Teardown** (`lib/teardown.sh`): destroys everything by ID with a tag sweep
+8. **Teardown** (`lib/teardown.sh`): destroys everything by ID with a tag sweep
    backstop. Runs even on failure unless `keep_droplets` is true.
 
 ## Output schema (`timings.<vcs>.json`)
@@ -91,6 +97,7 @@ needed.
     "pull_elsewhere": 4310
   },
   "payload": { "payload_download": 600, "payload_extract": 120 },
+  "storage": { "update_delta_bytes": 65536 },
   "meta": {
     "run_tag": "...",
     "region": "...",
@@ -101,6 +108,8 @@ needed.
 ```
 
 `commit_all` is `null` for Checkpoint because it has no separate local commit (`add` stages, `submit` publishes). **Lore** records `commit_all` as a real phase: `add` is `lore stage --scan .`, `commit_all` is `lore commit`, and `submit_all` is `lore push`.
+
+`storage.update_delta_bytes` is the server store growth (bytes) from the ~100-byte change to `small_change_file`. It is a storage measurement only (untimed), and is rendered as its own "Server storage delta" table with the Checkpoint comparison. The `storage` object is absent when `small_change_file` is empty.
 
 ## Lore adapter notes
 
