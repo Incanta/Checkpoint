@@ -17,9 +17,12 @@
 #      has no password flag/env. We feed it over a pseudo-tty via `script`,
 #      twice, in case first-run registration asks to confirm.
 #   2. Workspace changelist id: `ark commit` needs `-ws_cl <id>`; we parse it
-#      from `ark changes`. The parse below is a best guess at the output format
-#      and is the most likely thing to need adjusting (it dumps `ark changes` on
-#      failure to make that easy).
+#      from `ark changes`, which lists workspace changelists as "<id>: <Changes>"
+#      lines. We must anchor on that line shape (NOT "first integer in the
+#      output"): `ark changes` prints a "Connecting ...<server-ip>..." banner
+#      first, and grabbing the first integer there picks up part of the private
+#      IP (e.g. 10 from 10.x.x.x) instead of the changelist id. The parse dumps
+#      full `ark changes` output on failure so the format can be confirmed.
 #   3. TLS: the server auto-generates a self-signed cert. We assume the client
 #      trusts it on connect (TOFU); if not, an insecure/trust option may be
 #      needed (none is documented).
@@ -37,6 +40,11 @@ ARK_HOST="${SERVER_PRIVATE_IP}:9000"
 # Server data dir on the attached server volume (also the storage-delta path).
 ARK_DATA_DIR="/data/ark"
 SERVER_STORAGE_PATH="${ARK_DATA_DIR}"
+
+# Holding dir (sibling of the workspace, same /data filesystem) used to park the
+# extracted payload during the ignore-only first commit, then move it back for
+# the full-tree commit. See adapter_add_ignore / adapter_add_all.
+HOLD_DIR="${WORK_DIR}/_ark_hold"
 
 # Download the Linux zip and install the `ark` binary at a stable path. Single
 # quoted so the inner $(...) runs on the remote, not the coordinator (used inside
@@ -129,7 +137,7 @@ EOF
 }
 
 adapter_add_ignore() {
-  on_client "TREE_DIR='${TREE_DIR}' bash -seuo pipefail" <<'EOF'
+  on_client "TREE_DIR='${TREE_DIR}' HOLD='${HOLD_DIR}' bash -seuo pipefail" <<'EOF'
 cd "${TREE_DIR}"
 cat > .ark_ignore <<'IGN'
 # Benchmark ignore file (Ark .ark_ignore syntax: * globs, ! negation)
@@ -138,17 +146,44 @@ Intermediate/*
 DerivedDataCache/*
 Saved/*
 IGN
-# Trigger workspace change detection (the ignore file shows up as a pending add).
+# Ark auto-detects EVERY workspace file as one pending changelist, but the
+# benchmark wants the first version to hold only the ignore file (like the other
+# adapters), and the big upload to land in submit_all. So temporarily move the
+# extracted payload out of the workspace; only the ark-managed files (.ark*) and
+# the ignore file remain pending for this first commit. add_all moves it back.
+# These are same-filesystem renames on /data, so this is near-instant regardless
+# of tree size.
+mkdir -p "${HOLD}"
+shopt -s dotglob nullglob
+for e in *; do
+  case "$e" in
+    .ark|.ark_*) continue ;;   # keep ark workspace metadata + the ignore file
+  esac
+  mv "$e" "${HOLD}/"
+done
+shopt -u dotglob nullglob
+# Trigger workspace change detection (only the ignore file is pending now).
 ark changes >/dev/null
 EOF
 }
 
 # Resolve the current workspace changelist id from `ark changes` and commit it.
-# BEST-EFFORT parse (grabs the first integer id); dumps `ark changes` on failure
-# so the real output format can be confirmed and this adjusted if needed.
+# `ark changes` lists workspace changelists as "<id>: <Changes>" lines, so parse
+# the id from a line of that shape (leading optional whitespace, digits, colon).
+# We must NOT take "the first integer in the output": `ark changes` prints a
+# "Connecting ...<server-ip>..." banner first, so a naive grep grabs part of the
+# private IP (e.g. 10 from 10.x.x.x) and `ark commit -ws_cl 10` then fails with
+# "No workspace changelist with id 10" while still exiting 0 (a silent no-op).
+# Dump the full output on parse failure so the format can be confirmed.
 _ark_commit_remote='cd "${TREE_DIR}"
-wscl="$(ark changes -limit 1 | grep -oE "[0-9]+" | head -1)"
-if [ -z "$wscl" ]; then echo "could not determine workspace changelist id; ark changes output:"; ark changes; exit 1; fi
+changes_out="$(ark changes -limit 1 2>&1)"
+wscl="$(printf "%s\n" "$changes_out" | sed -n "s/^[[:space:]]*\([0-9][0-9]*\):.*/\1/p" | head -1)"
+if [ -z "$wscl" ]; then
+  echo "could not determine workspace changelist id from \"ark changes\"; full output:"
+  printf "%s\n" "$changes_out"
+  exit 1
+fi
+echo "committing workspace changelist ${wscl}"
 ark commit -ws_cl "$wscl" -message "${MSG}"'
 
 adapter_submit_ignore() {
@@ -158,8 +193,24 @@ EOF
 }
 
 adapter_add_all() {
-  # Automatic change detection; scanning the workspace is the "add" equivalent.
-  on_client "cd ${TREE_DIR} && ${ARK} changes >/dev/null"
+  # Move the payload parked by add_ignore back into the workspace, then let Ark's
+  # automatic change detection pick it up (the "add" equivalent). The move is a
+  # set of same-filesystem renames, so it is near-instant; the real work (and the
+  # upload) happens in submit_all.
+  on_client "TREE_DIR='${TREE_DIR}' HOLD='${HOLD_DIR}' bash -seuo pipefail" <<'EOF'
+if [ -d "${HOLD}" ]; then
+  cd "${HOLD}"
+  shopt -s dotglob nullglob
+  for e in *; do
+    mv "$e" "${TREE_DIR}/"
+  done
+  shopt -u dotglob nullglob
+  cd "${TREE_DIR}"
+  rmdir "${HOLD}" 2>/dev/null || true
+fi
+cd "${TREE_DIR}"
+ark changes >/dev/null
+EOF
 }
 
 adapter_commit_all() {
