@@ -17,10 +17,11 @@ on:
         # The default profile is whichever name is set here (and listed first
         # below). Add an entry to `options` for each committed
         # benchmark/config.<name>.json you want selectable from this dropdown.
-        default: titan
+        default: titan-8vcpu-64gb
         options:
-          - titan
-          - titan-4vcpu
+          - titan-8vcpu-64gb
+          - titan-4vcpu-32gb
+          - titan-4vcpu-16gb
           - lyra
 
 permissions:
