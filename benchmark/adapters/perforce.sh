@@ -157,8 +157,21 @@ adapter_commit_all() {
 }
 
 adapter_submit_all() {
-  # -q suppresses the per-file submit lines (see add_all).
-  on_client "cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} submit -d 'benchmark: full tree'"
+  # -q suppresses the per-file submit lines. Capture output so a failure (which
+  # can come back fast on a large submit, e.g. a server limit) surfaces its
+  # reason plus the opened-file count instead of an opaque rc=1.
+  on_client "TREE_DIR='${TREE_DIR}' WS='${WS_MAIN}' bash -seuo pipefail" <<'EOF'
+cd "${TREE_DIR}"
+if out="$(p4 -q -c "${WS}" submit -d 'benchmark: full tree' 2>&1)"; then
+  printf '%s\n' "$out"
+  exit 0
+fi
+echo "=== p4 submit failed; diagnostics ==="
+printf '%s\n' "$out" | tail -40
+echo "--- opened files (count) ---"
+p4 -c "${WS}" opened 2>&1 | wc -l
+exit 1
+EOF
 }
 
 adapter_pull_elsewhere() {

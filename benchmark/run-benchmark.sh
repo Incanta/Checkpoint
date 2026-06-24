@@ -156,20 +156,30 @@ time_phase pull_elsewhere -- adapter_pull_elsewhere
 # dedup vs whole-file re-store) and must not perturb the timing metrics, so the
 # update runs outside any time_phase.
 # ----------------------------------------------------------------------------
-if [ -n "${SMALL_CHANGE_FILE}" ]; then
-  log "--- step: small update + server storage delta (${SMALL_CHANGE_FILE}) ---"
-  before_bytes="$(server_storage_bytes)"
-  log "server storage before update: ${before_bytes} bytes"
-
-  adapter_update
-
+# Best-effort: a failure in this secondary metric (e.g. a VCS choking on a tiny
+# change against a very large version) must NOT discard the primary timing
+# results, which are already collected. Run it guarded; on any failure record
+# n/a and continue to the JSON write. Called via `if !` so set -e is suspended
+# inside and the explicit `|| return 1` controls the flow.
+measure_small_update_delta() {
+  local before after
+  before="$(server_storage_bytes)" || return 1
+  log "server storage before update: ${before} bytes"
+  adapter_update || return 1
   # Let the server flush async writes (e.g. Lore's flush_delay) before measuring.
   on_server "sync" || true
   sleep "${STORAGE_SETTLE_SECONDS:-20}"
+  after="$(server_storage_bytes)" || return 1
+  log "server storage after update:  ${after} bytes"
+  record_storage update_delta_bytes "$(( after - before ))"
+}
 
-  after_bytes="$(server_storage_bytes)"
-  log "server storage after update:  ${after_bytes} bytes"
-  record_storage update_delta_bytes "$(( after_bytes - before_bytes ))"
+if [ -n "${SMALL_CHANGE_FILE}" ]; then
+  log "--- step: small update + server storage delta (${SMALL_CHANGE_FILE}) ---"
+  if ! measure_small_update_delta; then
+    log "!!! small-update storage delta failed (non-fatal); recording n/a and continuing"
+    record_storage update_delta_bytes null
+  fi
 else
   log "--- skipping small update (config small_change_file is empty) ---"
 fi
