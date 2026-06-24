@@ -35,9 +35,14 @@ const faqs: {
         You could probably treat it like you would for MIT-licensed software.
         <br />
         <br />
-        The Elastic License 2.0 primarily restricts you from having a hosted
-        service of Checkpoint to third parties. If you need to do this, you can
-        do so under the OSI-approved AGPLv3 license.{" "}
+        The Elastic License 2.0 primarily restricts you from providing &quot;the
+        software to third parties as a hosted or managed service&quot;. This
+        restriction is primarily to prevent you from hosting a monetized
+        Software-as-a-Service (SaaS) platform under this license.
+        <br />
+        <br />
+        If you need to provide a &quot;hosted or managed service&quot; to third
+        parties, you can do so under the OSI-approved AGPLv3 license.{" "}
         <strong>
           NOTE: This license has more copyleft restrictions which may require
           you to open source more than you want. Please consult with a lawyer to
@@ -45,7 +50,7 @@ const faqs: {
         </strong>
         <br />
         <br />
-        We chose this dual licensing approach to prevent the large VCS hosting
+        We chose this dual licensing approach to prevent the large hosting
         providers from financially benefiting from Checkpoint without
         significantly contributing back to the community.
       </span>
