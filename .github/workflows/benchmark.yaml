@@ -20,6 +20,7 @@ on:
         default: titan
         options:
           - titan
+          - titan-4vcpu
           - lyra
 
 permissions:
