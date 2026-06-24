@@ -176,9 +176,32 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId,
   auto stepStart = std::chrono::steady_clock::now();
   bool hadProgress = false;
 
+  // The daemon runs the job on its single Node event loop, which can be blocked
+  // for a while by heavy synchronous work (e.g. writing workspace state for
+  // 100k+ files), during which its HTTP port stops answering. A getStatus poll
+  // that times out then does NOT mean the job failed; the daemon is just busy.
+  // Tolerate transient unreachability for a generous window before giving up.
+  auto lastContact = std::chrono::steady_clock::now();
+  const double kMaxUnreachableSeconds = 600.0;
+
   while (true) {
-    nlohmann::json input = {{"jobId", jobId}};
-    auto job = client.query("jobs.getStatus", input);
+    nlohmann::json job;
+    try {
+      nlohmann::json input = {{"jobId", jobId}};
+      job = client.query("jobs.getStatus", input);
+      lastContact = std::chrono::steady_clock::now();
+    } catch (const std::exception&) {
+      double unreachable =
+          std::chrono::duration<double>(
+              std::chrono::steady_clock::now() - lastContact)
+              .count();
+      if (unreachable > kMaxUnreachableSeconds) {
+        throw;  // daemon unreachable too long, treat as a real failure
+      }
+      // Busy/blocked daemon: wait and retry rather than aborting the job.
+      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+      continue;
+    }
 
     std::string status = job.value("status", "");
     std::string currentStep = (job.contains("currentStep") && job["currentStep"].is_string())
