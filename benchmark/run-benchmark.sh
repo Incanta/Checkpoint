@@ -105,6 +105,20 @@ adapter_client_setup
 log "--- prepare payload (download + extract, timed separately) ---"
 adapter_prepare_payload
 
+# Remove any VCS metadata the payload tarball carried so every adapter imports
+# the same pristine file tree (keeps the comparison fair). A nested `.git` is
+# especially harmful for the Gitea adapter: `git add -A` records such a
+# subdirectory as a submodule gitlink pointing at the embedded repo's HEAD
+# commit, which is not in our object store, so the push fails with
+# "missing object: <sha>". Runs on the client (where the tree lives) before any
+# adapter creates its own repo metadata.
+log "--- stripping stray .git metadata from payload ---"
+on_client "TREE_DIR='${TREE_DIR}' bash -seuo pipefail" <<'EOF'
+n=$(find "${TREE_DIR}" -type d -name .git | wc -l)
+echo "stripping ${n} stray .git director(ies) from the payload"
+find "${TREE_DIR}" -type d -name .git -prune -exec rm -rf {} +
+EOF
+
 log "--- create repo/workspace ---"
 adapter_create_repo
 
