@@ -203,9 +203,12 @@ function resourceCharts(run) {
   if (n === 0) return "";
   const step = Number(r.interval_s) || 30;
   // One x label per sample; show the minute number only at whole-minute marks.
+  // Non-mark ticks use a single space, not "": mermaid's xychart string token
+  // requires at least one character, so an empty "" fails to parse on GitHub
+  // ("Expecting 'STR' ... got 'COMMA'"). A space renders blank but parses.
   const xlabels = Array.from({ length: n }, (_, i) => {
     const sec = i * step;
-    return sec % 60 === 0 ? `"${sec / 60}"` : '""';
+    return sec % 60 === 0 ? `"${sec / 60}"` : '" "';
   });
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
   const cCpu = r.client.slice(0, n).map((s) => num(s.cpu_pct));
