@@ -1,12 +1,12 @@
 {
-  "tarball_url": "https://incantagames.sfo3.digitaloceanspaces.com/checkpoint/lyra.tar.gz",
-  "small_change_file": "Content/Effects/Textures/Flipbooks/SmokeSwirl_3_Flipbook_CHANNELPACK.uasset",
+  "tarball_url": "https://incantagames.sfo3.digitaloceanspaces.com/checkpoint/project-titan.tar.gz",
+  "small_change_file": "Content/Environment/Arctic/Meshes/Iktu_Temple/Temple/SM_Iktu_Temple_ColumnBLOCKOUT.uasset",
   "region": "sfo3",
   "droplet_size": "m-8vcpu-64gb",
   "data_volume_gb": 400,
   "server_volume_gb": 200,
-  "resource_interval_s": 1,
-  "chart_label_every": "sample",
+  "resource_interval_s": 30,
+  "chart_label_every": "minute",
   "vcs": [
     "checkpoint",
     "lore",
