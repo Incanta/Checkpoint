@@ -137,20 +137,22 @@ time_phase add_ignore -- adapter_add_ignore
 time_phase submit_ignore -- adapter_submit_ignore
 
 log "--- step: full tree ---"
-time_phase add_all -- adapter_add_all
-if [ "$ADAPTER_SUPPORTS_COMMIT" = "true" ]; then
-  time_phase commit_all -- adapter_commit_all
-else
-  record_null_phase commit_all
-fi
-
-# Sample system CPU/RAM on both droplets during the (heavy) full submit.
+# Sample system CPU/RAM on both droplets across the WHOLE full-tree publish
+# (add + commit + submit). The heavy work lands in different phases per VCS
+# (e.g. Lore does it in commit and then pushes in ~3s), so sampling only the
+# submit phase would miss it entirely; spanning the sequence captures it for all.
 RES_REMOTE="/tmp/bench-resources.jsonl"
 RES_PID="/tmp/bench-sampler.pid"
 RES_INTERVAL=30
 start_resource_sampler "$CLIENT_PUBLIC_IP" "$RES_REMOTE" "$RES_PID" "$RES_INTERVAL"
 start_resource_sampler "$SERVER_PUBLIC_IP" "$RES_REMOTE" "$RES_PID" "$RES_INTERVAL"
 
+time_phase add_all -- adapter_add_all
+if [ "$ADAPTER_SUPPORTS_COMMIT" = "true" ]; then
+  time_phase commit_all -- adapter_commit_all
+else
+  record_null_phase commit_all
+fi
 time_phase submit_all -- adapter_submit_all
 
 stop_resource_sampler "$CLIENT_PUBLIC_IP" "$RES_PID"

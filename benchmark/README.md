@@ -74,9 +74,12 @@ needed.
    tree (both timed, reported separately from the VCS operations).
 5. **Benchmark** (timed): `add` + submit the ignore file, then `add` the full
    tree, `submit` it, run `status` on the clean tree (its own phase, not part of
-   the submit total), and `pull` it into a fresh workspace. During the full
-   `submit`, a lightweight sampler records whole-system CPU% and used RAM (GB) on
-   both droplets every 30s (from `/proc`), for the resource charts.
+   the submit total), and `pull` it into a fresh workspace. Across the whole
+   full-tree publish (add + commit + submit), a lightweight sampler records
+   whole-system CPU% and used RAM (GB) on both droplets every 30s (from `/proc`)
+   for the resource charts. It spans all three phases because the heavy work
+   lands in different phases per VCS (e.g. Lore commits locally then pushes in
+   seconds).
 6. **Small update** (only if `small_change_file` is set): measure the server
    store size, make a ~100-byte change to that file, then submit it. The submit
    is timed on its own (the `update_submit` phase). The server store is then
@@ -84,9 +87,9 @@ needed.
    settle wait stay outside the timer, so only the submit itself is timed and no
    other metric is affected.
 7. **Report**: Markdown tables in the job summary, plus Mermaid `xychart`
-   resource graphs (CPU% and RAM, two line series each: client and server,
-   during the submit). Artifacts: `timings.<vcs>.json` (timings + embedded
-   resource samples) and `resources.<vcs>.json` (raw CPU/RAM samples).
+   resource graphs (CPU% and RAM, two line series each: blue = client, green =
+   server; x-axis in minutes). Artifacts: `timings.<vcs>.json` (timings +
+   embedded resource samples) and `resources.<vcs>.json` (raw CPU/RAM samples).
 8. **Teardown** (`lib/teardown.sh`): destroys everything by ID with a tag sweep
    backstop. Runs even on failure unless `keep_droplets` is true.
 

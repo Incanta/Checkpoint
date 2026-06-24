@@ -161,51 +161,48 @@ function storageTable() {
 
 const hasStorage = runs.some((r) => r.storage && Object.keys(r.storage).length > 0);
 
-// Render CPU and RAM during-submit charts for one run as Mermaid xychart-beta
-// blocks, each with two line series (client, then server). xychart has no
-// per-series legend, so the title states the line order. Returns "" if the run
-// has no resource samples.
+// Render CPU and RAM full-submit charts for one run as Mermaid xychart-beta
+// blocks, each with two line series (client = blue, server = green). The init
+// directive pins those colors so the title's legend is accurate. The x-axis is
+// in minutes, labeled only at whole-minute marks (blank in between). Returns ""
+// if the run has no resource samples.
 function resourceCharts(run) {
   const r = run.resources;
   if (!r || !Array.isArray(r.client) || !Array.isArray(r.server)) return "";
   const n = Math.min(r.client.length, r.server.length);
   if (n === 0) return "";
   const step = Number(r.interval_s) || 30;
-  const xs = Array.from({ length: n }, (_, i) => i * step);
+  // One x label per sample; show the minute number only at whole-minute marks.
+  const xlabels = Array.from({ length: n }, (_, i) => {
+    const sec = i * step;
+    return sec % 60 === 0 ? `"${sec / 60}"` : '""';
+  });
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
   const cCpu = r.client.slice(0, n).map((s) => num(s.cpu_pct));
   const sCpu = r.server.slice(0, n).map((s) => num(s.cpu_pct));
   const cRam = r.client.slice(0, n).map((s) => num(s.ram_gb));
   const sRam = r.server.slice(0, n).map((s) => num(s.ram_gb));
   const ramMax = Math.max(1, Math.ceil(Math.max(...cRam, ...sRam)));
-  const xaxis = `[${xs.join(", ")}]`;
+  const xaxis = `[${xlabels.join(", ")}]`;
+  // Pin series colors: line 1 (client) blue, line 2 (server) green.
+  const init =
+    '%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#1f77b4, #2ca02c"}}}}%%';
 
-  const chart = (title, yLabel, yMax, a, b) =>
+  const chart = (metric, yLabel, yMax, a, b) =>
     [
       "```mermaid",
+      init,
       "xychart-beta",
-      `    title "${title}"`,
-      `    x-axis "elapsed (s)" ${xaxis}`,
+      `    title "${metric} during full submit, ${run.vcs} (blue: client, green: server)"`,
+      `    x-axis "time (min)" ${xaxis}`,
       `    y-axis "${yLabel}" 0 --> ${yMax}`,
       `    line [${a.join(", ")}]`,
       `    line [${b.join(", ")}]`,
       "```",
     ].join("\n");
 
-  const cpu = chart(
-    `CPU % during submit, ${run.vcs} (line 1 client, line 2 server)`,
-    "CPU %",
-    100,
-    cCpu,
-    sCpu,
-  );
-  const ram = chart(
-    `RAM used GB during submit, ${run.vcs} (line 1 client, line 2 server)`,
-    "GB",
-    ramMax,
-    cRam,
-    sRam,
-  );
+  const cpu = chart("CPU %", "CPU %", 100, cCpu, sCpu);
+  const ram = chart("RAM used GB", "GB", ramMax, cRam, sRam);
   return `#### ${run.vcs}\n\n${cpu}\n\n${ram}\n`;
 }
 
@@ -234,7 +231,7 @@ if (hasStorage) {
 
 const charts = runs.map(resourceCharts).filter(Boolean);
 if (charts.length) {
-  out.push("## Resource usage during submit\n");
+  out.push("## Resource usage during full submit\n");
   out.push(charts.join("\n"));
   out.push("");
 }
