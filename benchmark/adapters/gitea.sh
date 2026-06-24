@@ -204,8 +204,25 @@ adapter_commit_all() {
 
 adapter_submit_all() {
   # git push uploads the commit; the LFS pre-push hook uploads the cached objects.
-  # -q drops the per-object progress stream.
-  on_client "cd ${TREE_DIR} && git push -q"
+  # -q drops the per-object progress stream. On failure (e.g. the recurring
+  # "missing object" push error), dump targeted git diagnostics so we can see
+  # whether it is a gitlink/submodule entry or genuine object-DB breakage,
+  # rather than guessing, then propagate the failure.
+  on_client "TREE_DIR='${TREE_DIR}' bash -seuo pipefail" <<'EOF'
+cd "${TREE_DIR}"
+if git push -q; then exit 0; fi
+echo "=== git push failed; diagnostics ===" >&2
+echo "--- gitlink (mode 160000 / submodule) index entries ---" >&2
+git ls-files -s | awk '$1=="160000"{print}' | head -20 >&2
+echo "gitlink count: $(git ls-files -s | awk '$1=="160000"' | wc -l)" >&2
+echo "--- .gitmodules ---" >&2
+{ [ -f .gitmodules ] && cat .gitmodules; } >&2 || echo "(no .gitmodules)" >&2
+echo "--- HEAD / branch ---" >&2
+git rev-parse HEAD @ origin/main 2>&1 | head >&2 || true
+echo "--- git fsck (missing/broken, first 40) ---" >&2
+git fsck --full 2>&1 | grep -iE 'missing|broken' | head -40 >&2 || true
+exit 1
+EOF
 }
 
 adapter_pull_elsewhere() {

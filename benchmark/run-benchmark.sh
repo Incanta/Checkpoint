@@ -113,10 +113,12 @@ adapter_prepare_payload
 # "missing object: <sha>". Runs on the client (where the tree lives) before any
 # adapter creates its own repo metadata.
 log "--- stripping stray .git metadata from payload ---"
+# Match `.git` whether it is a directory (embedded repo) or a file (submodule
+# working-dir pointer); both make `git add -A` record a gitlink.
 on_client "TREE_DIR='${TREE_DIR}' bash -seuo pipefail" <<'EOF'
-n=$(find "${TREE_DIR}" -type d -name .git | wc -l)
-echo "stripping ${n} stray .git director(ies) from the payload"
-find "${TREE_DIR}" -type d -name .git -prune -exec rm -rf {} +
+n=$(find "${TREE_DIR}" -name .git | wc -l)
+echo "stripping ${n} stray .git entr(ies) (dirs or submodule files) from the payload"
+find "${TREE_DIR}" -name .git -prune -exec rm -rf {} +
 EOF
 
 log "--- create repo/workspace ---"
