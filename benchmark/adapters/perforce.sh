@@ -82,28 +82,39 @@ apt-get install -y helix-cli
 p4 -V | head -2
 EOF
 
-  log "configuring p4 env + password auth (security level 0, no tickets)"
+  log "configuring p4 env + ticket auth (password file for per-phase re-login)"
   on_client "PORT='${P4PORT_PRIV}' PU='${P4_SUPERUSER}' PW='${P4_PASSWD}' bash -seuo pipefail" <<'EOF'
 p4 set P4PORT="${PORT}"
 p4 set P4USER="${PU}"
 p4 set P4IGNORE=.p4ignore
-# configure-helix-p4d sets a high security level that requires login tickets,
-# and those tickets expire mid-run: a long submit followed by a fresh command
-# fails with "P4PASSWD invalid or unset". Group-timeout bumps and security
-# level 2 did not fix it (p4 still preferred the expired ticket). So:
-#   1. log in once (needed to administer the server at the configured level),
-#   2. drop to security level 0 (legacy: password auth, no tickets required),
-#   3. store the password in the p4 environment, and
-#   4. log out to delete the ticket, so every later command authenticates
-#      directly with P4PASSWD and there is nothing to expire.
+# Modern p4d (2025+) requires login tickets to authenticate commands: a
+# plaintext P4PASSWD in the environment does NOT authenticate commands directly
+# at any security level, and login tickets expire mid-run (~30-40 min), so a
+# long submit followed by a fresh command fails with "P4PASSWD invalid or
+# unset". Earlier attempts to dodge this all failed:
+#   - bumping the group Timeout to unlimited + re-login: ticket still expired;
+#   - security level 2 + P4PASSWD: p4 still preferred the expired ticket;
+#   - security level 0 + P4PASSWD + logout: logout deleted the ONLY working
+#     auth, breaking the very next command immediately.
+# The reliable fix is to keep ticket auth and simply re-login right before every
+# server-touching phase, so each phase always starts with a fresh ticket and
+# expiry can never bite. Store the password in a root-only file and feed it to
+# `p4 login` on stdin; P4_RELOGIN (below) is that re-login, run before each phase.
 # See https://help.perforce.com/helix-core/server-apps/p4sag/2025.1/Content/P4SAG/security-levels.html
-echo "${PW}" | p4 login
-p4 configure set security=0
-p4 set P4PASSWD="${PW}"
-p4 logout >/dev/null 2>&1 || true
+printf '%s\n' "${PW}" > /root/.p4pass
+chmod 600 /root/.p4pass
+p4 login < /root/.p4pass
 p4 info
 EOF
 }
+
+# Re-login snippet prepended to every server-touching phase so each phase starts
+# with a fresh ticket (tickets expire mid-run, ~30-40 min). Runs quietly; a real
+# auth problem still surfaces because the p4 command that follows fails loudly.
+# Usable in the double-quoted one-liner phases (expands in the coordinator shell,
+# then the remote bash parses the redirection). The quoted-heredoc phases instead
+# inline this same line literally, since '<<'\''EOF'\''' suppresses expansion.
+P4_RELOGIN="p4 login < /root/.p4pass >/dev/null 2>&1 || true"
 
 # ----------------------------------------------------------------------------
 # Payload (identical Spaces download + extract as the other adapters)
@@ -129,6 +140,7 @@ adapter_create_repo() {
   # rooted at the extracted tree. The default generated View already maps
   # //depot/... -> //<client>/...; we just override Root.
   on_client "TREE_DIR='${TREE_DIR}' WS='${WS_MAIN}' DEPOT='${DEPOT}' bash -seuo pipefail" <<'EOF'
+p4 login < /root/.p4pass >/dev/null 2>&1 || true
 mkdir -p "${TREE_DIR}"
 p4 --field "Root=${TREE_DIR}" \
    --field "View=//${DEPOT}/... //${WS}/..." \
@@ -139,6 +151,7 @@ EOF
 
 adapter_add_ignore() {
   on_client "TREE_DIR='${TREE_DIR}' WS='${WS_MAIN}' bash -seuo pipefail" <<'EOF'
+p4 login < /root/.p4pass >/dev/null 2>&1 || true
 cd "${TREE_DIR}"
 cat > .p4ignore <<'IGN'
 # Benchmark ignore file (P4IGNORE syntax)
@@ -152,7 +165,7 @@ EOF
 }
 
 adapter_submit_ignore() {
-  on_client "cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} submit -d 'benchmark: ignore file'"
+  on_client "${P4_RELOGIN} && cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} submit -d 'benchmark: ignore file'"
 }
 
 adapter_add_all() {
@@ -160,7 +173,7 @@ adapter_add_all() {
   # honoring P4IGNORE. This is the heavy staging step. -q suppresses the
   # per-file "opened for add" lines (one per file would flood the CI log on a
   # tree this size); errors still print.
-  on_client "cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} reconcile -a"
+  on_client "${P4_RELOGIN} && cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} reconcile -a"
 }
 
 adapter_commit_all() {
@@ -172,6 +185,7 @@ adapter_submit_all() {
   # can come back fast on a large submit, e.g. a server limit) surfaces its
   # reason plus the opened-file count instead of an opaque rc=1.
   on_client "TREE_DIR='${TREE_DIR}' WS='${WS_MAIN}' bash -seuo pipefail" <<'EOF'
+p4 login < /root/.p4pass >/dev/null 2>&1 || true
 cd "${TREE_DIR}"
 if out="$(p4 -q -c "${WS}" submit -d 'benchmark: full tree' 2>&1)"; then
   printf '%s\n' "$out"
@@ -187,13 +201,14 @@ EOF
 
 adapter_status() {
   # `p4 status` reconciles in preview mode, scanning the workspace for changes.
-  on_client "cd ${TREE_DIR} && p4 -c ${WS_MAIN} status >/dev/null"
+  on_client "${P4_RELOGIN} && cd ${TREE_DIR} && p4 -c ${WS_MAIN} status >/dev/null"
 }
 
 adapter_pull_elsewhere() {
   # Second workspace rooted at a fresh directory, then sync the head revision so
   # the pull downloads every file from the server.
   on_client "PULL_DIR='${PULL_DIR}' WS='${WS_PULL}' DEPOT='${DEPOT}' bash -seuo pipefail" <<'EOF'
+p4 login < /root/.p4pass >/dev/null 2>&1 || true
 rm -rf "${PULL_DIR}"
 mkdir -p "${PULL_DIR}"
 p4 --field "Root=${PULL_DIR}" \
@@ -207,7 +222,7 @@ EOF
 # Small-update: open one file for edit, change ~100 bytes, and submit. Perforce
 # stores a new revision of the (binary) file, typically the whole file again.
 adapter_update() {
-  on_client "cd ${TREE_DIR} && p4 -c ${WS_MAIN} edit '${SMALL_CHANGE_FILE}'"
+  on_client "${P4_RELOGIN} && cd ${TREE_DIR} && p4 -c ${WS_MAIN} edit '${SMALL_CHANGE_FILE}'"
   client_append_bytes "${TREE_DIR}/${SMALL_CHANGE_FILE}" 100
-  on_client "cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} submit -d 'benchmark: small update'"
+  on_client "${P4_RELOGIN} && cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} submit -d 'benchmark: small update'"
 }
