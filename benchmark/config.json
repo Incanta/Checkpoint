@@ -5,8 +5,8 @@
   "droplet_size": "m-8vcpu-64gb",
   "data_volume_gb": 400,
   "server_volume_gb": 200,
-  "resource_interval_s": 30,
-  "chart_label_every": "minute",
+  "resource_interval_s": 1,
+  "chart_label_every": "sample",
   "vcs": [
     "checkpoint",
     "lore",
