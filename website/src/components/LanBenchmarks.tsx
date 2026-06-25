@@ -21,14 +21,6 @@ interface Timings {
   phases: Phases;
 }
 
-type Ram = "16" | "32" | "64";
-
-const RAM_OPTIONS: { value: Ram; label: string }[] = [
-  { value: "16", label: "16 GB" },
-  { value: "32", label: "32 GB" },
-  { value: "64", label: "64 GB" },
-];
-
 // Order is just the fetch order; bars are sorted by time below. Checkpoint is
 // flagged isUs so it renders in the brand purple, competitors in grey.
 const VCS_LIST: { key: string; name: string; isUs?: boolean }[] = [
@@ -83,7 +75,6 @@ function buildEntries(timings: Record<string, Timings>): BenchmarkTest[] {
 }
 
 export default function LanBenchmarks() {
-  const [ram, setRam] = useState<Ram>("32");
   const [data, setData] = useState<Record<string, Timings>>({});
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     "loading",
@@ -98,7 +89,7 @@ export default function LanBenchmarks() {
         const results = await Promise.all(
           VCS_LIST.map(async (vcs) => {
             const res = await fetch(
-              `/benchmark-results/${ram}gb-ram/timings.${vcs.key}.json`,
+              `/benchmark-results/timings.${vcs.key}.json`,
             );
             if (!res.ok) throw new Error(`${vcs.key}: ${res.status}`);
             return [vcs.key, (await res.json()) as Timings] as const;
@@ -117,7 +108,7 @@ export default function LanBenchmarks() {
     return () => {
       cancelled = true;
     };
-  }, [ram]);
+  }, []);
 
   const tests = useMemo(() => buildEntries(data), [data]);
   const maxSeconds = useMemo(
@@ -128,30 +119,11 @@ export default function LanBenchmarks() {
   const hasData = tests.some((t) => t.entries.length > 0);
 
   return (
-    <div className="glass rounded-2xl p-8 relative">
-      {/* RAM selector, pinned top-right so it doesn't reflow the header */}
-      <div className="absolute top-8 right-8 inline-flex rounded-full glass p-0.5">
-        {RAM_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => setRam(opt.value)}
-            className={`rounded-full px-3 py-1 text-xs font-medium transition-all ${
-              ram === opt.value
-                ? "bg-primary text-white shadow-lg shadow-primary/25"
-                : "text-muted hover:text-foreground"
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mb-6">
-        {/* Reserve space only on the title line so it clears the selector;
-            the subtitle sits below it and spans the full card width. */}
-        <h3 className="text-lg font-semibold mb-1 pr-44">LAN</h3>
+    <div className="glass rounded-2xl p-6 sm:p-8">
+      <div className="mb-6 text-center">
+        <h3 className="text-lg font-semibold mb-1">Speed comparison</h3>
         <p className="text-sm text-muted">
-          LAN based version control systems • local network server • Jun 2026
+          How long it took to submit and separately pull Project Titan
         </p>
       </div>
 

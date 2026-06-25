@@ -53,7 +53,6 @@ const VCS_LIST: Vcs[] = [
 
 type Side = "client" | "server";
 type Metric = "cpu" | "ram";
-type Ram = "16" | "32" | "64";
 
 const SIDE_OPTIONS: { value: Side; label: string }[] = [
   { value: "client", label: "Client" },
@@ -63,12 +62,6 @@ const SIDE_OPTIONS: { value: Side; label: string }[] = [
 const METRIC_OPTIONS: { value: Metric; label: string }[] = [
   { value: "cpu", label: "CPU" },
   { value: "ram", label: "RAM" },
-];
-
-const RAM_OPTIONS: { value: Ram; label: string }[] = [
-  { value: "16", label: "16 GB" },
-  { value: "32", label: "32 GB" },
-  { value: "64", label: "64 GB" },
 ];
 
 function PillGroup<T extends string>({
@@ -109,10 +102,7 @@ function PillGroup<T extends string>({
 export default function BenchmarkChart() {
   const [side, setSide] = useState<Side>("client");
   const [metric, setMetric] = useState<Metric>("cpu");
-  const [ram, setRam] = useState<Ram>("32");
 
-  // Data only depends on the RAM folder (each file carries client + server and
-  // both metrics), so we refetch only when `ram` changes.
   const [data, setData] = useState<Record<string, ResourceData>>({});
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     "loading",
@@ -127,7 +117,7 @@ export default function BenchmarkChart() {
         const results = await Promise.all(
           VCS_LIST.map(async (vcs) => {
             const res = await fetch(
-              `/benchmark-results/${ram}gb-ram/resources.${vcs.key}.json`,
+              `/benchmark-results/resources.${vcs.key}.json`,
             );
             if (!res.ok) throw new Error(`${vcs.key}: ${res.status}`);
             return [vcs.key, (await res.json()) as ResourceData] as const;
@@ -146,7 +136,7 @@ export default function BenchmarkChart() {
     return () => {
       cancelled = true;
     };
-  }, [ram]);
+  }, []);
 
   const chartData = useMemo<ChartData<"line">>(() => {
     const datasets = VCS_LIST.map((vcs) => {
@@ -227,13 +217,11 @@ export default function BenchmarkChart() {
       <div className="mb-6 text-center">
         <h3 className="text-lg font-semibold mb-1">Resource usage over time</h3>
         <p className="text-sm text-muted">
-          CPU and memory consumption across the full operation, normalized to
-          each system&apos;s run time.
+          CPU and memory consumption during submit (normalized)
         </p>
       </div>
-
       {/* Selectors */}
-      <div className="flex flex-wrap items-start justify-center gap-6 mb-8">
+      <div className="flex flex-wrap items-start justify-center gap-6 mb-8 mt-1">
         <PillGroup
           label="Machine"
           options={SIDE_OPTIONS}
@@ -245,12 +233,6 @@ export default function BenchmarkChart() {
           options={METRIC_OPTIONS}
           value={metric}
           onChange={setMetric}
-        />
-        <PillGroup
-          label="System RAM"
-          options={RAM_OPTIONS}
-          value={ram}
-          onChange={setRam}
         />
       </div>
 

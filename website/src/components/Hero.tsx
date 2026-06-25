@@ -72,13 +72,23 @@ export default function Hero() {
               up to
             </span>
             <span className="text-2xl sm:text-3xl font-extrabold bg-gradient-to-r from-primary-light to-accent bg-clip-text text-transparent">
-              73%
+              48%
             </span>
             <span className="text-sm sm:text-base font-medium text-foreground">
               faster than Perforce
             </span>
-            <svg className="w-4 h-4 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            <svg
+              className="w-4 h-4 text-muted"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19 9l-7 7-7-7"
+              />
             </svg>
           </a>
         </div>

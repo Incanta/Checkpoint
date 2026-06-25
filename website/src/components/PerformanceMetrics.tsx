@@ -1,5 +1,5 @@
-import BenchmarkChart from "@/components/BenchmarkChart";
 import LanBenchmarks from "@/components/LanBenchmarks";
+import BenchmarkChart from "@/components/BenchmarkChart";
 
 export default function PerformanceMetrics() {
   return (
@@ -40,9 +40,9 @@ export default function PerformanceMetrics() {
         {/* Footnote */}
         <p className="mt-8 text-center text-xs text-muted/50">
           Benchmarks performed using Checkpoint CLI on separate Linux client and
-          server machines. You can find the benchmark runs and results on{" "}
+          server machines. You can find the benchmark run on{" "}
           <a
-            href="https://github.com/Incanta/Checkpoint/actions/workflows/benchmark.yaml"
+            href="https://github.com/Incanta/Checkpoint/actions/runs/28134934677"
             target="_blank"
           >
             GitHub
