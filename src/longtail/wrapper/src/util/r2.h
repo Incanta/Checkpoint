@@ -12,6 +12,7 @@ struct R2StorageAPI {
   char* m_AccessKeyId;
   char* m_SecretAccessKey;
   char* m_SessionToken;
+  char* m_Region;      // SigV4 region; "auto" for R2, real region for AWS S3
   uint32_t m_NumAddedBlocks;
   struct WrapperAsyncHandle* m_Handle;
 };
@@ -23,4 +24,5 @@ struct Longtail_StorageAPI* CreateR2StorageAPI(
     const char* secretAccessKey,
     const char* sessionToken,
     struct WrapperAsyncHandle* handle = nullptr,
-    uint64_t tokenExpirationMs = 0);
+    uint64_t tokenExpirationMs = 0,
+    const char* region = "auto");
