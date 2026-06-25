@@ -75,6 +75,17 @@ const faqs: {
       </span>
     ),
   },
+  {
+    question: "Can I use any S3-compatible storage provider?",
+    answer: () => (
+      <span>
+        Currently we only support Cloudflare R2. While the underlying storage
+        library may support other S3-compatible APIs, the server application
+        uses R2-specific API&apos;s for creating buckets and temporary auth
+        tokens for security.
+      </span>
+    ),
+  },
 ];
 
 function FaqItem({
