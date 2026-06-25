@@ -1,0 +1,209 @@
+{
+  "vcs": "checkpoint",
+  "phases": {
+    "add_ignore": 2,
+    "submit_ignore": 2,
+    "add_all": 1,
+    "commit_all": null,
+    "submit_all": 14,
+    "status": 1,
+    "pull_elsewhere": 15,
+    "update_submit": 4
+  },
+  "payload": {
+    "payload_download": 8,
+    "payload_extract": 18
+  },
+  "storage": {
+    "update_delta_bytes": 4194304
+  },
+  "meta": {
+    "run_tag": "bench-28130501911-1-checkpoint",
+    "region": "sfo3",
+    "droplet_size": "m-8vcpu-64gb",
+    "recorded_at": "2026-06-24T21:30:20.825Z"
+  },
+  "resources": {
+    "interval_s": 1,
+    "label_every": "sample",
+    "client": [
+      {
+        "t": 1,
+        "cpu_pct": 0,
+        "ram_gb": 1.6
+      },
+      {
+        "t": 2,
+        "cpu_pct": 0,
+        "ram_gb": 1.59
+      },
+      {
+        "t": 3,
+        "cpu_pct": 1,
+        "ram_gb": 1.57
+      },
+      {
+        "t": 4,
+        "cpu_pct": 8,
+        "ram_gb": 1.63
+      },
+      {
+        "t": 5,
+        "cpu_pct": 99,
+        "ram_gb": 1.61
+      },
+      {
+        "t": 6,
+        "cpu_pct": 47,
+        "ram_gb": 1.83
+      },
+      {
+        "t": 7,
+        "cpu_pct": 16,
+        "ram_gb": 1.86
+      },
+      {
+        "t": 9,
+        "cpu_pct": 17,
+        "ram_gb": 1.82
+      },
+      {
+        "t": 10,
+        "cpu_pct": 20,
+        "ram_gb": 1.86
+      },
+      {
+        "t": 11,
+        "cpu_pct": 30,
+        "ram_gb": 1.82
+      },
+      {
+        "t": 12,
+        "cpu_pct": 18,
+        "ram_gb": 1.85
+      },
+      {
+        "t": 13,
+        "cpu_pct": 23,
+        "ram_gb": 1.89
+      },
+      {
+        "t": 14,
+        "cpu_pct": 13,
+        "ram_gb": 1.86
+      },
+      {
+        "t": 15,
+        "cpu_pct": 0,
+        "ram_gb": 1.85
+      },
+      {
+        "t": 16,
+        "cpu_pct": 6,
+        "ram_gb": 1.83
+      },
+      {
+        "t": 17,
+        "cpu_pct": 14,
+        "ram_gb": 1.8
+      },
+      {
+        "t": 18,
+        "cpu_pct": 4,
+        "ram_gb": 1.43
+      }
+    ],
+    "server": [
+      {
+        "t": 1,
+        "cpu_pct": 1,
+        "ram_gb": 1.39
+      },
+      {
+        "t": 2,
+        "cpu_pct": 0,
+        "ram_gb": 1.38
+      },
+      {
+        "t": 3,
+        "cpu_pct": 0,
+        "ram_gb": 1.38
+      },
+      {
+        "t": 4,
+        "cpu_pct": 13,
+        "ram_gb": 1.42
+      },
+      {
+        "t": 5,
+        "cpu_pct": 43,
+        "ram_gb": 1.42
+      },
+      {
+        "t": 6,
+        "cpu_pct": 39,
+        "ram_gb": 1.46
+      },
+      {
+        "t": 7,
+        "cpu_pct": 41,
+        "ram_gb": 1.44
+      },
+      {
+        "t": 8,
+        "cpu_pct": 38,
+        "ram_gb": 1.47
+      },
+      {
+        "t": 9,
+        "cpu_pct": 40,
+        "ram_gb": 1.46
+      },
+      {
+        "t": 10,
+        "cpu_pct": 32,
+        "ram_gb": 1.46
+      },
+      {
+        "t": 11,
+        "cpu_pct": 40,
+        "ram_gb": 1.45
+      },
+      {
+        "t": 12,
+        "cpu_pct": 23,
+        "ram_gb": 1.64
+      },
+      {
+        "t": 13,
+        "cpu_pct": 14,
+        "ram_gb": 1.69
+      },
+      {
+        "t": 14,
+        "cpu_pct": 5,
+        "ram_gb": 1.71
+      },
+      {
+        "t": 15,
+        "cpu_pct": 1,
+        "ram_gb": 1.71
+      },
+      {
+        "t": 16,
+        "cpu_pct": 1,
+        "ram_gb": 1.71
+      },
+      {
+        "t": 17,
+        "cpu_pct": 1,
+        "ram_gb": 1.72
+      }
+    ]
+  },
+  "verify": {
+    "pull_manifest_sha256": "33f87db51d637ccad279c2135451f093578e18c2936b923782154addee60496f",
+    "pull_file_count": 9721,
+    "pull_bytes": 2564052170
+  }
+}
