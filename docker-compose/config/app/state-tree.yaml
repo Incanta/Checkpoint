@@ -1,0 +1,5 @@
+# Where content-addressed state-tree blocks are stored.
+#   "storage"  - the configured storage backend (R2 / SeaweedFS) via the core
+#                storage server, alongside longtail content. Production.
+#   "postgres" - the TreeBlock table (no storage backend needed).
+block-store: "storage"

@@ -19,8 +19,8 @@ import { StorageBlockStore } from "./tree/storage-store";
 
 /** path -> sourceChangelistNumber (the materialized tree). */
 export type PathStateMap = StateMap;
-/** fileId -> sourceChangelistNumber (the legacy wire shape the daemon uses). */
-export type StateTree = Record<string, number>;
+
+export type BlockStoreType = "storage" | "postgres";
 
 /**
  * Select the block store backend. "storage" uses the configured storage server
@@ -28,7 +28,7 @@ export type StateTree = Record<string, number>;
  * setups with no storage server). See config/default/state-tree.yaml.
  */
 function blockStoreFor(db: PrismaClient, repoId: string): BlockStore {
-  const backend = config.get<string>("state-tree.block-store");
+  const backend = config.get<BlockStoreType>("state-tree.block-store");
   return backend === "postgres"
     ? new PrismaBlockStore(db, repoId)
     : new StorageBlockStore(db, repoId);
