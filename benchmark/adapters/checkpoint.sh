@@ -2,11 +2,18 @@
 # Checkpoint VCS adapter.
 #
 # Server: the repo's docker-compose bundle (app :13000, server :13001,
-#   postgres), images pulled from public GHCR. Storage stays in the default
-#   "filer w/ stub" mode (no SeaweedFS profile).
+#   postgres). With no pinned version (the HEAD path) the app + server images
+#   are BUILT from the shipped HEAD source so they match the HEAD client; with
+#   a pinned CHECKPOINT_VERSION the released GHCR images are pulled instead.
+#   Storage stays in the default "filer w/ stub" mode (no SeaweedFS profile).
 # Client: built from source on the droplet (CLI via CMake + daemon via Node),
 #   mirroring the proven .github/workflows/test.yaml flow. The published .deb
 #   is not used because releases are drafts with non-anonymous asset URLs.
+#
+# Building the server from HEAD (not just the client) is required because the
+# daemon and app are version-coupled: the daemon calls app tRPC procedures
+# (e.g. changelist.diffChangelists) that only exist at HEAD, so a HEAD client
+# against a released `latest` app fails with "No procedure found" (HTTP 500).
 # Auth: headless, via the app's devLogin (enabled in the deployed config) to
 #   mint an API token, then ~/.checkpoint/auth.json on the client, exactly as
 #   test.yaml does.
@@ -20,6 +27,15 @@ ADAPTER_SUPPORTS_COMMIT="false"
 SRC_DIR="/opt/checkpoint-src"
 CHK="${SRC_DIR}/src/clients/cli/build/chk"
 DAEMON_DIR="${SRC_DIR}/src/core/daemon"
+
+# Server-side source checkout (used only when building images from HEAD).
+SERVER_SRC_DIR="/opt/checkpoint-src"
+
+# Image tags the docker-compose bundle references for the default (unpinned)
+# run. When CHECKPOINT_VERSION is empty we build these tags locally from HEAD;
+# when it is set we rewrite the compose file to the pinned tags and pull.
+APP_IMAGE="ghcr.io/incanta/checkpoint-app:latest-sqlite"
+SERVER_IMAGE="ghcr.io/incanta/checkpoint-server:latest"
 
 # Server-side backend storage lives under Docker's data-root (relocated to the
 # server volume); used to measure the small-update storage delta.
@@ -113,15 +129,33 @@ dev:
   allow-dev-login: true
 AUTH
 
-# Pin image tags when a version is requested; otherwise keep compose defaults.
+# Pin image tags when a version is requested; otherwise keep compose defaults
+# (the latter are built from HEAD source by the caller, not pulled).
 if [ -n "$VERSION" ]; then
   sed -i "s#checkpoint-app:latest-sqlite#checkpoint-app:${VERSION}-sqlite#" docker-compose.yaml
   sed -i "s#checkpoint-server:latest#checkpoint-server:${VERSION}#" docker-compose.yaml
 fi
-
-docker compose pull
-docker compose up -d
 EOF
+
+  if [ -n "${CHECKPOINT_VERSION:-}" ]; then
+    log "pinned version ${CHECKPOINT_VERSION}: pulling released images from GHCR"
+    on_server "cd /opt/checkpoint-compose && docker compose pull"
+  else
+    log "no version pinned: building app + server images from HEAD source on the server"
+    on_server "rm -rf ${SERVER_SRC_DIR} && mkdir -p ${SERVER_SRC_DIR}"
+    git -C "${REPO_ROOT}" archive --format=tar HEAD | on_server "tar x -C ${SERVER_SRC_DIR}"
+    # Build the exact image tags the (unpinned) compose file references, so the
+    # subsequent `docker compose up` uses these local builds instead of pulling.
+    # The app is built sqlite-flavored to match the compose default and the
+    # benchmark's file:// database_url.
+    on_server "cd ${SERVER_SRC_DIR} && APP_IMAGE='${APP_IMAGE}' SERVER_IMAGE='${SERVER_IMAGE}' bash -seuo pipefail" <<'EOF'
+docker build -f src/app/Dockerfile --build-arg DB_PROVIDER=sqlite -t "$APP_IMAGE" .
+docker build -f src/core/server/Dockerfile -t "$SERVER_IMAGE" .
+EOF
+  fi
+
+  log "starting compose stack"
+  on_server "cd /opt/checkpoint-compose && docker compose up -d"
 
   log "waiting for app (:13000) and server (:13001) to be healthy"
   on_server_script <<'EOF'

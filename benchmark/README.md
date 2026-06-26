@@ -42,7 +42,7 @@ and **Ark** (Ark VCS). See `adapters/*.sh`.
    - `chart_label_every`: x-axis labeling for the resource charts. `"minute"` (default) uses a continuous numeric time axis that Mermaid labels at round-minute marks (sample points are still plotted at their true times, but without a tick per sample); `"sample"` uses a categorical axis with a labeled tick at every sample (minutes, trailing zeros trimmed), denser but useful for short runs. Any other value falls back to `"minute"`.
    - `small_change_file`: relative path (under the payload tree) of a file to make a ~100-byte change to after the initial submit. The run then submits that change and records how many bytes the **server** store grew (delta/dedup efficiency). Empty = skip this stage. Pick a large binary asset to make the difference meaningful. This stage is untimed; it only affects the storage-delta metric, never the timing metrics.
    - `vcs`: list; each entry runs as an isolated matrix job with its own droplet pair.
-   - `checkpoint_version`: empty uses the compose `latest` images and the source at `HEAD`; set it to pin server image tags.
+   - `checkpoint_version`: empty builds the app + server images from the `HEAD` source on the server droplet (so the server matches the `HEAD` client; the daemon and app are version-coupled); set it to a released tag to pull the pinned GHCR server images instead.
    - `keep_droplets`: `true` skips teardown (for debugging). **This leaves both droplets, both volumes, and the VPC running and billing until you delete them manually.**
 
 2. Commit the profile change (so the run is reproducible from history). To add a
@@ -72,7 +72,10 @@ needed.
    server volume (`/data/docker`) so the named volumes land there, then deploy
    the repo's `docker-compose/` bundle (app `:13000`, server `:13001`, Postgres)
    with the private IP templated in, secrets generated, and dev-login enabled.
-   Storage uses the default filer-stub mode.
+   With no pinned `checkpoint_version`, the app + server images are built from
+   the `HEAD` source on the droplet (so they match the `HEAD` client); a pinned
+   version pulls the released GHCR images instead. Storage uses the default
+   filer-stub mode.
 3. **Client setup** (Checkpoint): build the CLI (CMake) and daemon (Node) from
    the repo source shipped via `git archive` of `HEAD`, start the daemon, then
    authenticate headlessly (devLogin to an API token, written to
@@ -188,8 +191,12 @@ needed.
 
 - **Client is built from source**, not installed from a `.deb`: the installer
   releases are GitHub _drafts_ with non-anonymous asset URLs, so building from
-  the repo `HEAD` (as `test.yaml` does) is the reliable path. Server still uses
-  the published GHCR images.
+  the repo `HEAD` (as `test.yaml` does) is the reliable path. The **server**
+  (app + core images) is likewise built from `HEAD` on the default (unpinned)
+  path, because the daemon and app are version-coupled (the daemon calls app
+  tRPC procedures that only exist at `HEAD`); a released `latest` server would
+  fail with "No procedure found". Set `checkpoint_version` to pull released
+  GHCR server images instead.
 - **Disk sizing**: the droplet base disk is small (a `c-8` ships ~25GB), so all bulk storage is on the attached volumes. The **client** volume (`data_volume_gb`) holds the download, the extracted tree, per-VCS caches, and the fresh pull, so size it well above the payload (the committed default is 400GiB for a ~50GB payload). The **server** volume (`server_volume_gb`) holds the submitted payload once; 150-200GiB is comfortable. Every adapter mounts its volume at `/data` and keeps its backend there.
 - **Cost**: each matrix job runs two droplets plus two volumes for the duration of the build + benchmark. Pick `droplet_size`, `data_volume_gb`, and `server_volume_gb` accordingly, and remember `keep_droplets: true` keeps billing until manual cleanup.
 
