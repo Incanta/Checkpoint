@@ -122,10 +122,13 @@ export async function pull(
     stateBackend,
   );
 
-  const diff = DiffState(
-    workspaceState.files,
-    changelistResponse.stateTree as Record<string, number>,
-  );
+  // Path-keyed diff from our base to the target CL: only the changed paths and
+  // the source CLs to pull (no full state tree, no fileId resolution).
+  const diff = await client.changelist.diffChangelists.query({
+    repoId: workspace.repoId,
+    fromNumber: workspaceState.changelistNumber,
+    toNumber: changelistNumber,
+  });
 
   const changelistsResponse =
     await client.changelist.getChangelistsWithNumbers.mutate({
@@ -141,15 +144,10 @@ export async function pull(
     (changelist: any) => changelist.versionIndex,
   );
 
-  // ─── Pre-pull: save locally-modified text files for auto-merge ────
-  // Identify text files that exist locally with a different CL on the server.
-  // These will be overwritten by Longtail, so we save the current content
-  // and the base CL for 3-way merge after pull completes.
-  const serverStateTree = changelistResponse.stateTree as Record<
-    string,
-    number
-  >;
-
+  // Pre-pull: save locally-modified text files for auto-merge.
+  // The diff's modified files are the ones the pull will overwrite. If a file is
+  // locally edited (text), save its current content + base CL for a 3-way merge
+  // after the pull completes.
   interface MergeCandidate {
     /** Normalized relative path */
     relativePath: string;
@@ -161,24 +159,16 @@ export async function pull(
 
   const mergeCandidates: MergeCandidate[] = [];
 
-  // Build fileId -> path lookup from local state
-  const localFileIdToPath = new Map<string, string>();
-  for (const [filePath, file] of Object.entries(workspaceState.files)) {
-    localFileIdToPath.set(file.fileId, filePath);
-  }
-
-  for (const [fileId, serverCl] of Object.entries(serverStateTree)) {
-    const localPath = localFileIdToPath.get(fileId);
-    if (!localPath) continue; // New file on server — no merge needed
-
+  for (const change of diff.modified) {
+    const localPath = change.path;
     const localFile = workspaceState.files[localPath];
-    if (!localFile || localFile.changelist === serverCl) continue; // Up to date
+    if (!localFile || localFile.changelist === change.cl) continue; // up to date
 
     // Only auto-merge text files
     if (isBinaryFile(localPath, binaryExts)) continue;
 
     const fullPath = path.join(workspace.localPath, localPath);
-    if (!existsSync(fullPath)) continue; // Deleted locally — no merge
+    if (!existsSync(fullPath)) continue; // deleted locally, no merge
 
     // Check if the file has been modified locally
     try {
@@ -186,11 +176,11 @@ export async function pull(
         // Hash was deferred (post-pull optimisation). Fall back to mtime+size.
         const stat = await fs.stat(fullPath);
         if (stat.mtimeMs === localFile.mtime && stat.size === localFile.size) {
-          continue; // Not modified locally
+          continue; // not modified locally
         }
       } else {
         const currentHash = await hashFileMD5(fullPath);
-        if (currentHash === localFile.md5) continue; // Not modified locally
+        if (currentHash === localFile.md5) continue; // not modified locally
       }
 
       const currentContent = await fs.readFile(fullPath, "utf-8");
@@ -200,7 +190,7 @@ export async function pull(
         currentContent,
       });
     } catch {
-      // Can't read — skip merge for this file
+      // Can't read; skip merge for this file.
     }
   }
 
@@ -478,42 +468,18 @@ export async function pull(
   }
 
   if (!errored) {
-    // Batch-fetch all main file info in one API call
-    const allFileIds = Object.keys(serverStateTree);
-    const mainAllIds = [...new Set([...diff.deletions, ...allFileIds])];
-    const mainAllFilesResponse =
-      mainAllIds.length > 0
-        ? await client.file.getFiles.mutate({
-            ids: mainAllIds,
-            repoId: workspace.repoId,
-          })
-        : [];
-    const mainFilesById = new Map(
-      mainAllFilesResponse.map((f: any) => [f.id, f]),
-    );
-
-    // Handle deletions
-    const delFiles = diff.deletions
-      .map((id) => mainFilesById.get(id))
-      .filter(Boolean);
-
-    if (delFiles.length > 0) {
+    // Handle deletions (paths come straight from the diff; no getFiles needed).
+    if (diff.removed.length > 0) {
       onStep?.("Deleting removed files");
       let deletedCount = 0;
-      const deleteTotal = delFiles.length;
+      const deleteTotal = diff.removed.length;
       onProgress?.("Deleting removed files", 0, deleteTotal);
 
-      for (const file of delFiles) {
-        if (file?.path) {
-          const filePath = path.join(workspace.localPath, file.path);
-
-          if (existsSync(filePath)) {
-            await fs.rm(filePath, {
-              force: true,
-            });
-          }
+      for (const removedPath of diff.removed) {
+        const filePath = path.join(workspace.localPath, removedPath);
+        if (existsSync(filePath)) {
+          await fs.rm(filePath, { force: true });
         }
-
         deletedCount++;
         onProgress?.("Deleting removed files", deletedCount, deleteTotal);
       }
@@ -586,93 +552,45 @@ export async function pull(
       await Promise.all(workers);
     }
 
-    // Build new state with path keys and file info
-    const allFilesResponse = allFileIds
-      .map((id) => mainFilesById.get(id))
-      .filter(Boolean);
-
+    // Update workspace state incrementally from the diff: start from the old
+    // state, drop removed files, and re-record added/modified ones. Unchanged
+    // files keep their existing entry (and hash). Hashes are deferred (md5 "");
+    // the size+mtime baseline is enough until change detection needs them.
     onStep?.("Updating workspace state");
 
-    // Build lookup: fileId → old state entry (for skipping unchanged files)
-    const oldFileIdToEntry = new Map<
-      string,
-      { path: string; file: WorkspaceStateFile }
-    >();
-    for (const [filePath, file] of Object.entries(workspaceState.files)) {
-      oldFileIdToEntry.set(file.fileId, { path: filePath, file });
+    const newFiles: Record<string, WorkspaceStateFile> = {
+      ...workspaceState.files,
+    };
+    for (const removedPath of diff.removed) {
+      delete newFiles[removedPath];
     }
 
-    // Build set of merged file paths (these must be re-hashed even if CL matches)
-    const mergedPaths = new Set<string>(
-      mergeResult.cleanMerges.concat(mergeResult.conflictMerges),
-    );
-
-    // Partition files into changed (need hash) vs unchanged (copy old state)
-    const newFiles: Record<string, WorkspaceStateFile> = {};
-    const filesToHash: {
-      normalizedPath: string;
-      fullPath: string;
-      fileId: string;
-      changelist: number;
-    }[] = [];
-
-    for (const file of allFilesResponse) {
-      if (!file.path) continue;
-
-      const normalizedPath = file.path.replace(/^\//, "").replace(/\\/g, "/");
-      const fullPath = path.join(workspace.localPath, normalizedPath);
-      const changelist = serverStateTree[file.id];
-
-      if (!existsSync(fullPath)) continue;
-
-      const oldEntry = oldFileIdToEntry.get(file.id);
-      const wasMerged = mergedPaths.has(normalizedPath);
-
-      // Unchanged: same fileId, same changelist, not merged, and old path matches
-      if (
-        oldEntry &&
-        oldEntry.file.changelist === changelist &&
-        !wasMerged &&
-        oldEntry.path === normalizedPath
-      ) {
-        newFiles[normalizedPath] = { ...oldEntry.file };
-        continue;
-      }
-
-      filesToHash.push({
-        normalizedPath,
-        fullPath,
-        fileId: file.id,
-        changelist,
-      });
-    }
-
-    // Stat files in parallel — hashes are deferred until change detection
-    // actually needs them (size+mtime baseline is sufficient after pull).
-    const stateTotal = filesToHash.length;
+    const changed = [...diff.added, ...diff.modified];
+    const stateTotal = changed.length;
     onProgress?.("Updating workspace state", 0, stateTotal);
 
-    if (filesToHash.length > 0) {
-      const statResults = await Promise.all(
-        filesToHash.map(async (entry) => {
-          const stat = await fs.stat(entry.fullPath);
-          return { entry, stat };
-        }),
-      );
-
-      for (let i = 0; i < statResults.length; i++) {
-        const { entry, stat } = statResults[i]!;
-
-        newFiles[entry.normalizedPath] = {
-          fileId: entry.fileId,
-          changelist: entry.changelist,
+    const statResults = await Promise.all(
+      changed.map(async (change) => {
+        const fullPath = path.join(workspace.localPath, change.path);
+        try {
+          return { change, stat: await fs.stat(fullPath) };
+        } catch {
+          return { change, stat: null };
+        }
+      }),
+    );
+    for (let i = 0; i < statResults.length; i++) {
+      const { change, stat } = statResults[i]!;
+      if (stat) {
+        newFiles[change.path] = {
+          fileId: change.fileId,
+          changelist: change.cl,
           md5: "",
           size: stat.size,
           mtime: stat.mtimeMs,
         };
-
-        onProgress?.("Updating workspace state", i + 1, stateTotal);
       }
+      onProgress?.("Updating workspace state", i + 1, stateTotal);
     }
 
     await saveWorkspaceState(
@@ -745,31 +663,18 @@ export async function pullTextFilesForSubmit(
     return { cleanMerges: [], conflictMerges: [] };
   }
 
-  // Get the head changelist's state tree
-  const changelistResponse = await client.changelist.getChangelist.query({
+  // Path-keyed diff from our base to head: the modified files are the outdated
+  // ones. Intersect with the submit set, text files only.
+  const diff = await client.changelist.diffChangelists.query({
     repoId: workspace.repoId,
-    changelistNumber: remoteHeadNumber,
+    fromNumber: workspaceState.changelistNumber,
+    toNumber: remoteHeadNumber,
   });
 
-  if (!changelistResponse) {
-    throw new Error("Could not get changelist information");
-  }
-
-  const serverStateTree = changelistResponse.stateTree as Record<
-    string,
-    number
-  >;
-
-  // Build quick lookups
   const submitSet = new Set(
     submitPaths.map((p) => p.replace(/^[/\\]/, "").replace(/\\/g, "/")),
   );
-  const localFileIdToPath = new Map<string, string>();
-  for (const [filePath, file] of Object.entries(workspaceState.files)) {
-    localFileIdToPath.set(file.fileId, filePath);
-  }
 
-  // Find text files in the submit set that are outdated on the server
   interface TextMergeCandidate {
     relativePath: string;
     fileId: string;
@@ -780,31 +685,30 @@ export async function pullTextFilesForSubmit(
 
   const candidates: TextMergeCandidate[] = [];
 
-  for (const [fileId, remoteCl] of Object.entries(serverStateTree)) {
-    const localPath = localFileIdToPath.get(fileId);
-    if (!localPath) continue; // New on server, not our problem
-    if (!submitSet.has(localPath)) continue; // Not being submitted
+  for (const change of diff.modified) {
+    const localPath = change.path;
+    if (!submitSet.has(localPath)) continue; // not being submitted
 
     const localFile = workspaceState.files[localPath];
-    if (!localFile || localFile.changelist === remoteCl) continue; // Up to date
+    if (!localFile || localFile.changelist === change.cl) continue; // up to date
 
     // Only text files
     if (isBinaryFile(localPath, binaryExts)) continue;
 
     const fullPath = path.join(workspace.localPath, localPath);
-    if (!existsSync(fullPath)) continue; // Deleted locally
+    if (!existsSync(fullPath)) continue; // deleted locally
 
     try {
       const currentContent = await fs.readFile(fullPath, "utf-8");
       candidates.push({
         relativePath: localPath,
-        fileId,
+        fileId: change.fileId,
         baseCl: localFile.changelist,
-        remoteCl,
+        remoteCl: change.cl,
         currentContent,
       });
     } catch {
-      // Can't read — skip
+      // Can't read; skip.
     }
   }
 

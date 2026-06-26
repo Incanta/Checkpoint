@@ -28,7 +28,6 @@ async function seedLinearHistory(
         number: n,
         message: `Commit ${n}`,
         versionIndex: "",
-        stateTree: {},
         repoId,
         userId: owner.id,
         parentNumber: parent,

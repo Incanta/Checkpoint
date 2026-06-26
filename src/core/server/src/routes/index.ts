@@ -6,6 +6,7 @@ import { routeFiler } from "./filer.js";
 import { routeSystem } from "./system.js";
 import { routeRepoSize } from "./repo-size.js";
 import { routeStubFiler } from "./stub-filer.js";
+import { routeBlocks } from "./blocks.js";
 
 export function routes(): Router {
   const router = Router();
@@ -13,6 +14,8 @@ export function routes(): Router {
   router.use(routeRoot());
   router.use(routeSubmit());
   router.use(routeSystem());
+  // State-tree block storage (all modes: R2 / SeaweedFS / stub).
+  router.use(routeBlocks());
 
   if (config.get<string>("storage.mode") === "seaweedfs") {
     router.use(routeFiler());

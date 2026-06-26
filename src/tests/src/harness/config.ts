@@ -53,12 +53,14 @@ function applyDefaults(): void {
   setConfig("db.provider", "sqlite");
   setConfig("db.url", "file:./test.db");
 
-  // Storage — SeaweedFS via the local server
+  // Storage: SeaweedFS via the local server
   setConfig("storage.mode", "seaweedfs");
   setConfig("storage.backend-url.internal", "http://localhost:13001");
   setConfig("storage.backend-url.external", "http://localhost:13001");
   setConfig("storage.jwt.signing-key", "test-jwt-secret");
   setConfig("storage.token-expiration-seconds", 3600);
+  // Tree blocks go to the TreeBlock table in tests (no storage server running).
+  setConfig("state-tree.block-store", "postgres");
 
   // Logging — silence by default
   setConfig("logging.level", "error");

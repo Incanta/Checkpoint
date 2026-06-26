@@ -9,6 +9,11 @@ import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
 import { assertFeature } from "~/server/license-client";
 import {
+  getStateTreePaths,
+  buildStateTreeBlocks,
+  primeStateTreePaths,
+} from "~/server/state-tree";
+import {
   readFileFromVersionAsync,
   pollReadFileHandle,
   freeReadFileHandle,
@@ -84,9 +89,7 @@ export const shelfRouter = createTRPCRouter({
           description: z.string(),
           repoId: z.string(),
           authorId: z.string(),
-          versionIndex: z.string(),
-          stateTree: z.any(),
-          changelistNumber: z.int(),
+          versionIndex: z.string(),          changelistNumber: z.int(),
           status: z.enum(["ACTIVE", "SUBMITTED", "DELETED"]),
           submittedToBranch: z.string().nullable(),
           submittedAt: z.date().nullable(),
@@ -145,9 +148,7 @@ export const shelfRouter = createTRPCRouter({
         description: z.string(),
         repoId: z.string(),
         authorId: z.string(),
-        versionIndex: z.string(),
-        stateTree: z.any(),
-        changelistNumber: z.int(),
+        versionIndex: z.string(),        changelistNumber: z.int(),
         status: z.enum(["ACTIVE", "SUBMITTED", "DELETED"]),
         submittedToBranch: z.string().nullable(),
         submittedAt: z.date().nullable(),
@@ -220,9 +221,7 @@ export const shelfRouter = createTRPCRouter({
         description: z.string(),
         repoId: z.string(),
         authorId: z.string(),
-        versionIndex: z.string(),
-        stateTree: z.any(),
-        changelistNumber: z.int(),
+        versionIndex: z.string(),        changelistNumber: z.int(),
         status: z.enum(["ACTIVE", "SUBMITTED", "DELETED"]),
         submittedToBranch: z.string().nullable(),
         submittedAt: z.date().nullable(),
@@ -271,8 +270,9 @@ export const shelfRouter = createTRPCRouter({
       });
       const nextNumber = (lastCl?.number ?? -1) + 1;
 
-      // Create File records and build stateTree
-      const stateTree: Record<string, number> = {};
+      // Build the path-keyed map for the dangling CL's state tree and the
+      // shelf's file-change list.
+      const paths = new Map<string, number>();
       const fileChangesData: { fileId: string; type: string }[] = [];
 
       const nonDeleteMods = input.modifications.filter((mod) => !mod.delete);
@@ -314,22 +314,29 @@ export const shelfRouter = createTRPCRouter({
         const file = existingFiles.find((f) => f.path === modPath);
         if (!file) continue;
 
-        stateTree[file.id] = nextNumber;
+        paths.set(modPath, nextNumber);
         fileChangesData.push({ fileId: file.id, type: "ADD" });
       }
 
-      // Create a dangling changelist (no parentNumber, no branch)
+      // Create a dangling changelist (no parentNumber, no branch) carrying its
+      // own state tree.
+      const stateRootHash = await buildStateTreeBlocks(
+        ctx.db,
+        input.repoId,
+        paths.entries(),
+      );
       await ctx.db.changelist.create({
         data: {
           number: nextNumber,
           message: `Shelf: ${input.name}`,
           versionIndex: input.versionIndex,
-          stateTree,
+          stateRootHash,
           repoId: input.repoId,
           userId: ctx.session.user.id,
           parentNumber: null,
         },
       });
+      primeStateTreePaths(input.repoId, stateRootHash, paths);
 
       // Create the shelf
       const shelf = await ctx.db.shelf.create({
@@ -339,7 +346,6 @@ export const shelfRouter = createTRPCRouter({
           repoId: input.repoId,
           authorId: ctx.session.user.id,
           versionIndex: input.versionIndex,
-          stateTree,
           changelistNumber: nextNumber,
           fileChanges: {
             create: fileChangesData,
@@ -402,11 +408,10 @@ export const shelfRouter = createTRPCRouter({
         });
       }
 
-      // Build updated stateTree
-      const stateTree: Record<string, number> = shelf.stateTree as Record<
-        string,
-        number
-      >;
+      // Clone the dangling CL's path tree and apply the additions below.
+      const paths = new Map(
+        await getStateTreePaths(ctx.db, input.repoId, shelf.changelistNumber),
+      );
 
       const normalizedPaths = input.modifications.map((mod) =>
         mod.path.replaceAll("\\\\", "/"),
@@ -447,7 +452,7 @@ export const shelfRouter = createTRPCRouter({
         const file = existingFiles.find((f) => f.path === modPath);
         if (!file) continue;
 
-        stateTree[file.id] = shelf.changelistNumber;
+        paths.set(modPath, shelf.changelistNumber);
         upsertEntries.push({ fileId: file.id });
       }
 
@@ -464,12 +469,16 @@ export const shelfRouter = createTRPCRouter({
         `;
       }
 
-      // Update the shelf and its dangling CL with new version index
+      // Rebuild the dangling CL's state tree, then update the shelf and CL.
+      const stateRootHash = await buildStateTreeBlocks(
+        ctx.db,
+        input.repoId,
+        paths.entries(),
+      );
       await ctx.db.shelf.update({
         where: { id: shelf.id },
-        data: { versionIndex: input.versionIndex, stateTree },
+        data: { versionIndex: input.versionIndex },
       });
-
       await ctx.db.changelist.update({
         where: {
           repoId_number: {
@@ -477,8 +486,9 @@ export const shelfRouter = createTRPCRouter({
             number: shelf.changelistNumber,
           },
         },
-        data: { versionIndex: input.versionIndex, stateTree },
+        data: { versionIndex: input.versionIndex, stateRootHash },
       });
+      primeStateTreePaths(input.repoId, stateRootHash, paths);
 
       void recordActivity(ctx.db, {
         userId: ctx.session.user.id,
@@ -523,9 +533,9 @@ export const shelfRouter = createTRPCRouter({
         });
       }
 
-      const stateTree: Record<string, number> = {
-        ...(shelf.stateTree as Record<string, number>),
-      };
+      const paths = new Map(
+        await getStateTreePaths(ctx.db, input.repoId, shelf.changelistNumber),
+      );
       const normalizedPaths = input.filePaths.map((p) =>
         p.replaceAll("\\", "/"),
       );
@@ -536,7 +546,7 @@ export const shelfRouter = createTRPCRouter({
       );
 
       for (const fc of filesToRemove) {
-        delete stateTree[fc.fileId];
+        paths.delete(fc.file.path);
       }
 
       // Delete the shelf file change records
@@ -547,12 +557,16 @@ export const shelfRouter = createTRPCRouter({
         },
       });
 
-      // Update shelf and CL
+      // Rebuild the dangling CL's state tree, then update shelf and CL.
+      const stateRootHash = await buildStateTreeBlocks(
+        ctx.db,
+        input.repoId,
+        paths.entries(),
+      );
       await ctx.db.shelf.update({
         where: { id: shelf.id },
-        data: { versionIndex: input.versionIndex, stateTree },
+        data: { versionIndex: input.versionIndex },
       });
-
       await ctx.db.changelist.update({
         where: {
           repoId_number: {
@@ -560,8 +574,9 @@ export const shelfRouter = createTRPCRouter({
             number: shelf.changelistNumber,
           },
         },
-        data: { versionIndex: input.versionIndex, stateTree },
+        data: { versionIndex: input.versionIndex, stateRootHash },
       });
+      primeStateTreePaths(input.repoId, stateRootHash, paths);
 
       void recordActivity(ctx.db, {
         userId: ctx.session.user.id,
@@ -652,29 +667,35 @@ export const shelfRouter = createTRPCRouter({
       });
       const nextNumber = (lastCl?.number ?? -1) + 1;
 
-      // Merge shelf state into branch state
-      const branchState: Record<string, number> = {
-        ...(branchHead.stateTree as Record<string, number>),
-      };
-      const shelfState: Record<string, number> = shelf.stateTree as Record<
-        string,
-        number
-      >;
-
-      for (const [fileId, clNum] of Object.entries(shelfState)) {
-        branchState[fileId] = clNum;
+      // Merge the shelf's path tree into the branch head's (additive: the
+      // shelf overlays its files onto the branch).
+      const branchPaths = new Map(
+        await getStateTreePaths(ctx.db, input.repoId, branch.headNumber),
+      );
+      const shelfPaths = await getStateTreePaths(
+        ctx.db,
+        input.repoId,
+        shelf.changelistNumber,
+      );
+      for (const [path, clNum] of shelfPaths) {
+        branchPaths.set(path, clNum);
       }
 
       const mergeMessage = input.message ?? `Applied shelf "${shelf.name}"`;
 
-      // Create a new CL on the branch
+      // Create a new CL on the branch carrying the merged state tree.
+      const stateRootHash = await buildStateTreeBlocks(
+        ctx.db,
+        input.repoId,
+        branchPaths.entries(),
+      );
       await ctx.db.changelist.create({
         data: {
           number: nextNumber,
           message: mergeMessage,
           versionIndex: shelf.versionIndex,
           parentNumber: branch.headNumber,
-          stateTree: branchState,
+          stateRootHash,
           repoId: input.repoId,
           userId: ctx.session.user.id,
         },
@@ -689,6 +710,8 @@ export const shelfRouter = createTRPCRouter({
           type: fc.type as FileChangeType,
         })),
       });
+
+      primeStateTreePaths(input.repoId, stateRootHash, branchPaths);
 
       // Update branch head
       await ctx.db.branch.update({
@@ -802,30 +825,42 @@ export const shelfRouter = createTRPCRouter({
         where: { repoId_name: { repoId: input.repoId, name: input.shelfName } },
       });
 
-      // Build stateTree: for existing shelf, merge with previous state; for new shelf, start fresh
-      const stateTree: Record<string, number> =
+      // Build the dangling CL's path tree: for an existing shelf, start from its
+      // prior state.
+      const paths = new Map<string, number>(
         existingShelf?.status === "ACTIVE"
-          ? { ...((existingShelf.stateTree as Record<string, number>) ?? {}) }
-          : {};
+          ? await getStateTreePaths(
+              ctx.db,
+              input.repoId,
+              existingShelf.changelistNumber,
+            )
+          : [],
+      );
 
       for (const mod of normalizedMods) {
         const fileId = fileIdsForPaths[mod.path];
         if (!fileId) continue;
         if (mod.delete) {
-          delete stateTree[fileId];
+          paths.delete(mod.path);
         } else {
-          stateTree[fileId] = nextNumber;
+          paths.set(mod.path, nextNumber);
         }
       }
 
-      // Create dangling changelist (no parent, no branch update)
+      // Create dangling changelist (no parent, no branch update) carrying its
+      // own state tree.
+      const stateRootHash = await buildStateTreeBlocks(
+        ctx.db,
+        input.repoId,
+        paths.entries(),
+      );
       await ctx.db.changelist.create({
         data: {
           number: nextNumber,
           message: input.message || `Shelf: ${input.shelfName}`,
           versionIndex: input.versionIndex,
           parentNumber: null,
-          stateTree,
+          stateRootHash,
           repoId: input.repoId,
           userId: ctx.session.user.id,
         },
@@ -843,6 +878,8 @@ export const shelfRouter = createTRPCRouter({
             oldPath: mod.oldPath ? mod.oldPath.replaceAll("\\", "/") : null,
           })),
       });
+
+      primeStateTreePaths(input.repoId, stateRootHash, paths);
 
       if (existingShelf?.status === "ACTIVE") {
         // Update existing shelf with new version index and state
@@ -870,7 +907,6 @@ export const shelfRouter = createTRPCRouter({
           where: { id: existingShelf.id },
           data: {
             versionIndex: input.versionIndex,
-            stateTree,
             changelistNumber: nextNumber,
           },
         });
@@ -892,7 +928,6 @@ export const shelfRouter = createTRPCRouter({
           repoId: input.repoId,
           authorId: ctx.session.user.id,
           versionIndex: input.versionIndex,
-          stateTree,
           changelistNumber: nextNumber,
           fileChanges: {
             create: normalizedMods
@@ -966,9 +1001,7 @@ export const shelfRouter = createTRPCRouter({
         description: z.string(),
         repoId: z.string(),
         authorId: z.string(),
-        versionIndex: z.string(),
-        stateTree: z.any(),
-        changelistNumber: z.int(),
+        versionIndex: z.string(),        changelistNumber: z.int(),
         status: z.enum(["ACTIVE", "SUBMITTED", "DELETED"]),
         submittedToBranch: z.string().nullable(),
         submittedAt: z.date().nullable(),

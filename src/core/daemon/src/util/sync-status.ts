@@ -1,4 +1,4 @@
-import { CreateApiClientAuth, DiffState } from "@checkpointvcs/common";
+import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { getWorkspaceState, type Workspace } from "./util.js";
 import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 import { DaemonConfig } from "../daemon-config.js";
@@ -109,85 +109,33 @@ export async function checkSyncStatus(
     };
   }
 
-  // Get the head changelist's full state tree
-  const changelistResponse = await client.changelist.getChangelist.query({
+  // Ask the server for the path-keyed diff between our base and the head. This
+  // returns only the changed paths (and the source CLs to pull), not the whole
+  // state tree, and needs no fileId resolution.
+  const diff = await client.changelist.diffChangelists.query({
     repoId: workspace.repoId,
-    changelistNumber: remoteHeadNumber,
+    fromNumber: localChangelistNumber,
+    toNumber: remoteHeadNumber,
   });
 
-  if (!changelistResponse) {
-    throw new Error("Could not get changelist information");
-  }
+  // Modified files: present locally with a newer version on the server.
+  const outdatedFiles: OutdatedFile[] = diff.modified.map((change) => {
+    const local = workspaceState.files[change.path];
+    return {
+      fileId: change.fileId,
+      path: change.path,
+      localChangelist: local?.changelist ?? localChangelistNumber,
+      remoteChangelist: change.cl,
+    };
+  });
 
-  const serverStateTree = changelistResponse.stateTree as Record<
-    string,
-    number
-  >;
+  // New on remote: paths come straight from the diff (no getFiles round-trip).
+  const newOnRemote = diff.added.map((change) => change.path);
 
-  // Diff local state against server state
-  const diff = DiffState(workspaceState.files, serverStateTree);
-
-  // Build a map of fileId -> path from local state for lookups
-  const localFileIdToPath = new Map<string, string>();
-  const localFileIdToChangelist = new Map<string, number>();
-  for (const [filePath, file] of Object.entries(workspaceState.files)) {
-    localFileIdToPath.set(file.fileId, filePath);
-    localFileIdToChangelist.set(file.fileId, file.changelist);
-  }
-
-  // Get file info for outdated and new files
-  const outdatedFiles: OutdatedFile[] = [];
-  const newOnRemote: string[] = [];
-
-  // Find outdated files (exist locally but have newer CL on server)
-  for (const [fileId, serverCl] of Object.entries(serverStateTree)) {
-    const localCl = localFileIdToChangelist.get(fileId);
-    if (localCl !== undefined && localCl !== serverCl) {
-      const filePath = localFileIdToPath.get(fileId) ?? fileId;
-      outdatedFiles.push({
-        fileId,
-        path: filePath,
-        localChangelist: localCl,
-        remoteChangelist: serverCl,
-      });
-    } else if (localCl === undefined) {
-      // File is new on remote - we'll resolve the path later
-      newOnRemote.push(fileId);
-    }
-  }
-
-  // Find files deleted on remote
-  const deletedOnRemote: string[] = [];
-  for (const fileId of diff.deletions) {
-    const filePath = localFileIdToPath.get(fileId);
-    if (filePath) {
-      deletedOnRemote.push(filePath);
-    }
-  }
-
-  // Resolve paths for new-on-remote files
-  const resolvedNewOnRemote: string[] = [];
-  if (newOnRemote.length > 0) {
-    try {
-      const filesResponse = await client.file.getFiles.mutate({
-        ids: newOnRemote,
-        repoId: workspace.repoId,
-      });
-      for (const file of filesResponse) {
-        if (file.path) {
-          resolvedNewOnRemote.push(
-            file.path.replace(/^\//, "").replace(/\\/g, "/"),
-          );
-        }
-      }
-    } catch {
-      // If we can't resolve paths, just use the file IDs. Push in a loop rather
-      // than spreading (newOnRemote can hold tens of thousands of IDs on a large
-      // pull, and `push(...newOnRemote)` would throw "Maximum call stack size
-      // exceeded").
-      for (const id of newOnRemote) resolvedNewOnRemote.push(id);
-    }
-  }
+  // Deleted on remote: only those we actually have locally need removing.
+  const deletedOnRemote = diff.removed.filter(
+    (path) => workspaceState.files[path] !== undefined,
+  );
 
   return {
     upToDate: false,
@@ -197,7 +145,7 @@ export async function checkSyncStatus(
     changelistsToPull: diff.changelistsToPull,
     outdatedFiles,
     deletedOnRemote,
-    newOnRemote: resolvedNewOnRemote,
+    newOnRemote,
     checkedAt: new Date(),
   };
 }

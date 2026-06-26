@@ -8,9 +8,35 @@ import {
   getUserAndRepoWithAccess,
 } from "../auth-utils";
 import { recordActivity } from "../activity";
+import {
+  getStateTreePaths,
+  buildStateTreeBlocks,
+  primeStateTreePaths,
+  diffStateTrees,
+} from "~/server/state-tree";
 import type { InputJsonValue } from "@prisma/client/runtime/library";
 
 export const changelistRouter = createTRPCRouter({
+  // Path-keyed diff between two changelists' state trees. The daemon's sync
+  // path: returns only changed paths + the source CLs to pull (no full map).
+  diffChangelists: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        fromNumber: z.number(),
+        toNumber: z.number(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
+      return diffStateTrees(
+        ctx.db,
+        input.repoId,
+        input.fromNumber,
+        input.toNumber,
+      );
+    }),
+
   getChangelist: protectedProcedure
     .input(
       z.object({
@@ -348,11 +374,13 @@ export const changelistRouter = createTRPCRouter({
         });
       }
 
-      const stateTree: Record<string, number> =
-        parentChangelist.stateTree as Record<string, number>;
+      // Parent head's materialized path tree (cached); clone before mutating.
+      const paths = new Map(
+        await getStateTreePaths(ctx.db, input.repoId, branch.headNumber),
+      );
 
-      // Apply modifications to state tree
-      // Batch queries in chunks to avoid exceeding DB parameter limits
+      // Resolve / create File rows for the modified paths (for the FileChange
+      // log and the fileId wire shim). Batched to avoid DB parameter limits.
       const allPaths = input.modifications.map((mod) =>
         mod.path.replaceAll("\\", "/"),
       );
@@ -401,23 +429,26 @@ export const changelistRouter = createTRPCRouter({
         }
       }
 
-      // Build a path→file map for O(1) lookups instead of O(n) find()
+      // Build a path→file map for O(1) lookups, record fileIds for the log, and
+      // apply the modifications to the path tree.
       const filesByPath = new Map(modifiedFiles.map((f) => [f.path, f]));
       const fileIdsForPaths: Record<string, string | undefined> = {};
       for (const mod of input.modifications) {
         const modPath = mod.path.replaceAll("\\", "/");
-        const existingFile = filesByPath.get(modPath);
-
-        fileIdsForPaths[mod.path] = existingFile?.id;
-
+        fileIdsForPaths[mod.path] = filesByPath.get(modPath)?.id;
         if (mod.delete) {
-          if (existingFile) {
-            delete stateTree[existingFile.id];
-          }
+          paths.delete(modPath);
         } else {
-          stateTree[existingFile!.id] = nextNumber;
+          paths.set(modPath, nextNumber);
         }
       }
+
+      // Build the content-addressed state tree and store its blocks.
+      const stateRootHash = await buildStateTreeBlocks(
+        ctx.db,
+        input.repoId,
+        paths.entries(),
+      );
 
       // Create the changelist (inherit artifact state from parent)
       const changelist = await ctx.db.changelist.create({
@@ -426,7 +457,7 @@ export const changelistRouter = createTRPCRouter({
           message: input.message,
           versionIndex: input.versionIndex,
           parentNumber: branch.headNumber,
-          stateTree: stateTree,
+          stateRootHash,
           artifactVersionIndex: parentChangelist.artifactVersionIndex,
           artifactStateTree:
             parentChangelist.artifactStateTree as InputJsonValue,
@@ -453,6 +484,8 @@ export const changelistRouter = createTRPCRouter({
             };
           }),
       });
+
+      primeStateTreePaths(input.repoId, stateRootHash, paths);
 
       if (!input.keepCheckedOut) {
         await ctx.db.fileCheckout.updateMany({
@@ -487,9 +520,9 @@ export const changelistRouter = createTRPCRouter({
     .input(
       z.object({
         repoId: z.string(),
-        /** The older CL number (exclusive — changes IN this CL are NOT included). */
+        /** The older CL number (exclusive: changes IN this CL are NOT included). */
         fromNumber: z.number(),
-        /** The newer CL number (inclusive — we start here and walk back). */
+        /** The newer CL number (inclusive: we start here and walk back). */
         toNumber: z.number(),
       }),
     )

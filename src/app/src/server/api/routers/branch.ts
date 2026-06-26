@@ -5,6 +5,11 @@ import type { Changelist } from "@prisma/client";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { FileChangeType, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
+import {
+  getStateTreePaths,
+  buildStateTreeBlocks,
+  primeStateTreePaths,
+} from "~/server/state-tree";
 
 export const branchRouter = createTRPCRouter({
   getBranch: protectedProcedure
@@ -457,20 +462,22 @@ export const branchRouter = createTRPCRouter({
         });
       }
 
-      // Merge the state trees: incoming overwrites target
-      const targetState: Record<string, number> = {
-        ...(targetHead.stateTree as Record<string, number>),
-      };
-      const incomingState: Record<string, number> =
-        incomingHead.stateTree as Record<string, number>;
-
-      for (const [fileId, clNum] of Object.entries(incomingState)) {
-        targetState[fileId] = clNum;
+      // Merge the path trees: incoming overwrites target.
+      const targetPaths = new Map(
+        await getStateTreePaths(ctx.db, input.repoId, targetHead.number),
+      );
+      const incomingPaths = await getStateTreePaths(
+        ctx.db,
+        input.repoId,
+        incomingHead.number,
+      );
+      for (const [path, clNum] of incomingPaths) {
+        targetPaths.set(path, clNum);
       }
 
       // Merge artifact state trees: incoming overwrites target
       const targetArtifactState: Record<string, number> = {
-        ...(targetHead.artifactStateTree as Record<string, number> ?? {}),
+        ...((targetHead.artifactStateTree as Record<string, number>) ?? {}),
       };
       const incomingArtifactState: Record<string, number> =
         (incomingHead.artifactStateTree as Record<string, number>) ?? {};
@@ -489,10 +496,10 @@ export const branchRouter = createTRPCRouter({
         include: { file: true },
       });
 
-      // Remove deleted files from the merged state
+      // Remove deleted files from the merged path tree
       for (const fc of fileChanges) {
         if (fc.type === FileChangeType.DELETE) {
-          delete targetState[fc.fileId];
+          targetPaths.delete(fc.file.path);
         }
       }
 
@@ -503,6 +510,13 @@ export const branchRouter = createTRPCRouter({
       });
       const nextNumber = (lastCl?.number ?? -1) + 1;
 
+      // Build the merged state tree.
+      const stateRootHash = await buildStateTreeBlocks(
+        ctx.db,
+        input.repoId,
+        targetPaths.entries(),
+      );
+
       // Create the squash merge changelist
       const mergeCl = await ctx.db.changelist.create({
         data: {
@@ -510,9 +524,12 @@ export const branchRouter = createTRPCRouter({
           message: mergeMessage,
           versionIndex: incomingHead.versionIndex,
           parentNumber: targetBranch.headNumber,
-          stateTree: targetState,
+          stateRootHash,
           artifactVersionIndex: incomingHead.artifactVersionIndex,
-          artifactStateTree: Object.keys(targetArtifactState).length > 0 ? targetArtifactState : undefined,
+          artifactStateTree:
+            Object.keys(targetArtifactState).length > 0
+              ? targetArtifactState
+              : undefined,
           repoId: input.repoId,
           userId: ctx.session.user.id,
         },
@@ -547,6 +564,8 @@ export const branchRouter = createTRPCRouter({
           ),
         });
       }
+
+      primeStateTreePaths(input.repoId, stateRootHash, targetPaths);
 
       // Update the target branch headNumber
       await ctx.db.branch.update({

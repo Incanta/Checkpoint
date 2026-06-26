@@ -1,7 +1,8 @@
 // Factory functions for the DB shapes router code reads. Keep these tiny
-// and explicit — tests should be readable.
+// and explicit, so tests stay readable.
 
 import type { PrismaClient } from "@prisma/client";
+import { buildStateTreeBlocks } from "~/server/state-tree";
 
 let counter = 0;
 /** Process-unique id with a stable prefix. Exposed so premium fixtures can
@@ -115,12 +116,14 @@ export async function makeRepo(
   });
 
   if (opts.withMainBranch !== false) {
+    // CL 0 is the lineage root with an empty state tree (mirrors production).
+    const rootHash = await buildStateTreeBlocks(db, repo.id, []);
     await db.changelist.create({
       data: {
         number: 0,
         message: "Repo Creation",
         versionIndex: "",
-        stateTree: {},
+        stateRootHash: rootHash,
         repoId: repo.id,
         userId,
       },
@@ -189,7 +192,6 @@ export async function makeChangelist(
       number: opts.number ?? 1,
       message: opts.message ?? "Test changelist",
       versionIndex: opts.versionIndex ?? "",
-      stateTree: {},
       repoId,
       userId,
     },

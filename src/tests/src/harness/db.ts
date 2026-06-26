@@ -7,7 +7,7 @@
 // The Prisma schema is applied with `prisma db push` (no migrations, no
 // history) against a fresh file, which is fast enough for unit tests.
 //
-// We deliberately do NOT import `db` from `~/server/db` here — that
+// We deliberately do NOT import `db` from `~/server/db` here, as that
 // instantiates a singleton against the dev DATABASE_URL. The harness's
 // PrismaClient is plumbed into the app's `db` import via the global
 // `__checkpointTestDb` setter (see vitest-setup.ts).
@@ -31,7 +31,7 @@ export interface TestDb {
   teardown: () => Promise<void>;
 }
 
-// Order matters — leaf tables (those with no incoming FKs) first. If you add
+// Order matters: leaf tables (those with no incoming FKs) first. If you add
 // a new model to the schema and tests start failing with FK violations,
 // insert it ahead of its parents here.
 //
@@ -40,6 +40,9 @@ export interface TestDb {
 // on main), the `DELETE FROM …` throws and the try/catch around each one
 // silently moves on.
 const tableOrder = [
+  "TreeBlock",
+  "FileChange",
+  "FileCheckout",
   "Notification",
   "IssueSubscription",
   "PullRequestSubscription",
@@ -64,6 +67,7 @@ const tableOrder = [
   "Branch",
   "RepoRole",
   "Repo",
+  "File",
   "OrgUser",
   "Org",
   "Session",
@@ -83,7 +87,7 @@ export async function createTestDb(): Promise<TestDb> {
   // the latter is DEP0190'd because args get concatenated into the shell
   // command unescaped. The string form picks the shell up correctly on
   // Windows (where `yarn` is a `.cmd` shim, unreachable via execFileSync
-  // without a shell) without that footgun — our args here are all known
+  // without a shell) without that footgun. Our args here are all known
   // literals plus `schemaDir`, which we double-quote.
   execSync(
     `yarn prisma db push --schema "${schemaDir}" --skip-generate --accept-data-loss`,
@@ -105,7 +109,7 @@ export async function createTestDb(): Promise<TestDb> {
       // Disable FK checks for the duration of the wipe so self-referencing
       // tables (Branch has a parentBranch FK to itself) and parent/child
       // pairs don't trip CASCADE constraints. SQLite scopes PRAGMA to the
-      // connection — Prisma reuses one per client, so this is safe.
+      // connection (Prisma reuses one per client), so this is safe.
       await client.$executeRawUnsafe(`PRAGMA foreign_keys = OFF`);
       try {
         for (const table of tableOrder) {

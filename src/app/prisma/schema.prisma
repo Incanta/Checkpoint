@@ -227,7 +227,12 @@ model Changelist {
   number       Int
   message      String
   versionIndex String
-  stateTree    Json
+
+  // Root hash of this changelist's content-addressed state tree (see
+  // server/tree/). The materialized state (path -> sourceChangelistNumber) is
+  // derived by walking the tree from this root. Replaces the per-CL stateTree
+  // blob. Null only for test-seeded changelists with no tree.
+  stateRootHash String?
 
   // Artifact overlay (populated by CI after submit)
   artifactVersionIndex String?
@@ -248,6 +253,19 @@ model Changelist {
   artifacts   ArtifactFile[]
 
   @@unique([repoId, number])
+}
+
+// Content-addressed state-tree node block. `hash` is the SHA-256 of `data`
+// (the serialized node, see server/tree/codec.ts). Immutable and deduplicated:
+// unchanged subtrees share a block across changelists. Scoped per repo for
+// isolation and simple GC. This is the initial backing store; the same
+// BlockStore interface can be repointed at R2 / SeaweedFS later.
+model TreeBlock {
+  repoId String
+  hash   String
+  data   Bytes
+
+  @@id([repoId, hash])
 }
 
 model ChangelistLabel {
@@ -282,6 +300,9 @@ model FileChange {
 
   type    FileChangeType
   oldPath String?
+
+  // Range scan over a changelist's file changes (used by merges and history).
+  @@index([repoId, changelistNumber])
 }
 
 model ArtifactFile {
@@ -528,7 +549,7 @@ model MergePermission {
   @@unique([repoId, userId, type])
 }
 
-// Shelves — mutable dangling changelists (Pro+)
+// Shelves: mutable dangling changelists (Pro+)
 
 enum ShelfStatus {
   ACTIVE
@@ -552,9 +573,10 @@ model Shelf {
 
   // Current longtail version index (all-inclusive of shelf files)
   versionIndex String
-  stateTree    Json // {fileId → changelistNumber}
 
-  // Dangling changelist number (from repo sequence, not on any branch)
+  // Dangling changelist number (from repo sequence, not on any branch). The
+  // shelf's state tree lives on this changelist (stateRootHash); its file list
+  // is in fileChanges below.
   changelistNumber Int
 
   status ShelfStatus @default(ACTIVE)

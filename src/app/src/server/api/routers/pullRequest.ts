@@ -7,6 +7,11 @@ import { FileChangeType, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
 import { subscribeToPR, notifyPRSubscribers } from "~/server/notifications";
+import {
+  getStateTreePaths,
+  buildStateTreeBlocks,
+  primeStateTreePaths,
+} from "~/server/state-tree";
 
 function prLink(orgName: string, repoName: string, number: number) {
   return `/${orgName}/${repoName}/pull-requests/${number}`;
@@ -518,14 +523,16 @@ export const pullRequestRouter = createTRPCRouter({
         });
       }
 
-      const targetState: Record<string, number> = {
-        ...(targetHead.stateTree as Record<string, number>),
-      };
-      const incomingState: Record<string, number> =
-        incomingHead.stateTree as Record<string, number>;
-
-      for (const [fileId, clNum] of Object.entries(incomingState)) {
-        targetState[fileId] = clNum;
+      const targetPaths = new Map(
+        await getStateTreePaths(ctx.db, input.repoId, targetHead.number),
+      );
+      const incomingPaths = await getStateTreePaths(
+        ctx.db,
+        input.repoId,
+        incomingHead.number,
+      );
+      for (const [path, clNum] of incomingPaths) {
+        targetPaths.set(path, clNum);
       }
 
       const incomingClNumbers = incomingCls.map((cl) => cl.number);
@@ -539,7 +546,7 @@ export const pullRequestRouter = createTRPCRouter({
 
       for (const fc of fileChanges) {
         if (fc.type === FileChangeType.DELETE) {
-          delete targetState[fc.fileId];
+          targetPaths.delete(fc.file.path);
         }
       }
 
@@ -549,13 +556,19 @@ export const pullRequestRouter = createTRPCRouter({
       });
       const nextNumber = (lastCl?.number ?? -1) + 1;
 
+      const stateRootHash = await buildStateTreeBlocks(
+        ctx.db,
+        input.repoId,
+        targetPaths.entries(),
+      );
+
       const mergeCl = await ctx.db.changelist.create({
         data: {
           number: nextNumber,
           message: mergeMessage,
           versionIndex: incomingHead.versionIndex,
           parentNumber: targetBranch.headNumber,
-          stateTree: targetState,
+          stateRootHash,
           repoId: input.repoId,
           userId: ctx.session.user.id,
         },
@@ -587,6 +600,8 @@ export const pullRequestRouter = createTRPCRouter({
           ),
         });
       }
+
+      primeStateTreePaths(input.repoId, stateRootHash, targetPaths);
 
       // Update target branch head
       await ctx.db.branch.update({
@@ -824,7 +839,7 @@ export const pullRequestRouter = createTRPCRouter({
 
       const link = prLink(repo.org.name, repo.name, pr.number);
       if (input.state === "PENDING") {
-        // Review requested — notify the reviewer
+        // Review requested: notify the reviewer
         if (input.reviewerId !== ctx.session.user.id) {
           await ctx.db.notification.create({
             data: {
@@ -838,7 +853,7 @@ export const pullRequestRouter = createTRPCRouter({
           });
         }
       } else {
-        // Approved or changes requested — notify all subscribers
+        // Approved or changes requested: notify all subscribers
         const stateLabel =
           input.state === "APPROVED" ? "approved" : "requested changes on";
         void notifyPRSubscribers({

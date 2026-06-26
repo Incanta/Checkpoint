@@ -1,11 +1,11 @@
-// Tests for the `shelf` router — create / list / get / rename / delete and
+// Tests for the `shelf` router: create / list / get / rename / delete and
 // the file add/remove path. Premium-only: the Shelf + ShelfFileChange + File
 // models don't exist on main.
 //
 // `submitToBranch` is skipped on purpose. It builds a real changelist on a
 // branch via the longtail addon's submit pipeline and is the right kind of
 // thing to cover in an integration test rather than a fast in-process one.
-// `getFileContent` is skipped for the same reason — it reads bytes from
+// `getFileContent` is skipped for the same reason: it reads bytes from
 // the storage layer via the longtail addon.
 
 import {
@@ -233,7 +233,7 @@ describe("shelf router", () => {
   });
 
   describe("addFiles / removeFiles", () => {
-    it("addFiles extends an existing shelf's fileChanges + stateTree", async () => {
+    it("addFiles extends an existing shelf's fileChanges", async () => {
       const { alice, repo } = await bootstrap(testDb);
       const caller = await makeAppCaller({ asUser: alice });
       const shelf = await caller.shelf.create({
@@ -281,7 +281,7 @@ describe("shelf router", () => {
       ).rejects.toMatchObject({ code: "NOT_FOUND" });
     });
 
-    it("removeFiles drops the matched fileChanges + removes them from the stateTree", async () => {
+    it("removeFiles drops the matched fileChanges", async () => {
       const { alice, repo } = await bootstrap(testDb);
       const caller = await makeAppCaller({ asUser: alice });
       const shelf = await caller.shelf.create({
@@ -306,10 +306,6 @@ describe("shelf router", () => {
         "a.ts",
         "c.ts",
       ]);
-      const stateTreeKeys = Object.keys(
-        got.stateTree as Record<string, unknown>,
-      );
-      expect(stateTreeKeys).toHaveLength(2);
     });
   });
 

@@ -21,6 +21,7 @@ import {
   isBinaryFile,
 } from "~/server/binary-extensions";
 import { Logger } from "~/server/logging";
+import { getStateTreePaths } from "~/server/state-tree";
 import {
   isR2Enabled,
   getR2Endpoint,
@@ -509,7 +510,7 @@ export const fileRouter = createTRPCRouter({
             number: input.changelistNumber,
           },
         },
-        select: { stateTree: true, artifactStateTree: true },
+        select: { artifactStateTree: true },
       });
 
       if (!changelist) {
@@ -519,22 +520,36 @@ export const fileRouter = createTRPCRouter({
         });
       }
 
-      const stateTree = changelist.stateTree as Record<string, number>;
-      const artifactStateTree = input.includeArtifacts
+      // Main state is path-keyed straight from the tree.
+      const mainPaths = await getStateTreePaths(
+        ctx.db,
+        input.repoId,
+        input.changelistNumber,
+      );
+
+      // The artifact overlay is still a fileId-keyed blob; convert it to paths
+      // via the File table (only when artifacts are requested).
+      const artifactRaw = input.includeArtifacts
         ? ((changelist.artifactStateTree as Record<string, number> | null) ??
           {})
         : {};
-      const aliveFileIds = new Set([
-        ...Object.keys(stateTree),
-        ...Object.keys(artifactStateTree),
-      ]);
-      const artifactFileIds = new Set(Object.keys(artifactStateTree));
+      const artifactPaths = new Map<string, number>();
+      if (Object.keys(artifactRaw).length > 0) {
+        const allFiles = await ctx.db.file.findMany({
+          where: { repoId: input.repoId },
+          select: { id: true, path: true },
+        });
+        const idToPath = new Map(allFiles.map((f) => [f.id, f.path]));
+        for (const [fileId, cl] of Object.entries(artifactRaw)) {
+          const p = idToPath.get(fileId);
+          if (p) artifactPaths.set(p, cl);
+        }
+      }
 
-      // Get all files for this repo (only id + path for efficiency)
-      const allFiles = await ctx.db.file.findMany({
-        where: { repoId: input.repoId },
-        select: { id: true, path: true },
-      });
+      const alivePaths = new Set<string>([
+        ...mainPaths.keys(),
+        ...artifactPaths.keys(),
+      ]);
 
       // Normalize folderPath: ensure it ends with "/" if non-empty
       const prefix =
@@ -553,27 +568,26 @@ export const fileRouter = createTRPCRouter({
       }[] = [];
       let totalFileCount = 0;
 
-      for (const file of allFiles) {
-        if (!aliveFileIds.has(file.id)) continue;
+      for (const filePath of alivePaths) {
         totalFileCount++;
 
         // Check if this file is under the requested folder
-        if (!file.path.startsWith(prefix)) continue;
+        if (!filePath.startsWith(prefix)) continue;
 
-        const remainder = file.path.slice(prefix.length);
+        const remainder = filePath.slice(prefix.length);
         const slashIndex = remainder.indexOf("/");
 
         if (slashIndex === -1) {
           // Direct child file
-          const lastCl = stateTree[file.id] ?? artifactStateTree[file.id]!;
+          const lastCl = mainPaths.get(filePath) ?? artifactPaths.get(filePath)!;
           files.push({
             name: remainder,
-            path: file.path,
+            path: filePath,
             lastCl,
-            isArtifact: artifactFileIds.has(file.id),
+            isArtifact: artifactPaths.has(filePath),
           });
         } else {
-          // Subfolder — collect unique folder name
+          // Subfolder: collect unique folder name
           folders.add(remainder.slice(0, slashIndex));
         }
       }

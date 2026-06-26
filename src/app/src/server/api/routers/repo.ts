@@ -10,6 +10,7 @@ import { isR2Enabled, createR2Bucket } from "~/server/r2-service";
 import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { Logger } from "~/server/logging";
+import { buildStateTreeBlocks, primeStateTreePaths } from "~/server/state-tree";
 import { snapshotStoragePeak } from "~/server/billing/storage-usage";
 
 export const repoRouter = createTRPCRouter({
@@ -117,17 +118,19 @@ export const repoRouter = createTRPCRouter({
         },
       });
 
-      // Create initial changelist
+      // Create initial changelist (CL 0) with an empty state tree.
+      const initRootHash = await buildStateTreeBlocks(ctx.db, repo.id, []);
       await ctx.db.changelist.create({
         data: {
           number: 0,
           message: "Repo Creation",
           versionIndex: "",
-          stateTree: {},
+          stateRootHash: initRootHash,
           repoId: repo.id,
           userId: ctx.session.user.id,
         },
       });
+      primeStateTreePaths(repo.id, initRootHash, new Map());
 
       // Create main branch
       await ctx.db.branch.create({
@@ -167,6 +170,7 @@ export const repoRouter = createTRPCRouter({
           // rollback repo creation if bucket creation fails
           await ctx.db.repoRole.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.branch.deleteMany({ where: { repoId: repo.id } });
+          await ctx.db.treeBlock.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.changelist.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.repo.delete({ where: { id: repo.id } });
           throw new TRPCError({
@@ -186,6 +190,7 @@ export const repoRouter = createTRPCRouter({
           // rollback repo creation if directory creation fails
           await ctx.db.repoRole.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.branch.deleteMany({ where: { repoId: repo.id } });
+          await ctx.db.treeBlock.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.changelist.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.repo.delete({ where: { id: repo.id } });
           throw new TRPCError({
@@ -301,7 +306,7 @@ export const repoRouter = createTRPCRouter({
       // MEMBERs see public repos plus any non-NONE per-repo role they hold.
       // One query for all of this org's repos avoids the N+1 that the
       // previous `Array.filter(async predicate)` not only had but also
-      // silently leaked through — Promise return values were treated as
+      // silently leaked through, as Promise return values were treated as
       // truthy by the synchronous filter.
       const grantedRoles = await ctx.db.repoRole.findMany({
         where: {
