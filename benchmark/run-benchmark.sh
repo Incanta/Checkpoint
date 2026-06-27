@@ -199,8 +199,17 @@ log "pulled content: sha256=${PULL_HASH} files=${PULL_COUNT} bytes=${PULL_BYTES}
 # n/a and continue to the JSON write. Called via `if !` so set -e is suspended
 # inside and the explicit `|| return 1` controls the flow.
 measure_small_update_delta() {
-  local before after
+  local before after comp_before comp_after
   before="$(server_storage_bytes)" || return 1
+  # Optional per-component snapshot, for adapters that implement it (e.g.
+  # Checkpoint splits the store into content blocks / version index / state-tree
+  # blocks / global store index, plus a clean content-store total that excludes
+  # Docker logs, the app DB, and overlay churn that `server_storage_bytes` of
+  # the whole data-root would also count). Snapshot before the change.
+  comp_before=""
+  if declare -F adapter_storage_components >/dev/null; then
+    comp_before="$(adapter_storage_components || true)"
+  fi
   log "server storage before update: ${before} bytes"
   # Time only the submit of the small change (its own phase). The storage
   # measurement and settle sleep stay outside the timer so they never affect it.
@@ -211,6 +220,12 @@ measure_small_update_delta() {
   after="$(server_storage_bytes)" || return 1
   log "server storage after update:  ${after} bytes"
   record_storage update_delta_bytes "$(( after - before ))"
+  # Per-component breakdown (after - before per component), if snapshotted.
+  if [ -n "$comp_before" ]; then
+    comp_after="$(adapter_storage_components || true)"
+    record_storage_breakdown "$comp_before" "$comp_after"
+    log "recorded per-component storage breakdown"
+  fi
 }
 
 if [ -n "${SMALL_CHANGE_FILE}" ]; then

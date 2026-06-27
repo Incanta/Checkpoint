@@ -101,9 +101,20 @@ needed.
 7. **Small update** (only if `small_change_file` is set): measure the server
    store size, make a ~100-byte change to that file, then submit it. The submit
    is timed on its own (the `update_submit` phase). The server store is then
-   measured again and the byte delta recorded. The storage measurement and
-   settle wait stay outside the timer, so only the submit itself is timed and no
-   other metric is affected.
+   measured again and the byte delta recorded (`update_delta_bytes`). The storage
+   measurement and settle wait stay outside the timer, so only the submit itself
+   is timed and no other metric is affected. `update_delta_bytes` is a `du` of
+   the whole server data-root, so it also catches Docker container logs, the app
+   DB, and overlay churn, not just Checkpoint's content store. An adapter may
+   additionally implement `adapter_storage_components` to break the delta into
+   parts; the Checkpoint adapter does, recording `update_delta_content_store_total`
+   (a clean number for just the backend content-store volume, excluding logs, the
+   DB, and overlay) plus one `update_delta_<component>` per part of the repo's
+   store: the Longtail content blocks, `versions` (the per-CL `.lvi` indexes),
+   `tree` (the content-addressed state-tree blocks), and `store.lsi` (the global
+   store index, rewritten in full each submit but overwritten in place, so its
+   delta is ~0 on the local-FS stub). This attributes a small change's storage
+   cost to content vs metadata instead of one opaque number.
 8. **Report**: Markdown tables in the job summary (including the pull-verification
    table, which should show identical hashes across VCS), plus Mermaid `xychart`
    resource graphs. Per VCS: CPU% and RAM, two line series each (blue = client,
@@ -133,7 +144,14 @@ needed.
     "update_submit": 8
   },
   "payload": { "payload_download": 600, "payload_extract": 120 },
-  "storage": { "update_delta_bytes": 65536 },
+  "storage": {
+    "update_delta_bytes": 6291456,
+    "update_delta_content_store_total": 870400,
+    "update_delta_chunks": 65536,
+    "update_delta_versions": 399000,
+    "update_delta_tree": 393216,
+    "update_delta_store.lsi": 0
+  },
   "resources": {
     "interval_s": 30,
     "client": [{ "t": 0, "cpu_pct": 80, "ram_gb": 3.1 }],
@@ -155,7 +173,7 @@ needed.
 
 `commit_all` is `null` for Checkpoint because it has no separate local commit (`add` stages, `submit` publishes). **Lore** records `commit_all` as a real phase: `add` is `lore stage --scan .`, `commit_all` is `lore commit`, and `submit_all` is `lore push`.
 
-`storage.update_delta_bytes` is the server store growth (bytes) from the ~100-byte change to `small_change_file`. It is a storage measurement only (untimed), and is rendered as its own "Server storage delta" table with the Checkpoint comparison. The `storage` object is absent when `small_change_file` is empty.
+`storage.update_delta_bytes` is the server store growth (bytes) from the ~100-byte change to `small_change_file`, measured as a `du` of the whole server data-root (so it also includes Docker logs, the app DB, and overlay churn). It is a storage measurement only (untimed), and is rendered as its own "Server storage delta" table with the Checkpoint comparison. The `storage` object is absent when `small_change_file` is empty. The other `update_delta_*` keys are the optional per-component breakdown described in step 7: `update_delta_content_store_total` is a clean total for just the backend content-store volume, and the remaining keys split that into content blocks, `versions` (`.lvi`), `tree` (state-tree blocks), and `store.lsi`. They are absent for adapters that do not implement `adapter_storage_components`; the summary table shows a blank cell for any VCS missing a given row.
 
 ## Lore adapter notes
 

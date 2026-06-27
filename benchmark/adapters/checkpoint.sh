@@ -341,3 +341,39 @@ adapter_update() {
   on_client "cd ${TREE_DIR} && ${CHK} add '${SMALL_CHANGE_FILE}' >/dev/null"
   on_client "cd ${TREE_DIR} && ${CHK} submit --no-progress --message 'benchmark: small update'"
 }
+
+# Per-component storage snapshot for the small-update breakdown. The harness
+# calls this before and after the update submit and records the per-component
+# deltas (see record_storage_breakdown). Emits "name<TAB>bytes" lines:
+#   content_store_total - the whole stub-filer content-store volume, a CLEAN
+#       number that excludes Docker container logs, the app DB (a separate
+#       volume), and overlay churn that the whole-/data/docker metric also
+#       counts. This is the true on-disk growth of Checkpoint's backend store.
+#   <child> - each entry under the single bench repo dir ({org}/{repo}): the
+#       Longtail content blocks dir, `versions` (the per-CL .lvi indexes),
+#       `tree` (the content-addressed state-tree blocks), and the `store.lsi`
+#       global store index. Names are discovered, not hard-coded, so the layout
+#       can change without editing this hook.
+adapter_storage_components() {
+  on_server "bash -seuo pipefail" <<'EOF'
+sync
+# Host path of the stub-filer content store (the server's storage-data volume,
+# mounted at /app/data in the container).
+VOL="$(docker inspect checkpoint-server \
+  --format '{{ range .Mounts }}{{ if eq .Destination "/app/data" }}{{ .Source }}{{ end }}{{ end }}' \
+  2>/dev/null || true)"
+[ -n "$VOL" ] && [ -d "$VOL" ] || exit 0
+
+printf 'content_store_total\t%s\n' "$(du -sB1 "$VOL" 2>/dev/null | cut -f1)"
+
+# Break the single bench repo dir ({org}/{repo}) into its components. The glob
+# matches both subdirs (the blocks dir, versions, tree) and files (store.lsi).
+for repo in "$VOL"/*/*; do
+  [ -d "$repo" ] || continue
+  for child in "$repo"/*; do
+    [ -e "$child" ] || continue
+    printf '%s\t%s\n' "$(basename "$child")" "$(du -sB1 "$child" 2>/dev/null | cut -f1)"
+  done
+done
+EOF
+}

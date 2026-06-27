@@ -42,9 +42,52 @@ const PAYLOAD_PHASES = [
   ["payload_download", "Download tarball"],
   ["payload_extract", "Extract tarball"],
 ];
-const STORAGE_ROWS = [
-  ["update_delta_bytes", "Server storage delta (small update)"],
+// Friendly labels + preferred order for the storage-delta rows. The first is
+// the whole-data-root number (noisy: includes Docker logs, the app DB, and
+// overlay churn). The rest are an optional per-component breakdown an adapter
+// may emit (Checkpoint does); any update_delta_* key not listed here is still
+// shown, appended and sorted, so new components need no change to this file.
+const STORAGE_LABELS = {
+  update_delta_bytes: "Server storage delta (whole Docker data-root)",
+  update_delta_content_store_total:
+    "content store total (excl. logs, DB, overlay)",
+  update_delta_chunks: "content blocks (Longtail chunks)",
+  update_delta_versions: "version indexes (.lvi)",
+  update_delta_tree: "state-tree blocks",
+  "update_delta_store.lsi": "store.lsi (global store index)",
+};
+const STORAGE_ORDER = [
+  "update_delta_bytes",
+  "update_delta_content_store_total",
+  "update_delta_chunks",
+  "update_delta_versions",
+  "update_delta_tree",
+  "update_delta_store.lsi",
 ];
+
+// Rows to render: the known keys (in preferred order) that any run actually has,
+// then any other update_delta_* keys present, sorted.
+function storageRows() {
+  const present = (key) => runs.some((r) => r.storage && key in r.storage);
+  const seen = new Set();
+  const rows = [];
+  for (const key of STORAGE_ORDER) {
+    if (present(key)) {
+      rows.push([key, STORAGE_LABELS[key] || key]);
+      seen.add(key);
+    }
+  }
+  const extra = new Set();
+  for (const r of runs) {
+    for (const k of Object.keys(r.storage || {})) {
+      if (k.startsWith("update_delta_") && !seen.has(k)) extra.add(k);
+    }
+  }
+  for (const k of [...extra].sort()) {
+    rows.push([k, STORAGE_LABELS[k] || k.replace(/^update_delta_/, "")]);
+  }
+  return rows;
+}
 
 function fmt(seconds) {
   if (seconds === undefined) return "";
@@ -147,7 +190,7 @@ function storageTable() {
   const header = ["Metric", ...runs.map((r) => (r === baseline ? `${r.vcs} (baseline)` : r.vcs))];
   const sep = header.map(() => "---");
   const lines = [`| ${header.join(" | ")} |`, `| ${sep.join(" | ")} |`];
-  for (const [key, label] of STORAGE_ROWS) {
+  for (const [key, label] of storageRows()) {
     const cells = runs.map((r) => {
       const v = (r.storage || {})[key];
       let s = fmtBytes(v);
