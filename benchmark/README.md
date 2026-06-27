@@ -152,6 +152,12 @@ needed.
     "update_delta_tree": 393216,
     "update_delta_store.lsi": 0
   },
+  "submit_stages": {
+    "Indexing version": 312,
+    "Writing blocks": 469,
+    "Flushing uploads": 21,
+    "Uploading to server": 1
+  },
   "resources": {
     "interval_s": 30,
     "client": [{ "t": 0, "cpu_pct": 80, "ram_gb": 3.1 }],
@@ -174,6 +180,8 @@ needed.
 `commit_all` is `null` for Checkpoint because it has no separate local commit (`add` stages, `submit` publishes). **Lore** records `commit_all` as a real phase: `add` is `lore stage --scan .`, `commit_all` is `lore commit`, and `submit_all` is `lore push`.
 
 `storage.update_delta_bytes` is the server store growth (bytes) from the ~100-byte change to `small_change_file`, measured as a `du` of the whole server data-root (so it also includes Docker logs, the app DB, and overlay churn). It is a storage measurement only (untimed), and is rendered as its own "Server storage delta" table with the Checkpoint comparison. The `storage` object is absent when `small_change_file` is empty. The other `update_delta_*` keys are the optional per-component breakdown described in step 7: `update_delta_content_store_total` is a clean total for just the backend content-store volume, and the remaining keys split that into content blocks, `versions` (`.lvi`), `tree` (state-tree blocks), and `store.lsi`. They are absent for adapters that do not implement `adapter_storage_components`; the summary table shows a blank cell for any VCS missing a given row.
+
+`submit_stages` is a per-stage wall-clock breakdown (whole seconds) of the full-tree submit, so you can see where a large submit spends its time (indexing/hashing vs writing, compressing, and uploading blocks vs finalizing). For Checkpoint, the Checkpoint daemon emits a `[submit-timing]` line with the native submit's per-step durations; the harness reads it from the daemon log right after `submit_all` (so it reflects that submit, not the later small ones) via `adapter_record_submit_stages`, and the summary renders a "Submit stage breakdown" table with the most expensive stage first. Stage names come from the native layer and are dynamic. The object is absent for adapters that do not report it. Pair it with the resource charts to tell a CPU-bound submit (client CPU pegged during the long stage) from an I/O- or network-bound one.
 
 ## Lore adapter notes
 

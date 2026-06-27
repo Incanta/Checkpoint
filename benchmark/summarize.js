@@ -204,6 +204,40 @@ function storageTable() {
 
 const hasStorage = runs.some((r) => r.storage && Object.keys(r.storage).length > 0);
 
+// Per-stage breakdown of the full-tree submit (Checkpoint emits this; other
+// adapters may not). Stage names are dynamic (they come from the native submit),
+// so rows are ordered by the baseline's most expensive stage first to make the
+// bottleneck obvious. Cells are blank for a VCS missing a given stage.
+function submitStagesTable() {
+  const names = new Set();
+  for (const r of runs) {
+    for (const k of Object.keys(r.submit_stages || {})) names.add(k);
+  }
+  if (names.size === 0) return "";
+  const base = (baseline && baseline.submit_stages) || {};
+  const order = [...names].sort(
+    (a, b) => (Number(base[b]) || 0) - (Number(base[a]) || 0) || a.localeCompare(b),
+  );
+  const header = [
+    "Submit stage",
+    ...runs.map((r) => (r === baseline ? `${r.vcs} (baseline)` : r.vcs)),
+  ];
+  const sep = header.map(() => "---");
+  const lines = [`| ${header.join(" | ")} |`, `| ${sep.join(" | ")} |`];
+  for (const name of order) {
+    const cells = runs.map((r) => {
+      const v = (r.submit_stages || {})[name];
+      return v === undefined ? "" : fmt(v);
+    });
+    lines.push(`| ${name} | ${cells.join(" | ")} |`);
+  }
+  return `### Submit stage breakdown (full tree)\n\n${lines.join("\n")}\n`;
+}
+
+const hasSubmitStages = runs.some(
+  (r) => r.submit_stages && Object.keys(r.submit_stages).length > 0,
+);
+
 // Pull-verification table: the manifest fingerprint of each pulled tree. The
 // hashes should be identical across VCS (same payload); a mismatch or a smaller
 // file count/byte total flags a VCS that did not materialize the full content.
@@ -418,6 +452,16 @@ if (hasStorage) {
         "column (negative = more)._",
     );
   }
+  out.push("");
+}
+
+if (hasSubmitStages) {
+  out.push(submitStagesTable());
+  out.push(
+    "_Per-stage wall-clock of the native full-tree submit (where its time goes: " +
+      "indexing/hashing vs writing+compressing+uploading blocks vs finalizing). " +
+      "Pair with the resource charts to tell CPU-bound from I/O/network-bound._",
+  );
   out.push("");
 }
 

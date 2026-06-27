@@ -76,6 +76,11 @@ record_null_phase() { record_timing "vcs" "$1" "null"; }
 # its own group so it is never mixed into the timed phase table.
 record_storage() { record_timing "storage" "$1" "$2"; }
 
+# record_submit_stage <name> <seconds>: a per-stage breakdown of the full-tree
+# submit (e.g. indexing vs writing blocks vs uploading), kept in its own group
+# so it renders as a separate diagnostic table, not mixed with the timed phases.
+record_submit_stage() { record_timing "submit_stages" "$1" "$2"; }
+
 # write_timings_json <out_file> <vcs>
 # Emits { vcs, phases:{...}, payload:{...}, storage:{...}, meta:{...} } via Node.
 write_timings_json() {
@@ -93,11 +98,15 @@ write_timings_json() {
   } | node -e '
     const fs = require("fs");
     const rows = fs.readFileSync(0, "utf8").split("\n").filter(Boolean);
-    const phases = {}, payload = {}, storage = {};
+    const phases = {}, payload = {}, storage = {}, submit_stages = {};
     for (const line of rows) {
       const [group, name, value] = line.split("\t");
       const v = value === "null" ? null : Number(value);
-      const bucket = group === "payload" ? payload : group === "storage" ? storage : phases;
+      const bucket =
+        group === "payload" ? payload
+        : group === "storage" ? storage
+        : group === "submit_stages" ? submit_stages
+        : phases;
       bucket[name] = v;
     }
     const out = {
@@ -105,6 +114,7 @@ write_timings_json() {
       phases,
       payload,
       storage,
+      submit_stages,
       meta: {
         run_tag: process.argv[2] || null,
         region: process.argv[3] || null,

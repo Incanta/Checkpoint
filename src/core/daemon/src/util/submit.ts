@@ -135,10 +135,29 @@ export async function submit(
     throw new Error("Failed to create longtail handle");
   }
 
-  // Only wire progress callbacks when a consumer asked for them. When both are
-  // omitted (e.g. the CLI passed --no-progress), pollHandle skips all per-tick
-  // callback work and polls coarsely just to detect completion, so there is no
-  // callback overhead at all.
+  // Per-stage wall-clock breakdown of the native submit (indexing, getting
+  // existing content, writing blocks, flushing, uploading). We always observe
+  // step transitions via onStep (it is cheap, one timestamp per transition) so
+  // the breakdown is captured even with --no-progress; pollHandle invokes
+  // onStep on every step change regardless of progress reporting. Granularity is
+  // the poll interval, which we keep coarse (250ms) when no consumer asked for
+  // progress, so this adds no meaningful overhead.
+  const stagesMs: Record<string, number> = {};
+  let lastStage = "";
+  let stageStart = Date.now();
+  const recordStageTransition = (next: string) => {
+    const now = Date.now();
+    if (lastStage) {
+      stagesMs[lastStage] = (stagesMs[lastStage] ?? 0) + (now - stageStart);
+    }
+    stageStart = now;
+    lastStage = next;
+  };
+
+  // Whether a consumer (e.g. the CLI without --no-progress) wants progress
+  // callbacks. We still wire onStep internally for timing either way.
+  const wantProgress = !!(onStep || onProgress);
+
   const pollOptions: Parameters<typeof pollHandle>[1] = {
     onTokenRefresh: async () => {
       console.log("[submit] Token refresh requested by native addon");
@@ -157,21 +176,35 @@ export async function submit(
         }),
       };
     },
+    onStep: (step) => {
+      recordStageTransition(step);
+      if (onStep) {
+        console.log(`[submit] Step: ${step}`);
+        onStep(step);
+      }
+    },
   };
-  if (onStep) {
-    pollOptions.onStep = (step) => {
-      console.log(`[submit] Step: ${step}`);
-      onStep(step);
-    };
-  }
   if (onProgress) {
     pollOptions.onProgress = (step, done, total) => onProgress(step, done, total);
   }
-  if (!onStep && !onProgress) {
+  if (!wantProgress) {
     pollOptions.intervalMs = 250;
   }
 
   const { status, result } = await pollHandle(handle, pollOptions);
+
+  // Close out the final stage and emit the breakdown as one parseable line so
+  // tooling (e.g. the benchmark harness) can attribute where a large submit
+  // spends its time. Values are milliseconds.
+  if (lastStage) {
+    stagesMs[lastStage] = (stagesMs[lastStage] ?? 0) + (Date.now() - stageStart);
+  }
+  console.log(
+    `[submit-timing] ${JSON.stringify({
+      modifications: modifications.length,
+      stagesMs,
+    })}`,
+  );
 
   if (status.error !== 0) {
     console.log(

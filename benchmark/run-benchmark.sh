@@ -163,6 +163,15 @@ else
 fi
 time_phase submit_all -- adapter_submit_all
 
+# Optional per-stage breakdown of the full-tree submit (adapters that can report
+# it, e.g. Checkpoint reads its daemon's [submit-timing] line). Captured right
+# after submit_all so it reflects that submit, not the later small ones. Records
+# under the submit_stages group; non-fatal.
+if declare -F adapter_record_submit_stages >/dev/null; then
+  adapter_record_submit_stages \
+    || log "!!! submit-stage breakdown capture failed (non-fatal)"
+fi
+
 stop_resource_sampler "$CLIENT_PUBLIC_IP" "$RES_PID"
 stop_resource_sampler "$SERVER_PUBLIC_IP" "$RES_PID"
 copy_from_host "$CLIENT_PUBLIC_IP" "$RES_REMOTE" "resources.${VCS}.client.jsonl" || true

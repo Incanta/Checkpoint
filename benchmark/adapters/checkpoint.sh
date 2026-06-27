@@ -342,6 +342,41 @@ adapter_update() {
   on_client "cd ${TREE_DIR} && ${CHK} submit --no-progress --message 'benchmark: small update'"
 }
 
+# Per-stage breakdown of the full-tree submit. The daemon logs one
+# `[submit-timing] {"modifications":N,"stagesMs":{...}}` line per submit (the
+# native submit's wall-clock per step: indexing, getting existing content,
+# writing blocks, flushing, finalizing, uploading). The harness calls this right
+# after submit_all, so the LAST such line is that submit's. We convert the
+# per-stage milliseconds to whole seconds and record them under submit_stages.
+adapter_record_submit_stages() {
+  local line json parsed name secs
+  line="$(on_client "grep -a '\\[submit-timing\\]' /var/log/checkpoint-daemon.log 2>/dev/null | tail -1 || true")"
+  if [ -z "$line" ]; then
+    log "no [submit-timing] line in daemon log; skipping submit-stage breakdown"
+    return 0
+  fi
+  # Take from the first '{' to end of line (robust to any log prefix).
+  json="{${line#*\{}"
+  parsed="$(printf '%s' "$json" | node -e '
+    let d = "";
+    process.stdin.on("data", (c) => (d += c)).on("end", () => {
+      try {
+        const stages = (JSON.parse(d).stagesMs) || {};
+        for (const [k, v] of Object.entries(stages)) {
+          process.stdout.write(`${k}\t${Math.round(Number(v) / 1000)}\n`);
+        }
+      } catch {
+        process.exit(1);
+      }
+    });
+  ')" || { log "could not parse [submit-timing] JSON; skipping"; return 0; }
+  while IFS=$'\t' read -r name secs; do
+    [ -n "$name" ] || continue
+    record_submit_stage "$name" "$secs"
+  done <<< "$parsed"
+  log "recorded submit-stage breakdown (${json})"
+}
+
 # Per-component storage snapshot for the small-update breakdown. The harness
 # calls this before and after the update submit and records the per-component
 # deltas (see record_storage_breakdown). Emits "name<TAB>bytes" lines:
