@@ -22,6 +22,7 @@ on:
           - titan-8vcpu-64gb
           - titan-4vcpu-32gb
           - titan-4vcpu-16gb
+          - titan-checkpoint
           - lyra
 
 permissions:
