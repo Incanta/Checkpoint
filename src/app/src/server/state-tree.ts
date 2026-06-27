@@ -129,21 +129,43 @@ export interface StateTreeDiff {
   changelistsToPull: number[];
 }
 
-/** Resolve fileIds for a set of paths (changed paths only; chunked). */
+/**
+ * Resolve fileIds for a set of paths (changed paths only). Chunked into IN
+ * batches, with a bounded number of batches in flight so a large changed set
+ * (e.g. a fresh full sync of 100k+ files) doesn't run hundreds of queries
+ * strictly one-after-another.
+ */
 async function fileIdsForPaths(
   db: PrismaClient,
   repoId: string,
   paths: string[],
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
-  for (let i = 0; i < paths.length; i += 500) {
-    const batch = paths.slice(i, i + 500);
-    const files = await db.file.findMany({
-      where: { repoId, path: { in: batch } },
-      select: { id: true, path: true },
-    });
-    for (const f of files) out.set(f.path, f.id);
+  const CHUNK = 500;
+  const CONCURRENCY = 8;
+
+  const batches: string[][] = [];
+  for (let i = 0; i < paths.length; i += CHUNK) {
+    batches.push(paths.slice(i, i + CHUNK));
   }
+
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < batches.length) {
+      const batch = batches[cursor++]!;
+      const files = await db.file.findMany({
+        where: { repoId, path: { in: batch } },
+        select: { id: true, path: true },
+      });
+      for (const f of files) out.set(f.path, f.id);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, batches.length) }, () =>
+      worker(),
+    ),
+  );
   return out;
 }
 
@@ -159,6 +181,20 @@ async function rootHashOf(
   return cl?.stateRootHash ?? null;
 }
 
+/** Options controlling how much enrichment the diff performs. */
+export interface DiffStateTreesOptions {
+  /**
+   * Resolve fileIds for ADDED paths. The daemon's pull path needs these (it
+   * records fileId per file in the workspace state), but the sync-status path
+   * does not (it reports added files by path only). Resolving them means one DB
+   * query per ~500 added paths, so on a fresh full sync of a large repo it is
+   * the dominant cost; skip it where it is unused. fileIds for MODIFIED paths
+   * are always resolved (both callers need them, and the set is typically tiny).
+   * Defaults to true to preserve the pull path's behavior.
+   */
+  resolveAddedFileIds?: boolean;
+}
+
 /**
  * Diff the state trees of two changelists, returning only the changed paths and
  * the source CLs to pull. This is the daemon's sync path: O(changed), not the
@@ -169,7 +205,9 @@ export async function diffStateTrees(
   repoId: string,
   fromNumber: number,
   toNumber: number,
+  options: DiffStateTreesOptions = {},
 ): Promise<StateTreeDiff> {
+  const resolveAddedFileIds = options.resolveAddedFileIds ?? true;
   const [fromRoot, toRoot] = await Promise.all([
     rootHashOf(db, repoId, fromNumber),
     rootHashOf(db, repoId, toNumber),
@@ -202,9 +240,12 @@ export async function diffStateTrees(
   for (const c of modified) cls.add(c.cl);
 
   // Attach fileIds for the changed paths (so the daemon can update its state
-  // file without a full getFiles round-trip). Only the changed paths, not all.
+  // file without a full getFiles round-trip). Modified paths always; added
+  // paths only when the caller needs them (the sync-status path does not, and
+  // on a fresh full sync that set is the entire repo). Only changed paths, not
+  // all files.
   const fileIdByPath = await fileIdsForPaths(db, repoId, [
-    ...added.map((c) => c.path),
+    ...(resolveAddedFileIds ? added.map((c) => c.path) : []),
     ...modified.map((c) => c.path),
   ]);
   const enrich = (c: TreeChange): StateTreeChange => ({

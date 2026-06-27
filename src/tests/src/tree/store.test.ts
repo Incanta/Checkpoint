@@ -110,6 +110,56 @@ describe("Prisma-backed tree block store (R2)", () => {
     expect(d.changelistsToPull).toEqual([2]);
   });
 
+  it("resolveAddedFileIds: false skips added fileIds but keeps modified ones", async () => {
+    const db = testDb.client;
+    const id = await repoId();
+
+    // File rows so fileIds can resolve to non-empty values.
+    await db.file.createMany({
+      data: [
+        { repoId: id, path: "dir/a.txt" },
+        { repoId: id, path: "dir/c.txt" },
+      ],
+    });
+
+    const r1 = await buildStateTreeBlocks(
+      db,
+      id,
+      new Map([["dir/a.txt", 1]]).entries(),
+    );
+    await db.changelist.create({
+      data: { repoId: id, number: 1, message: "", versionIndex: "", stateRootHash: r1 },
+    });
+
+    // CL 2: modify a, add c.
+    const r2 = await buildStateTreeBlocks(
+      db,
+      id,
+      new Map([
+        ["dir/a.txt", 2],
+        ["dir/c.txt", 2],
+      ]).entries(),
+    );
+    await db.changelist.create({
+      data: { repoId: id, number: 2, message: "", versionIndex: "", stateRootHash: r2 },
+    });
+
+    // Default: both added and modified fileIds resolved.
+    const full = await diffStateTrees(db, id, 1, 2);
+    expect(full.added.map((c) => c.path)).toEqual(["dir/c.txt"]);
+    expect(full.added[0]!.fileId).not.toBe("");
+    expect(full.modified[0]!.fileId).not.toBe("");
+
+    // Cheap variant (sync-status path): added fileIds skipped, modified kept.
+    const cheap = await diffStateTrees(db, id, 1, 2, {
+      resolveAddedFileIds: false,
+    });
+    expect(cheap.added.map((c) => c.path)).toEqual(["dir/c.txt"]);
+    expect(cheap.added[0]!.fileId).toBe("");
+    expect(cheap.modified[0]!.path).toBe("dir/a.txt");
+    expect(cheap.modified[0]!.fileId).not.toBe("");
+  });
+
   it("blocks are scoped per repo", async () => {
     const db = testDb.client;
     const a = await repoId();

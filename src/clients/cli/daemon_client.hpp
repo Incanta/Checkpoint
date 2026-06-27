@@ -148,7 +148,10 @@ class DaemonClient {
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    // Some queries (e.g. a force-refreshed sync status on a large repo) do work
+    // that scales with the repo size, so the read ceiling matches doPost (120s)
+    // rather than a short 30s. Connect still fails fast (the daemon is local).
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
 
     CURLcode res = curl_easy_perform(curl);

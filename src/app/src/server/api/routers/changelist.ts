@@ -25,6 +25,10 @@ export const changelistRouter = createTRPCRouter({
         repoId: z.string(),
         fromNumber: z.number(),
         toNumber: z.number(),
+        // Resolve fileIds for added paths. The pull path needs them; the
+        // sync-status path does not (and on a fresh full sync that set is the
+        // whole repo, so resolving it dominates the cost). Defaults to true.
+        resolveAddedFileIds: z.boolean().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -34,6 +38,7 @@ export const changelistRouter = createTRPCRouter({
         input.repoId,
         input.fromNumber,
         input.toNumber,
+        { resolveAddedFileIds: input.resolveAddedFileIds },
       );
     }),
 

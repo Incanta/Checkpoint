@@ -8,6 +8,6 @@
 //   so if app re-exported these from common, the app's own build would
 //   transitively pull in its own dist/ as inputs and fail with TS5055.
 
-export const SERVER_VERSION = "0.4.0";
+export const SERVER_VERSION = "0.4.1";
 export const SERVER_API = 1;
 export const MIN_SERVER_API = 1;

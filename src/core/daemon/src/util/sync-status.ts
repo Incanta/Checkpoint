@@ -111,11 +111,17 @@ export async function checkSyncStatus(
 
   // Ask the server for the path-keyed diff between our base and the head. This
   // returns only the changed paths (and the source CLs to pull), not the whole
-  // state tree, and needs no fileId resolution.
+  // state tree. We don't need fileIds for added paths here (newOnRemote is
+  // reported by path), so skip resolving them. On a fresh full sync that set is
+  // the entire repo and resolving it server-side dominates the cost (and was
+  // pushing this synchronous check past the CLI's request timeout on large
+  // repos). fileIds for modified paths are still resolved (outdatedFiles uses
+  // them); that set is typically small.
   const diff = await client.changelist.diffChangelists.query({
     repoId: workspace.repoId,
     fromNumber: localChangelistNumber,
     toNumber: remoteHeadNumber,
+    resolveAddedFileIds: false,
   });
 
   // Modified files: present locally with a newer version on the server.
