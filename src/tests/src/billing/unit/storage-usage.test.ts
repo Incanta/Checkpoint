@@ -1,7 +1,7 @@
-// Tests for storage-usage.ts — `calculateStorageCharge` over the SeaweedFS
-// path (R2 is mocked out by the harness via vitest-setup). The function
-// fetches repo sizes from a backend HTTP endpoint, so we stub `fetch`
-// per-test.
+// Tests for storage-usage.ts. In gateway modes (local / s3) `calculateStorageCharge`
+// reads each repo's cached `storageBytes` counter (R2 is mocked out by the
+// harness via vitest-setup), so tests seed `storageBytes` on the repos rather
+// than stubbing an HTTP fetch.
 
 import {
   describe,
@@ -10,7 +10,6 @@ import {
   beforeAll,
   afterAll,
   beforeEach,
-  vi,
 } from "vitest";
 import { calculateStorageCharge } from "~/server/billing/storage-usage";
 import { createTestDb, type TestDb } from "../harness/db";
@@ -24,29 +23,17 @@ import { setConfig } from "../harness/config";
 
 const GB = 1024 * 1024 * 1024;
 
-function mockRepoSizes(sizes: number[]): void {
-  // Each repo triggers one fetch to `${backendUrl}/repo-size`. Return them
-  // in order; if a test creates N repos, give it N sizes.
-  let i = 0;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => {
-      const size = sizes[i] ?? 0;
-      i += 1;
-      return new Response(JSON.stringify({ size }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }),
-  );
-}
-
 async function makeRepo(
   db: import("@prisma/client").PrismaClient,
   orgId: string,
+  storageBytes = 0,
 ): Promise<string> {
   const repo = await db.repo.create({
-    data: { name: `r-${Math.random().toString(36).slice(2)}`, orgId },
+    data: {
+      name: `r-${Math.random().toString(36).slice(2)}`,
+      orgId,
+      storageBytes: BigInt(storageBytes),
+    },
   });
   return repo.id;
 }
@@ -76,8 +63,7 @@ describe("storage-usage", () => {
   it("returns zero charge when total usage is within the free tier", async () => {
     setConfig("stripe.storage.free-tier-gb", 25);
     const org = await makeOrg(testDb.client);
-    await makeRepo(testDb.client, org.id);
-    mockRepoSizes([10 * GB]); // 10 GB total, under 25 GB free tier
+    await makeRepo(testDb.client, org.id, 10 * GB); // under 25 GB free tier
 
     const r = await calculateStorageCharge(org.id, testDb.client);
 
@@ -89,8 +75,7 @@ describe("storage-usage", () => {
   it("ceils to the next bucket when usage exceeds free tier", async () => {
     // free=0, bucket=50 GB, price=250c. 60 GB usage → 2 buckets → 500c.
     const org = await makeOrg(testDb.client);
-    await makeRepo(testDb.client, org.id);
-    mockRepoSizes([60 * GB]);
+    await makeRepo(testDb.client, org.id, 60 * GB);
 
     const r = await calculateStorageCharge(org.id, testDb.client);
 
@@ -100,10 +85,9 @@ describe("storage-usage", () => {
 
   it("sums sizes across multiple repos", async () => {
     const org = await makeOrg(testDb.client);
-    await makeRepo(testDb.client, org.id);
-    await makeRepo(testDb.client, org.id);
-    await makeRepo(testDb.client, org.id);
-    mockRepoSizes([20 * GB, 30 * GB, 25 * GB]); // 75 GB
+    await makeRepo(testDb.client, org.id, 20 * GB);
+    await makeRepo(testDb.client, org.id, 30 * GB);
+    await makeRepo(testDb.client, org.id, 25 * GB); // 75 GB total
 
     const r = await calculateStorageCharge(org.id, testDb.client);
 
@@ -115,7 +99,7 @@ describe("storage-usage", () => {
 
   it("uses recorded peak when it exceeds current usage", async () => {
     const org = await makeOrg(testDb.client, { billingCycleAnchor: 1 });
-    await makeRepo(testDb.client, org.id);
+    await makeRepo(testDb.client, org.id, 10 * GB); // current is only 10 GB
     // Seed a peak of 200 GB for June 2026.
     await testDb.client.orgStoragePeak.create({
       data: {
@@ -125,7 +109,6 @@ describe("storage-usage", () => {
         peakStorageBytes: BigInt(200 * GB),
       },
     });
-    mockRepoSizes([10 * GB]); // current is only 10 GB
 
     const r = await calculateStorageCharge(org.id, testDb.client);
 
@@ -136,7 +119,7 @@ describe("storage-usage", () => {
 
   it("updates the peak when current usage exceeds the recorded peak", async () => {
     const org = await makeOrg(testDb.client, { billingCycleAnchor: 1 });
-    await makeRepo(testDb.client, org.id);
+    await makeRepo(testDb.client, org.id, 120 * GB);
     await testDb.client.orgStoragePeak.create({
       data: {
         orgId: org.id,
@@ -145,7 +128,6 @@ describe("storage-usage", () => {
         peakStorageBytes: BigInt(50 * GB),
       },
     });
-    mockRepoSizes([120 * GB]);
 
     await calculateStorageCharge(org.id, testDb.client);
 
@@ -159,8 +141,7 @@ describe("storage-usage", () => {
     setConfig("stripe.storage.bucket-size-gb", 10);
     setConfig("stripe.storage.bucket-price-cents", 100);
     const org = await makeOrg(testDb.client);
-    await makeRepo(testDb.client, org.id);
-    mockRepoSizes([35 * GB]); // ceil(35/10) = 4 buckets
+    await makeRepo(testDb.client, org.id, 35 * GB); // ceil(35/10) = 4 buckets
 
     const r = await calculateStorageCharge(org.id, testDb.client);
 
@@ -170,17 +151,16 @@ describe("storage-usage", () => {
 
   it("ignores soft-deleted repos", async () => {
     const org = await makeOrg(testDb.client);
-    await makeRepo(testDb.client, org.id);
-    const deleted = await makeRepo(testDb.client, org.id);
+    await makeRepo(testDb.client, org.id, 5 * GB);
+    const deleted = await makeRepo(testDb.client, org.id, 100 * GB);
     await testDb.client.repo.update({
       where: { id: deleted },
       data: { deletedAt: new Date() },
     });
-    // Only one alive repo → one fetch call.
-    mockRepoSizes([5 * GB]);
 
     const r = await calculateStorageCharge(org.id, testDb.client);
 
+    // The 100 GB soft-deleted repo is excluded; only the 5 GB live repo counts.
     expect(r.totalBytes).toBe(5 * GB);
   });
 });
