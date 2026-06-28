@@ -155,6 +155,10 @@ export function routeSubmit(): Router {
 
     const basePath = `/${claims.orgId}/${claims.repoId}`;
 
+    // New content bytes from this submit (set from the merge result below), used
+    // to maintain the repo's cached storage size incrementally.
+    let addedBytes = 0;
+
     if (req.file) {
       const storeIndexBuffer = req.file.buffer;
 
@@ -191,7 +195,7 @@ export function routeSubmit(): Router {
         throw new Error("Failed to create longtail handle");
       }
 
-      const { status } = await pollHandle(handle, {
+      const { status, result } = await pollHandle(handle, {
         onStep: (step) => Logger.debug(`[Submit] Current step: ${step}`),
       });
 
@@ -209,6 +213,9 @@ export function routeSubmit(): Router {
           );
         return;
       }
+
+      // The merge reports the new content bytes from this submit's store index.
+      addedBytes = Number((result as { addedBytes?: number })?.addedBytes ?? 0);
     } else if (
       payload.modifications.some((m) => !m.delete) ||
       payload.versionIndex
@@ -298,8 +305,16 @@ export function routeSubmit(): Router {
       );
 
       res.status(200).json(responseMessage);
-      // Repo size is computed on demand now (see /repo-size), so there is no
-      // precomputed size file to refresh here.
+
+      // Maintain the repo's cached storage size incrementally
+      // Fire-and-forget so it never delays the submit response.
+      if (addedBytes > 0) {
+        client.storage.incrementRepoStorageBytes
+          .mutate({ repoId: claims.repoId, bytes: addedBytes })
+          .catch((e: any) =>
+            Logger.error(`[Submit] Failed to update repo size: ${e.message}`),
+          );
+      }
     } catch (e: any) {
       Logger.error(`[Submit] ${e.message}`);
       res.status(500).send(e.message);

@@ -163,6 +163,25 @@ int Merge(
     return err;
   }
 
+  // Sum this submit's new content bytes for incremental repo-size tracking.
+  // additional_store_index holds only the missing (newly stored) chunks, so its
+  // chunk sizes are the content bytes added by this submit (deduped). Reported
+  // in the handle result; the app increments Repo.storageBytes by it.
+  uint64_t addedBytes = 0;
+  if (additional_store_index) {
+    uint32_t chunkCount = *additional_store_index->m_ChunkCount;
+    for (uint32_t i = 0; i < chunkCount; ++i) {
+      addedBytes += additional_store_index->m_ChunkSizes[i];
+    }
+  }
+  {
+    std::stringstream resultStream;
+    resultStream << "{\"addedBytes\":" << addedBytes << "}";
+    std::string resultStr = resultStream.str();
+    strncpy(handle->result, resultStr.c_str(), sizeof(handle->result) - 1);
+    handle->result[sizeof(handle->result) - 1] = '\0';
+  }
+
   SetHandleStep(handle, "Completed");
   handle->error = 0;
   handle->completed = 1;

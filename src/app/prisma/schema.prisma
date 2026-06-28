@@ -115,14 +115,14 @@ model Org {
   scheduledTier        LicenseTier?
   scheduledTierAt      DateTime?
 
-  users      OrgUser[]
-  repos      Repo[]
-  workspaces Workspace[]
-  activity   OrgUserActivity[]
-  license    License?
-  invoices   Invoice[]
+  users                   OrgUser[]
+  repos                   Repo[]
+  workspaces              Workspace[]
+  activity                OrgUserActivity[]
+  license                 License?
+  invoices                Invoice[]
   cardExpiryNotifications CardExpiryNotification[]
-  storagePeaks OrgStoragePeak[]
+  storagePeaks            OrgStoragePeak[]
 }
 
 model OrgUser {
@@ -149,6 +149,8 @@ model Repo {
   public Boolean @default(false)
 
   r2BucketName String?
+
+  storageBytes BigInt @default(0)
 
   org   Org    @relation(fields: [orgId], references: [id])
   orgId String
@@ -771,9 +773,9 @@ model CardExpiryNotification {
   org   Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   orgId String
 
-  paymentMethodId String
-  expiryMonth     Int
-  expiryYear      Int
+  paymentMethodId  String
+  expiryMonth      Int
+  expiryYear       Int
   notifyDaysBefore Int
 
   sentAt DateTime @default(now())

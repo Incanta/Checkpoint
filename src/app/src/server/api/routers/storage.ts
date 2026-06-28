@@ -111,60 +111,26 @@ export const storageRouter = createTRPCRouter({
         "READ",
       );
 
-      if (isR2Enabled()) {
-        if (!repo.r2BucketName) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "R2 storage is enabled but repo does not have a bucket",
-          });
-        }
+      return { size: Number(repo.storageBytes) };
+    }),
 
-        try {
-          const usage = await getBucketUsageR2(repo.r2BucketName);
-          return { size: usage };
-        } catch (err: unknown) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: `Failed to fetch repo size from R2: ${String(err)}`,
-          });
-        }
-      }
-
-      const token = njwt.create(
-        {
-          iss: "checkpoint-vcs",
-          sub: ctx.session.user.id,
-          userId: ctx.session.user.id,
-          orgId: repo.orgId,
-          repoId: repo.id,
-          mode: "read",
-          basePath: `/${repo.orgId}/${repo.id}`,
-        },
-        config.get<string>("storage.jwt.signing-key"),
-      );
-
-      token.setExpiration(
-        Date.now() +
-          config.get<number>("storage.token-expiration-seconds") * 1000,
-      );
-
-      const backendUrl = config.get<string>("storage.backend-url.internal");
-
-      const response = await fetch(`${backendUrl}/repo-size`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token.compact()}`,
-        },
-      });
-
-      if (!response.ok) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to fetch repo size",
+  // Called by the core server after a successful submit/merge to add that
+  // submit's new content bytes to the repo's cached storage size.
+  incrementRepoStorageBytes: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        bytes: z.number().int().nonnegative(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.repoId, "WRITE");
+      if (input.bytes > 0) {
+        await ctx.db.repo.update({
+          where: { id: input.repoId },
+          data: { storageBytes: { increment: BigInt(input.bytes) } },
         });
       }
-
-      const data = (await response.json()) as { size: number };
-      return { size: data.size };
+      return { success: true };
     }),
 });

@@ -1,5 +1,4 @@
 import config from "@incanta/config";
-import njwt from "njwt";
 import path from "path";
 import { type NextRequest } from "next/server";
 import {
@@ -11,11 +10,7 @@ import {
 
 import { getSession } from "~/server/auth";
 import { db } from "~/server/db";
-import {
-  isR2Enabled,
-  getR2Endpoint,
-  createR2TempCredentials,
-} from "~/server/r2-service";
+import { buildAddonStorageOptions } from "~/server/storage-options";
 
 export async function GET(request: NextRequest) {
   const session = await getSession();
@@ -60,68 +55,12 @@ export async function GET(request: NextRequest) {
   }
 
   const remoteBasePath = `/${repo.orgId}/${repo.id}`;
-  const expirationSeconds = config.get<number>(
-    "storage.token-expiration-seconds",
+
+  const storageOptions = await buildAddonStorageOptions(
+    session.user.id,
+    repo,
+    false,
   );
-
-  let filerUrl = "";
-  let jwt = "";
-  let jwtExpirationMs = 0;
-  let r2Params:
-    | {
-        storageType: "r2";
-        r2AccessKeyId: string;
-        r2SecretAccessKey: string;
-        r2SessionToken: string;
-        r2Endpoint: string;
-        r2BucketName: string;
-      }
-    | undefined;
-
-  if (isR2Enabled()) {
-    if (!repo.r2BucketName) {
-      return Response.json(
-        { error: "R2 storage is enabled but repo does not have a bucket" },
-        { status: 500 },
-      );
-    }
-
-    const creds = await createR2TempCredentials(
-      repo.r2BucketName,
-      "object-read-only",
-      expirationSeconds,
-    );
-    r2Params = {
-      storageType: "r2",
-      r2AccessKeyId: creds.accessKeyId,
-      r2SecretAccessKey: creds.secretAccessKey,
-      r2SessionToken: creds.sessionToken,
-      r2Endpoint: getR2Endpoint(),
-      r2BucketName: repo.r2BucketName,
-    };
-    jwtExpirationMs = Date.now() + expirationSeconds * 1000;
-  } else {
-    const readToken = njwt.create(
-      {
-        iss: "checkpoint-vcs",
-        sub: session.user.id,
-        userId: session.user.id,
-        orgId: repo.orgId,
-        repoId: repo.id,
-        mode: "read",
-        basePath: remoteBasePath,
-      },
-      config.get<string>("storage.jwt.signing-key"),
-    );
-    readToken.setExpiration(Date.now() + expirationSeconds * 1000);
-    jwt = readToken.compact();
-    jwtExpirationMs = Date.now() + expirationSeconds * 1000;
-
-    const backendUrl = config.get<string>("storage.backend-url.internal");
-    filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
-      res.text(),
-    );
-  }
 
   const logLevel = GetLogLevel(
     config.get<string>(
@@ -133,11 +72,8 @@ export async function GET(request: NextRequest) {
     filePath,
     versionIndexName: changelist.versionIndex,
     remoteBasePath,
-    filerUrl,
-    jwt,
-    jwtExpirationMs,
+    ...storageOptions,
     logLevel,
-    ...r2Params,
   });
 
   if (!handle) {

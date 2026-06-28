@@ -1,7 +1,6 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
-import config from "@incanta/config";
 import { Logger } from "../logging";
 import { TimeManager } from "../time";
 import { getStoragePricingConfig } from "../stripe/client";
@@ -29,47 +28,13 @@ export async function calculateStorageCharge(
 ): Promise<StorageChargeResult> {
   const repos = await db.repo.findMany({
     where: { orgId, deletedAt: null },
-    select: { id: true, orgId: true, r2BucketName: true },
+    select: { id: true, orgId: true, r2BucketName: true, storageBytes: true },
   });
 
-  // Fetch sizes from the storage backend for each live repo
   let totalBytes = 0;
-  const backendUrl = config.get<string>("storage.backend-url.internal");
-  const systemKey = config.get<string>("storage.jwt.signing-key");
 
   for (const repo of repos) {
-    try {
-      if (isR2Enabled()) {
-        if (!repo.r2BucketName) {
-          Logger.warn(
-            `[Billing] Repo ${repo.id} is missing R2 bucket name, skipping usage calculation`,
-          );
-          continue;
-        }
-
-        const usage = await getBucketUsageR2(repo.r2BucketName);
-        totalBytes += Number(usage);
-      } else {
-        const jwt = await createSystemJwt(orgId, repo.id, systemKey);
-        const res = await fetch(`${backendUrl}/repo-size`, {
-          headers: {
-            Authorization: `Bearer ${jwt}`,
-          },
-        });
-        if (res.ok) {
-          const data = (await res.json()) as { size?: number };
-          totalBytes += data.size ?? 0;
-        } else {
-          Logger.warn(
-            `[Billing] Failed to fetch size for repo ${repo.id}: ${res.status} ${res.statusText}`,
-          );
-        }
-      }
-    } catch (err: unknown) {
-      Logger.warn(
-        `[Billing] Failed to fetch size for repo ${repo.id}: ${String(err)}`,
-      );
-    }
+    totalBytes += Number(repo.storageBytes);
   }
 
   // Peak tracking is only relevant on the license manager (billing instance).
@@ -133,23 +98,4 @@ export async function snapshotStoragePeak(
 ): Promise<void> {
   if (!isLicenseManager()) return;
   await calculateStorageCharge(orgId, db);
-}
-
-/** Create a minimal system JWT for internal storage API calls. */
-async function createSystemJwt(
-  orgId: string,
-  repoId: string,
-  systemKey: string,
-): Promise<string> {
-  const { SignJWT } = await import("jose");
-  const secret = new TextEncoder().encode(systemKey);
-  return await new SignJWT({
-    orgId,
-    repoId,
-    access: "read",
-    type: "system",
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("5m")
-    .sign(secret);
 }
