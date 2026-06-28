@@ -3,7 +3,7 @@
 package main
 
 // User-facing semver version of the bundled client installation.
-const ClientVersion = "0.4.1"
+const ClientVersion = "0.4.2"
 
 // Integer daemon-API version this tray was built against. Compared against
 // the daemon's min_daemon_api at connect time.

@@ -11,8 +11,8 @@
 //   DAEMON_API     — current daemon API the running daemon speaks
 //   MIN_DAEMON_API — minimum daemon-API a connecting client must speak
 
-export const SERVER_VERSION = "0.4.1";
-export const CLIENT_VERSION = "0.4.1";
+export const SERVER_VERSION = "0.4.2";
+export const CLIENT_VERSION = "0.4.2";
 export const SERVER_API = 1;
 export const MIN_SERVER_API = 1;
 export const DAEMON_API = 1;
