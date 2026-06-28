@@ -1,4 +1,4 @@
-#include "r2.h"
+#include "s3.h"
 #include "token-refresh.h"
 
 #include <curl/curl.h>
@@ -14,14 +14,14 @@
 #include <string>
 #include <thread>
 
-struct R2StorageAPI_OpenFile {
+struct S3StorageAPI_OpenFile {
   char* m_Path;
   std::string m_WriteBuffer;
   int m_IsWriteMode;
 };
 
 // ============================================================================
-// libcurl helper functions for R2 (S3-compatible with AWS SigV4)
+// libcurl helpers for S3-compatible stores (R2, MinIO, AWS, Spaces) via SigV4
 // ============================================================================
 
 struct CurlResponse {
@@ -31,14 +31,14 @@ struct CurlResponse {
   std::string error;
 };
 
-struct R2UploadData {
+struct S3UploadData {
   const void* data;
   size_t size;
   size_t pos;
 };
 
-static size_t R2ReadCallback(char* buffer, size_t size, size_t nitems, void* userp) {
-  struct R2UploadData* upload = static_cast<struct R2UploadData*>(userp);
+static size_t S3ReadCallback(char* buffer, size_t size, size_t nitems, void* userp) {
+  struct S3UploadData* upload = static_cast<struct S3UploadData*>(userp);
   size_t remaining = upload->size - upload->pos;
   size_t copy = (size * nitems < remaining) ? size * nitems : remaining;
   if (copy > 0) {
@@ -48,14 +48,14 @@ static size_t R2ReadCallback(char* buffer, size_t size, size_t nitems, void* use
   return copy;
 }
 
-static size_t R2WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+static size_t S3WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
   size_t realsize = size * nmemb;
   std::string* str = static_cast<std::string*>(userp);
   str->append(static_cast<char*>(contents), realsize);
   return realsize;
 }
 
-static size_t R2HeaderCallback(char* buffer, size_t size, size_t nitems, void* userdata) {
+static size_t S3HeaderCallback(char* buffer, size_t size, size_t nitems, void* userdata) {
   size_t realsize = size * nitems;
   std::map<std::string, std::string>* headers = static_cast<std::map<std::string, std::string>*>(userdata);
 
@@ -96,13 +96,16 @@ static CURL* GetCurlHandle() {
   return tls_curl.handle;
 }
 
-// Configure curl handle with AWS SigV4 auth for R2
-static void R2SetupAuth(CURL* curl, struct curl_slist** headers,
+// Configure curl handle with AWS SigV4 auth. The region matters for SigV4:
+// R2 uses "auto", AWS/Spaces need their real region, MinIO/SeaweedFS are lenient.
+static void S3SetupAuth(CURL* curl, struct curl_slist** headers,
+                        const std::string& region,
                         const std::string& accessKeyId,
                         const std::string& secretAccessKey,
                         const std::string& sessionToken) {
   // Use libcurl's built-in AWS SigV4 signing (available since curl 7.75)
-  curl_easy_setopt(curl, CURLOPT_AWS_SIGV4, "aws:amz:auto:s3");
+  std::string sigv4 = "aws:amz:" + (region.empty() ? "auto" : region) + ":s3";
+  curl_easy_setopt(curl, CURLOPT_AWS_SIGV4, sigv4.c_str());
 
   // Set credentials
   std::string userpwd = accessKeyId + ":" + secretAccessKey;
@@ -115,30 +118,30 @@ static void R2SetupAuth(CURL* curl, struct curl_slist** headers,
   }
 }
 
-// Check if R2 STS credentials need refreshing. If so, requests new ones from
+// Check if S3/STS credentials need refreshing. If so, requests new ones from
 // the JS polling thread and updates the storage API's credential pointers.
 // Old credential strings are intentionally leaked (a few hundred bytes per
 // refresh) to avoid use-after-free in concurrent worker threads.
-static int R2_RefreshCredentialsIfNeeded(R2StorageAPI* api) {
+static int S3_RefreshCredentialsIfNeeded(S3StorageAPI* api) {
   if (!api->m_Handle) return 0;
   int err = EnsureTokenFresh(api->m_Handle);
   if (err) return err;
-  if (api->m_Handle->refreshedR2AccessKeyId[0] != '\0') {
-    api->m_AccessKeyId = strdup(api->m_Handle->refreshedR2AccessKeyId);
-    api->m_Handle->refreshedR2AccessKeyId[0] = '\0';
-    api->m_SecretAccessKey = strdup(api->m_Handle->refreshedR2SecretAccessKey);
-    api->m_Handle->refreshedR2SecretAccessKey[0] = '\0';
-    api->m_SessionToken = strdup(api->m_Handle->refreshedR2SessionToken);
-    api->m_Handle->refreshedR2SessionToken[0] = '\0';
+  if (api->m_Handle->refreshedS3AccessKeyId[0] != '\0') {
+    api->m_AccessKeyId = strdup(api->m_Handle->refreshedS3AccessKeyId);
+    api->m_Handle->refreshedS3AccessKeyId[0] = '\0';
+    api->m_SecretAccessKey = strdup(api->m_Handle->refreshedS3SecretAccessKey);
+    api->m_Handle->refreshedS3SecretAccessKey[0] = '\0';
+    api->m_SessionToken = strdup(api->m_Handle->refreshedS3SessionToken);
+    api->m_Handle->refreshedS3SessionToken[0] = '\0';
   }
   return 0;
 }
 
-// Build the full URL for an object in the R2 bucket
+// Build the full URL for an object in the S3 bucket
 // endpoint: "https://{accountId}.r2.cloudflarestorage.com"
 // bucket: "checkpoint-{repoId}"
 // key: the object path (with leading slash stripped)
-static std::string R2BuildUrl(const std::string& endpoint, const std::string& bucket, const std::string& path) {
+static std::string S3BuildUrl(const std::string& endpoint, const std::string& bucket, const std::string& path) {
   // Strip leading slash from path to form the S3 key
   std::string key = path;
   while (!key.empty() && key[0] == '/') {
@@ -150,12 +153,13 @@ static std::string R2BuildUrl(const std::string& endpoint, const std::string& bu
 }
 
 // HTTP HEAD request with SigV4 auth
-static CurlResponse R2HttpHead(const std::string& url,
+static CurlResponse S3HttpHead(const std::string& url,
+                               const std::string& region,
                                const std::string& accessKeyId,
                                const std::string& secretAccessKey,
                                const std::string& sessionToken) {
   struct Longtail_LogContextFmt_Private* ctx = 0;
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpHead: url=%s", url.c_str())
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3HttpHead: url=%s", url.c_str())
   CurlResponse response;
   response.status_code = 0;
 
@@ -166,12 +170,12 @@ static CurlResponse R2HttpHead(const std::string& url,
   }
 
   struct curl_slist* headers = nullptr;
-  R2SetupAuth(curl, &headers, accessKeyId, secretAccessKey, sessionToken);
+  S3SetupAuth(curl, &headers, region, accessKeyId, secretAccessKey, sessionToken);
 
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, R2HeaderCallback);
+  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, S3HeaderCallback);
   curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
@@ -180,27 +184,28 @@ static CurlResponse R2HttpHead(const std::string& url,
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
     response.error = curl_easy_strerror(res);
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpHead curl error: %s (url: %s)", response.error.c_str(), url.c_str())
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3HttpHead curl error: %s (url: %s)", response.error.c_str(), url.c_str())
   } else {
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
     if (response.status_code < 200 || response.status_code >= 300) {
-      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpHead HTTP %ld (url: %s)", response.status_code, url.c_str())
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3HttpHead HTTP %ld (url: %s)", response.status_code, url.c_str())
     }
   }
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpHead: status=%ld, error=%s", response.status_code, response.error.c_str())
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3HttpHead: status=%ld, error=%s", response.status_code, response.error.c_str())
   curl_slist_free_all(headers);
 
   return response;
 }
 
 // HTTP GET request with SigV4 auth
-static CurlResponse R2HttpGet(const std::string& url,
+static CurlResponse S3HttpGet(const std::string& url,
+                              const std::string& region,
                               const std::string& accessKeyId,
                               const std::string& secretAccessKey,
                               const std::string& sessionToken) {
   struct Longtail_LogContextFmt_Private* ctx = 0;
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpGet: url=%s", url.c_str())
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3HttpGet: url=%s", url.c_str())
   CurlResponse response;
   response.status_code = 0;
 
@@ -211,13 +216,13 @@ static CurlResponse R2HttpGet(const std::string& url,
   }
 
   struct curl_slist* headers = nullptr;
-  R2SetupAuth(curl, &headers, accessKeyId, secretAccessKey, sessionToken);
+  S3SetupAuth(curl, &headers, region, accessKeyId, secretAccessKey, sessionToken);
 
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, R2WriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, S3WriteCallback);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
-  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, R2HeaderCallback);
+  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, S3HeaderCallback);
   curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
@@ -226,29 +231,30 @@ static CurlResponse R2HttpGet(const std::string& url,
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
     response.error = curl_easy_strerror(res);
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpGet curl error: %s (url: %s)", response.error.c_str(), url.c_str())
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3HttpGet curl error: %s (url: %s)", response.error.c_str(), url.c_str())
   } else {
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
     if (response.status_code < 200 || response.status_code >= 300) {
-      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpGet HTTP %ld (url: %s, body: %s)", response.status_code, url.c_str(), response.body.c_str())
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3HttpGet HTTP %ld (url: %s, body: %s)", response.status_code, url.c_str(), response.body.c_str())
     }
   }
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpGet: status=%ld, body_size=%zu, error=%s", response.status_code, response.body.size(), response.error.c_str())
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3HttpGet: status=%ld, body_size=%zu, error=%s", response.status_code, response.body.size(), response.error.c_str())
   curl_slist_free_all(headers);
 
   return response;
 }
 
 // HTTP PUT request with body data and SigV4 auth
-static CurlResponse R2HttpPut(const std::string& url,
+static CurlResponse S3HttpPut(const std::string& url,
+                              const std::string& region,
                               const std::string& accessKeyId,
                               const std::string& secretAccessKey,
                               const std::string& sessionToken,
                               const void* data,
                               size_t dataSize) {
   struct Longtail_LogContextFmt_Private* ctx = 0;
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpPut: url=%s, dataSize=%zu", url.c_str(), dataSize)
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3HttpPut: url=%s, dataSize=%zu", url.c_str(), dataSize)
   CurlResponse response;
   response.status_code = 0;
 
@@ -260,9 +266,9 @@ static CurlResponse R2HttpPut(const std::string& url,
 
   struct curl_slist* headers = nullptr;
   headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
-  R2SetupAuth(curl, &headers, accessKeyId, secretAccessKey, sessionToken);
+  S3SetupAuth(curl, &headers, region, accessKeyId, secretAccessKey, sessionToken);
 
-  R2UploadData uploadData;
+  S3UploadData uploadData;
   uploadData.data = data;
   uploadData.size = dataSize;
   uploadData.pos = 0;
@@ -270,10 +276,10 @@ static CurlResponse R2HttpPut(const std::string& url,
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-  curl_easy_setopt(curl, CURLOPT_READFUNCTION, R2ReadCallback);
+  curl_easy_setopt(curl, CURLOPT_READFUNCTION, S3ReadCallback);
   curl_easy_setopt(curl, CURLOPT_READDATA, &uploadData);
   curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)dataSize);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, R2WriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, S3WriteCallback);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
@@ -282,27 +288,28 @@ static CurlResponse R2HttpPut(const std::string& url,
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
     response.error = curl_easy_strerror(res);
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpPut curl error: %s (url: %s)", response.error.c_str(), url.c_str())
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3HttpPut curl error: %s (url: %s)", response.error.c_str(), url.c_str())
   } else {
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
     if (response.status_code < 200 || response.status_code >= 300) {
-      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpPut HTTP %ld (url: %s, body: %s)", response.status_code, url.c_str(), response.body.c_str())
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3HttpPut HTTP %ld (url: %s, body: %s)", response.status_code, url.c_str(), response.body.c_str())
     }
   }
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpPut: status=%ld, error=%s", response.status_code, response.error.c_str())
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3HttpPut: status=%ld, error=%s", response.status_code, response.error.c_str())
   curl_slist_free_all(headers);
 
   return response;
 }
 
 // HTTP DELETE request with SigV4 auth
-static CurlResponse R2HttpDelete(const std::string& url,
+static CurlResponse S3HttpDelete(const std::string& url,
+                                 const std::string& region,
                                  const std::string& accessKeyId,
                                  const std::string& secretAccessKey,
                                  const std::string& sessionToken) {
   struct Longtail_LogContextFmt_Private* ctx = 0;
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpDelete: url=%s", url.c_str())
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3HttpDelete: url=%s", url.c_str())
   CurlResponse response;
   response.status_code = 0;
 
@@ -313,12 +320,12 @@ static CurlResponse R2HttpDelete(const std::string& url,
   }
 
   struct curl_slist* headers = nullptr;
-  R2SetupAuth(curl, &headers, accessKeyId, secretAccessKey, sessionToken);
+  S3SetupAuth(curl, &headers, region, accessKeyId, secretAccessKey, sessionToken);
 
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, R2WriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, S3WriteCallback);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
@@ -327,15 +334,15 @@ static CurlResponse R2HttpDelete(const std::string& url,
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
     response.error = curl_easy_strerror(res);
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpDelete curl error: %s (url: %s)", response.error.c_str(), url.c_str())
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3HttpDelete curl error: %s (url: %s)", response.error.c_str(), url.c_str())
   } else {
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
     if (response.status_code < 200 || response.status_code >= 300) {
-      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpDelete HTTP %ld (url: %s, body: %s)", response.status_code, url.c_str(), response.body.c_str())
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3HttpDelete HTTP %ld (url: %s, body: %s)", response.status_code, url.c_str(), response.body.c_str())
     }
   }
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpDelete: status=%ld, error=%s", response.status_code, response.error.c_str())
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3HttpDelete: status=%ld, error=%s", response.status_code, response.error.c_str())
   curl_slist_free_all(headers);
 
   return response;
@@ -343,14 +350,15 @@ static CurlResponse R2HttpDelete(const std::string& url,
 
 // HTTP server-side COPY (S3 CopyObject) with SigV4 auth.
 // Uses PUT with x-amz-copy-source header — no data transfer to/from client.
-static CurlResponse R2HttpCopy(const std::string& targetUrl,
+static CurlResponse S3HttpCopy(const std::string& targetUrl,
                                 const std::string& bucket,
                                 const std::string& sourceKey,
+                                const std::string& region,
                                 const std::string& accessKeyId,
                                 const std::string& secretAccessKey,
                                 const std::string& sessionToken) {
   struct Longtail_LogContextFmt_Private* ctx = 0;
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpCopy: target=%s, source=/%s/%s", targetUrl.c_str(), bucket.c_str(), sourceKey.c_str())
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3HttpCopy: target=%s, source=/%s/%s", targetUrl.c_str(), bucket.c_str(), sourceKey.c_str())
   CurlResponse response;
   response.status_code = 0;
 
@@ -371,13 +379,13 @@ static CurlResponse R2HttpCopy(const std::string& targetUrl,
   std::string copyHeader = "x-amz-copy-source: " + copySource;
   headers = curl_slist_append(headers, copyHeader.c_str());
 
-  R2SetupAuth(curl, &headers, accessKeyId, secretAccessKey, sessionToken);
+  S3SetupAuth(curl, &headers, region, accessKeyId, secretAccessKey, sessionToken);
 
   curl_easy_setopt(curl, CURLOPT_URL, targetUrl.c_str());
   curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
   curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)0);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, R2WriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, S3WriteCallback);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
@@ -386,42 +394,43 @@ static CurlResponse R2HttpCopy(const std::string& targetUrl,
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
     response.error = curl_easy_strerror(res);
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpCopy curl error: %s (target: %s)", response.error.c_str(), targetUrl.c_str())
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3HttpCopy curl error: %s (target: %s)", response.error.c_str(), targetUrl.c_str())
   } else {
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
     if (response.status_code < 200 || response.status_code >= 300) {
-      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2HttpCopy HTTP %ld (target: %s, body: %s)", response.status_code, targetUrl.c_str(), response.body.c_str())
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3HttpCopy HTTP %ld (target: %s, body: %s)", response.status_code, targetUrl.c_str(), response.body.c_str())
     }
   }
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2HttpCopy: status=%ld, error=%s", response.status_code, response.error.c_str())
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3HttpCopy: status=%ld, error=%s", response.status_code, response.error.c_str())
   curl_slist_free_all(headers);
 
   return response;
 }
 
 // ============================================================================
-// R2 Storage API Implementation (Longtail_StorageAPI interface)
+// S3 Storage API Implementation (Longtail_StorageAPI interface)
 // ============================================================================
 
-static void R2StorageAPI_Dispose(struct Longtail_API* storage_api) {
+static void S3StorageAPI_Dispose(struct Longtail_API* storage_api) {
   MAKE_LOG_CONTEXT_FIELDS(ctx)
   LONGTAIL_LOGFIELD(storage_api, "%p")
   MAKE_LOG_CONTEXT_WITH_FIELDS(ctx, 0, LONGTAIL_LOG_LEVEL_DEBUG)
 
   LONGTAIL_FATAL_ASSERT(ctx, storage_api != 0, return);
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
-  free(r2_api->m_Endpoint);
-  free(r2_api->m_BucketName);
-  free(r2_api->m_AccessKeyId);
-  free(r2_api->m_SecretAccessKey);
-  free(r2_api->m_SessionToken);
+  struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
+  free(s3_api->m_Endpoint);
+  free(s3_api->m_Region);
+  free(s3_api->m_BucketName);
+  free(s3_api->m_AccessKeyId);
+  free(s3_api->m_SecretAccessKey);
+  free(s3_api->m_SessionToken);
 
   Longtail_Free(storage_api);
 }
 
-static int R2StorageAPI_OpenReadFile(
+static int S3StorageAPI_OpenReadFile(
     struct Longtail_StorageAPI* storage_api,
     const char* path,
     Longtail_StorageAPI_HOpenFile* out_open_file) {
@@ -431,17 +440,17 @@ static int R2StorageAPI_OpenReadFile(
   LONGTAIL_VALIDATE_INPUT(ctx, path != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, out_open_file != 0, return EINVAL);
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_OpenReadFile: path=%s", path)
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_OpenReadFile: path=%s", path)
 
-  R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)Longtail_Alloc(
-      "R2StorageAPI_OpenFile",
-      sizeof(struct R2StorageAPI_OpenFile));
+  S3StorageAPI_OpenFile* open_file = (struct S3StorageAPI_OpenFile*)Longtail_Alloc(
+      "S3StorageAPI_OpenFile",
+      sizeof(struct S3StorageAPI_OpenFile));
 
   if (!open_file) {
     return ENOMEM;
   }
 
-  new (open_file) R2StorageAPI_OpenFile();
+  new (open_file) S3StorageAPI_OpenFile();
   open_file->m_Path = Longtail_Strdup(path);
   open_file->m_IsWriteMode = 0;
   *out_open_file = (Longtail_StorageAPI_HOpenFile)open_file;
@@ -449,7 +458,7 @@ static int R2StorageAPI_OpenReadFile(
   return 0;
 }
 
-static int R2StorageAPI_GetSize(
+static int S3StorageAPI_GetSize(
     struct Longtail_StorageAPI* storage_api,
     Longtail_StorageAPI_HOpenFile f,
     uint64_t* out_size) {
@@ -459,32 +468,32 @@ static int R2StorageAPI_GetSize(
   LONGTAIL_VALIDATE_INPUT(ctx, f != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, out_size != 0, return EINVAL);
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
-  { int err = R2_RefreshCredentialsIfNeeded(r2_api); if (err) return err; }
-  R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
+  struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
+  { int err = S3_RefreshCredentialsIfNeeded(s3_api); if (err) return err; }
+  S3StorageAPI_OpenFile* open_file = (struct S3StorageAPI_OpenFile*)f;
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_GetSize: path=%s", open_file->m_Path)
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_GetSize: path=%s", open_file->m_Path)
 
-  std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
-  CurlResponse r = R2HttpHead(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
+  std::string url = S3BuildUrl(s3_api->m_Endpoint, s3_api->m_BucketName, open_file->m_Path);
+  CurlResponse r = S3HttpHead(url, s3_api->m_Region, s3_api->m_AccessKeyId, s3_api->m_SecretAccessKey, s3_api->m_SessionToken);
 
   if (r.status_code >= 200 && r.status_code < 300) {
     auto it = r.headers.find("content-length");
     if (it != r.headers.end()) {
       *out_size = std::stoull(it->second);
-      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_GetSize: path=%s, size=%" PRIu64, open_file->m_Path, *out_size)
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_GetSize: path=%s, size=%" PRIu64, open_file->m_Path, *out_size)
       return 0;
     }
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_GetSize: path=%s, no content-length header", open_file->m_Path)
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_GetSize: path=%s, no content-length header", open_file->m_Path)
     return ENOENT;
   }
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_GetSize: path=%s, status=%ld", open_file->m_Path, r.status_code)
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_GetSize: path=%s, status=%ld", open_file->m_Path, r.status_code)
   if (r.status_code == 404) return ENOENT;
   return r.status_code > 0 ? EIO : EIO;
 }
 
-static int R2StorageAPI_Read(
+static int S3StorageAPI_Read(
     struct Longtail_StorageAPI* storage_api,
     Longtail_StorageAPI_HOpenFile f,
     uint64_t offset,
@@ -496,16 +505,16 @@ static int R2StorageAPI_Read(
   LONGTAIL_VALIDATE_INPUT(ctx, f != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, output != 0, return EINVAL);
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
-  { int err = R2_RefreshCredentialsIfNeeded(r2_api); if (err) return err; }
-  R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
+  struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
+  { int err = S3_RefreshCredentialsIfNeeded(s3_api); if (err) return err; }
+  S3StorageAPI_OpenFile* open_file = (struct S3StorageAPI_OpenFile*)f;
 
-  std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
-  CurlResponse r = R2HttpGet(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
+  std::string url = S3BuildUrl(s3_api->m_Endpoint, s3_api->m_BucketName, open_file->m_Path);
+  CurlResponse r = S3HttpGet(url, s3_api->m_Region, s3_api->m_AccessKeyId, s3_api->m_SecretAccessKey, s3_api->m_SessionToken);
 
   if (r.status_code >= 200 && r.status_code < 300) {
     if (offset > r.body.length()) {
-      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Read: path=%s, offset %" PRIu64 " > body size %zu", open_file->m_Path, offset, r.body.length())
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_Read: path=%s, offset %" PRIu64 " > body size %zu", open_file->m_Path, offset, r.body.length())
       return EIO;
     }
 
@@ -515,16 +524,16 @@ static int R2StorageAPI_Read(
     }
 
     memcpy(output, r.body.c_str() + offset, adjustedLength);
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Read: path=%s, read %" PRIu64 " bytes", open_file->m_Path, adjustedLength)
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_Read: path=%s, read %" PRIu64 " bytes", open_file->m_Path, adjustedLength)
     return 0;
   }
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Read: path=%s, failed status=%ld", open_file->m_Path, r.status_code)
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_Read: path=%s, failed status=%ld", open_file->m_Path, r.status_code)
   if (r.status_code == 404) return ENOENT;
   return EIO;
 }
 
-static int R2StorageAPI_OpenWriteFile(
+static int S3StorageAPI_OpenWriteFile(
     struct Longtail_StorageAPI* storage_api,
     const char* path,
     uint64_t initial_size,
@@ -535,29 +544,29 @@ static int R2StorageAPI_OpenWriteFile(
   LONGTAIL_VALIDATE_INPUT(ctx, path != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, out_open_file != 0, return EINVAL);
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+  struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
 
-  R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)Longtail_Alloc(
-      "R2StorageAPI_OpenFile",
-      sizeof(struct R2StorageAPI_OpenFile));
+  S3StorageAPI_OpenFile* open_file = (struct S3StorageAPI_OpenFile*)Longtail_Alloc(
+      "S3StorageAPI_OpenFile",
+      sizeof(struct S3StorageAPI_OpenFile));
 
   if (!open_file) {
     return ENOMEM;
   }
 
-  new (open_file) R2StorageAPI_OpenFile();
+  new (open_file) S3StorageAPI_OpenFile();
   open_file->m_Path = Longtail_Strdup(path);
   open_file->m_IsWriteMode = 1;
   *out_open_file = (Longtail_StorageAPI_HOpenFile)open_file;
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_OpenWriteFile: path=%s, initial_size=%" PRIu64, path, initial_size)
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_OpenWriteFile: path=%s, initial_size=%" PRIu64, path, initial_size)
 
-  r2_api->m_NumAddedBlocks++;
+  s3_api->m_NumAddedBlocks++;
 
   return 0;
 }
 
-static int R2StorageAPI_Write(
+static int S3StorageAPI_Write(
     struct Longtail_StorageAPI* storage_api,
     Longtail_StorageAPI_HOpenFile f,
     uint64_t offset,
@@ -569,12 +578,12 @@ static int R2StorageAPI_Write(
   LONGTAIL_VALIDATE_INPUT(ctx, f != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, input != 0, return EINVAL);
 
-  R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
+  S3StorageAPI_OpenFile* open_file = (struct S3StorageAPI_OpenFile*)f;
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Write: path=%s, offset=%" PRIu64 ", length=%" PRIu64 ", buffer_size=%zu",
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_Write: path=%s, offset=%" PRIu64 ", length=%" PRIu64 ", buffer_size=%zu",
                open_file->m_Path, offset, length, open_file->m_WriteBuffer.size())
 
-  // Buffer only — the actual PUT to R2 happens in CloseFile.
+  // Buffer only; the actual PUT happens in CloseFile.
   // Longtail_WriteStoredBlock calls Write twice (block index metadata, then
   // block content). Buffering avoids a redundant intermediate PUT of the
   // incomplete data. Combined with LONGTAIL_STORAGE_FLAG_OBJECT_STORAGE
@@ -586,27 +595,27 @@ static int R2StorageAPI_Write(
   }
   memcpy(&open_file->m_WriteBuffer[(size_t)offset], input, (size_t)length);
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_Write: buffered, path=%s, total_size=%zu", open_file->m_Path, open_file->m_WriteBuffer.size())
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_Write: buffered, path=%s, total_size=%zu", open_file->m_Path, open_file->m_WriteBuffer.size())
   return 0;
 }
 
-static int R2StorageAPI_SetSize(
+static int S3StorageAPI_SetSize(
     struct Longtail_StorageAPI* storage_api,
     Longtail_StorageAPI_HOpenFile f,
     uint64_t length) {
-  // No-op for R2
+  // No-op for object storage
   return 0;
 }
 
-static int R2StorageAPI_SetPermissions(
+static int S3StorageAPI_SetPermissions(
     struct Longtail_StorageAPI* storage_api,
     const char* path,
     uint16_t permissions) {
-  // No-op for R2
+  // No-op for object storage
   return 0;
 }
 
-static int R2StorageAPI_GetPermissions(
+static int S3StorageAPI_GetPermissions(
     struct Longtail_StorageAPI* storage_api,
     const char* path,
     uint16_t* out_permissions) {
@@ -619,85 +628,85 @@ static int R2StorageAPI_GetPermissions(
   return 0;
 }
 
-static void R2StorageAPI_CloseFile(struct Longtail_StorageAPI* storage_api, Longtail_StorageAPI_HOpenFile f) {
+static void S3StorageAPI_CloseFile(struct Longtail_StorageAPI* storage_api, Longtail_StorageAPI_HOpenFile f) {
   struct Longtail_LogContextFmt_Private* ctx = 0;
 
   LONGTAIL_VALIDATE_INPUT(ctx, storage_api != 0, return);
   LONGTAIL_VALIDATE_INPUT(ctx, f != 0, return);
 
-  R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)f;
+  S3StorageAPI_OpenFile* open_file = (struct S3StorageAPI_OpenFile*)f;
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_CloseFile: path=%s, is_write=%d, buffer_size=%zu",
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_CloseFile: path=%s, is_write=%d, buffer_size=%zu",
                open_file->m_Path, open_file->m_IsWriteMode, open_file->m_WriteBuffer.size())
 
-  // Flush the write buffer to R2 as a single PUT.
+  // Flush the write buffer to the store as a single PUT.
   // Write() only buffers; the upload happens here so that multiple Write()
   // calls (e.g., block index + block data) are coalesced into one request.
   if (open_file->m_IsWriteMode && !open_file->m_WriteBuffer.empty()) {
-    struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
-    R2_RefreshCredentialsIfNeeded(r2_api);
-    std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
+    struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
+    S3_RefreshCredentialsIfNeeded(s3_api);
+    std::string url = S3BuildUrl(s3_api->m_Endpoint, s3_api->m_BucketName, open_file->m_Path);
 
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_CloseFile: uploading %zu bytes to %s",
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_CloseFile: uploading %zu bytes to %s",
                  open_file->m_WriteBuffer.size(), open_file->m_Path)
 
-    CurlResponse r = R2HttpPut(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken,
+    CurlResponse r = S3HttpPut(url, s3_api->m_Region, s3_api->m_AccessKeyId, s3_api->m_SecretAccessKey, s3_api->m_SessionToken,
                                open_file->m_WriteBuffer.data(), open_file->m_WriteBuffer.size());
     if (r.status_code < 200 || r.status_code >= 300) {
-      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2StorageAPI_CloseFile: PUT failed HTTP %ld, curl_error: %s, path: %s",
+      LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3StorageAPI_CloseFile: PUT failed HTTP %ld, curl_error: %s, path: %s",
                    r.status_code, r.error.c_str(), open_file->m_Path)
     }
   }
 
   Longtail_Free(open_file->m_Path);
-  open_file->~R2StorageAPI_OpenFile();
+  open_file->~S3StorageAPI_OpenFile();
   Longtail_Free(open_file);
 }
 
-static int R2StorageAPI_CreateDir(struct Longtail_StorageAPI* storage_api, const char* path) {
-  // R2/S3 doesn't have real directories — no-op
+static int S3StorageAPI_CreateDir(struct Longtail_StorageAPI* storage_api, const char* path) {
+  // Object storage has no real directories
   return 0;
 }
 
-static int R2StorageAPI_RenameFile(struct Longtail_StorageAPI* storage_api, const char* source_path, const char* target_path) {
+static int S3StorageAPI_RenameFile(struct Longtail_StorageAPI* storage_api, const char* source_path, const char* target_path) {
   struct Longtail_LogContextFmt_Private* ctx = 0;
 
   LONGTAIL_VALIDATE_INPUT(ctx, storage_api != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, source_path != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, target_path != 0, return EINVAL);
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
-  { int err = R2_RefreshCredentialsIfNeeded(r2_api); if (err) return err; }
+  struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
+  { int err = S3_RefreshCredentialsIfNeeded(s3_api); if (err) return err; }
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_RenameFile: source=%s, target=%s", source_path, target_path)
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_RenameFile: source=%s, target=%s", source_path, target_path)
 
   // Use S3 CopyObject (server-side copy, no data transfer) instead of
   // the old GET+PUT+DELETE which downloaded the entire object back.
   // Note: With LONGTAIL_STORAGE_FLAG_OBJECT_STORAGE, FSBlockStore writes
   // directly to the final path and never calls RenameFile for blocks.
   // This codepath is only hit for non-block files (e.g., store index).
-  std::string sourceUrl = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, source_path);
-  std::string targetUrl = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, target_path);
+  std::string sourceUrl = S3BuildUrl(s3_api->m_Endpoint, s3_api->m_BucketName, source_path);
+  std::string targetUrl = S3BuildUrl(s3_api->m_Endpoint, s3_api->m_BucketName, target_path);
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_RenameFile: CopyObject %s -> %s", source_path, target_path)
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_RenameFile: CopyObject %s -> %s", source_path, target_path)
 
-  CurlResponse copyResp = R2HttpCopy(targetUrl, r2_api->m_BucketName, source_path,
-                                     r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
+  CurlResponse copyResp = S3HttpCopy(targetUrl, s3_api->m_BucketName, source_path,
+                                     s3_api->m_Region, s3_api->m_AccessKeyId, s3_api->m_SecretAccessKey, s3_api->m_SessionToken);
   if (copyResp.status_code < 200 || copyResp.status_code >= 300) {
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2StorageAPI_RenameFile: CopyObject failed HTTP %ld", copyResp.status_code)
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3StorageAPI_RenameFile: CopyObject failed HTTP %ld", copyResp.status_code)
     return (copyResp.status_code == 404) ? ENOENT : EIO;
   }
 
   // Delete source after successful copy
-  CurlResponse delResp = R2HttpDelete(sourceUrl, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
+  CurlResponse delResp = S3HttpDelete(sourceUrl, s3_api->m_Region, s3_api->m_AccessKeyId, s3_api->m_SecretAccessKey, s3_api->m_SessionToken);
   if (delResp.status_code != 404 && (delResp.status_code < 200 || delResp.status_code >= 300)) {
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_WARNING, "R2StorageAPI_RenameFile: DELETE source failed HTTP %ld (non-fatal)", delResp.status_code)
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_WARNING, "S3StorageAPI_RenameFile: DELETE source failed HTTP %ld (non-fatal)", delResp.status_code)
   }
 
   return 0;
 }
 
-static char* R2StorageAPI_ConcatPath(struct Longtail_StorageAPI* storage_api, const char* root_path, const char* sub_path) {
+static char* S3StorageAPI_ConcatPath(struct Longtail_StorageAPI* storage_api, const char* root_path, const char* sub_path) {
   struct Longtail_LogContextFmt_Private* ctx = 0;
 
   LONGTAIL_VALIDATE_INPUT(ctx, storage_api != 0, return 0);
@@ -713,71 +722,71 @@ static char* R2StorageAPI_ConcatPath(struct Longtail_StorageAPI* storage_api, co
   return path;
 }
 
-static int R2StorageAPI_IsDir(struct Longtail_StorageAPI* storage_api, const char* path) {
-  // R2/S3 doesn't have directories
+static int S3StorageAPI_IsDir(struct Longtail_StorageAPI* storage_api, const char* path) {
+  // Object storage has no directories
   return 0;
 }
 
-static int R2StorageAPI_IsFile(struct Longtail_StorageAPI* storage_api, const char* path) {
+static int S3StorageAPI_IsFile(struct Longtail_StorageAPI* storage_api, const char* path) {
   struct Longtail_LogContextFmt_Private* ctx = 0;
 
   LONGTAIL_VALIDATE_INPUT(ctx, storage_api != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, path != 0, return EINVAL);
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+  struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
 
-  std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, path);
-  CurlResponse r = R2HttpHead(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
+  std::string url = S3BuildUrl(s3_api->m_Endpoint, s3_api->m_BucketName, path);
+  CurlResponse r = S3HttpHead(url, s3_api->m_Region, s3_api->m_AccessKeyId, s3_api->m_SecretAccessKey, s3_api->m_SessionToken);
 
   int result = (r.status_code >= 200 && r.status_code < 300) ? 1 : 0;
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_IsFile: path=%s, result=%d, status=%ld", path, result, r.status_code)
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_IsFile: path=%s, result=%d, status=%ld", path, result, r.status_code)
   return result;
 }
 
-static int R2StorageAPI_RemoveDir(struct Longtail_StorageAPI* storage_api, const char* path) {
-  // R2/S3 doesn't have directories — no-op
+static int S3StorageAPI_RemoveDir(struct Longtail_StorageAPI* storage_api, const char* path) {
+  // Object storage has no directories — no-op
   return 0;
 }
 
-static int R2StorageAPI_RemoveFile(struct Longtail_StorageAPI* storage_api, const char* path) {
+static int S3StorageAPI_RemoveFile(struct Longtail_StorageAPI* storage_api, const char* path) {
   struct Longtail_LogContextFmt_Private* ctx = 0;
 
   LONGTAIL_VALIDATE_INPUT(ctx, storage_api != 0, return EINVAL);
   LONGTAIL_VALIDATE_INPUT(ctx, path != 0, return EINVAL);
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+  struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_RemoveFile: path=%s", path)
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_RemoveFile: path=%s", path)
 
-  std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, path);
-  CurlResponse r = R2HttpDelete(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
+  std::string url = S3BuildUrl(s3_api->m_Endpoint, s3_api->m_BucketName, path);
+  CurlResponse r = S3HttpDelete(url, s3_api->m_Region, s3_api->m_AccessKeyId, s3_api->m_SecretAccessKey, s3_api->m_SessionToken);
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_RemoveFile: path=%s, status=%ld", path, r.status_code)
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_RemoveFile: path=%s, status=%ld", path, r.status_code)
   if (r.status_code >= 200 && r.status_code < 300) return 0;
   if (r.status_code == 404) return 0;  // Already deleted
   return EIO;
 }
 
 // Directory iteration — not implemented (same as SeaweedFS)
-static int R2StorageAPI_StartFind(struct Longtail_StorageAPI* storage_api, const char* path, Longtail_StorageAPI_HIterator* out_iterator) {
+static int S3StorageAPI_StartFind(struct Longtail_StorageAPI* storage_api, const char* path, Longtail_StorageAPI_HIterator* out_iterator) {
   return ENOENT;
 }
 
-static int R2StorageAPI_FindNext(struct Longtail_StorageAPI* storage_api, Longtail_StorageAPI_HIterator iterator) {
+static int S3StorageAPI_FindNext(struct Longtail_StorageAPI* storage_api, Longtail_StorageAPI_HIterator iterator) {
   return ENOENT;
 }
 
-static void R2StorageAPI_CloseFind(struct Longtail_StorageAPI* storage_api, Longtail_StorageAPI_HIterator iterator) {
+static void S3StorageAPI_CloseFind(struct Longtail_StorageAPI* storage_api, Longtail_StorageAPI_HIterator iterator) {
 }
 
-static int R2StorageAPI_GetEntryProperties(
+static int S3StorageAPI_GetEntryProperties(
     struct Longtail_StorageAPI* storage_api,
     Longtail_StorageAPI_HIterator iterator,
     struct Longtail_StorageAPI_EntryProperties* out_properties) {
   return ENOENT;
 }
 
-static int R2StorageAPI_LockFile(struct Longtail_StorageAPI* storage_api, const char* path, Longtail_StorageAPI_HLockFile* out_lock_file) {
+static int S3StorageAPI_LockFile(struct Longtail_StorageAPI* storage_api, const char* path, Longtail_StorageAPI_HLockFile* out_lock_file) {
   MAKE_LOG_CONTEXT_FIELDS(ctx)
   LONGTAIL_LOGFIELD(storage_api, "%p"),
       LONGTAIL_LOGFIELD(path, "%s"),
@@ -788,9 +797,9 @@ static int R2StorageAPI_LockFile(struct Longtail_StorageAPI* storage_api, const 
   LONGTAIL_FATAL_ASSERT(ctx, path != 0, return EINVAL);
   LONGTAIL_FATAL_ASSERT(ctx, out_lock_file != 0, return EINVAL);
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
+  struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
 
-  char* lock_path = (char*)Longtail_Alloc("R2StorageAPI_LockFile", strlen(path) + 5 + 1);
+  char* lock_path = (char*)Longtail_Alloc("S3StorageAPI_LockFile", strlen(path) + 5 + 1);
   if (!lock_path) {
     return ENOMEM;
   }
@@ -798,16 +807,16 @@ static int R2StorageAPI_LockFile(struct Longtail_StorageAPI* storage_api, const 
   strcpy(lock_path, path);
   strcat(lock_path, ".lock");
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_LockFile: %s", lock_path);
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_LockFile: %s", lock_path);
 
   // Wait for lock file to not exist
-  while (R2StorageAPI_IsFile(storage_api, lock_path)) {
+  while (S3StorageAPI_IsFile(storage_api, lock_path)) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)Longtail_Alloc(
-      "R2StorageAPI_LockFile",
-      sizeof(struct R2StorageAPI_OpenFile));
+  S3StorageAPI_OpenFile* open_file = (struct S3StorageAPI_OpenFile*)Longtail_Alloc(
+      "S3StorageAPI_LockFile",
+      sizeof(struct S3StorageAPI_OpenFile));
 
   if (!open_file) {
     Longtail_Free(lock_path);
@@ -815,13 +824,13 @@ static int R2StorageAPI_LockFile(struct Longtail_StorageAPI* storage_api, const 
   }
 
   // Create lock file by PUTting an empty object
-  std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, lock_path);
+  std::string url = S3BuildUrl(s3_api->m_Endpoint, s3_api->m_BucketName, lock_path);
   const char lockData[] = "lock";
-  CurlResponse r = R2HttpPut(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken,
+  CurlResponse r = S3HttpPut(url, s3_api->m_Region, s3_api->m_AccessKeyId, s3_api->m_SecretAccessKey, s3_api->m_SessionToken,
                              lockData, 4);
 
   if (r.status_code >= 200 && r.status_code < 300) {
-    memset(open_file, 0, sizeof(struct R2StorageAPI_OpenFile));
+    memset(open_file, 0, sizeof(struct S3StorageAPI_OpenFile));
     open_file->m_Path = lock_path;
     *out_lock_file = (Longtail_StorageAPI_HLockFile)open_file;
     return 0;
@@ -832,7 +841,7 @@ static int R2StorageAPI_LockFile(struct Longtail_StorageAPI* storage_api, const 
   }
 }
 
-static int R2StorageAPI_UnlockFile(struct Longtail_StorageAPI* storage_api, Longtail_StorageAPI_HLockFile lock_file) {
+static int S3StorageAPI_UnlockFile(struct Longtail_StorageAPI* storage_api, Longtail_StorageAPI_HLockFile lock_file) {
   MAKE_LOG_CONTEXT_FIELDS(ctx)
   LONGTAIL_LOGFIELD(storage_api, "%p"),
       LONGTAIL_LOGFIELD(lock_file, "%p")
@@ -841,14 +850,14 @@ static int R2StorageAPI_UnlockFile(struct Longtail_StorageAPI* storage_api, Long
   LONGTAIL_FATAL_ASSERT(ctx, storage_api != 0, return EINVAL);
   LONGTAIL_FATAL_ASSERT(ctx, lock_file != 0, return EINVAL);
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
-  R2StorageAPI_OpenFile* open_file = (struct R2StorageAPI_OpenFile*)lock_file;
+  struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
+  S3StorageAPI_OpenFile* open_file = (struct S3StorageAPI_OpenFile*)lock_file;
 
-  std::string url = R2BuildUrl(r2_api->m_Endpoint, r2_api->m_BucketName, open_file->m_Path);
+  std::string url = S3BuildUrl(s3_api->m_Endpoint, s3_api->m_BucketName, open_file->m_Path);
 
-  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "R2StorageAPI_UnlockFile: %s", url.c_str());
+  LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_UnlockFile: %s", url.c_str());
 
-  CurlResponse r = R2HttpDelete(url, r2_api->m_AccessKeyId, r2_api->m_SecretAccessKey, r2_api->m_SessionToken);
+  CurlResponse r = S3HttpDelete(url, s3_api->m_Region, s3_api->m_AccessKeyId, s3_api->m_SecretAccessKey, s3_api->m_SessionToken);
 
   Longtail_Free(open_file->m_Path);
   Longtail_Free(open_file);
@@ -857,7 +866,7 @@ static int R2StorageAPI_UnlockFile(struct Longtail_StorageAPI* storage_api, Long
   return (r.status_code == 404 || (r.status_code >= 200 && r.status_code < 300)) ? 0 : EIO;
 }
 
-static char* R2StorageAPI_GetParentPath(
+static char* S3StorageAPI_GetParentPath(
     struct Longtail_StorageAPI* storage_api,
     const char* path) {
   MAKE_LOG_CONTEXT_FIELDS(ctx)
@@ -871,7 +880,7 @@ static char* R2StorageAPI_GetParentPath(
   return Longtail_GetParentPath(path);
 }
 
-static int R2StorageAPI_MapFile(
+static int S3StorageAPI_MapFile(
     struct Longtail_StorageAPI* storage_api,
     Longtail_StorageAPI_HOpenFile f,
     uint64_t offset,
@@ -882,17 +891,17 @@ static int R2StorageAPI_MapFile(
   return ENOTSUP;
 }
 
-static void R2StorageAPI_UnmapFile(
+static void S3StorageAPI_UnmapFile(
     struct Longtail_StorageAPI* storage_api,
     Longtail_StorageAPI_HFileMap m) {
   // Not supported for remote storage
 }
 
 // ============================================================================
-// R2 Storage API Init / Create
+// S3 Storage API Init / Create
 // ============================================================================
 
-static int R2StorageAPI_Init(
+static int S3StorageAPI_Init(
     void* mem,
     struct Longtail_StorageAPI** out_storage_api) {
   MAKE_LOG_CONTEXT_FIELDS(ctx)
@@ -903,38 +912,39 @@ static int R2StorageAPI_Init(
   LONGTAIL_VALIDATE_INPUT(ctx, mem != 0, return 0);
   struct Longtail_StorageAPI* api = Longtail_MakeStorageAPI(
       mem,
-      R2StorageAPI_Dispose,
-      R2StorageAPI_OpenReadFile,
-      R2StorageAPI_GetSize,
-      R2StorageAPI_Read,
-      R2StorageAPI_OpenWriteFile,
-      R2StorageAPI_Write,
-      R2StorageAPI_SetSize,
-      R2StorageAPI_SetPermissions,
-      R2StorageAPI_GetPermissions,
-      R2StorageAPI_CloseFile,
-      R2StorageAPI_CreateDir,
-      R2StorageAPI_RenameFile,
-      R2StorageAPI_ConcatPath,
-      R2StorageAPI_IsDir,
-      R2StorageAPI_IsFile,
-      R2StorageAPI_RemoveDir,
-      R2StorageAPI_RemoveFile,
-      R2StorageAPI_StartFind,
-      R2StorageAPI_FindNext,
-      R2StorageAPI_CloseFind,
-      R2StorageAPI_GetEntryProperties,
-      R2StorageAPI_LockFile,
-      R2StorageAPI_UnlockFile,
-      R2StorageAPI_GetParentPath,
-      R2StorageAPI_MapFile,
-      R2StorageAPI_UnmapFile);
+      S3StorageAPI_Dispose,
+      S3StorageAPI_OpenReadFile,
+      S3StorageAPI_GetSize,
+      S3StorageAPI_Read,
+      S3StorageAPI_OpenWriteFile,
+      S3StorageAPI_Write,
+      S3StorageAPI_SetSize,
+      S3StorageAPI_SetPermissions,
+      S3StorageAPI_GetPermissions,
+      S3StorageAPI_CloseFile,
+      S3StorageAPI_CreateDir,
+      S3StorageAPI_RenameFile,
+      S3StorageAPI_ConcatPath,
+      S3StorageAPI_IsDir,
+      S3StorageAPI_IsFile,
+      S3StorageAPI_RemoveDir,
+      S3StorageAPI_RemoveFile,
+      S3StorageAPI_StartFind,
+      S3StorageAPI_FindNext,
+      S3StorageAPI_CloseFind,
+      S3StorageAPI_GetEntryProperties,
+      S3StorageAPI_LockFile,
+      S3StorageAPI_UnlockFile,
+      S3StorageAPI_GetParentPath,
+      S3StorageAPI_MapFile,
+      S3StorageAPI_UnmapFile);
   *out_storage_api = api;
   return 0;
 }
 
-struct Longtail_StorageAPI* CreateR2StorageAPI(
+struct Longtail_StorageAPI* CreateS3StorageAPI(
     const char* endpoint,
+    const char* region,
     const char* bucketName,
     const char* accessKeyId,
     const char* secretAccessKey,
@@ -943,26 +953,27 @@ struct Longtail_StorageAPI* CreateR2StorageAPI(
     uint64_t tokenExpirationMs) {
   MAKE_LOG_CONTEXT(ctx, 0, LONGTAIL_LOG_LEVEL_DEBUG)
 
-  void* mem = Longtail_Alloc("R2StorageAPI", sizeof(struct R2StorageAPI));
+  void* mem = Longtail_Alloc("S3StorageAPI", sizeof(struct S3StorageAPI));
   if (!mem) {
     LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "Longtail_Alloc() failed with %d", ENOMEM)
     return 0;
   }
   struct Longtail_StorageAPI* storage_api;
-  int err = R2StorageAPI_Init(mem, &storage_api);
+  int err = S3StorageAPI_Init(mem, &storage_api);
   if (err) {
-    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "R2StorageAPI_Init() failed with %d", err)
+    LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3StorageAPI_Init() failed with %d", err)
     return 0;
   }
 
-  struct R2StorageAPI* r2_api = (struct R2StorageAPI*)storage_api;
-  r2_api->m_Endpoint = strdup(endpoint);
-  r2_api->m_BucketName = strdup(bucketName);
-  r2_api->m_AccessKeyId = strdup(accessKeyId);
-  r2_api->m_SecretAccessKey = strdup(secretAccessKey);
-  r2_api->m_SessionToken = sessionToken ? strdup(sessionToken) : strdup("");
-  r2_api->m_NumAddedBlocks = 0;
-  r2_api->m_Handle = handle;
+  struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
+  s3_api->m_Endpoint = strdup(endpoint);
+  s3_api->m_Region = strdup(region ? region : "auto");
+  s3_api->m_BucketName = strdup(bucketName);
+  s3_api->m_AccessKeyId = strdup(accessKeyId);
+  s3_api->m_SecretAccessKey = strdup(secretAccessKey);
+  s3_api->m_SessionToken = sessionToken ? strdup(sessionToken) : strdup("");
+  s3_api->m_NumAddedBlocks = 0;
+  s3_api->m_Handle = handle;
   if (handle) {
     handle->tokenExpirationMs = tokenExpirationMs;
   }

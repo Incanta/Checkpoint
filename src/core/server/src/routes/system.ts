@@ -1,8 +1,7 @@
 import { Router } from "express";
 import config from "@incanta/config";
 import njwt from "njwt";
-import { promises as fs } from "fs";
-import { getFilerUrl } from "../utils/filer.js";
+import { getStorageBackend, usesGateway } from "../storage/backend.js";
 
 interface SystemJWTClaims {
   iss: string;
@@ -83,61 +82,17 @@ export function routeSystem(): Router {
       return;
     }
 
-    if (config.get<boolean>("storage.seaweedfs.stub.enabled")) {
-      // we can just make the directory locally without going through the filer API
-      const localPath = `${config.get<string>(
-        "storage.seaweedfs.stub.storage-path",
-      )}${path}`;
-
-      try {
-        await fs.mkdir(localPath, { recursive: true });
-        console.log(`Created local directory: ${localPath}`);
-        res.status(201).json({ success: true, path });
-      } catch (error) {
-        console.error("Error creating local directory:", error);
-        res.status(500).send(`Internal server error: ${error}`);
-      }
-
-      return;
-    }
-
-    // Create directory in filer (SeaweedFS or local stub)
-    const filerUrl = getFilerUrl(true);
-
-    const filerToken = njwt.create(
-      {
-        iss: "checkpoint-vcs",
-        sub: "system",
-        userId: "system",
-        mode: "write",
-        basePath: `/`,
-      },
-      config.get<string>("storage.jwt.signing-key"),
-    );
-
-    filerToken.setExpiration(Date.now() + 1000);
-
+    // Gateway modes create the prefix through the backend (a dir on local
+    // disk, a no-op for object stores where keys are lazy). In r2 mode the
+    // per-repo bucket is provisioned by the app, so this is a no-op.
     try {
-      // SeaweedFS filer creates directories by posting to the path with trailing slash
-      const dirPath = path.endsWith("/") ? path : `${path}/`;
-      const response = await fetch(`${filerUrl}${dirPath}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${filerToken.compact()}`,
-        },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Failed to create directory in SeaweedFS: ${errorText}`);
-        res.status(500).send(`Failed to create directory: ${errorText}`);
-        return;
+      if (usesGateway()) {
+        const backend = await getStorageBackend();
+        await backend.ensurePrefix(path);
       }
-
-      console.log(`Created directory: ${path}`);
       res.status(201).json({ success: true, path });
     } catch (error) {
-      console.error("Error creating directory in SeaweedFS:", error);
+      console.error("Error creating storage prefix:", error);
       res.status(500).send(`Internal server error: ${error}`);
     }
   });
@@ -202,58 +157,16 @@ export function routeSystem(): Router {
       return;
     }
 
-    if (config.get<boolean>("storage.seaweedfs.stub.enabled")) {
-      const localPath = `${config.get<string>(
-        "storage.seaweedfs.stub.storage-path",
-      )}${path}`;
-
-      try {
-        await fs.rm(localPath, { recursive: true, force: true });
-        console.log(`Removed local directory: ${localPath}`);
-        res.status(200).json({ success: true, path });
-      } catch (error) {
-        console.error("Error removing local directory:", error);
-        res.status(500).send(`Internal server error: ${error}`);
-      }
-
-      return;
-    }
-
-    const filerUrl = getFilerUrl(true);
-
-    const filerToken = njwt.create(
-      {
-        iss: "checkpoint-vcs",
-        sub: "system",
-        userId: "system",
-        mode: "write",
-        basePath: `/`,
-      },
-      config.get<string>("storage.jwt.signing-key"),
-    );
-
-    filerToken.setExpiration(Date.now() + 1000);
-
+    // Gateway modes delete everything under the prefix through the backend. In
+    // r2 mode the per-repo bucket is deleted by the app, so this is a no-op.
     try {
-      const dirPath = path.endsWith("/") ? path : `${path}/`;
-      const response = await fetch(`${filerUrl}${dirPath}?recursive=true`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${filerToken.compact()}`,
-        },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Failed to remove directory in SeaweedFS: ${errorText}`);
-        res.status(500).send(`Failed to remove directory: ${errorText}`);
-        return;
+      if (usesGateway()) {
+        const backend = await getStorageBackend();
+        await backend.deletePrefix(path);
       }
-
-      console.log(`Removed directory: ${path}`);
       res.status(200).json({ success: true, path });
     } catch (error) {
-      console.error("Error removing directory in SeaweedFS:", error);
+      console.error("Error removing storage prefix:", error);
       res.status(500).send(`Internal server error: ${error}`);
     }
   });

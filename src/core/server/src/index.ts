@@ -32,17 +32,16 @@ app.use(express.json());
 app.use(routes());
 
 app.listen(port, () => {
+  const mode = config.get<string>("storage.mode");
   Logger.log(`Checkpoint Server:`);
   Logger.log(`  Port:        ${port}`);
-  Logger.log(
-    `  Storage:     ${config.get<string>("storage.mode") === "r2" ? "R2" : "SeaweedFS"}`,
-  );
+  Logger.log(`  Storage:     ${mode}`);
 
-  if (config.get<string>("storage.mode") === "seaweedfs") {
-    Logger.log(
-      `  Filer Stub: ${config.get<boolean>("storage.seaweedfs.stub.enabled")}`,
-    );
-  } else {
+  if (mode === "local") {
+    Logger.log(`  Path:        ${config.get<string>("storage.local.path")}`);
+  } else if (mode === "s3") {
+    Logger.log(`  S3 bucket:   ${config.get<string>("storage.s3.bucket")}`);
+  } else if (mode === "r2") {
     if (
       !config.get<string>("storage.r2.account-id") ||
       !config.get<string>("storage.r2.access-key-id") ||
@@ -52,6 +51,9 @@ app.listen(port, () => {
       Logger.fatal("R2 storage configuration is incomplete");
       process.exit(1);
     }
+  } else {
+    Logger.fatal(`Unknown storage.mode: ${mode}`);
+    process.exit(1);
   }
 
   Logger.log("[healthy] Server is ready");

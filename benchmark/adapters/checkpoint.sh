@@ -5,7 +5,8 @@
 #   postgres). With no pinned version (the HEAD path) the app + server images
 #   are BUILT from the shipped HEAD source so they match the HEAD client; with
 #   a pinned CHECKPOINT_VERSION the released GHCR images are pulled instead.
-#   Storage stays in the default "filer w/ stub" mode (no SeaweedFS profile).
+#   Storage stays in the default "local" mode (the core server stores blocks on
+#   its own disk and serves them through the gateway; no external store).
 # Client: built from source on the droplet (CLI via CMake + daemon via Node),
 #   mirroring the proven .github/workflows/test.yaml flow. The published .deb
 #   is not used because releases are drafts with non-anonymous asset URLs.
@@ -380,7 +381,7 @@ adapter_record_submit_stages() {
 # Per-component storage snapshot for the small-update breakdown. The harness
 # calls this before and after the update submit and records the per-component
 # deltas (see record_storage_breakdown). Emits "name<TAB>bytes" lines:
-#   content_store_total - the whole stub-filer content-store volume, a CLEAN
+#   content_store_total - the whole local content-store volume, a CLEAN
 #       number that excludes Docker container logs, the app DB (a separate
 #       volume), and overlay churn that the whole-/data/docker metric also
 #       counts. This is the true on-disk growth of Checkpoint's backend store.
@@ -392,7 +393,7 @@ adapter_record_submit_stages() {
 adapter_storage_components() {
   on_server "bash -seuo pipefail" <<'EOF'
 sync
-# Host path of the stub-filer content store (the server's storage-data volume,
+# Host path of the local content store (the server's storage-data volume,
 # mounted at /app/data in the container).
 VOL="$(docker inspect checkpoint-server \
   --format '{{ range .Mounts }}{{ if eq .Destination "/app/data" }}{{ .Source }}{{ end }}{{ end }}' \

@@ -1,3 +1,0 @@
-[submodule "src/seaweedfs"]
-	path = src/seaweedfs
-	url = git@github.com:Incanta/seaweedfs.git

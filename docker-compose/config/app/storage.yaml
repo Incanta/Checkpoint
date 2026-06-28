@@ -1,7 +1,7 @@
 # Storage mode for the app. MUST match ./config/server/storage.yaml (`mode`).
-#   "seaweedfs": both the stub and full-SeaweedFS setups use this value.
-#   "r2":        Cloudflare R2 object storage.
-mode: "seaweedfs" # "seaweedfs" | "r2"
+# The app only distinguishes "r2" (clients talk to R2 directly) from the gateway
+# modes "local"/"s3" (clients go through the core server). See STORAGE.md.
+mode: "local" # local | s3 | r2
 
 jwt:
   signing-key: "secret|storage_signing_key"

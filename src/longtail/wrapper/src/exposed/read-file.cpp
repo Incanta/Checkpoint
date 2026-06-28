@@ -57,15 +57,16 @@ static int ReadFileFromVersionSync(
     const char* FilePath,
     const char* VersionIndexName,
     const char* RemoteBasePath,
-    const char* FilerUrl,
+    const char* StorageType,
+    const char* GatewayUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
-    const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     WrapperAsyncHandle* handle,
     void** out_data,
     uint64_t* out_size) {
@@ -77,10 +78,10 @@ static int ReadFileFromVersionSync(
   struct Longtail_CompressionRegistryAPI* compression_registry = Longtail_CreateFullCompressionRegistry();
 
   struct Longtail_StorageAPI* remote_storage_api;
-  if (StorageType && strcmp(StorageType, "r2") == 0) {
-    remote_storage_api = CreateR2StorageAPI(R2Endpoint, R2BucketName, R2AccessKeyId, R2SecretAccessKey, R2SessionToken);
+  if (StorageType && strcmp(StorageType, "gateway") == 0) {
+    remote_storage_api = CreateGatewayStorageAPI(GatewayUrl, JWT);
   } else {
-    remote_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT);
+    remote_storage_api = CreateS3StorageAPI(S3Endpoint, S3Region, S3Bucket, S3AccessKeyId, S3SecretAccessKey, S3SessionToken);
   }
 
   struct Longtail_BlockStoreAPI* store_block_remotestore_api = Longtail_CreateFSBlockStoreAPI(
@@ -488,15 +489,16 @@ DLL_EXPORT ReadFileAsyncHandle* ReadFileFromVersionAsync(
     const char* FilePath,
     const char* VersionIndexName,
     const char* RemoteBasePath,
-    const char* FilerUrl,
+    const char* StorageType,
+    const char* GatewayUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
-    const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     int LogLevel) {
   SetLogging(LogLevel);
 
@@ -516,15 +518,16 @@ DLL_EXPORT ReadFileAsyncHandle* ReadFileFromVersionAsync(
         FilePath,
         VersionIndexName,
         RemoteBasePath,
-        FilerUrl,
+        StorageType,
+        GatewayUrl,
         JWT,
         JWTExpirationMs,
-        StorageType,
-        R2Endpoint,
-        R2BucketName,
-        R2AccessKeyId,
-        R2SecretAccessKey,
-        R2SessionToken,
+        S3Endpoint,
+        S3Region,
+        S3Bucket,
+        S3AccessKeyId,
+        S3SecretAccessKey,
+        S3SessionToken,
         &handle->base,
         &data,
         &size);

@@ -30,8 +30,8 @@
 #include <thread>
 
 #include "../util/json.h"
-#include "../util/seaweedfs.h"
-#include "../util/r2.h"
+#include "../util/gateway.h"
+#include "../util/s3.h"
 #include "exposed.h"
 #include "wrapper-handle.h"
 
@@ -58,17 +58,18 @@ int32_t SubmitSync(
     bool EnableMmapBlockStore,
     const char* LocalRootPath,
     const char* RemoteBasePath,
-    const char* FilerUrl,
     const char* BackendUrl,
-    const char* JWT,
-    uint64_t JWTExpirationMs,
     const char* API_JWT,
     const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* GatewayUrl,
+    const char* JWT,
+    uint64_t JWTExpirationMs,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     bool KeepCheckedOut,
     const char* WorkspaceId,
     uint32_t NumModifications,
@@ -81,15 +82,16 @@ int32_t PullSync(
     bool EnableMmapBlockStore,
     const char* LocalRootPath,
     const char* RemoteBasePath,
-    const char* FilerUrl,
+    const char* StorageType,
+    const char* GatewayUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
-    const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     WrapperAsyncHandle* handle);
 
 // Extended handle for ReadFileFromVersion that includes the file data

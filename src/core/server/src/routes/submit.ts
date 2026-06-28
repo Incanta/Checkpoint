@@ -19,9 +19,53 @@ import {
 } from "@checkpointvcs/longtail-addon";
 import { Router } from "express";
 import multer from "multer";
-import { getFilerUrl } from "../utils/filer.js";
 import { getR2Endpoint } from "../utils/r2.js";
 import { Logger } from "../logging.js";
+
+// Build the backend storage descriptor the addon's server-side store.lsi merge
+// needs, from the configured storage.mode. "local" merges against local disk;
+// "s3" covers both s3 mode (shared bucket) and r2 mode (per-repo bucket), both
+// via the addon's S3 adapter with the server's full credentials.
+async function buildMergeStorageOptions(
+  repoId: string,
+): Promise<Record<string, unknown>> {
+  const mode = config.get<string>("storage.mode");
+  if (mode === "local") {
+    return {
+      storageType: "local",
+      localStoragePath: config.get<string>("storage.local.path"),
+    };
+  }
+  if (mode === "s3") {
+    return {
+      storageType: "s3",
+      s3Endpoint: config.get<string>("storage.s3.endpoint"),
+      s3Region: config.get<string>("storage.s3.region"),
+      s3Bucket: config.get<string>("storage.s3.bucket"),
+      s3ForcePathStyle: config.get<boolean>("storage.s3.force-path-style"),
+      s3AccessKeyId: await config.getWithSecrets<string>(
+        "storage.s3.access-key-id",
+      ),
+      s3SecretAccessKey: await config.getWithSecrets<string>(
+        "storage.s3.secret-access-key",
+      ),
+    };
+  }
+  // r2: the addon's S3 adapter pointed at R2, per-repo bucket.
+  return {
+    storageType: "s3",
+    s3Endpoint: getR2Endpoint(),
+    s3Region: "auto",
+    s3Bucket: `checkpoint-${repoId}`,
+    s3ForcePathStyle: false,
+    s3AccessKeyId: await config.getWithSecrets<string>(
+      "storage.r2.access-key-id",
+    ),
+    s3SecretAccessKey: await config.getWithSecrets<string>(
+      "storage.r2.secret-access-key",
+    ),
+  };
+}
 
 interface JWTClaims {
   iss: string;
@@ -62,119 +106,6 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fieldSize: 200 * 1024 * 1024 },
 });
-
-const DIR_MODE_BIT = 0x80000000;
-
-interface FilerChunk {
-  file_id: string;
-  size: number;
-  mtime: number;
-  e_tag: string;
-}
-
-interface FilerEntry {
-  FullPath: string;
-  Mode: number;
-  chunks?: FilerChunk[];
-}
-
-interface FilerListResponse {
-  Path: string;
-  Entries: FilerEntry[] | null;
-  Limit: number;
-  LastFileName: string;
-  ShouldDisplayLoadMore: boolean;
-}
-
-async function calculateRepoSize(
-  filerUrl: string,
-  basePath: string,
-  authToken: string,
-): Promise<number> {
-  let totalSize = 0;
-  const dirsToVisit: string[] = ["/"];
-
-  while (dirsToVisit.length > 0) {
-    const dir = dirsToVisit.pop()!;
-    let lastFileName: string | undefined;
-    let shouldLoadMore = true;
-
-    while (shouldLoadMore) {
-      const url = new URL(`${filerUrl}${basePath}${dir}`);
-      if (lastFileName) {
-        url.searchParams.set("lastFileName", lastFileName);
-      }
-
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        console.error(
-          `Failed to list filer directory ${basePath}${dir}: ${response.status}`,
-        );
-        shouldLoadMore = false;
-        break;
-      }
-
-      const data: FilerListResponse = await response.json();
-
-      if (data.Entries) {
-        for (const entry of data.Entries) {
-          // Skip the size file itself
-          if (entry.FullPath === `${basePath}/size`) {
-            continue;
-          }
-
-          if ((entry.Mode & DIR_MODE_BIT) !== 0) {
-            // Directory — recurse into it
-            const relativePath = entry.FullPath.slice(basePath.length);
-            dirsToVisit.push(`${relativePath}/`);
-          } else if (entry.chunks) {
-            // File — sum chunk sizes
-            for (const chunk of entry.chunks) {
-              totalSize += chunk.size;
-            }
-          }
-        }
-      }
-
-      shouldLoadMore = data.ShouldDisplayLoadMore;
-      lastFileName = data.LastFileName;
-    }
-  }
-
-  return totalSize;
-}
-
-async function writeRepoSize(
-  filerUrl: string,
-  basePath: string,
-  authToken: string,
-  size: number,
-): Promise<void> {
-  const formData = new FormData();
-  const file = new File([size.toString()], "size", { type: "text/plain" });
-  formData.append("file", file);
-
-  const response = await fetch(`${filerUrl}${basePath}/size`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${authToken}`,
-    },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    console.error(
-      `Failed to write repo size file: ${response.status} ${response.statusText}`,
-    );
-  }
-}
 
 export function routeSubmit(): Router {
   const router = Router();
@@ -222,9 +153,6 @@ export function routeSubmit(): Router {
 
     const claims: JWTClaims = verifiedToken.body.toJSON() as any;
 
-    const storageMode = config.get<string>("storage.mode");
-    const filerUrl = storageMode === "seaweedfs" ? getFilerUrl(true) : "";
-
     const basePath = `/${claims.orgId}/${claims.repoId}`;
 
     if (req.file) {
@@ -246,27 +174,16 @@ export function routeSubmit(): Router {
         config.get<LongtailLogLevel>("longtail.log-level"),
       );
 
-      const mergeOptions: Parameters<typeof mergeAsync>[0] = {
+      const mergeOptions = {
         remoteBasePath: basePath,
-        filerUrl,
-        jwt: token,
         storeIndexBuffer: Buffer.from(storeIndexBuffer),
         logLevel,
-      };
+        ...(await buildMergeStorageOptions(claims.repoId)),
+      } as Parameters<typeof mergeAsync>[0];
 
-      Logger.debug(`[Submit] Using ${storageMode} storage for merge`);
-
-      if (storageMode === "r2") {
-        mergeOptions.storageType = "r2";
-        mergeOptions.r2AccessKeyId = await config.getWithSecrets<string>(
-          "storage.r2.access-key-id",
-        );
-        mergeOptions.r2SecretAccessKey = await config.getWithSecrets<string>(
-          "storage.r2.secret-access-key",
-        );
-        mergeOptions.r2Endpoint = getR2Endpoint();
-        mergeOptions.r2BucketName = `checkpoint-${claims.repoId}`;
-      }
+      Logger.debug(
+        `[Submit] Merging store index (mode ${config.get<string>("storage.mode")})`,
+      );
 
       const handle = mergeAsync(mergeOptions);
 
@@ -381,15 +298,8 @@ export function routeSubmit(): Router {
       );
 
       res.status(200).json(responseMessage);
-
-      // Fire and forget — recalculate and persist total repo size
-      if (storageMode !== "r2") {
-        calculateRepoSize(filerUrl, basePath, token)
-          .then((size) => writeRepoSize(filerUrl, basePath, token, size))
-          .catch((e) =>
-            Logger.error(`[Submit] Failed to update repo size: ${e.message}`),
-          );
-      }
+      // Repo size is computed on demand now (see /repo-size), so there is no
+      // precomputed size file to refresh here.
     } catch (e: any) {
       Logger.error(`[Submit] ${e.message}`);
       res.status(500).send(e.message);

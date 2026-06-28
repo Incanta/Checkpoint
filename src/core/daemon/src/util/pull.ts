@@ -16,6 +16,7 @@ import {
   saveWorkspaceState,
   type Workspace,
 } from "./util.js";
+import { toStorageOptions } from "./storage-options.js";
 import { readFileFromChangelist } from "./read-file.js";
 import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 import { autoMergeText } from "./auto-merge.js";
@@ -64,9 +65,10 @@ export async function pull(
     throw new Error("Could not get storage token");
   }
 
-  const tokenExpirationMs = storageTokenResponse.expiration * 1000;
+  // Storage backend options (gateway or s3/r2-direct) shared by the pull loops.
+  const storageOptions = toStorageOptions(storageTokenResponse);
 
-  // Token refresh callback — shared between main pull and artifact pull loops
+  // Token refresh callback shared between the main and artifact pull loops.
   const refreshStorageToken = async () => {
     Logger.debug("Token refresh requested by native addon");
     const newToken = await client.storage.getToken.query({
@@ -77,23 +79,13 @@ export async function pull(
     return {
       jwt: newToken.token,
       jwtExpirationMs: (newToken.expiration ?? 0) * 1000,
-      ...(newToken.r2Credentials && {
-        r2AccessKeyId: newToken.r2Credentials.accessKeyId,
-        r2SecretAccessKey: newToken.r2Credentials.secretAccessKey,
-        r2SessionToken: newToken.r2Credentials.sessionToken,
+      ...(newToken.r2 && {
+        s3AccessKeyId: newToken.r2.accessKeyId,
+        s3SecretAccessKey: newToken.r2.secretAccessKey,
+        s3SessionToken: newToken.r2.sessionToken,
       }),
     };
   };
-
-  let filerUrl = "";
-  let token = "";
-  if (storageTokenResponse.storageType === "r2") {
-    // R2: no filer URL needed, credentials are passed directly to addon
-  } else {
-    token = storageTokenResponse.token;
-    const backendUrl = storageTokenResponse.backendUrl;
-    filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) => res.text());
-  }
 
   if (changelistNumber === null) {
     const branchResponse = await client.branch.getBranch.query({
@@ -216,18 +208,8 @@ export async function pull(
       enableMmapBlockStore: daemonConfig.longtail.enableMmapBlockStore,
       localRootPath: workspace.localPath,
       remoteBasePath: `/${orgId}/${workspace.repoId}`,
-      filerUrl,
-      jwt: token,
-      jwtExpirationMs: tokenExpirationMs,
       cachePath: blockCachePath,
-      storageType: storageTokenResponse.storageType,
-      ...(storageTokenResponse.r2Credentials && {
-        r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
-        r2SecretAccessKey: storageTokenResponse.r2Credentials.secretAccessKey,
-        r2SessionToken: storageTokenResponse.r2Credentials.sessionToken,
-        r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
-        r2BucketName: storageTokenResponse.r2Credentials.bucket,
-      }),
+      ...storageOptions,
       logLevel: GetLogLevel(resolvedLogLevel),
     });
 
@@ -311,19 +293,8 @@ export async function pull(
           enableMmapBlockStore: daemonConfig.longtail.enableMmapBlockStore,
           localRootPath: workspace.localPath,
           remoteBasePath: `/${orgId}/${workspace.repoId}`,
-          filerUrl,
-          jwt: token,
-          jwtExpirationMs: tokenExpirationMs,
           cachePath: blockCachePath,
-          storageType: storageTokenResponse.storageType,
-          ...(storageTokenResponse.r2Credentials && {
-            r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
-            r2SecretAccessKey:
-              storageTokenResponse.r2Credentials.secretAccessKey,
-            r2SessionToken: storageTokenResponse.r2Credentials.sessionToken,
-            r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
-            r2BucketName: storageTokenResponse.r2Credentials.bucket,
-          }),
+          ...storageOptions,
           logLevel: GetLogLevel(resolvedLogLevel),
         });
 

@@ -10,6 +10,7 @@ import {
 } from "@checkpointvcs/longtail-addon";
 import { DaemonConfig } from "../daemon-config.js";
 import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
+import { toStorageOptions } from "./storage-options.js";
 
 export interface ReadFileWorkspace {
   daemonId: string;
@@ -66,19 +67,7 @@ export async function readFileFromVersion(
     throw new Error("Could not get storage token");
   }
 
-  const tokenExpirationMs = storageTokenResponse.expiration * 1000;
-
-  let filerUrl = "";
-  let token = "";
-  if (storageTokenResponse.storageType === "r2") {
-    // R2: no filer URL needed
-  } else {
-    token = storageTokenResponse.token;
-    const backendUrl = storageTokenResponse.backendUrl;
-    filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
-      res.text(),
-    );
-  }
+  const storageOptions = toStorageOptions(storageTokenResponse);
 
   // Get the repo to construct the remote base path
   const repo = await client.repo.getRepo.query({ id: workspace.repoId });
@@ -96,17 +85,7 @@ export async function readFileFromVersion(
     filePath,
     versionIndexName,
     remoteBasePath,
-    filerUrl,
-    jwt: token,
-    jwtExpirationMs: tokenExpirationMs,
-    storageType: storageTokenResponse.storageType,
-    ...(storageTokenResponse.r2Credentials && {
-      r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
-      r2SecretAccessKey: storageTokenResponse.r2Credentials.secretAccessKey,
-      r2SessionToken: storageTokenResponse.r2Credentials.sessionToken,
-      r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
-      r2BucketName: storageTokenResponse.r2Credentials.bucket,
-    }),
+    ...storageOptions,
     logLevel: GetLogLevel(logLevel),
   });
 

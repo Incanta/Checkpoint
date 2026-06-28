@@ -23,17 +23,18 @@ int32_t SubmitSync(
     bool EnableMmapBlockStore,
     const char* LocalRootPath,
     const char* RemoteBasePath,
-    const char* FilerUrl,
     const char* BackendUrl,
-    const char* JWT,
-    uint64_t JWTExpirationMs,
     const char* API_JWT,
     const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* GatewayUrl,
+    const char* JWT,
+    uint64_t JWTExpirationMs,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     bool KeepCheckedOut,
     const char* WorkspaceId,
     uint32_t NumModifications,
@@ -45,10 +46,10 @@ int32_t SubmitSync(
 
   struct Longtail_StorageAPI* file_storage_api = Longtail_CreateFSStorageAPI();
   struct Longtail_StorageAPI* remote_storage_api;
-  if (StorageType && strcmp(StorageType, "r2") == 0) {
-    remote_storage_api = CreateR2StorageAPI(R2Endpoint, R2BucketName, R2AccessKeyId, R2SecretAccessKey, R2SessionToken, handle, JWTExpirationMs);
+  if (StorageType && strcmp(StorageType, "gateway") == 0) {
+    remote_storage_api = CreateGatewayStorageAPI(GatewayUrl, JWT, handle, JWTExpirationMs);
   } else {
-    remote_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT, handle, JWTExpirationMs);
+    remote_storage_api = CreateS3StorageAPI(S3Endpoint, S3Region, S3Bucket, S3AccessKeyId, S3SecretAccessKey, S3SessionToken, handle, JWTExpirationMs);
   }
 
   struct Longtail_BlockStoreAPI* store_block_fsstore_api = Longtail_CreateFSBlockStoreAPI(
@@ -517,8 +518,6 @@ int32_t SubmitSync(
     }
   }
 
-  SeaweedFSStorageAPI* seaweed_actual_api = (SeaweedFSStorageAPI*)remote_storage_api;
-
   std::stringstream version_file_stream;
   void* missing_store_index_buffer = 0;
   size_t missing_store_index_size;
@@ -604,17 +603,10 @@ int32_t SubmitSync(
 
   SetHandleStep(handle, "Uploading to server");
 
-  // Use the current JWT — if a token refresh occurred during the upload, the
-  // SeaweedFS storage API's m_JWT has been updated. For R2, the JWT field
-  // passed to SubmitSync is not used for storage (SigV4 is), but the backend
-  // /submit endpoint still needs a valid auth header.
-  const char* currentJwt = JWT;
-  if (!StorageType || strcmp(StorageType, "r2") != 0) {
-    SeaweedFSStorageAPI* sfs = (SeaweedFSStorageAPI*)remote_storage_api;
-    currentJwt = sfs->m_JWT;
-  } else if (handle->refreshedJwt[0] != '\0') {
-    currentJwt = handle->refreshedJwt;
-  }
+  // The /submit POST authenticates with the storage JWT (the gateway token).
+  // If a token refresh happened mid-upload, prefer the refreshed JWT.
+  const char* currentJwt =
+      (handle->refreshedJwt[0] != '\0') ? handle->refreshedJwt : JWT;
 
   // Use libcurl directly for the multipart POST
   CURL* curl = curl_easy_init();
@@ -761,17 +753,18 @@ SubmitAsync(
     bool EnableMmapBlockStore,
     const char* LocalRootPath,
     const char* RemoteBasePath,
-    const char* FilerUrl,
     const char* BackendUrl,
-    const char* JWT,
-    uint64_t JWTExpirationMs,
     const char* API_JWT,
     const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* GatewayUrl,
+    const char* JWT,
+    uint64_t JWTExpirationMs,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     bool KeepCheckedOut,
     const char* WorkspaceId,
     uint32_t NumModifications,
@@ -804,17 +797,18 @@ SubmitAsync(
         EnableMmapBlockStore,
         LocalRootPath,
         RemoteBasePath,
-        FilerUrl,
         BackendUrl,
-        JWT,
-        JWTExpirationMs,
         API_JWT,
         StorageType,
-        R2Endpoint,
-        R2BucketName,
-        R2AccessKeyId,
-        R2SecretAccessKey,
-        R2SessionToken,
+        GatewayUrl,
+        JWT,
+        JWTExpirationMs,
+        S3Endpoint,
+        S3Region,
+        S3Bucket,
+        S3AccessKeyId,
+        S3SecretAccessKey,
+        S3SessionToken,
         KeepCheckedOut,
         WorkspaceId,
         NumModifications,

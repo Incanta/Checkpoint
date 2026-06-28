@@ -1,81 +1,47 @@
 # ============================================================================
-# Storage mode. Pick ONE of the three setups below. We internally use R2 as it
-# provides a good balance of performance, reliability (e.g. cloud backup), and cost.
-# If you're a smaller team or just trying Checkpoint out, the default "Filer w/ stub"
-# is likely the easiest to get started with since it just stores the files on the local disk.
+# Storage mode for the core server. Pick ONE. See src/core/server/STORAGE.md.
 #
-#   1. Filer w/ stub      (default): server serves files from a local volume.
-#                           No extra services. Good for trying Checkpoint out and
-#                           smaller deployments.
-#   2. Filer w/ SeaweedFS:           real SeaweedFS cluster (master/volume/filer).
-#                           Run with: docker compose --profile seaweedfs up
-#                           Likely only useful for larger deployments.
-#   3. R2:                           Cloudflare R2 object storage.
+#   local : the server stores files on a local volume, served through the
+#           gateway. No extra services. Easiest; good for trying Checkpoint out
+#           and for smaller deployments. (DEFAULT)
+#   s3    : any S3-compatible store (SeaweedFS S3 gateway, MinIO, AWS, DO
+#           Spaces), proxied through the core-server gateway. One shared bucket;
+#           objects keyed by /{org}/{repo}/. Good for larger self-hosted setups.
+#   r2    : Cloudflare R2 object storage; clients talk to R2 directly (free
+#           egress + edge delivery).
 #
 # Whatever you choose here MUST match ./config/app/storage.yaml (`mode`).
-# Replace IP_ADDRESS with the host/IP your users reach this machine at.
+# Replace IP_ADDRESS in the app config with the host/IP your users reach.
 # ============================================================================
 
-mode: "seaweedfs" # "seaweedfs" | "r2"
+mode: "local" # local | s3 | r2
 
 jwt:
   signing-key: "secret|storage_signing_key"
 
 # ----------------------------------------------------------------------------
-# 1. Filer w/ stub (DEFAULT)
+# 1. local (DEFAULT): store on the server's own volume (the storage-data volume
+#    mounted at /app/data by docker-compose.yaml).
 # ----------------------------------------------------------------------------
-seaweedfs:
-  stub:
-    enabled: true
-    storage-path: "/app/data"
-  connection:
-    master:
-      host: "seaweed-master"
-      port: 9333
-      tls: false
-    filer:
-      # The server reaching its own embedded stub filer over the network.
-      internal:
-        host: "checkpoint-server"
-        port: 13001
-        tls: false
-        path: "/filer"
-      # What the Checkpoint CLI/daemon on user machines uses. Must be the
-      # externally reachable address of the server.
-      external:
-        host: "IP_ADDRESS"
-        port: 13001
-        tls: false
-        path: "/filer"
+local:
+  path: "/app/data"
 
 # ----------------------------------------------------------------------------
-# 2. Filer w/ SeaweedFS: uncomment, set `stub.enabled: false` above, and run
-#    `docker compose --profile seaweedfs up`. The filer is published on host
-#    port 13002 (-> container 8888) by docker-compose.yaml.
+# 2. s3: any S3-compatible store, proxied through the gateway. Server-side
+#    credentials (full access). For SeaweedFS, run its S3 gateway separately and
+#    point here; for MinIO/Spaces/AWS use their endpoint + region. Secrets come
+#    from ./config/.secrets (s3_* keys).
 # ----------------------------------------------------------------------------
-#   seaweedfs:
-#     stub:
-#       enabled: false
-#       storage-path: "/app/data"
-#     connection:
-#       master:
-#         host: "seaweed-master"
-#         port: 9333
-#         tls: false
-#       filer:
-#         internal:
-#           host: "seaweed-filer"
-#           port: 8888
-#           tls: false
-#           path: ""
-#         external:
-#           host: "IP_ADDRESS"
-#           port: 13002
-#           tls: false
-#           path: ""
+s3:
+  endpoint: "" # e.g. http://minio:9000 or https://s3.<region>.amazonaws.com
+  region: "" # e.g. us-east-1 (R2 uses "auto"; MinIO/SeaweedFS are lenient)
+  bucket: "" # one shared bucket for the whole app
+  force-path-style: true # MinIO / SeaweedFS S3 typically need path-style
+  access-key-id: "secret|s3_access_key_id"
+  secret-access-key: "secret|s3_secret_access_key"
 
 # ----------------------------------------------------------------------------
-# 3. R2: set `mode: "r2"` above and fill these in. Secrets come from
+# 3. r2: set `mode: "r2"` above and fill these in. Secrets come from
 #    ./config/.secrets (see the r2_* keys).
 # ----------------------------------------------------------------------------
 r2:

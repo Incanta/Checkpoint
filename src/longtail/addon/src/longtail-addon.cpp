@@ -35,17 +35,18 @@ WrapperAsyncHandle* SubmitAsync(
     bool EnableMmapBlockStore,
     const char* LocalRootPath,
     const char* RemoteBasePath,
-    const char* FilerUrl,
     const char* BackendUrl,
-    const char* JWT,
-    uint64_t JWTExpirationMs,
     const char* API_JWT,
     const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* GatewayUrl,
+    const char* JWT,
+    uint64_t JWTExpirationMs,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     bool KeepCheckedOut,
     const char* WorkspaceId,
     uint32_t NumModifications,
@@ -56,14 +57,14 @@ void FreeHandle(WrapperAsyncHandle* handle);
 
 WrapperAsyncHandle* MergeAsync(
     const char* RemoteBasePath,
-    const char* FilerUrl,
-    const char* JWT,
     const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* LocalStoragePath,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     void* additional_store_index_buffer,
     size_t additional_store_index_size,
     int LogLevel);
@@ -74,15 +75,16 @@ WrapperAsyncHandle* PullAsync(
     bool EnableMmapBlockStore,
     const char* LocalRootPath,
     const char* RemoteBasePath,
-    const char* FilerUrl,
+    const char* StorageType,
+    const char* GatewayUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
-    const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     const char* CachePath,
     int LogLevel);
 
@@ -90,15 +92,16 @@ ReadFileAsyncHandle* ReadFileFromVersionAsync(
     const char* FilePath,
     const char* VersionIndexName,
     const char* RemoteBasePath,
-    const char* FilerUrl,
+    const char* StorageType,
+    const char* GatewayUrl,
     const char* JWT,
     uint64_t JWTExpirationMs,
-    const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     int LogLevel);
 
 void FreeReadFileHandle(ReadFileAsyncHandle* handle);
@@ -158,6 +161,16 @@ static const char* StoreString(HandleContext* ctx, const std::string& s) {
   return ctx->strings.back().c_str();
 }
 
+// Optional string option: returns the stored value if present, else `def`.
+static const char* OptStr(HandleContext* ctx, const Napi::Object& opts,
+                          const char* key, const char* def) {
+  Napi::Value val = opts.Get(key);
+  if (val.IsString()) {
+    return StoreString(ctx, val.As<Napi::String>().Utf8Value());
+  }
+  return def;
+}
+
 // --------------------------------------------------------------------------
 // submitAsync(options: object): External<HandleContext>
 // --------------------------------------------------------------------------
@@ -198,53 +211,18 @@ static Napi::Value NapiSubmitAsync(const Napi::CallbackInfo& info) {
   bool enableMmapBlockStore = opts.Get("enableMmapBlockStore").As<Napi::Boolean>().Value();
   const char* localRootPath = StoreString(ctx, opts.Get("localRootPath").As<Napi::String>().Utf8Value());
   const char* remoteBasePath = StoreString(ctx, opts.Get("remoteBasePath").As<Napi::String>().Utf8Value());
-  const char* filerUrl = StoreString(ctx, opts.Get("filerUrl").As<Napi::String>().Utf8Value());
   const char* backendUrl = StoreString(ctx, opts.Get("backendUrl").As<Napi::String>().Utf8Value());
   const char* jwt = StoreString(ctx, opts.Get("jwt").As<Napi::String>().Utf8Value());
   uint64_t jwtExpirationMs = static_cast<uint64_t>(opts.Get("jwtExpirationMs").As<Napi::Number>().Int64Value());
   const char* apiJwt = StoreString(ctx, opts.Get("apiJwt").As<Napi::String>().Utf8Value());
-  const char* storageType = "seaweedfs";
-  const char* r2Endpoint = nullptr;
-  const char* r2BucketName = nullptr;
-  const char* r2AccessKeyId = nullptr;
-  const char* r2SecretAccessKey = nullptr;
-  const char* r2SessionToken = nullptr;
-  {
-    Napi::Value val = opts.Get("storageType");
-    if (val.IsString()) {
-      storageType = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2Endpoint");
-    if (val.IsString()) {
-      r2Endpoint = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2BucketName");
-    if (val.IsString()) {
-      r2BucketName = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2AccessKeyId");
-    if (val.IsString()) {
-      r2AccessKeyId = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2SecretAccessKey");
-    if (val.IsString()) {
-      r2SecretAccessKey = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2SessionToken");
-    if (val.IsString()) {
-      r2SessionToken = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
+  const char* storageType = OptStr(ctx, opts, "storageType", "gateway");
+  const char* gatewayUrl = OptStr(ctx, opts, "gatewayUrl", "");
+  const char* s3Endpoint = OptStr(ctx, opts, "s3Endpoint", "");
+  const char* s3Region = OptStr(ctx, opts, "s3Region", "");
+  const char* s3Bucket = OptStr(ctx, opts, "s3Bucket", "");
+  const char* s3AccessKeyId = OptStr(ctx, opts, "s3AccessKeyId", "");
+  const char* s3SecretAccessKey = OptStr(ctx, opts, "s3SecretAccessKey", "");
+  const char* s3SessionToken = OptStr(ctx, opts, "s3SessionToken", "");
   bool keepCheckedOut = opts.Get("keepCheckedOut").As<Napi::Boolean>().Value();
   const char* workspaceId = StoreString(ctx, opts.Get("workspaceId").As<Napi::String>().Utf8Value());
   int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
@@ -273,9 +251,9 @@ static Napi::Value NapiSubmitAsync(const Napi::CallbackInfo& info) {
       targetChunkSize, targetBlockSize, maxChunksPerBlock, minBlockUsagePercent,
       hashingAlgo, compressionAlgo,
       enableMmapIndexing, enableMmapBlockStore,
-      localRootPath, remoteBasePath, filerUrl, backendUrl,
-      jwt, jwtExpirationMs, apiJwt,
-      storageType, r2Endpoint, r2BucketName, r2AccessKeyId, r2SecretAccessKey, r2SessionToken,
+      localRootPath, remoteBasePath, backendUrl, apiJwt,
+      storageType, gatewayUrl, jwt, jwtExpirationMs,
+      s3Endpoint, s3Region, s3Bucket, s3AccessKeyId, s3SecretAccessKey, s3SessionToken,
       keepCheckedOut, workspaceId,
       numMods, ctx->modifications.data(),
       logLevel);
@@ -311,66 +289,25 @@ static Napi::Value NapiPullAsync(const Napi::CallbackInfo& info) {
   bool enableMmapBlockStore = opts.Get("enableMmapBlockStore").As<Napi::Boolean>().Value();
   const char* localRootPath = StoreString(ctx, opts.Get("localRootPath").As<Napi::String>().Utf8Value());
   const char* remoteBasePath = StoreString(ctx, opts.Get("remoteBasePath").As<Napi::String>().Utf8Value());
-  const char* filerUrl = StoreString(ctx, opts.Get("filerUrl").As<Napi::String>().Utf8Value());
   const char* jwt = StoreString(ctx, opts.Get("jwt").As<Napi::String>().Utf8Value());
   uint64_t jwtExpirationMs = static_cast<uint64_t>(opts.Get("jwtExpirationMs").As<Napi::Number>().Int64Value());
-  const char* storageType = "seaweedfs";
-  const char* r2Endpoint = nullptr;
-  const char* r2BucketName = nullptr;
-  const char* r2AccessKeyId = nullptr;
-  const char* r2SecretAccessKey = nullptr;
-  const char* r2SessionToken = nullptr;
-  {
-    Napi::Value val = opts.Get("storageType");
-    if (val.IsString()) {
-      storageType = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2Endpoint");
-    if (val.IsString()) {
-      r2Endpoint = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2BucketName");
-    if (val.IsString()) {
-      r2BucketName = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2AccessKeyId");
-    if (val.IsString()) {
-      r2AccessKeyId = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2SecretAccessKey");
-    if (val.IsString()) {
-      r2SecretAccessKey = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2SessionToken");
-    if (val.IsString()) {
-      r2SessionToken = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
+  const char* storageType = OptStr(ctx, opts, "storageType", "gateway");
+  const char* gatewayUrl = OptStr(ctx, opts, "gatewayUrl", "");
+  const char* s3Endpoint = OptStr(ctx, opts, "s3Endpoint", "");
+  const char* s3Region = OptStr(ctx, opts, "s3Region", "");
+  const char* s3Bucket = OptStr(ctx, opts, "s3Bucket", "");
+  const char* s3AccessKeyId = OptStr(ctx, opts, "s3AccessKeyId", "");
+  const char* s3SecretAccessKey = OptStr(ctx, opts, "s3SecretAccessKey", "");
+  const char* s3SessionToken = OptStr(ctx, opts, "s3SessionToken", "");
   int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
-  const char* cachePath = nullptr;
-  {
-    Napi::Value val = opts.Get("cachePath");
-    if (val.IsString()) {
-      cachePath = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
+  const char* cachePath = OptStr(ctx, opts, "cachePath", nullptr);
 
   WrapperAsyncHandle* handle = ::PullAsync(
       versionIndex,
       enableMmapIndexing, enableMmapBlockStore,
-      localRootPath, remoteBasePath, filerUrl, jwt,
-      jwtExpirationMs,
-      storageType, r2Endpoint, r2BucketName, r2AccessKeyId, r2SecretAccessKey, r2SessionToken,
+      localRootPath, remoteBasePath,
+      storageType, gatewayUrl, jwt, jwtExpirationMs,
+      s3Endpoint, s3Region, s3Bucket, s3AccessKeyId, s3SecretAccessKey, s3SessionToken,
       cachePath,
       logLevel);
 
@@ -401,50 +338,15 @@ static Napi::Value NapiMergeAsync(const Napi::CallbackInfo& info) {
   auto* ctx = new HandleContext();
 
   const char* remoteBasePath = StoreString(ctx, opts.Get("remoteBasePath").As<Napi::String>().Utf8Value());
-  const char* filerUrl = StoreString(ctx, opts.Get("filerUrl").As<Napi::String>().Utf8Value());
-  const char* jwt = StoreString(ctx, opts.Get("jwt").As<Napi::String>().Utf8Value());
-  const char* storageType = "seaweedfs";
-  const char* r2Endpoint = nullptr;
-  const char* r2BucketName = nullptr;
-  const char* r2AccessKeyId = nullptr;
-  const char* r2SecretAccessKey = nullptr;
-  const char* r2SessionToken = nullptr;
-  {
-    Napi::Value val = opts.Get("storageType");
-    if (val.IsString()) {
-      storageType = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2Endpoint");
-    if (val.IsString()) {
-      r2Endpoint = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2BucketName");
-    if (val.IsString()) {
-      r2BucketName = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2AccessKeyId");
-    if (val.IsString()) {
-      r2AccessKeyId = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2SecretAccessKey");
-    if (val.IsString()) {
-      r2SecretAccessKey = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2SessionToken");
-    if (val.IsString()) {
-      r2SessionToken = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
+  // Server-side merge: storageType is "local" or "s3" (never "gateway").
+  const char* storageType = OptStr(ctx, opts, "storageType", "local");
+  const char* localStoragePath = OptStr(ctx, opts, "localStoragePath", "");
+  const char* s3Endpoint = OptStr(ctx, opts, "s3Endpoint", "");
+  const char* s3Region = OptStr(ctx, opts, "s3Region", "");
+  const char* s3Bucket = OptStr(ctx, opts, "s3Bucket", "");
+  const char* s3AccessKeyId = OptStr(ctx, opts, "s3AccessKeyId", "");
+  const char* s3SecretAccessKey = OptStr(ctx, opts, "s3SecretAccessKey", "");
+  const char* s3SessionToken = OptStr(ctx, opts, "s3SessionToken", "");
   int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
 
   // Copy the store index buffer so it stays alive for the async operation
@@ -452,8 +354,9 @@ static Napi::Value NapiMergeAsync(const Napi::CallbackInfo& info) {
   ctx->bufferData.assign(storeIndexBuf.Data(), storeIndexBuf.Data() + storeIndexBuf.Length());
 
   WrapperAsyncHandle* handle = ::MergeAsync(
-      remoteBasePath, filerUrl, jwt,
-      storageType, r2Endpoint, r2BucketName, r2AccessKeyId, r2SecretAccessKey, r2SessionToken,
+      remoteBasePath,
+      storageType, localStoragePath,
+      s3Endpoint, s3Region, s3Bucket, s3AccessKeyId, s3SecretAccessKey, s3SessionToken,
       ctx->bufferData.data(),
       ctx->bufferData.size(),
       logLevel);
@@ -487,57 +390,22 @@ static Napi::Value NapiReadFileFromVersionAsync(const Napi::CallbackInfo& info) 
   const char* filePath = StoreString(ctx, opts.Get("filePath").As<Napi::String>().Utf8Value());
   const char* versionIndexName = StoreString(ctx, opts.Get("versionIndexName").As<Napi::String>().Utf8Value());
   const char* remoteBasePath = StoreString(ctx, opts.Get("remoteBasePath").As<Napi::String>().Utf8Value());
-  const char* filerUrl = StoreString(ctx, opts.Get("filerUrl").As<Napi::String>().Utf8Value());
   const char* jwt = StoreString(ctx, opts.Get("jwt").As<Napi::String>().Utf8Value());
   uint64_t jwtExpirationMs = static_cast<uint64_t>(opts.Get("jwtExpirationMs").As<Napi::Number>().Int64Value());
-  const char* storageType = "seaweedfs";
-  const char* r2Endpoint = nullptr;
-  const char* r2BucketName = nullptr;
-  const char* r2AccessKeyId = nullptr;
-  const char* r2SecretAccessKey = nullptr;
-  const char* r2SessionToken = nullptr;
-  {
-    Napi::Value val = opts.Get("storageType");
-    if (val.IsString()) {
-      storageType = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2Endpoint");
-    if (val.IsString()) {
-      r2Endpoint = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2BucketName");
-    if (val.IsString()) {
-      r2BucketName = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2AccessKeyId");
-    if (val.IsString()) {
-      r2AccessKeyId = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2SecretAccessKey");
-    if (val.IsString()) {
-      r2SecretAccessKey = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
-  {
-    Napi::Value val = opts.Get("r2SessionToken");
-    if (val.IsString()) {
-      r2SessionToken = StoreString(ctx, val.As<Napi::String>().Utf8Value());
-    }
-  }
+  const char* storageType = OptStr(ctx, opts, "storageType", "gateway");
+  const char* gatewayUrl = OptStr(ctx, opts, "gatewayUrl", "");
+  const char* s3Endpoint = OptStr(ctx, opts, "s3Endpoint", "");
+  const char* s3Region = OptStr(ctx, opts, "s3Region", "");
+  const char* s3Bucket = OptStr(ctx, opts, "s3Bucket", "");
+  const char* s3AccessKeyId = OptStr(ctx, opts, "s3AccessKeyId", "");
+  const char* s3SecretAccessKey = OptStr(ctx, opts, "s3SecretAccessKey", "");
+  const char* s3SessionToken = OptStr(ctx, opts, "s3SessionToken", "");
   int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
 
   ReadFileAsyncHandle* handle = ::ReadFileFromVersionAsync(
       filePath, versionIndexName, remoteBasePath,
-      filerUrl, jwt, jwtExpirationMs,
-      storageType, r2Endpoint, r2BucketName, r2AccessKeyId, r2SecretAccessKey, r2SessionToken,
+      storageType, gatewayUrl, jwt, jwtExpirationMs,
+      s3Endpoint, s3Region, s3Bucket, s3AccessKeyId, s3SecretAccessKey, s3SessionToken,
       logLevel);
 
   if (!handle) {
@@ -695,29 +563,29 @@ static Napi::Value NapiSetRefreshedToken(const Napi::CallbackInfo& info) {
     }
   }
 
-  // Write R2 credentials
+  // Write S3 credentials (used by the S3 adapter; gateway uses only the JWT)
   {
-    Napi::Value val = opts.Get("r2AccessKeyId");
+    Napi::Value val = opts.Get("s3AccessKeyId");
     if (val.IsString()) {
       std::string s = val.As<Napi::String>().Utf8Value();
-      strncpy(handle->refreshedR2AccessKeyId, s.c_str(), sizeof(handle->refreshedR2AccessKeyId) - 1);
-      handle->refreshedR2AccessKeyId[sizeof(handle->refreshedR2AccessKeyId) - 1] = '\0';
+      strncpy(handle->refreshedS3AccessKeyId, s.c_str(), sizeof(handle->refreshedS3AccessKeyId) - 1);
+      handle->refreshedS3AccessKeyId[sizeof(handle->refreshedS3AccessKeyId) - 1] = '\0';
     }
   }
   {
-    Napi::Value val = opts.Get("r2SecretAccessKey");
+    Napi::Value val = opts.Get("s3SecretAccessKey");
     if (val.IsString()) {
       std::string s = val.As<Napi::String>().Utf8Value();
-      strncpy(handle->refreshedR2SecretAccessKey, s.c_str(), sizeof(handle->refreshedR2SecretAccessKey) - 1);
-      handle->refreshedR2SecretAccessKey[sizeof(handle->refreshedR2SecretAccessKey) - 1] = '\0';
+      strncpy(handle->refreshedS3SecretAccessKey, s.c_str(), sizeof(handle->refreshedS3SecretAccessKey) - 1);
+      handle->refreshedS3SecretAccessKey[sizeof(handle->refreshedS3SecretAccessKey) - 1] = '\0';
     }
   }
   {
-    Napi::Value val = opts.Get("r2SessionToken");
+    Napi::Value val = opts.Get("s3SessionToken");
     if (val.IsString()) {
       std::string s = val.As<Napi::String>().Utf8Value();
-      strncpy(handle->refreshedR2SessionToken, s.c_str(), sizeof(handle->refreshedR2SessionToken) - 1);
-      handle->refreshedR2SessionToken[sizeof(handle->refreshedR2SessionToken) - 1] = '\0';
+      strncpy(handle->refreshedS3SessionToken, s.c_str(), sizeof(handle->refreshedS3SessionToken) - 1);
+      handle->refreshedS3SessionToken[sizeof(handle->refreshedS3SessionToken) - 1] = '\0';
     }
   }
 

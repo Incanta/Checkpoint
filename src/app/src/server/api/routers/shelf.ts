@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import config from "@incanta/config";
-import njwt from "njwt";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { FileChangeType, Prisma, RepoAccess } from "@prisma/client";
@@ -13,6 +12,7 @@ import {
   buildStateTreeBlocks,
   primeStateTreePaths,
 } from "~/server/state-tree";
+import { buildAddonStorageOptions } from "~/server/storage-options";
 import {
   readFileFromVersionAsync,
   pollReadFileHandle,
@@ -89,7 +89,8 @@ export const shelfRouter = createTRPCRouter({
           description: z.string(),
           repoId: z.string(),
           authorId: z.string(),
-          versionIndex: z.string(),          changelistNumber: z.int(),
+          versionIndex: z.string(),
+          changelistNumber: z.int(),
           status: z.enum(["ACTIVE", "SUBMITTED", "DELETED"]),
           submittedToBranch: z.string().nullable(),
           submittedAt: z.date().nullable(),
@@ -148,7 +149,8 @@ export const shelfRouter = createTRPCRouter({
         description: z.string(),
         repoId: z.string(),
         authorId: z.string(),
-        versionIndex: z.string(),        changelistNumber: z.int(),
+        versionIndex: z.string(),
+        changelistNumber: z.int(),
         status: z.enum(["ACTIVE", "SUBMITTED", "DELETED"]),
         submittedToBranch: z.string().nullable(),
         submittedAt: z.date().nullable(),
@@ -221,7 +223,8 @@ export const shelfRouter = createTRPCRouter({
         description: z.string(),
         repoId: z.string(),
         authorId: z.string(),
-        versionIndex: z.string(),        changelistNumber: z.int(),
+        versionIndex: z.string(),
+        changelistNumber: z.int(),
         status: z.enum(["ACTIVE", "SUBMITTED", "DELETED"]),
         submittedToBranch: z.string().nullable(),
         submittedAt: z.date().nullable(),
@@ -1001,7 +1004,8 @@ export const shelfRouter = createTRPCRouter({
         description: z.string(),
         repoId: z.string(),
         authorId: z.string(),
-        versionIndex: z.string(),        changelistNumber: z.int(),
+        versionIndex: z.string(),
+        changelistNumber: z.int(),
         status: z.enum(["ACTIVE", "SUBMITTED", "DELETED"]),
         submittedToBranch: z.string().nullable(),
         submittedAt: z.date().nullable(),
@@ -1080,29 +1084,10 @@ export const shelfRouter = createTRPCRouter({
 
       const remoteBasePath = `/${repo.orgId}/${repo.id}`;
 
-      const readToken = njwt.create(
-        {
-          iss: "checkpoint-vcs",
-          sub: ctx.session.user.id,
-          userId: ctx.session.user.id,
-          orgId: repo.orgId,
-          repoId: repo.id,
-          mode: "read",
-          basePath: remoteBasePath,
-        },
-        config.get<string>("storage.jwt.signing-key"),
-      );
-
-      const expirationSeconds = config.get<number>(
-        "storage.token-expiration-seconds",
-      );
-      readToken.setExpiration(Date.now() + expirationSeconds * 1000);
-      const jwt = readToken.compact();
-      const jwtExpirationMs = Date.now() + expirationSeconds * 1000;
-
-      const backendUrl = config.get<string>("storage.backend-url.internal");
-      const filerUrl = await fetch(`${backendUrl}/filer-url`).then((res) =>
-        res.text(),
+      const storageOptions = await buildAddonStorageOptions(
+        ctx.session.user.id,
+        repo,
+        false,
       );
 
       const logLevel = GetLogLevel(
@@ -1115,9 +1100,7 @@ export const shelfRouter = createTRPCRouter({
         filePath: input.filePath,
         versionIndexName: shelf.versionIndex,
         remoteBasePath,
-        filerUrl,
-        jwt,
-        jwtExpirationMs,
+        ...storageOptions,
         logLevel,
       });
 

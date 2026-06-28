@@ -2,26 +2,31 @@
 
 int Merge(
     const char* RemoteBasePath,
-    const char* FilerUrl,
-    const char* JWT,
     const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* LocalStoragePath,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     void* additional_store_index_buffer,
     size_t additional_store_index_size,
     WrapperAsyncHandle* handle) {
+  // Server-side merge runs against the backend directly: "local" uses the
+  // native filesystem (base path under LocalStoragePath); "s3" (covers s3 and
+  // r2 modes) uses the S3 adapter with the server's full credentials.
   struct Longtail_StorageAPI* remote_storage_api;
-  if (StorageType && strcmp(StorageType, "r2") == 0) {
-    remote_storage_api = CreateR2StorageAPI(R2Endpoint, R2BucketName, R2AccessKeyId, R2SecretAccessKey, R2SessionToken);
+  std::string basePath = RemoteBasePath;
+  if (StorageType && strcmp(StorageType, "local") == 0) {
+    remote_storage_api = Longtail_CreateFSStorageAPI();
+    basePath = std::string(LocalStoragePath) + RemoteBasePath;
   } else {
-    remote_storage_api = CreateSeaweedFSStorageAPI(FilerUrl, JWT);
+    remote_storage_api = CreateS3StorageAPI(S3Endpoint, S3Region, S3Bucket, S3AccessKeyId, S3SecretAccessKey, S3SessionToken);
   }
 
   if (!remote_storage_api) {
-    SetHandleStep(handle, "Failed to create seaweed storage api");
+    SetHandleStep(handle, "Failed to create storage api");
     handle->error = ENOMEM;
     handle->completed = 1;
     return ENOMEM;
@@ -33,8 +38,8 @@ int Merge(
       additional_store_index_size,
       &additional_store_index);
 
-  std::string LockFilePath = RemoteBasePath + std::string("/store.lsi.sync");
-  std::string StoreFilePath = RemoteBasePath + std::string("/store.lsi");
+  std::string LockFilePath = basePath + std::string("/store.lsi.sync");
+  std::string StoreFilePath = basePath + std::string("/store.lsi");
 
   while (remote_storage_api->IsFile(remote_storage_api, LockFilePath.c_str())) {
     Longtail_Sleep(100000);  // sleep for 100ms
@@ -168,14 +173,14 @@ int Merge(
 DLL_EXPORT WrapperAsyncHandle*
 MergeAsync(
     const char* RemoteBasePath,
-    const char* FilerUrl,
-    const char* JWT,
     const char* StorageType,
-    const char* R2Endpoint,
-    const char* R2BucketName,
-    const char* R2AccessKeyId,
-    const char* R2SecretAccessKey,
-    const char* R2SessionToken,
+    const char* LocalStoragePath,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
     void* additional_store_index_buffer,
     size_t additional_store_index_size,
     int LogLevel = 4) {
@@ -193,14 +198,14 @@ MergeAsync(
   std::thread merge_thread([=]() {
     int32_t err = Merge(
         RemoteBasePath,
-        FilerUrl,
-        JWT,
         StorageType,
-        R2Endpoint,
-        R2BucketName,
-        R2AccessKeyId,
-        R2SecretAccessKey,
-        R2SessionToken,
+        LocalStoragePath,
+        S3Endpoint,
+        S3Region,
+        S3Bucket,
+        S3AccessKeyId,
+        S3SecretAccessKey,
+        S3SessionToken,
         additional_store_index_buffer,
         additional_store_index_size, handle);
 

@@ -60,62 +60,10 @@ services:
       - ./config/server:/app/config
       - ./config/.secrets:/app/.secrets:ro
 
-  # ----------------------------------------------------------------
-  # SeaweedFS cluster: only started with `--profile seaweedfs`
-  # ----------------------------------------------------------------
-  # Use this profile for the "Filer w/ SeaweedFS" storage mode. See README.md
-  # for the matching ./config/server/storage.yaml changes. Not started for the
-  # default stub mode or the R2 mode.
-  seaweed-master:
-    container_name: checkpoint-seaweed-master
-    image: chrislusf/seaweedfs:latest
-    restart: unless-stopped
-    profiles: ["seaweedfs"]
-    networks:
-      - checkpoint
-    command: "master -ip=seaweed-master -mdir=/data"
-    volumes:
-      - seaweed-master-data:/data
-
-  seaweed-volume:
-    container_name: checkpoint-seaweed-volume
-    image: chrislusf/seaweedfs:latest
-    restart: unless-stopped
-    profiles: ["seaweedfs"]
-    networks:
-      - checkpoint
-    command: "volume -mserver=seaweed-master:9333 -ip=seaweed-volume -dir=/data -max=0"
-    depends_on:
-      - seaweed-master
-    volumes:
-      - seaweed-volume-data:/data
-
-  seaweed-filer:
-    container_name: checkpoint-seaweed-filer
-    image: chrislusf/seaweedfs:latest
-    restart: unless-stopped
-    profiles: ["seaweedfs"]
-    networks:
-      - checkpoint
-    # Publish the filer so the Checkpoint CLI/daemon on user machines can reach
-    # it directly (the external filer URL the server hands out). Internal
-    # server-to-filer traffic stays on the `checkpoint` network.
-    ports:
-      - "13002:8888"
-    command: "filer -master=seaweed-master:9333 -ip=seaweed-filer"
-    depends_on:
-      - seaweed-master
-      - seaweed-volume
-    volumes:
-      - seaweed-filer-data:/data
-
 volumes:
   # postgres-data:
   app-data:
   storage-data:
-  seaweed-master-data:
-  seaweed-volume-data:
-  seaweed-filer-data:
 
 networks:
   checkpoint:

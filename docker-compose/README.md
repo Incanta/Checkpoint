@@ -4,12 +4,11 @@ A self-hosted Checkpoint instance: the **app** (UI + API), the **server** (core 
 
 ## Services
 
-| Service    | Purpose                   | Host port  |
-| ---------- | ------------------------- | ---------- |
-| `app`      | Next.js UI + API          | 13000      |
-| `server`   | Core storage server       | 13001      |
-| `postgres` | Application database      | (internal) |
-| SeaweedFS  | Object storage (optional) | 13002      |
+| Service    | Purpose              | Host port  |
+| ---------- | -------------------- | ---------- |
+| `app`      | Next.js UI + API     | 13000      |
+| `server`   | Core storage server  | 13001      |
+| `postgres` | Application database  | (internal) |
 
 ## 1. Set your host address
 
@@ -17,7 +16,6 @@ The browser and the Checkpoint CLI/daemon connect from outside the Docker networ
 
 - `config/app/server.yaml` (`external-url`)
 - `config/app/storage.yaml` (`backend-url.external`)
-- `config/server/storage.yaml` (`filer ... external.host`)
 
 For a purely local trial you can use `localhost`.
 
@@ -39,11 +37,11 @@ Pick one and edit `config/app/storage.yaml` + `config/server/storage.yaml` (thei
 
 Which to pick:
 
-- **Smaller team or just trying Checkpoint out?** Use the default **Filer w/ stub**. It just stores files on the local disk and needs no extra services.
-- **Larger deployment?** **Filer w/ SeaweedFS** runs a real distributed cluster.
-- **Want a simple cloud-based storage system (what we use internally)?** **R2** gives a good balance of performance, reliability (e.g. cloud backup), and cost.
+- **Smaller team or just trying Checkpoint out?** Use the default **local** mode. The server stores files on its own disk and serves them through its gateway; no extra services.
+- **Larger self-hosted deployment?** Use **s3** with any S3-compatible store (MinIO, SeaweedFS's S3 gateway, AWS, DigitalOcean Spaces). The server proxies blocks to it through the gateway.
+- **Want simple, cheap cloud storage (what we use internally)?** **R2** gives a good balance of performance, reliability (e.g. cloud backup), and cost, and clients talk to R2 directly (free egress).
 
-### a. Filer w/ stub (default)
+### a. local (default)
 
 The server serves files from a local volume. No extra services. Good for trying Checkpoint out and smaller deployments.
 
@@ -51,15 +49,20 @@ The server serves files from a local volume. No extra services. Good for trying 
 docker compose up -d
 ```
 
-### b. Filer w/ SeaweedFS
+### b. s3 (any S3-compatible store)
 
-A real SeaweedFS cluster (master + volume + filer), started via the `seaweedfs` compose profile. Likely only useful for larger deployments. In `config/server/storage.yaml`: set `seaweedfs.stub.enabled: false` and switch the `connection` block to the SeaweedFS values (see the commented section in that file). Leave `mode` as `seaweedfs` in both files. Then:
+Set `mode: "s3"` in both storage files, then fill the `s3` block in `config/server/storage.yaml` (endpoint, region, one shared bucket, `force-path-style` for MinIO/SeaweedFS) and add the credentials to `config/.secrets`:
 
-```bash
-docker compose --profile seaweedfs up -d
+```ini
+s3_access_key_id=...
+s3_secret_access_key=...
 ```
 
-The filer is published on host port `13002`; set the external filer host to your `IP_ADDRESS` so remote clients can reach it.
+Run the S3 store separately (e.g. a MinIO container or SeaweedFS with its S3 gateway). Clients still talk only to the Checkpoint server, which proxies to S3.
+
+```bash
+docker compose up -d
+```
 
 ### c. Cloudflare R2
 
@@ -78,9 +81,7 @@ docker compose up -d
 ## 4. Start
 
 ```bash
-docker compose up -d        # stub or R2
-# or
-docker compose --profile seaweedfs up -d   # full SeaweedFS
+docker compose up -d        # any mode (local / s3 / r2)
 
 docker compose logs -f app  # watch startup + DB migrations
 ```

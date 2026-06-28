@@ -74,6 +74,9 @@ set "DELAY_LOAD_HOOK="
 if exist "%~dp0node_modules\cmake-js\lib\cpp\win_delay_load_hook.cc" (
     set "DELAY_LOAD_HOOK=%~dp0node_modules\cmake-js\lib\cpp\win_delay_load_hook.cc"
 )
+REM CMake parses -D string values as cmake code, so backslashes in the path are
+REM read as escapes (e.g. "\w" is invalid). Pass it with forward slashes.
+if defined DELAY_LOAD_HOOK set "DELAY_LOAD_HOOK=!DELAY_LOAD_HOOK:\=/!"
 
 set "SRC_DIR=%cd%"
 set "BUILD_DIR=%cd%\build"

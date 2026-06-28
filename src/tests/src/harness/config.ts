@@ -53,8 +53,8 @@ function applyDefaults(): void {
   setConfig("db.provider", "sqlite");
   setConfig("db.url", "file:./test.db");
 
-  // Storage: SeaweedFS via the local server
-  setConfig("storage.mode", "seaweedfs");
+  // Storage: local gateway mode (no external storage server in tests)
+  setConfig("storage.mode", "local");
   setConfig("storage.backend-url.internal", "http://localhost:13001");
   setConfig("storage.backend-url.external", "http://localhost:13001");
   setConfig("storage.jwt.signing-key", "test-jwt-secret");

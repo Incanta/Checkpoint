@@ -91,7 +91,31 @@ export interface Modification {
   oldPath?: string;
 }
 
-export interface SubmitAsyncOptions {
+// Storage backend selection shared by the async operations. See STORAGE.md.
+//   gateway - the Checkpoint core-server gateway (storage.mode local / s3);
+//             the client streams blobs over HTTP with a Bearer JWT.
+//   s3      - direct S3-compatible access (R2 for clients; any S3 for the
+//             server-side store-index merge).
+//   local   - the server's own disk (store-index merge only).
+export interface StorageOptions {
+  storageType: "gateway" | "s3" | "local";
+  // gateway
+  gatewayUrl?: string;
+  jwt?: string; // gateway Bearer token (also the control-plane token)
+  jwtExpirationMs?: number;
+  // s3 (and r2, which is just s3 with R2's endpoint/region)
+  s3Endpoint?: string;
+  s3Region?: string;
+  s3Bucket?: string;
+  s3AccessKeyId?: string;
+  s3SecretAccessKey?: string;
+  s3SessionToken?: string;
+  s3ForcePathStyle?: boolean;
+  // local (merge only)
+  localStoragePath?: string;
+}
+
+export interface SubmitAsyncOptions extends StorageOptions {
   branchName: string;
   shelfName?: string;
   artifactForChangelistNum?: number;
@@ -106,70 +130,35 @@ export interface SubmitAsyncOptions {
   enableMmapBlockStore: boolean;
   localRootPath: string;
   remoteBasePath: string;
-  filerUrl: string;
-  backendUrl: string;
-  jwt: string;
-  jwtExpirationMs: number;
+  backendUrl: string; // core-server control plane (/submit)
   apiJwt: string;
   keepCheckedOut: boolean;
   workspaceId: string;
   modifications: Modification[];
   logLevel: number;
-  storageType?: "seaweedfs" | "r2";
-  r2AccessKeyId?: string;
-  r2SecretAccessKey?: string;
-  r2SessionToken?: string;
-  r2Endpoint?: string;
-  r2BucketName?: string;
 }
 
-export interface PullAsyncOptions {
+export interface PullAsyncOptions extends StorageOptions {
   versionIndex: string;
   enableMmapIndexing: boolean;
   enableMmapBlockStore: boolean;
   localRootPath: string;
   remoteBasePath: string;
-  filerUrl: string;
-  jwt: string;
-  jwtExpirationMs: number;
   logLevel: number;
   cachePath?: string;
-  storageType?: "seaweedfs" | "r2";
-  r2AccessKeyId?: string;
-  r2SecretAccessKey?: string;
-  r2SessionToken?: string;
-  r2Endpoint?: string;
-  r2BucketName?: string;
 }
 
-export interface MergeAsyncOptions {
+export interface MergeAsyncOptions extends StorageOptions {
   remoteBasePath: string;
-  filerUrl: string;
-  jwt: string;
   storeIndexBuffer: Buffer;
   logLevel: number;
-  storageType?: "seaweedfs" | "r2";
-  r2AccessKeyId?: string;
-  r2SecretAccessKey?: string;
-  r2SessionToken?: string;
-  r2Endpoint?: string;
-  r2BucketName?: string;
 }
 
-export interface ReadFileFromVersionAsyncOptions {
+export interface ReadFileFromVersionAsyncOptions extends StorageOptions {
   filePath: string;
   versionIndexName: string;
   remoteBasePath: string;
-  filerUrl: string;
-  jwt: string;
-  jwtExpirationMs: number;
   logLevel: number;
-  storageType?: "seaweedfs" | "r2";
-  r2AccessKeyId?: string;
-  r2SecretAccessKey?: string;
-  r2SessionToken?: string;
-  r2Endpoint?: string;
-  r2BucketName?: string;
 }
 
 export { HandleStatus, NativeHandle };
@@ -180,18 +169,18 @@ export { HandleStatus, NativeHandle };
 
 export interface RefreshedTokenOptions {
   jwt?: string;
-  r2AccessKeyId?: string;
-  r2SecretAccessKey?: string;
-  r2SessionToken?: string;
+  s3AccessKeyId?: string;
+  s3SecretAccessKey?: string;
+  s3SessionToken?: string;
   expirationMs: number;
 }
 
 export interface TokenRefreshResult {
   jwt?: string;
   jwtExpirationMs: number;
-  r2AccessKeyId?: string;
-  r2SecretAccessKey?: string;
-  r2SessionToken?: string;
+  s3AccessKeyId?: string;
+  s3SecretAccessKey?: string;
+  s3SessionToken?: string;
 }
 
 // --------------------------------------------------------------------------
@@ -342,9 +331,9 @@ export async function pollHandle(
         const refreshed = await options.onTokenRefresh();
         setRefreshedToken(handle, {
           jwt: refreshed.jwt,
-          r2AccessKeyId: refreshed.r2AccessKeyId,
-          r2SecretAccessKey: refreshed.r2SecretAccessKey,
-          r2SessionToken: refreshed.r2SessionToken,
+          s3AccessKeyId: refreshed.s3AccessKeyId,
+          s3SecretAccessKey: refreshed.s3SecretAccessKey,
+          s3SessionToken: refreshed.s3SessionToken,
           expirationMs: refreshed.jwtExpirationMs,
         });
       } catch (err) {

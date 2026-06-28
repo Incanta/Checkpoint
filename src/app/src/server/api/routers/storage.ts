@@ -54,7 +54,10 @@ export const storageRouter = createTRPCRouter({
 
       token.setExpiration(Date.now() + expirationSeconds * 1000);
 
-      // Check if R2 storage should be used
+      const serverUrl = config.get<string>("storage.backend-url.external");
+      const expiration = Math.floor(Date.now() / 1000) + expirationSeconds;
+
+      // R2: the client talks to R2 directly with scoped STS temp credentials.
       if (isR2Enabled()) {
         if (!repo.r2BucketName) {
           throw new TRPCError({
@@ -70,11 +73,11 @@ export const storageRouter = createTRPCRouter({
         );
 
         return {
-          storageType: "r2" as "seaweedfs" | "r2",
+          kind: "r2" as const,
           token: token.compact(),
-          expiration: Math.floor(Date.now() / 1000) + expirationSeconds,
-          backendUrl: config.get<string>("storage.backend-url.external"),
-          r2Credentials: {
+          expiration,
+          serverUrl,
+          r2: {
             accessKeyId: creds.accessKeyId,
             secretAccessKey: creds.secretAccessKey,
             sessionToken: creds.sessionToken,
@@ -84,18 +87,14 @@ export const storageRouter = createTRPCRouter({
         };
       }
 
+      // Gateway modes (local / s3): the client talks to the core-server gateway
+      // with the Checkpoint JWT; the server holds the backend credentials.
       return {
-        storageType: "seaweedfs" as "seaweedfs" | "r2",
+        kind: "gateway" as const,
         token: token.compact(),
-        expiration: Math.floor(Date.now() / 1000) + expirationSeconds,
-        backendUrl: config.get<string>("storage.backend-url.external"),
-        r2Credentials: null as {
-          accessKeyId: string;
-          secretAccessKey: string;
-          sessionToken: string;
-          endpoint: string;
-          bucket: string;
-        } | null,
+        expiration,
+        serverUrl,
+        gatewayUrl: `${serverUrl}/storage`,
       };
     }),
 

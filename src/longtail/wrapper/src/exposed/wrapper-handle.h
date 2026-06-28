@@ -24,10 +24,11 @@ struct WrapperAsyncHandle {
   volatile uint32_t tokenRefreshInProgress;
   uint64_t tokenExpirationMs;
 
-  // JS writes refreshed credentials here
+  // JS writes refreshed credentials here. refreshedJwt is used by the gateway
+  // adapter; the refreshedS3* fields by the S3 adapter (R2 / generic S3).
   char refreshedJwt[4096];
-  char refreshedR2AccessKeyId[256];
-  char refreshedR2SecretAccessKey[256];
-  char refreshedR2SessionToken[2048];
+  char refreshedS3AccessKeyId[256];
+  char refreshedS3SecretAccessKey[256];
+  char refreshedS3SessionToken[2048];
   uint64_t refreshedExpirationMs;
 };

@@ -1,12 +1,11 @@
 import { Router } from "express";
-import config from "@incanta/config";
 import { routeRoot } from "./root.js";
 import { routeSubmit } from "./submit.js";
-import { routeFiler } from "./filer.js";
 import { routeSystem } from "./system.js";
 import { routeRepoSize } from "./repo-size.js";
-import { routeStubFiler } from "./stub-filer.js";
 import { routeBlocks } from "./blocks.js";
+import { routeGateway } from "./gateway.js";
+import { usesGateway } from "../storage/backend.js";
 
 export function routes(): Router {
   const router = Router();
@@ -14,15 +13,15 @@ export function routes(): Router {
   router.use(routeRoot());
   router.use(routeSubmit());
   router.use(routeSystem());
-  // State-tree block storage (all modes: R2 / SeaweedFS / stub).
+  // State-tree + content block storage goes through the unified backend.
   router.use(routeBlocks());
 
-  if (config.get<string>("storage.mode") === "seaweedfs") {
-    router.use(routeFiler());
+  // The client-facing blob gateway and repo-size are only for gateway modes
+  // (local / s3). In r2 mode the client talks to R2 directly and repo size
+  // comes from the Cloudflare usage API in the app.
+  if (usesGateway()) {
+    router.use("/storage", routeGateway());
     router.use(routeRepoSize());
-    if (config.get<boolean>("storage.seaweedfs.stub.enabled")) {
-      router.use("/filer", routeStubFiler());
-    }
   }
 
   return router;

@@ -1,10 +1,15 @@
-mode: "seaweedfs" # "seaweedfs" | "r2" (Cloudflare R2, requires a Studio subscription)
+# Must match the core server's storage.mode. The app only distinguishes "r2"
+# (clients go direct) from the gateway modes "local"/"s3" (clients go through
+# the core server). See src/core/server/STORAGE.md.
+mode: "local" # local | s3 | r2
 
 jwt:
   signing-key: "secret"
 
 token-expiration-seconds: 3600
 
+# Core server base URL. serverUrl in the token (control plane: /submit,
+# /repo-size); the gateway blob base is derived as serverUrl + /storage.
 backend-url:
   internal: "http://localhost:13001"
   external: "http://localhost:13001"

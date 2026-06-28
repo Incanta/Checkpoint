@@ -1,29 +1,29 @@
-mode: "seaweedfs" # "seaweedfs" | "r2" (Cloudflare R2, requires a Studio subscription)
+# Storage backend for the core server. See src/core/server/STORAGE.md.
+#   local - the core server's own disk, served through the gateway.
+#   s3    - any S3-compatible store (SeaweedFS S3, MinIO, AWS, Spaces),
+#           proxied through the gateway; one shared bucket, /{org}/{repo}/ keys.
+#   r2    - Cloudflare R2, accessed directly by clients (per-repo bucket).
+mode: "local" # local | s3 | r2
 
 jwt:
+  # HS256 key. The app signs storage tokens; the server verifies them. Must match.
   signing-key: "secret"
 
-seaweedfs:
-  stub:
-    enabled: true
-    storage-path: "./data/filer"
-  connection:
-    master:
-      host: "master"
-      port: 9333
-      tls: false
-    filer:
-      internal:
-        host: "localhost"
-        port: "${server.listen-port}"
-        tls: false
-        path: "/filer"
-      external:
-        host: "localhost"
-        port: "${server.listen-port}"
-        tls: false
-        path: "/filer"
+# Local-disk backend (mode: local).
+local:
+  path: "./data/storage"
 
+# S3-compatible backend (mode: s3). Server-side credentials, full access.
+s3:
+  endpoint: ""
+  region: ""
+  bucket: ""
+  force-path-style: true # MinIO / SeaweedFS S3 typically need path-style
+  access-key-id: ""
+  secret-access-key: ""
+
+# Cloudflare R2 (mode: r2). Clients go direct; the server uses these for the
+# server-side store-index merge and the tree-block channel.
 r2:
   account-id: ""
   access-key-id: ""

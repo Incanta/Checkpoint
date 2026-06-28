@@ -1,7 +1,7 @@
 import { Router } from "express";
 import jwt from "njwt";
 import config from "@incanta/config";
-import { getFilerUrl } from "../utils/filer.js";
+import { getStorageBackend } from "../storage/backend.js";
 
 interface JWTClaims {
   iss: string;
@@ -45,27 +45,12 @@ export function routeRepoSize(): Router {
     const basePath = `/${claims.orgId}/${claims.repoId}`;
 
     try {
-      {
-        const filerUrl = getFilerUrl(true);
-
-        const response = await fetch(`${filerUrl}${basePath}/size`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (!response.ok) {
-          // No size file yet — return 0
-          res.status(200).json({ size: 0 });
-          return;
-        }
-
-        const text = await response.text();
-        const size = parseInt(text, 10);
-
-        res.status(200).json({ size: isNaN(size) ? 0 : size });
-      }
+      // Computed on demand from the backend (local disk walk or S3 list). This
+      // route serves the gateway modes (local / s3); R2 repo size comes from
+      // the Cloudflare usage API in the app, not here.
+      const backend = await getStorageBackend();
+      const size = await backend.sizeUnder(basePath);
+      res.status(200).json({ size });
     } catch (e: any) {
       console.error(`Failed to read repo size for ${basePath}:`, e.message);
       res.status(500).send(e.message);

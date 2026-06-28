@@ -1,16 +1,12 @@
 import { Router, raw, type Request, type Response } from "express";
 import config from "@incanta/config";
 import njwt from "njwt";
-import { promises as fs } from "fs";
-import path from "path";
-import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { getR2Client } from "../utils/r2.js";
-import { getFilerUrl } from "../utils/filer.js";
+import { getStorageBackend } from "../storage/backend.js";
 
-// Content-addressed state-tree block storage. The API server writes/reads tree
-// blocks here over the system-JWT channel; this route routes the actual I/O to
-// R2, the SeaweedFS filer, or the local stub by storage.mode. Blocks live at
-// /{orgId}/{repoId}/tree/{hash}, alongside longtail content.
+// Content-addressed state-tree block storage. The app writes/reads tree blocks
+// here over the system-JWT channel; the actual I/O goes through the unified
+// storage backend (local / s3 / r2), the same path as longtail content blocks.
+// Blocks live at /{orgId}/{repoId}/tree/{hash}.
 
 interface SystemJWTClaims {
   iss: string;
@@ -70,64 +66,13 @@ function verify(
   return claims;
 }
 
-function stubEnabled(): boolean {
-  return (
-    config.get<string>("storage.mode") === "seaweedfs" &&
-    config.get<boolean>("storage.seaweedfs.stub.enabled")
-  );
-}
-
-function filerSystemToken(): string {
-  const token = njwt.create(
-    {
-      iss: "checkpoint-vcs",
-      sub: "system",
-      userId: "system",
-      mode: "write",
-      basePath: "/",
-    },
-    config.get<string>("storage.jwt.signing-key"),
-  );
-  token.setExpiration(Date.now() + 60_000);
-  return token.compact();
-}
-
 async function writeBlob(
   blockPath: string,
   bucket: string | undefined,
   data: Buffer,
 ): Promise<void> {
-  if (stubEnabled()) {
-    const local = `${config.get<string>("storage.seaweedfs.stub.storage-path")}${blockPath}`;
-    await fs.mkdir(path.dirname(local), { recursive: true });
-    await fs.writeFile(local, data);
-    return;
-  }
-  if (config.get<string>("storage.mode") === "r2") {
-    if (!bucket) throw new Error("missing bucket for r2 block write");
-    const s3 = await getR2Client();
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: blockPath.replace(/^\//, ""),
-        Body: data,
-      }),
-    );
-    return;
-  }
-  // SeaweedFS filer: multipart upload to the full path.
-  const form = new FormData();
-  form.append("file", new Blob([new Uint8Array(data)]), path.basename(blockPath));
-  const response = await fetch(`${getFilerUrl(true)}${blockPath}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${filerSystemToken()}` },
-    body: form,
-  });
-  if (!response.ok) {
-    throw new Error(
-      `filer block write failed ${response.status}: ${await response.text()}`,
-    );
-  }
+  const backend = await getStorageBackend({ bucket });
+  await backend.put(blockPath, data, data.length);
 }
 
 // Returns the block bytes, or null if it does not exist.
@@ -135,42 +80,8 @@ async function readBlob(
   blockPath: string,
   bucket: string | undefined,
 ): Promise<Buffer | null> {
-  if (stubEnabled()) {
-    const local = `${config.get<string>("storage.seaweedfs.stub.storage-path")}${blockPath}`;
-    try {
-      return await fs.readFile(local);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw err;
-    }
-  }
-  if (config.get<string>("storage.mode") === "r2") {
-    if (!bucket) throw new Error("missing bucket for r2 block read");
-    const s3 = await getR2Client();
-    try {
-      const out = await s3.send(
-        new GetObjectCommand({
-          Bucket: bucket,
-          Key: blockPath.replace(/^\//, ""),
-        }),
-      );
-      const bytes = await out.Body!.transformToByteArray();
-      return Buffer.from(bytes);
-    } catch (err) {
-      if ((err as { name?: string }).name === "NoSuchKey") return null;
-      throw err;
-    }
-  }
-  // SeaweedFS filer.
-  const response = await fetch(`${getFilerUrl(true)}${blockPath}`, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${filerSystemToken()}` },
-  });
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    throw new Error(`filer block read failed ${response.status}`);
-  }
-  return Buffer.from(await response.arrayBuffer());
+  const backend = await getStorageBackend({ bucket });
+  return backend.getBuffer(blockPath);
 }
 
 export function routeBlocks(): Router {

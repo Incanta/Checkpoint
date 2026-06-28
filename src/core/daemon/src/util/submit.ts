@@ -17,6 +17,7 @@ import {
   saveWorkspaceState,
   type Workspace,
 } from "./util.js";
+import { toStorageOptions } from "./storage-options.js";
 import path from "path";
 import { promises as fs } from "fs";
 import { DaemonConfig } from "../daemon-config.js";
@@ -59,14 +60,7 @@ export async function submit(
     throw new Error("Could not get storage token");
   }
 
-  const tokenExpirationMs = storageTokenResponse.expiration * 1000;
-
-  const token = storageTokenResponse.token;
-  const backendUrl = storageTokenResponse.backendUrl;
-  const filerUrl =
-    storageTokenResponse.storageType === "r2"
-      ? ""
-      : await fetch(`${backendUrl}/filer-url`).then((res) => res.text());
+  const storageOptions = toStorageOptions(storageTokenResponse);
 
   console.log(`[submit] Calling SubmitAsync:`);
   console.log(`[submit]   branchName: ${workspace.branchName}`);
@@ -76,17 +70,8 @@ export async function submit(
   console.log(`[submit]   message: ${message}`);
   console.log(`[submit]   localPath: ${workspace.localPath}`);
   console.log(`[submit]   remoteRoot: /${orgId}/${workspace.repoId}`);
-  if (storageTokenResponse.storageType === "r2") {
-    console.log(
-      `[submit]   Using R2 storage with endpoint: ${storageTokenResponse.r2Credentials?.endpoint}`
-    );
-    console.log(
-      `[submit]   R2 bucket name: ${storageTokenResponse.r2Credentials?.bucket}`,
-    );
-  } else {
-    console.log(`[submit]   filerUrl: ${filerUrl}`);
-  }
-  console.log(`[submit]   backendUrl: ${backendUrl}`);
+  console.log(`[submit]   storage: ${storageOptions.storageType}`);
+  console.log(`[submit]   serverUrl: ${storageTokenResponse.serverUrl}`);
   console.log(`[submit]   workspaceId: ${workspaceId}`);
   console.log(`[submit]   modifications: ${modifications.length}`);
 
@@ -103,18 +88,8 @@ export async function submit(
     enableMmapBlockStore: daemonConfig.longtail.enableMmapBlockStore,
     localRootPath: workspace.localPath,
     remoteBasePath: `/${orgId}/${workspace.repoId}`,
-    filerUrl,
-    backendUrl,
-    jwt: token,
-    jwtExpirationMs: tokenExpirationMs,
-    storageType: storageTokenResponse.storageType,
-    ...(storageTokenResponse.r2Credentials && {
-      r2AccessKeyId: storageTokenResponse.r2Credentials.accessKeyId,
-      r2SecretAccessKey: storageTokenResponse.r2Credentials.secretAccessKey,
-      r2SessionToken: storageTokenResponse.r2Credentials.sessionToken,
-      r2Endpoint: storageTokenResponse.r2Credentials.endpoint,
-      r2BucketName: storageTokenResponse.r2Credentials.bucket,
-    }),
+    backendUrl: storageTokenResponse.serverUrl,
+    ...storageOptions,
     apiJwt: user.apiToken,
     keepCheckedOut,
     workspaceId,
@@ -169,10 +144,10 @@ export async function submit(
       return {
         jwt: newToken.token,
         jwtExpirationMs: (newToken.expiration ?? 0) * 1000,
-        ...(newToken.r2Credentials && {
-          r2AccessKeyId: newToken.r2Credentials.accessKeyId,
-          r2SecretAccessKey: newToken.r2Credentials.secretAccessKey,
-          r2SessionToken: newToken.r2Credentials.sessionToken,
+        ...(newToken.r2 && {
+          s3AccessKeyId: newToken.r2.accessKeyId,
+          s3SecretAccessKey: newToken.r2.secretAccessKey,
+          s3SessionToken: newToken.r2.sessionToken,
         }),
       };
     },
