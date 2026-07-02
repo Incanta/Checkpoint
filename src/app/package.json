@@ -74,7 +74,7 @@
     "@typescript/native-preview": "^7.0.0-dev.20260304.1",
     "eslint": "^9.34.0",
     "javascript-obfuscator": "^5.4.1",
-    "postcss": "^8.5.15",
+    "postcss": "^8.5.16",
     "prettier": "^3.6.2",
     "prettier-plugin-tailwindcss": "^0.6.11",
     "prisma": "^6.5.0",
