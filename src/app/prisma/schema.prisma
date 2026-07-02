@@ -881,8 +881,17 @@ model Verification {
 model InstanceSettings {
   id String @id @default("default")
 
+  // Globally-unique id for this installation, generated once when the
+  // instance is first configured. Sent with anonymous usage telemetry.
+  instanceId String? @unique
+
   eulaAcceptedAt DateTime?
   eulaAcceptedBy String?
+
+  // Anonymous usage telemetry (org/repo/user counts) reported weekly to
+  // Incanta. Defaults to enabled; operators opt out during initial setup.
+  telemetryEnabled Boolean   @default(true)
+  lastTelemetryAt  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

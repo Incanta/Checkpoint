@@ -18,6 +18,13 @@ export async function register() {
       await import("~/server/license-client");
     await initLicenseClient();
 
+    // Start weekly anonymous usage telemetry (self-hosted instances only;
+    // self-gates on opt-out and on the license-manager instance).
+    const { initTelemetryScheduler } = await import(
+      "~/server/telemetry/scheduler"
+    );
+    initTelemetryScheduler();
+
     const { default: config } = await import("@incanta/config");
 
     Logger.log(`Checkpoint App:`);

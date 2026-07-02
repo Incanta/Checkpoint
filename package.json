@@ -3,6 +3,7 @@
   "packageManager": "yarn@4.13.0",
   "workspaces": [
     "src/app",
+    "src/metrics",
     "src/core",
     "src/core/daemon",
     "src/core/server",

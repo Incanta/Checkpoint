@@ -9,6 +9,7 @@ export function SetupForm() {
   useDocumentTitle("Initial Setup · Checkpoint VCS");
   const router = useRouter();
   const [agreed, setAgreed] = useState(false);
+  const [shareMetrics, setShareMetrics] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const acceptEula = api.setup.acceptEula.useMutation({
@@ -22,7 +23,7 @@ export function SetupForm() {
 
   const handleAccept = () => {
     setError(null);
-    acceptEula.mutate();
+    acceptEula.mutate({ telemetryEnabled: shareMetrics });
   };
 
   return (
@@ -75,6 +76,26 @@ export function SetupForm() {
           I have read and agree to the EULA and Privacy Policy
         </span>
       </label>
+
+      <div className="space-y-2 rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] p-4">
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            checked={shareMetrics}
+            onChange={(e) => setShareMetrics(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-[var(--color-border-default)] bg-[var(--color-bg-primary)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+          />
+          <span className="text-sm text-[var(--color-text-primary)]">
+            Share anonymous usage metrics
+            <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
+              Once a week we send aggregate counts (organizations, repositories,
+              and users) plus a random instance id to Incanta. No names, content,
+              or personal data are included. You can leave this unchecked to opt
+              out.
+            </span>
+          </span>
+        </label>
+      </div>
 
       {error && (
         <div className="rounded-md border border-[var(--color-danger)] bg-[var(--color-danger)]/10 p-3">

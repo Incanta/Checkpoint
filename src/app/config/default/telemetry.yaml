@@ -1,0 +1,7 @@
+# Anonymous usage telemetry reported by self-hosted instances.
+# Each instance sends aggregate org/repo/user counts plus its random
+# instanceId once a week. Reporting is fire-and-forget and never blocks.
+# Individual instances can also opt out during initial setup
+# (InstanceSettings.telemetryEnabled).
+enabled: false
+endpoint-url: "https://telemetry.checkpointvcs.com"

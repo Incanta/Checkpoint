@@ -1,0 +1,7 @@
+/.next/
+/node_modules/
+/src/generated/
+next-env.d.ts
+*.db
+*.db-journal
+.env.local

@@ -1,0 +1,27 @@
+// Telemetry datastore for the Incanta-hosted metrics dashboard. This is a
+// standalone database, independent of the main Checkpoint app schema. The
+// generated client is emitted into src/generated/prisma so it never collides
+// with the app's @prisma/client.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// One row per weekly report received from a self-hosted instance.
+model InstanceReport {
+  id         String   @id @default(cuid())
+  instanceId String
+  orgCount   Int
+  repoCount  Int
+  userCount  Int
+  reportedAt DateTime @default(now())
+
+  @@index([instanceId, reportedAt])
+  @@index([reportedAt])
+}
