@@ -108,23 +108,12 @@ function applyDefaults(): void {
   setConfig("stripe.prices.cloud.storage", "price_cloud_storage");
   setConfig("stripe.prices.cloud.minimum-due", "price_cloud_minimum_due");
 
-  // Prices (self-hosted)
-  setConfig("stripe.prices.self-hosted.studio-write", "price_sh_studio_write");
-  setConfig("stripe.prices.self-hosted.studio-read", "price_sh_studio_read");
-  setConfig("stripe.prices.self-hosted.pro-write", "price_sh_pro_write");
-  setConfig("stripe.prices.self-hosted.pro-read", "price_sh_pro_read");
-
-  // Seat pricing — meter-reporting reads this as a single nested object.
+  // Seat pricing. meter-reporting reads this as a single nested object.
   setConfig("stripe.seat-prices", {
     cloud: {
       basic: { write: 400, read: 200 },
       pro: { write: 900, read: 400 },
       studio: { write: 2400, read: 1200 },
-    },
-    selfHosted: {
-      basic: { write: 0, read: 0 },
-      pro: { write: 400, read: 200 },
-      studio: { write: 900, read: 400 },
     },
   });
 }

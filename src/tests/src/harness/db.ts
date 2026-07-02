@@ -60,7 +60,6 @@ const tableOrder = [
   "InvoiceItem",
   "Invoice",
   "CardExpiryNotification",
-  "LicenseUsageReport",
   "License",
   "Workspace",
   "Changelist",

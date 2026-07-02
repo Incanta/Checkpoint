@@ -44,7 +44,6 @@ export interface MakeOrgOpts {
     | "DELETED";
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
-  selfHosted?: boolean;
   trialEndsAt?: Date | null;
   delinquentSince?: Date | null;
   suspendedAt?: Date | null;
@@ -77,7 +76,6 @@ export async function makeOrg(
       subscriptionStatus: opts.status ?? "ACTIVE",
       stripeCustomerId,
       stripeSubscriptionId,
-      selfHosted: opts.selfHosted ?? false,
       trialEndsAt: opts.trialEndsAt ?? null,
       delinquentSince: opts.delinquentSince ?? null,
       suspendedAt: opts.suspendedAt ?? null,

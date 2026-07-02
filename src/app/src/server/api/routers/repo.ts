@@ -102,14 +102,6 @@ export const repoRouter = createTRPCRouter({
         });
       }
 
-      if (orgUser.org.selfHosted) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message:
-            "Self-hosted organizations cannot have repositories. Repos are managed on your self-hosted instance.",
-        });
-      }
-
       const repo = await ctx.db.repo.create({
         data: {
           name: input.name,

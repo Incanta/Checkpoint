@@ -15,13 +15,11 @@ import { getBillingPeriod } from "./billing-period";
 
 /**
  * Report the current user meter values (write/read) to Stripe
- * for a given org. For self-hosted orgs, reads from LicenseUsageReport
- * instead of OrgUserActivity.
+ * for a given org, derived from OrgUserActivity.
  */
 export async function getOrgUserMeters(
   org: {
     id: string;
-    selfHosted: boolean;
     billingCycleAnchor: number;
     canceledAt: Date | null;
     stripeCustomerId: string | null;
@@ -43,40 +41,6 @@ export async function getOrgUserMeters(
       org.billingCycleAnchor,
     );
 
-    if (org.selfHosted) {
-      // Self-hosted: read from LicenseUsageReport
-      const license = await db.license.findFirst({
-        where: { orgId: org.id, active: true },
-        select: { id: true },
-      });
-      if (!license) return { writeUsers: 0, readUsers: 0 };
-
-      const report = await db.licenseUsageReport.findUnique({
-        where: {
-          licenseId_year_month: {
-            licenseId: license.id,
-            year,
-            month,
-          },
-        },
-        select: { awuCount: true, aruCount: true },
-      });
-
-      if (!report) {
-        Logger.warn(
-          `[Billing] No license usage report found for self-hosted org ${org.id} for ${year}-${month}`,
-        );
-
-        return null;
-      }
-
-      return {
-        writeUsers: report.awuCount,
-        readUsers: report.aruCount,
-      };
-    }
-
-    // Cloud: read from OrgUserActivity
     const activities = await db.orgUserActivity.findMany({
       where: { orgId: org.id, year, month },
       select: { writeCount: true, readCount: true },
@@ -118,7 +82,6 @@ export async function reportOrgMeters(
       where: { id: orgId },
       select: {
         id: true,
-        selfHosted: true,
         subscriptionTier: true,
         billingCycleAnchor: true,
         stripeCustomerId: true,
@@ -152,15 +115,11 @@ export async function reportOrgMeters(
 
     interface SeatPrices {
       cloud: ServicePrices;
-      selfHosted: ServicePrices;
     }
 
     const seatPrices = config.get<SeatPrices>("stripe.seat-prices");
     const tier = org.subscriptionTier.toLowerCase() as keyof ServicePrices;
-    const servicePrices = org.selfHosted
-      ? seatPrices.selfHosted
-      : seatPrices.cloud;
-    const prices = servicePrices[tier];
+    const prices = seatPrices.cloud[tier];
     const { bucketPriceCents } = getStoragePricingConfig();
     const stripe = getStripeClient();
     const minInvoice = getMinimumInvoiceCents();
@@ -247,7 +206,7 @@ export async function reportOrgMeters(
     }
 
     Logger.debug(
-      `[Billing] Reported meters for org ${orgId}: write=${writeUsers}, read=${readUsers}${org.selfHosted ? " (self-hosted)" : `, storage=${storageBuckets} buckets`}`,
+      `[Billing] Reported meters for org ${orgId}: write=${writeUsers}, read=${readUsers}, storage=${storageBuckets} buckets`,
     );
   } catch (err: unknown) {
     Logger.warn(

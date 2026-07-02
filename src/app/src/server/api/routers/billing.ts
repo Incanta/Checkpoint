@@ -127,71 +127,6 @@ export const billingRouter = createTRPCRouter({
       return { checkoutUrl: session.url };
     }),
 
-  /** Create a Stripe Checkout Session for a self-hosted license purchase. */
-  createSelfHostedCheckout: protectedProcedure
-    .input(
-      z.object({
-        orgName: z.string().min(1),
-        tier: z.enum(["PRO", "STUDIO"]),
-        successUrl: z.string(),
-        cancelUrl: z.string(),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      assertBillingEnabled();
-
-      const stripe = getStripeClient();
-
-      const customer = await stripe.customers.create({
-        name: input.orgName,
-        email: ctx.session.user.email ?? undefined,
-        metadata: { orgName: input.orgName, selfHosted: "true" },
-      });
-
-      const prices = getStripePriceConfig();
-      const minInvoice = getMinimumInvoiceCents();
-      const tierKey = input.tier.toLowerCase() as "pro" | "studio";
-      const lineItems: Array<{ price: string }> = [];
-
-      const shPrices = prices.selfHosted;
-      const writeKey = `${tierKey}-write` as keyof typeof shPrices;
-      const readKey = `${tierKey}-read` as keyof typeof shPrices;
-
-      if (shPrices[writeKey]) lineItems.push({ price: shPrices[writeKey] });
-      if (shPrices[readKey]) lineItems.push({ price: shPrices[readKey] });
-      if (minInvoice !== null && prices.cloud["minimum-due"])
-        lineItems.push({ price: prices.cloud["minimum-due"] });
-
-      const session = await stripe.checkout.sessions.create({
-        customer: customer.id,
-        mode: "subscription",
-        line_items: lineItems,
-        success_url: input.successUrl,
-        cancel_url: input.cancelUrl,
-        managed_payments: { enabled: true },
-        metadata: {
-          orgName: input.orgName,
-          tier: input.tier,
-          selfHosted: "true",
-          userId: ctx.session.user.id,
-        },
-        subscription_data: {
-          metadata: {
-            orgName: input.orgName,
-            tier: input.tier,
-            selfHosted: "true",
-            userId: ctx.session.user.id,
-          },
-        },
-      });
-
-      Logger.info(
-        `[Billing] Created self-hosted Checkout Session ${session.id} for org "${input.orgName}" (${input.tier})`,
-      );
-
-      return { checkoutUrl: session.url };
-    }),
-
   /** Create a Stripe Checkout Session to resubscribe a CANCELED org. */
   resubscribe: protectedProcedure
     .input(
@@ -218,7 +153,6 @@ export const billingRouter = createTRPCRouter({
         select: {
           id: true,
           name: true,
-          selfHosted: true,
           subscriptionStatus: true,
           stripeCustomerId: true,
         },
@@ -249,29 +183,15 @@ export const billingRouter = createTRPCRouter({
       const tierKey = input.tier.toLowerCase() as "basic" | "pro" | "studio";
       const lineItems: Array<{ price: string }> = [];
 
-      if (org.selfHosted) {
-        // Self-hosted: write/read only
-        const shPrices = prices.selfHosted;
-        const shTierKey = tierKey as "pro" | "studio";
-        const writeKey = `${shTierKey}-write` as keyof typeof shPrices;
-        const readKey = `${shTierKey}-read` as keyof typeof shPrices;
-        if (shPrices[writeKey]) lineItems.push({ price: shPrices[writeKey] });
-        if (shPrices[readKey]) lineItems.push({ price: shPrices[readKey] });
-        if (minInvoice !== null && prices.cloud["minimum-due"])
-          lineItems.push({ price: prices.cloud["minimum-due"] });
-      } else {
-        // Cloud: write/read + storage + minimum-due
-        const cloudPrices = prices.cloud;
-        const writeKey = `${tierKey}-write` as keyof typeof cloudPrices;
-        const readKey = `${tierKey}-read` as keyof typeof cloudPrices;
-        if (cloudPrices[writeKey])
-          lineItems.push({ price: cloudPrices[writeKey] });
-        if (cloudPrices[readKey])
-          lineItems.push({ price: cloudPrices[readKey] });
-        if (cloudPrices.storage) lineItems.push({ price: cloudPrices.storage });
-        if (minInvoice !== null && cloudPrices["minimum-due"])
-          lineItems.push({ price: cloudPrices["minimum-due"] });
-      }
+      // Cloud: write/read + storage + minimum-due
+      const cloudPrices = prices.cloud;
+      const writeKey = `${tierKey}-write` as keyof typeof cloudPrices;
+      const readKey = `${tierKey}-read` as keyof typeof cloudPrices;
+      if (cloudPrices[writeKey]) lineItems.push({ price: cloudPrices[writeKey] });
+      if (cloudPrices[readKey]) lineItems.push({ price: cloudPrices[readKey] });
+      if (cloudPrices.storage) lineItems.push({ price: cloudPrices.storage });
+      if (minInvoice !== null && cloudPrices["minimum-due"])
+        lineItems.push({ price: cloudPrices["minimum-due"] });
 
       const session = await stripe.checkout.sessions.create({
         customer: customerId,
@@ -283,14 +203,12 @@ export const billingRouter = createTRPCRouter({
         metadata: {
           existingOrgId: org.id,
           tier: input.tier,
-          selfHosted: org.selfHosted ? "true" : "false",
           userId: ctx.session.user.id,
         },
         subscription_data: {
           metadata: {
             orgName: org.name,
             tier: input.tier,
-            selfHosted: org.selfHosted ? "true" : "false",
             userId: ctx.session.user.id,
           },
         },
@@ -319,7 +237,6 @@ export const billingRouter = createTRPCRouter({
       const org = await ctx.db.org.findUniqueOrThrow({
         where: { id: input.orgId },
         select: {
-          selfHosted: true,
           subscriptionTier: true,
           subscriptionStatus: true,
           trialEndsAt: true,
@@ -379,7 +296,6 @@ export const billingRouter = createTRPCRouter({
       return {
         tier: org.subscriptionTier,
         status: org.subscriptionStatus,
-        selfHosted: org.selfHosted,
         trialEndsAt: org.trialEndsAt?.toISOString() ?? null,
         canceledAt: org.canceledAt?.toISOString() ?? null,
         delinquentSince: org.delinquentSince?.toISOString() ?? null,
@@ -506,7 +422,6 @@ export const billingRouter = createTRPCRouter({
       const org = await ctx.db.org.findUniqueOrThrow({
         where: { id: input.orgId },
         select: {
-          selfHosted: true,
           stripeSubscriptionId: true,
           subscriptionTier: true,
           subscriptionStatus: true,
@@ -578,59 +493,28 @@ export const billingRouter = createTRPCRouter({
             deleted?: boolean;
           }> = [];
 
-          if (org.selfHosted) {
-            const shPrices = prices.selfHosted;
-            const writeKey = `${tierKey}-write` as keyof typeof shPrices;
-            const readKey = `${tierKey}-read` as keyof typeof shPrices;
+          const cloudPrices = prices.cloud;
+          const writeKey = `${tierKey}-write` as keyof typeof cloudPrices;
+          const readKey = `${tierKey}-read` as keyof typeof cloudPrices;
 
-            if (!shPrices[writeKey] && !shPrices[readKey]) {
-              throw new TRPCError({
-                code: "INTERNAL_SERVER_ERROR",
-                message: "Pricing configuration error",
-              });
-            }
+          if (!cloudPrices[writeKey] && !cloudPrices[readKey]) {
+            Logger.warn(
+              `[Billing] No Stripe prices found for tier ${input.tier}, cannot update subscription`,
+            );
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Pricing configuration error",
+            });
+          }
 
-            for (const item of sub.items.data) {
-              if (
-                item.price.id ===
-                shPrices[`${priorTierKey}-write` as keyof typeof shPrices]
-              ) {
-                items.push({ id: item.id, price: shPrices[writeKey] });
-              } else if (
-                item.price.id ===
-                shPrices[`${priorTierKey}-read` as keyof typeof shPrices]
-              ) {
-                items.push({ id: item.id, price: shPrices[readKey] });
-              } else {
-                items.push({ id: item.id, price: item.price.id });
-              }
-            }
-          } else {
-            const cloudPrices = prices.cloud;
-            const writeKey = `${tierKey}-write` as keyof typeof cloudPrices;
-            const readKey = `${tierKey}-read` as keyof typeof cloudPrices;
-
-            if (!cloudPrices[writeKey] && !cloudPrices[readKey]) {
-              Logger.warn(
-                `[Billing] No Stripe prices found for tier ${input.tier}, cannot update subscription`,
-              );
-              throw new TRPCError({
-                code: "INTERNAL_SERVER_ERROR",
-                message: "Pricing configuration error",
-              });
-            }
-
-            for (const item of sub.items.data) {
-              if (item.price.id === cloudPrices[`${priorTierKey}-write`]) {
-                items.push({ id: item.id, price: cloudPrices[writeKey] });
-              } else if (
-                item.price.id === cloudPrices[`${priorTierKey}-read`]
-              ) {
-                items.push({ id: item.id, price: cloudPrices[readKey] });
-              } else {
-                // keep storage and minimum due items unchanged
-                items.push({ id: item.id, price: item.price.id });
-              }
+          for (const item of sub.items.data) {
+            if (item.price.id === cloudPrices[`${priorTierKey}-write`]) {
+              items.push({ id: item.id, price: cloudPrices[writeKey] });
+            } else if (item.price.id === cloudPrices[`${priorTierKey}-read`]) {
+              items.push({ id: item.id, price: cloudPrices[readKey] });
+            } else {
+              // keep storage and minimum due items unchanged
+              items.push({ id: item.id, price: item.price.id });
             }
           }
 

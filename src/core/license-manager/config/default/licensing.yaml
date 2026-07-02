@@ -1,4 +1,0 @@
-# The Ed25519 private key (base64-encoded PKCS#8 DER) for license manager verification.
-# This must match the public key published at key.checkpointvcs.com DNS TXT record.
-# Can reference a secrets provider value (e.g. "vault:licensing/incanta-key").
-incanta-key: ""

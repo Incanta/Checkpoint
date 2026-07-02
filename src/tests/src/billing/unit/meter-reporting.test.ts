@@ -1,5 +1,5 @@
-// Tests for meter-reporting.ts — counting active write/read users (cloud vs
-// self-hosted) and reporting them plus storage / minimum-due to Stripe via
+// Tests for meter-reporting.ts: counting active write/read users from
+// OrgUserActivity and reporting them plus storage / minimum-due to Stripe via
 // `stripe.billing.meterEvents.create`.
 
 import {
@@ -92,7 +92,6 @@ describe("meter-reporting", () => {
       const result = await getOrgUserMeters(
         {
           id: org.id,
-          selfHosted: false,
           billingCycleAnchor: 1,
           canceledAt: null,
           stripeCustomerId: "cus_test",
@@ -110,7 +109,6 @@ describe("meter-reporting", () => {
       const result = await getOrgUserMeters(
         {
           id: "x",
-          selfHosted: false,
           billingCycleAnchor: 1,
           canceledAt: null,
           stripeCustomerId: "cus_x",
@@ -127,7 +125,6 @@ describe("meter-reporting", () => {
       const result = await getOrgUserMeters(
         {
           id: org.id,
-          selfHosted: false,
           billingCycleAnchor: 1,
           canceledAt: null,
           stripeCustomerId: null,
@@ -158,7 +155,6 @@ describe("meter-reporting", () => {
       const result = await getOrgUserMeters(
         {
           id: org.id,
-          selfHosted: false,
           billingCycleAnchor: 1,
           canceledAt: new Date(),
           stripeCustomerId: "cus_x",
@@ -168,72 +164,6 @@ describe("meter-reporting", () => {
         testDb.client,
       );
       expect(result).toEqual({ writeUsers: 0, readUsers: 0 });
-    });
-  });
-
-  describe("getOrgUserMeters (self-hosted)", () => {
-    it("reads from LicenseUsageReport for the matching billing period", async () => {
-      const org = await makeOrg(testDb.client, { selfHosted: true });
-      const license = await testDb.client.license.create({
-        data: {
-          orgId: org.id,
-          key: "lic_test",
-          secretHash: "h",
-          tier: "PRO",
-          active: true,
-        },
-      });
-      await testDb.client.licenseUsageReport.create({
-        data: {
-          licenseId: license.id,
-          year: 2026,
-          month: 6,
-          awuCount: 4,
-          aruCount: 9,
-        },
-      });
-
-      const result = await getOrgUserMeters(
-        {
-          id: org.id,
-          selfHosted: true,
-          billingCycleAnchor: 1,
-          canceledAt: null,
-          stripeCustomerId: "cus_sh",
-          subscriptionStatus: "ACTIVE",
-          subscriptionTier: "PRO",
-        },
-        testDb.client,
-      );
-
-      expect(result).toEqual({ writeUsers: 4, readUsers: 9 });
-    });
-
-    it("returns null when self-hosted org has no usage report yet", async () => {
-      const org = await makeOrg(testDb.client, { selfHosted: true });
-      await testDb.client.license.create({
-        data: {
-          orgId: org.id,
-          key: "lic_noreport",
-          secretHash: "h",
-          tier: "PRO",
-          active: true,
-        },
-      });
-
-      const result = await getOrgUserMeters(
-        {
-          id: org.id,
-          selfHosted: true,
-          billingCycleAnchor: 1,
-          canceledAt: null,
-          stripeCustomerId: "cus_sh",
-          subscriptionStatus: "ACTIVE",
-          subscriptionTier: "PRO",
-        },
-        testDb.client,
-      );
-      expect(result).toBeNull();
     });
   });
 

@@ -19,7 +19,6 @@ import {
   accountDeletionWarningEmail,
 } from "~/server/email/billing-templates";
 import { createOrgDirectory } from "~/server/storage-service";
-import crypto from "crypto";
 
 export async function POST(request: NextRequest) {
   if (!isLicenseManager() || !isStripeEnabled()) {
@@ -98,7 +97,6 @@ async function applyScheduledTierChange(
     where: { stripeCustomerId, scheduledTier: { not: null } },
     select: {
       id: true,
-      selfHosted: true,
       subscriptionTier: true,
       scheduledTier: true,
       stripeSubscriptionId: true,
@@ -126,46 +124,23 @@ async function applyScheduledTierChange(
         deleted?: boolean;
       }> = [];
 
-      if (org.selfHosted) {
-        const shPrices = prices.selfHosted;
-        const writeKey = `${tierKey}-write` as keyof typeof shPrices;
-        const readKey = `${tierKey}-read` as keyof typeof shPrices;
-        for (const item of sub.items.data) {
-          if (
-            item.price.id ===
-            shPrices[`${priorTierKey}-write` as keyof typeof shPrices]
-          ) {
-            items.push({ id: item.id, price: shPrices[writeKey] });
-          } else if (
-            item.price.id ===
-            shPrices[`${priorTierKey}-read` as keyof typeof shPrices]
-          ) {
-            items.push({ id: item.id, price: shPrices[readKey] });
-          } else {
-            items.push({ id: item.id, price: item.price.id });
-          }
-        }
-      } else {
-        const cloudPrices = prices.cloud;
-        const writeKey = `${tierKey}-write` as keyof typeof cloudPrices;
-        const readKey = `${tierKey}-read` as keyof typeof cloudPrices;
+      const cloudPrices = prices.cloud;
+      const writeKey = `${tierKey}-write` as keyof typeof cloudPrices;
+      const readKey = `${tierKey}-read` as keyof typeof cloudPrices;
 
-        if (!cloudPrices[writeKey] && !cloudPrices[readKey]) {
-          Logger.warn(
-            `[Billing] No Stripe prices found for tier ${newTier}, cannot update subscription`,
-          );
-        }
+      if (!cloudPrices[writeKey] && !cloudPrices[readKey]) {
+        Logger.warn(
+          `[Billing] No Stripe prices found for tier ${newTier}, cannot update subscription`,
+        );
+      }
 
-        for (const item of sub.items.data) {
-          if (item.price.id === cloudPrices[`${priorTierKey}-write`]) {
-            items.push({ id: item.id, price: cloudPrices[writeKey] });
-          } else if (
-            item.price.id === cloudPrices[`${priorTierKey}-read`]
-          ) {
-            items.push({ id: item.id, price: cloudPrices[readKey] });
-          } else {
-            items.push({ id: item.id, price: item.price.id });
-          }
+      for (const item of sub.items.data) {
+        if (item.price.id === cloudPrices[`${priorTierKey}-write`]) {
+          items.push({ id: item.id, price: cloudPrices[writeKey] });
+        } else if (item.price.id === cloudPrices[`${priorTierKey}-read`]) {
+          items.push({ id: item.id, price: cloudPrices[readKey] });
+        } else {
+          items.push({ id: item.id, price: item.price.id });
         }
       }
 
@@ -235,13 +210,11 @@ async function handleCheckoutCompleted(
     | "PRO"
     | "STUDIO";
   const useTrial = session.metadata?.useTrial === "true";
-  const isSelfHosted = session.metadata?.selfHosted === "true";
 
   // Create the org now that checkout succeeded
   const org = await db.org.create({
     data: {
       name: orgName,
-      selfHosted: isSelfHosted,
       stripeCustomerId: customerId ?? undefined,
       stripeSubscriptionId: subscriptionId ?? undefined,
       subscriptionStatus: useTrial ? "TRIAL" : "ACTIVE",
@@ -277,53 +250,22 @@ async function handleCheckoutCompleted(
     },
   });
 
-  // Create org directory in storage (cloud only)
-  if (!isSelfHosted) {
-    try {
-      await createOrgDirectory(org.id);
-    } catch (error: any) {
-      Logger.error(
-        `[Stripe Webhook] Failed to create org directory for ${org.id}: ${JSON.stringify(error)}`,
-      );
-    }
+  // Create org directory in storage
+  try {
+    await createOrgDirectory(org.id);
+  } catch (error: any) {
+    Logger.error(
+      `[Stripe Webhook] Failed to create org directory for ${org.id}: ${JSON.stringify(error)}`,
+    );
   }
 
-  // Start trial if requested (cloud only — self-hosted is not eligible)
-  if (useTrial && !isSelfHosted) {
+  // Start trial if requested
+  if (useTrial) {
     try {
       await startTrial(org.id, userId, db, tier);
     } catch (err: any) {
       Logger.warn(
         `[Stripe Webhook] Failed to start trial for org ${org.id}: ${JSON.stringify(err)}`,
-      );
-    }
-  }
-
-  // Auto-generate license for self-hosted orgs
-  if (isSelfHosted) {
-    try {
-      const key = "lic_" + crypto.randomBytes(16).toString("hex");
-      const secret = "sec_" + crypto.randomBytes(32).toString("hex");
-      const secretHash = crypto
-        .createHash("sha256")
-        .update(secret)
-        .digest("hex");
-
-      await db.license.create({
-        data: {
-          key,
-          secretHash,
-          tier,
-          orgId: org.id,
-        },
-      });
-
-      Logger.info(
-        `[Stripe Webhook] Created license for self-hosted org "${orgName}" (${org.id})`,
-      );
-    } catch (err: any) {
-      Logger.error(
-        `[Stripe Webhook] Failed to create license for self-hosted org ${org.id}: ${JSON.stringify(err)}`,
       );
     }
   }

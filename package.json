@@ -6,7 +6,6 @@
     "src/core",
     "src/core/daemon",
     "src/core/server",
-    "src/core/license-manager",
     "src/core/common",
     "src/clients/desktop",
     "src/tests"

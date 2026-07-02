@@ -11,7 +11,7 @@
  *   node dev.js -t           - Same as --test
  *   node dev.js stop         - Stop running services
  *
- * Starts: app, daemon, server, license-manager
+ * Starts: app, daemon, server
  * Features:
  * - Colored prefixed logging (like Docker Compose)
  * - Individual log files in ./logs/
@@ -77,26 +77,11 @@ let services = [
     cwd: path.join(__dirname, "src/core"),
     healthPattern: /\[healthy\]/i,
   },
-  {
-    name: "license-mgr",
-    color: colors.blue,
-    command: process.platform === "win32" ? "yarn.cmd" : "yarn",
-    args: ["license-manager"],
-    cwd: path.join(__dirname, "src/core"),
-    healthPattern: /\[healthy\]/i,
-  },
 ];
 
 // If --server flag is provided, filter services to only server-related ones
 if (serverMode) {
   services = services.filter((s) => s.name === "app" || s.name === "server");
-}
-
-// The license-manager requires `licensing.incanta-key` (gitignored config) to
-// start. It's not exercised by the CLI integration test, and CI doesn't have
-// the key — so skip it in CI / test mode so "All services healthy" can fire.
-if (isCI || testMode) {
-  services = services.filter((s) => s.name !== "license-mgr");
 }
 
 // Track running processes and health status

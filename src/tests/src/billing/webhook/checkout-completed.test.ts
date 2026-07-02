@@ -1,7 +1,7 @@
-// `checkout.session.completed` — Stripe fires this when a customer finishes
+// `checkout.session.completed` is fired by Stripe when a customer finishes
 // the hosted Checkout flow. The handler creates a new org (or reactivates
-// one for the resubscribe path), attaches the user as ADMIN, starts a trial
-// if requested, and provisions a license for self-hosted orgs.
+// one for the resubscribe path), attaches the user as ADMIN, and starts a
+// trial if requested.
 
 import {
   describe,
@@ -78,7 +78,6 @@ describe("webhook: checkout.session.completed", () => {
     expect(org.subscriptionTier).toBe("PRO");
     expect(org.stripeCustomerId).toBe("cus_new");
     expect(org.stripeSubscriptionId).toBe("sub_new");
-    expect(org.selfHosted).toBe(false);
 
     const orgUser = await env.testDb.client.orgUser.findFirstOrThrow({
       where: { orgId: org.id, userId: user.id },
@@ -114,43 +113,6 @@ describe("webhook: checkout.session.completed", () => {
       where: { id: user.id },
     });
     expect(userRow.trialUsed).toBe(true);
-  });
-
-  it("provisions a license for a self-hosted org and skips trial+directory", async () => {
-    const user = await makeUser(env.testDb.client);
-
-    const event = makeStripeEvent(
-      "checkout.session.completed",
-      checkoutSession({
-        metadata: {
-          orgName: "Self-Hosted Co",
-          userId: user.id,
-          tier: "STUDIO",
-          selfHosted: "true",
-          useTrial: "true", // ignored for self-hosted
-        },
-      }),
-    );
-
-    const { request } = buildSignedWebhookRequest(event);
-    await env.POST(request);
-
-    const org = await env.testDb.client.org.findFirstOrThrow({
-      where: { name: "Self-Hosted Co" },
-    });
-    expect(org.selfHosted).toBe(true);
-    // NOTE: the route currently honors useTrial=true even for self-hosted,
-    // so the initial status is TRIAL — but `startTrial` is skipped for
-    // self-hosted (route.ts L292), leaving trialEndsAt unset. Probably a
-    // bug, but lock the current behavior down so we notice if it changes.
-    expect(org.subscriptionStatus).toBe("TRIAL");
-    expect(org.trialEndsAt).toBeNull();
-
-    const license = await env.testDb.client.license.findFirstOrThrow({
-      where: { orgId: org.id },
-    });
-    expect(license.tier).toBe("STUDIO");
-    expect(license.key.startsWith("lic_")).toBe(true);
   });
 
   it("silently ignores sessions missing orgName/userId metadata", async () => {

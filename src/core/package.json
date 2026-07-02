@@ -7,7 +7,6 @@
     "client",
     "daemon",
     "server",
-    "license-manager",
     "common"
   ],
   "scripts": {
@@ -16,8 +15,7 @@
     "cli": "NODE_CONFIG_DIR=client/config bun run client/src/bin.ts",
     "package": "bun package.ts",
     "server": "cd server && yarn start",
-    "daemon": "cd daemon && yarn start",
-    "license-manager": "cd license-manager && yarn start"
+    "daemon": "cd daemon && yarn start"
   },
   "peerDependencies": {
     "@incanta/config": "^2.1.16",

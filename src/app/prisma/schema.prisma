@@ -100,7 +100,6 @@ model Org {
   binaryExtensions String @default("")
 
   subscriptionTier LicenseTier @default(BASIC)
-  selfHosted       Boolean     @default(false)
 
   // Stripe billing (cloud / license-manager only)
   stripeCustomerId     String?            @unique
@@ -503,33 +502,12 @@ model License {
   tier       LicenseTier @default(BASIC)
   active     Boolean     @default(true)
 
-  // Cloud: links to an org on this instance
+  // Links to an org on this instance (cloud / license-manager SaaS)
   orgId String? @unique
   org   Org?    @relation(fields: [orgId], references: [id])
 
-  // Self-hosted: metadata about the remote instance
-  instanceName String?
-  instanceUrl  String?
-
-  lastReportAt DateTime?
-
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
-  usageReports LicenseUsageReport[]
-}
-
-model LicenseUsageReport {
-  id        String  @id @default(cuid())
-  licenseId String
-  license   License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
-  year      Int
-  month     Int
-  awuCount  Int
-  aruCount  Int
-
-  reportedAt DateTime @default(now())
-
-  @@unique([licenseId, year, month])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum MergePermissionType {

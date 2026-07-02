@@ -299,7 +299,7 @@ async function reportMeters(): Promise<void> {
       stripeCustomerId: { not: null },
       deletedAt: null,
     },
-    select: { id: true, name: true, selfHosted: true, stripeCustomerId: true },
+    select: { id: true, name: true, stripeCustomerId: true },
   });
 
   if (orgs.length === 0) return;
@@ -319,10 +319,7 @@ async function reportMeters(): Promise<void> {
         if (!org.stripeCustomerId) return;
 
         try {
-          // Self-hosted orgs don't have storage
-          const storage = org.selfHosted
-            ? { buckets: 0, totalGB: 0 }
-            : await calculateStorageCharge(org.id, db);
+          const storage = await calculateStorageCharge(org.id, db);
           await reportOrgMeters(
             org.id,
             org.stripeCustomerId,

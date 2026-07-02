@@ -78,12 +78,6 @@ export interface StripePriceConfig {
     storage: string;
     "minimum-due": string;
   };
-  selfHosted: {
-    "studio-write": string;
-    "studio-read": string;
-    "pro-write": string;
-    "pro-read": string;
-  };
 }
 
 export function getStripePriceConfig(): StripePriceConfig {
@@ -97,16 +91,6 @@ export function getStripePriceConfig(): StripePriceConfig {
       "basic-read": config.get<string>("stripe.prices.cloud.basic-read"),
       storage: config.get<string>("stripe.prices.cloud.storage"),
       "minimum-due": config.get<string>("stripe.prices.cloud.minimum-due"),
-    },
-    selfHosted: {
-      "studio-write": config.get<string>(
-        "stripe.prices.self-hosted.studio-write",
-      ),
-      "studio-read": config.get<string>(
-        "stripe.prices.self-hosted.studio-read",
-      ),
-      "pro-write": config.get<string>("stripe.prices.self-hosted.pro-write"),
-      "pro-read": config.get<string>("stripe.prices.self-hosted.pro-read"),
     },
   };
 }
