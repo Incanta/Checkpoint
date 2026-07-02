@@ -27,7 +27,8 @@ and **Ark** (Ark VCS). See `adapters/*.sh`.
      "server_volume_gb": 200,
      "resource_interval_s": 30,
      "chart_label_every": "minute",
-     "small_change_file": "",
+     "small_change_file_large": "",
+     "small_change_file_small": "",
      "vcs": ["checkpoint"],
      "checkpoint_version": "",
      "keep_droplets": false
@@ -40,7 +41,7 @@ and **Ark** (Ark VCS). See `adapters/*.sh`.
    - `client_swap_gb`: size (GiB) of a swap file enabled on the client before the run; `0` (default) disables it. Use this when a client process is OOM-killed on a large tree (notably the Lore CLI, whose peak memory scales with tree size and exposes no memory/concurrency tuning): swap lets it spill to disk and complete instead of being killed. The swap file lives on the `/data` volume. **Caveat:** swap is much slower than RAM, so any phase that actually touches it reports inflated timings, this keeps a run alive, it does not give a clean measurement. Prefer a larger `droplet_size` when you want accurate numbers.
    - `resource_interval_s`: how often (seconds) the CPU/RAM sampler polls both droplets across the full-tree publish (add + commit + submit). Default 30. Smaller values give finer-grained resource charts at the cost of more samples; values larger than the full-submit duration may yield no samples. Omitted = 30.
    - `chart_label_every`: x-axis labeling for the resource charts. `"minute"` (default) uses a continuous numeric time axis that Mermaid labels at round-minute marks (sample points are still plotted at their true times, but without a tick per sample); `"sample"` uses a categorical axis with a labeled tick at every sample (minutes, trailing zeros trimmed), denser but useful for short runs. Any other value falls back to `"minute"`.
-   - `small_change_file`: relative path (under the payload tree) of a file to make a ~100-byte change to after the initial submit. The run then submits that change and records how many bytes the **server** store grew (delta/dedup efficiency). Empty = skip this stage. Pick a large binary asset to make the difference meaningful. This stage is untimed; it only affects the storage-delta metric, never the timing metrics.
+   - `small_change_file_large` / `small_change_file_small`: relative paths (under the payload tree) of two files to make a ~100-byte change to after the initial submit, measured independently. For each, the run submits that change and records how many bytes the **server** store grew (delta/dedup efficiency). `small_change_file_large` should point at a **large** binary asset and `small_change_file_small` at a **small** file, so you can compare how each VCS handles a tiny edit to a big object vs a small one. Either may be empty to skip that variant. Metrics are namespaced per variant (`update_large_*` and `update_small_*`), and the submit of each is timed on its own phase (`update_large_submit` / `update_small_submit`). These stages do not affect the primary timing metrics. (The old single `small_change_file` key is still accepted as a fallback for `small_change_file_large`.)
    - `vcs`: list; each entry runs as an isolated matrix job with its own droplet pair.
    - `checkpoint_version`: empty builds the app + server images from the `HEAD` source on the server droplet (so the server matches the `HEAD` client; the daemon and app are version-coupled); set it to a released tag to pull the pinned GHCR server images instead.
    - `keep_droplets`: `true` skips teardown (for debugging). **This leaves both droplets, both volumes, and the VPC running and billing until you delete them manually.**
@@ -98,23 +99,28 @@ needed.
    mismatch or a smaller file count flags a VCS that did not materialize the
    full content. Metadata only (no byte reads), so it is cheap; it catches
    missing/truncated/extra files but not same-size byte corruption.
-7. **Small update** (only if `small_change_file` is set): measure the server
-   store size, make a ~100-byte change to that file, then submit it. The submit
-   is timed on its own (the `update_submit` phase). The server store is then
-   measured again and the byte delta recorded (`update_delta_bytes`). The storage
-   measurement and settle wait stay outside the timer, so only the submit itself
-   is timed and no other metric is affected. `update_delta_bytes` is a `du` of
-   the whole server data-root, so it also catches Docker container logs, the app
-   DB, and overlay churn, not just Checkpoint's content store. An adapter may
-   additionally implement `adapter_storage_components` to break the delta into
-   parts; the Checkpoint adapter does, recording `update_delta_content_store_total`
-   (a clean number for just the backend content-store volume, excluding logs, the
-   DB, and overlay) plus one `update_delta_<component>` per part of the repo's
-   store: the Longtail content blocks, `versions` (the per-CL `.lvi` indexes),
-   `tree` (the content-addressed state-tree blocks), and `store.lsi` (the global
-   store index, rewritten in full each submit but overwritten in place, so its
-   delta is ~0 on the local-FS stub). This attributes a small change's storage
-   cost to content vs metadata instead of one opaque number.
+7. **Small updates** (each variant only if its target is set): run up to two
+   independent small-update measurements, one against `small_change_file_large`
+   (label `large`) and one against `small_change_file_small` (label `small`). For
+   each: measure the server store size, make a ~100-byte change to that file, then
+   submit it. The submit is timed on its own (`update_large_submit` /
+   `update_small_submit`). The server store is then measured again and the byte
+   delta recorded (`update_large_delta_bytes` / `update_small_delta_bytes`). The
+   storage measurement and settle wait stay outside the timer, so only the submit
+   itself is timed and no other metric is affected. The `*_delta_bytes` value is a
+   `du` of the whole server data-root, so it also catches Docker container logs,
+   the app DB, and overlay churn, not just Checkpoint's content store. An adapter
+   may additionally implement `adapter_storage_components` to break the delta into
+   parts; the Checkpoint adapter does, recording
+   `update_<label>_delta_content_store_total` (a clean number for just the backend
+   content-store volume, excluding logs, the DB, and overlay) plus one
+   `update_<label>_delta_<component>` per part of the repo's store: the Longtail
+   content blocks, `versions` (the per-CL `.lvi` indexes), `tree` (the
+   content-addressed state-tree blocks), and `store.lsi` (the global store index,
+   rewritten in full each submit but overwritten in place, so its delta is ~0 on
+   the local-FS stub). This attributes a small change's storage cost to content vs
+   metadata instead of one opaque number, and comparing the `large` vs `small`
+   variants shows whether a VCS's overhead scales with the edited file's size.
 8. **Report**: Markdown tables in the job summary (including the pull-verification
    table, which should show identical hashes across VCS), plus Mermaid `xychart`
    resource graphs. Per VCS: CPU% and RAM, two line series each (blue = client,
@@ -141,16 +147,23 @@ needed.
     "submit_all": 5102,
     "status": 30,
     "pull_elsewhere": 4310,
-    "update_submit": 8
+    "update_large_submit": 8,
+    "update_small_submit": 2
   },
   "payload": { "payload_download": 600, "payload_extract": 120 },
   "storage": {
-    "update_delta_bytes": 6291456,
-    "update_delta_content_store_total": 870400,
-    "update_delta_chunks": 65536,
-    "update_delta_versions": 399000,
-    "update_delta_tree": 393216,
-    "update_delta_store.lsi": 0
+    "update_large_delta_bytes": 6291456,
+    "update_large_delta_content_store_total": 870400,
+    "update_large_delta_chunks": 65536,
+    "update_large_delta_versions": 399000,
+    "update_large_delta_tree": 393216,
+    "update_large_delta_store.lsi": 0,
+    "update_small_delta_bytes": 1048576,
+    "update_small_delta_content_store_total": 12288,
+    "update_small_delta_chunks": 4096,
+    "update_small_delta_versions": 4096,
+    "update_small_delta_tree": 4096,
+    "update_small_delta_store.lsi": 0
   },
   "submit_stages": {
     "Indexing version": 312,

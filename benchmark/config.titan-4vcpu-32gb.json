@@ -1,6 +1,7 @@
 {
   "tarball_url": "https://incantagames.sfo3.digitaloceanspaces.com/checkpoint/project-titan.tar.gz",
-  "small_change_file": "Content/Environment/Arctic/Meshes/Iktu_Temple/Temple/SM_Iktu_Temple_ColumnBLOCKOUT.uasset",
+  "small_change_file_large": "Content/Environment/Arctic/Meshes/Iktu_Temple/Temple/SM_Iktu_Temple_ColumnBLOCKOUT.uasset",
+  "small_change_file_small": "Titan.png",
   "region": "sfo3",
   "droplet_size": "m-4vcpu-32gb",
   "data_volume_gb": 400,

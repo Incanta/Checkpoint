@@ -35,6 +35,9 @@ const TOTAL_ROW = ["__submit_total__", "Total (through submit)"];
 const POST_PHASES = [
   ["status", "Status (clean workspace)"],
   ["pull_elsewhere", "Pull into fresh workspace"],
+  ["update_large_submit", "Small-change submit (large file)"],
+  ["update_small_submit", "Small-change submit (small file)"],
+  // Back-compat: runs produced before the large/small split used update_submit.
   ["update_submit", "Small-change submit"],
 ];
 
@@ -42,49 +45,63 @@ const PAYLOAD_PHASES = [
   ["payload_download", "Download tarball"],
   ["payload_extract", "Extract tarball"],
 ];
-// Friendly labels + preferred order for the storage-delta rows. The first is
-// the whole-data-root number (noisy: includes Docker logs, the app DB, and
-// overlay churn). The rest are an optional per-component breakdown an adapter
-// may emit (Checkpoint does); any update_delta_* key not listed here is still
-// shown, appended and sorted, so new components need no change to this file.
-const STORAGE_LABELS = {
-  update_delta_bytes: "Server storage delta (whole Docker data-root)",
-  update_delta_content_store_total:
-    "content store total (excl. logs, DB, overlay)",
-  update_delta_chunks: "content blocks (Longtail chunks)",
-  update_delta_versions: "version indexes (.lvi)",
-  update_delta_tree: "state-tree blocks",
-  "update_delta_store.lsi": "store.lsi (global store index)",
+// Friendly labels + preferred order for the storage-delta component SUFFIXES
+// (the part after the update_<variant>_delta_ prefix). The first is the
+// whole-data-root number (noisy: includes Docker logs, the app DB, and overlay
+// churn). The rest are an optional per-component breakdown an adapter may emit
+// (Checkpoint does); any suffix not listed here is still shown, appended and
+// sorted, so new components need no change to this file.
+const STORAGE_SUFFIX_LABELS = {
+  bytes: "Server storage delta (whole Docker data-root)",
+  content_store_total: "content store total (excl. logs, DB, overlay)",
+  chunks: "content blocks (Longtail chunks)",
+  versions: "version indexes (.lvi)",
+  tree: "state-tree blocks",
+  "store.lsi": "store.lsi (global store index)",
 };
-const STORAGE_ORDER = [
-  "update_delta_bytes",
-  "update_delta_content_store_total",
-  "update_delta_chunks",
-  "update_delta_versions",
-  "update_delta_tree",
-  "update_delta_store.lsi",
+const STORAGE_SUFFIX_ORDER = [
+  "bytes",
+  "content_store_total",
+  "chunks",
+  "versions",
+  "tree",
+  "store.lsi",
 ];
 
-// Rows to render: the known keys (in preferred order) that any run actually has,
-// then any other update_delta_* keys present, sorted.
-function storageRows() {
-  const present = (key) => runs.some((r) => r.storage && key in r.storage);
+// The small-update variants, each namespaced by a key prefix. The run harness
+// measures a large-file and a small-file update; older runs used a single
+// unprefixed update_delta_* set (kept for back-compat). Each present variant
+// renders its own storage-delta table.
+const UPDATE_VARIANTS = [
+  { prefix: "update_large_delta_", title: "large file" },
+  { prefix: "update_small_delta_", title: "small file" },
+  { prefix: "update_delta_", title: "" },
+];
+
+// Rows for one variant: the known suffixes (in preferred order) any run has for
+// this prefix, then any other suffixes present, sorted. Returns [key, label].
+function storageRowsFor(prefix) {
+  const present = (suffix) =>
+    runs.some((r) => r.storage && prefix + suffix in r.storage);
   const seen = new Set();
   const rows = [];
-  for (const key of STORAGE_ORDER) {
-    if (present(key)) {
-      rows.push([key, STORAGE_LABELS[key] || key]);
-      seen.add(key);
+  for (const suffix of STORAGE_SUFFIX_ORDER) {
+    if (present(suffix)) {
+      rows.push([prefix + suffix, STORAGE_SUFFIX_LABELS[suffix] || suffix]);
+      seen.add(suffix);
     }
   }
   const extra = new Set();
   for (const r of runs) {
     for (const k of Object.keys(r.storage || {})) {
-      if (k.startsWith("update_delta_") && !seen.has(k)) extra.add(k);
+      if (k.startsWith(prefix)) {
+        const suffix = k.slice(prefix.length);
+        if (!seen.has(suffix)) extra.add(suffix);
+      }
     }
   }
-  for (const k of [...extra].sort()) {
-    rows.push([k, STORAGE_LABELS[k] || k.replace(/^update_delta_/, "")]);
+  for (const suffix of [...extra].sort()) {
+    rows.push([prefix + suffix, STORAGE_SUFFIX_LABELS[suffix] || suffix]);
   }
   return rows;
 }
@@ -156,7 +173,15 @@ function vcsTable() {
   const sep = header.map(() => "---");
   const lines = [`| ${header.join(" | ")} |`, `| ${sep.join(" | ")} |`];
 
-  const rows = [...SUBMIT_PHASES, TOTAL_ROW, ...POST_PHASES];
+  // Drop rows no run has at all (undefined everywhere), so the mutually
+  // exclusive update variants (large/small vs the legacy update_submit) don't
+  // leave always-empty rows. A `null` value (e.g. Checkpoint's commit) is a
+  // real "n/a" and is kept.
+  const rows = [...SUBMIT_PHASES, TOTAL_ROW, ...POST_PHASES].filter(
+    ([key]) =>
+      key === "__submit_total__" ||
+      runs.some((r) => phaseValue(r, key) !== undefined),
+  );
   for (const [key, label] of rows) {
     const isTotal = key === "__submit_total__";
     const cells = runs.map((r) => {
@@ -186,11 +211,13 @@ function payloadTable() {
 // Server-side storage growth from a tiny (~100-byte) change to one file, in
 // bytes, with the Checkpoint comparison. Lower is better (smaller = more
 // efficient delta/dedup). Not a timing measurement.
-function storageTable() {
+function storageTableFor(prefix, title) {
+  const rows = storageRowsFor(prefix);
+  if (rows.length === 0) return "";
   const header = ["Metric", ...runs.map((r) => (r === baseline ? `${r.vcs} (baseline)` : r.vcs))];
   const sep = header.map(() => "---");
   const lines = [`| ${header.join(" | ")} |`, `| ${sep.join(" | ")} |`];
-  for (const [key, label] of storageRows()) {
+  for (const [key, label] of rows) {
     const cells = runs.map((r) => {
       const v = (r.storage || {})[key];
       let s = fmtBytes(v);
@@ -199,7 +226,10 @@ function storageTable() {
     });
     lines.push(`| ${label} | ${cells.join(" | ")} |`);
   }
-  return `### Server storage delta (small update)\n\n${lines.join("\n")}\n`;
+  const heading = title
+    ? `Server storage delta (${title} small update)`
+    : "Server storage delta (small update)";
+  return `### ${heading}\n\n${lines.join("\n")}\n`;
 }
 
 const hasStorage = runs.some((r) => r.storage && Object.keys(r.storage).length > 0);
@@ -445,14 +475,18 @@ out.push("");
 out.push(payloadTable());
 out.push("");
 if (hasStorage) {
-  out.push(storageTable());
-  if (baseline && runs.length > 1) {
-    out.push(
-      "_Percent vs Checkpoint: `(N%)` means Checkpoint stored N% less than that " +
-        "column (negative = more)._",
-    );
+  for (const { prefix, title } of UPDATE_VARIANTS) {
+    const table = storageTableFor(prefix, title);
+    if (!table) continue;
+    out.push(table);
+    if (baseline && runs.length > 1) {
+      out.push(
+        "_Percent vs Checkpoint: `(N%)` means Checkpoint stored N% less than that " +
+          "column (negative = more)._",
+      );
+    }
+    out.push("");
   }
-  out.push("");
 }
 
 if (hasSubmitStages) {

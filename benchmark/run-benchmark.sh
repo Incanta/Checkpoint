@@ -83,10 +83,17 @@ export WORK_DIR="/data/work"
 export TREE_DIR="${WORK_DIR}/tree"        # extracted payload + repo lives here
 export PULL_DIR="${WORK_DIR}/pull"        # fresh workspace for the final pull
 
-# Optional: relative path (under TREE_DIR) of a file to make a small change to
-# after the initial submit, to measure the server-side storage cost of a tiny
-# update. Empty -> the update stage is skipped.
-export SMALL_CHANGE_FILE="${SMALL_CHANGE_FILE:-}"
+# Optional: relative paths (under TREE_DIR) of files to make a ~100-byte change
+# to after the initial submit, to measure the server-side storage cost of a tiny
+# update (delta/dedup efficiency). Two independent targets are measured:
+#   - LARGE: a large binary asset (recorded under update_large_*)
+#   - SMALL: a small file            (recorded under update_small_*)
+# Each is optional; an empty target skips that variant. SMALL_CHANGE_FILE is the
+# back-compat alias for the large target (also the adapter fallback when
+# adapter_update is called without an explicit file arg).
+export SMALL_CHANGE_FILE_LARGE="${SMALL_CHANGE_FILE_LARGE:-${SMALL_CHANGE_FILE:-}}"
+export SMALL_CHANGE_FILE_SMALL="${SMALL_CHANGE_FILE_SMALL:-}"
+export SMALL_CHANGE_FILE="${SMALL_CHANGE_FILE_LARGE}"
 
 # shellcheck source=/dev/null
 source "$ADAPTER"
@@ -195,20 +202,24 @@ read -r PULL_HASH PULL_COUNT PULL_BYTES <<< "$PULL_VERIFY"
 log "pulled content: sha256=${PULL_HASH} files=${PULL_COUNT} bytes=${PULL_BYTES}"
 
 # ----------------------------------------------------------------------------
-# Small-update server-storage delta (untimed: storage only, never timing)
+# Small-update server-storage deltas (untimed: storage only, never timing)
 #
 # Make a ~100-byte change to one file, submit it, and record how many bytes the
 # server's backend store grew. This measures delta/dedup efficiency (chunk-level
 # dedup vs whole-file re-store) and must not perturb the timing metrics, so the
-# update runs outside any time_phase.
+# update runs outside any time_phase. Two independent variants are measured:
+# a large binary asset (label "large") and a small file (label "small"), each
+# under its own update_<label>_* metric keys.
 # ----------------------------------------------------------------------------
 # Best-effort: a failure in this secondary metric (e.g. a VCS choking on a tiny
 # change against a very large version) must NOT discard the primary timing
 # results, which are already collected. Run it guarded; on any failure record
 # n/a and continue to the JSON write. Called via `if !` so set -e is suspended
 # inside and the explicit `|| return 1` controls the flow.
-measure_small_update_delta() {
-  local before after comp_before comp_after
+#
+# measure_update_delta <label> <target_file>
+measure_update_delta() {
+  local label="$1" target="$2" before after comp_before comp_after
   before="$(server_storage_bytes)" || return 1
   # Optional per-component snapshot, for adapters that implement it (e.g.
   # Checkpoint splits the store into content blocks / version index / state-tree
@@ -219,33 +230,41 @@ measure_small_update_delta() {
   if declare -F adapter_storage_components >/dev/null; then
     comp_before="$(adapter_storage_components || true)"
   fi
-  log "server storage before update: ${before} bytes"
+  log "server storage before ${label} update: ${before} bytes"
   # Time only the submit of the small change (its own phase). The storage
   # measurement and settle sleep stay outside the timer so they never affect it.
-  time_phase update_submit -- adapter_update || return 1
+  time_phase "update_${label}_submit" -- adapter_update "$target" || return 1
   # Let the server flush async writes (e.g. Lore's flush_delay) before measuring.
   on_server "sync" || true
   sleep "${STORAGE_SETTLE_SECONDS:-20}"
   after="$(server_storage_bytes)" || return 1
-  log "server storage after update:  ${after} bytes"
-  record_storage update_delta_bytes "$(( after - before ))"
+  log "server storage after ${label} update:  ${after} bytes"
+  record_storage "update_${label}_delta_bytes" "$(( after - before ))"
   # Per-component breakdown (after - before per component), if snapshotted.
   if [ -n "$comp_before" ]; then
     comp_after="$(adapter_storage_components || true)"
-    record_storage_breakdown "$comp_before" "$comp_after"
-    log "recorded per-component storage breakdown"
+    record_storage_breakdown "update_${label}_delta_" "$comp_before" "$comp_after"
+    log "recorded per-component storage breakdown for ${label} update"
   fi
 }
 
-if [ -n "${SMALL_CHANGE_FILE}" ]; then
-  log "--- step: small update + server storage delta (${SMALL_CHANGE_FILE}) ---"
-  if ! measure_small_update_delta; then
-    log "!!! small-update storage delta failed (non-fatal); recording n/a and continuing"
-    record_storage update_delta_bytes null
+# run_small_update <label> <target_file>: guarded wrapper. Skips cleanly when the
+# target is empty; on failure records n/a for that variant and continues.
+run_small_update() {
+  local label="$1" target="$2"
+  if [ -z "$target" ]; then
+    log "--- skipping ${label}-file small update (config target is empty) ---"
+    return 0
   fi
-else
-  log "--- skipping small update (config small_change_file is empty) ---"
-fi
+  log "--- step: ${label}-file small update + server storage delta (${target}) ---"
+  if ! measure_update_delta "$label" "$target"; then
+    log "!!! ${label}-file small-update storage delta failed (non-fatal); recording n/a and continuing"
+    record_storage "update_${label}_delta_bytes" null
+  fi
+}
+
+run_small_update large "${SMALL_CHANGE_FILE_LARGE}"
+run_small_update small "${SMALL_CHANGE_FILE_SMALL}"
 
 # ----------------------------------------------------------------------------
 # Emit results

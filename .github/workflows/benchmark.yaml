@@ -43,7 +43,8 @@ jobs:
       client_swap_gb: ${{ steps.cfg.outputs.client_swap_gb }}
       resource_interval_s: ${{ steps.cfg.outputs.resource_interval_s }}
       chart_label_every: ${{ steps.cfg.outputs.chart_label_every }}
-      small_change_file: ${{ steps.cfg.outputs.small_change_file }}
+      small_change_file_large: ${{ steps.cfg.outputs.small_change_file_large }}
+      small_change_file_small: ${{ steps.cfg.outputs.small_change_file_small }}
       tarball_url: ${{ steps.cfg.outputs.tarball_url }}
       checkpoint_version: ${{ steps.cfg.outputs.checkpoint_version }}
       keep_droplets: ${{ steps.cfg.outputs.keep_droplets }}
@@ -83,7 +84,10 @@ jobs:
             set("client_swap_gb", String(c.client_swap_gb || 0));
             set("resource_interval_s", String(c.resource_interval_s || 30));
             set("chart_label_every", c.chart_label_every === "sample" ? "sample" : "minute");
-            set("small_change_file", c.small_change_file || "");
+            // Large-asset update target (back-compat: the old single key was
+            // small_change_file); small-file update target is separate.
+            set("small_change_file_large", c.small_change_file_large || c.small_change_file || "");
+            set("small_change_file_small", c.small_change_file_small || "");
             set("tarball_url", c.tarball_url || "");
             set("checkpoint_version", c.checkpoint_version || "");
             set("keep_droplets", String(!!c.keep_droplets));
@@ -107,7 +111,8 @@ jobs:
       CLIENT_SWAP_GB: ${{ needs.config.outputs.client_swap_gb }}
       RES_INTERVAL: ${{ needs.config.outputs.resource_interval_s }}
       CHART_LABEL_EVERY: ${{ needs.config.outputs.chart_label_every }}
-      SMALL_CHANGE_FILE: ${{ needs.config.outputs.small_change_file }}
+      SMALL_CHANGE_FILE_LARGE: ${{ needs.config.outputs.small_change_file_large }}
+      SMALL_CHANGE_FILE_SMALL: ${{ needs.config.outputs.small_change_file_small }}
       TARBALL_URL: ${{ needs.config.outputs.tarball_url }}
       CHECKPOINT_VERSION: ${{ needs.config.outputs.checkpoint_version }}
       SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}

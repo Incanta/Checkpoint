@@ -241,7 +241,8 @@ EOF
 
 # Small-update: change ~100 bytes of one file and commit a new changelist.
 adapter_update() {
-  client_append_bytes "${TREE_DIR}/${SMALL_CHANGE_FILE}" 100
+  local f="${1:-${SMALL_CHANGE_FILE:-}}"
+  client_append_bytes "${TREE_DIR}/${f}" 100
   on_client "TREE_DIR='${TREE_DIR}' MSG='benchmark: small update' bash -seuo pipefail" <<EOF
 ${_ark_commit_remote}
 EOF

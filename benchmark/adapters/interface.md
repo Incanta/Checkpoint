@@ -47,6 +47,12 @@ whole-second timers by the harness.
 | `adapter_commit_all` | client | yes (`commit_all`) if `ADAPTER_SUPPORTS_COMMIT=true` | local commit step (git only) |
 | `adapter_submit_all` | client | yes (`submit_all`) | push/submit the full version |
 | `adapter_pull_elsewhere` | client | yes (`pull_elsewhere`) | fresh workspace/clone + pull the version |
+| `adapter_status` | client | yes (`status`) | report what changed over the (clean) full tree |
+| `adapter_update <file>` | client | yes (`update_<label>_submit`) | make a ~100-byte change to `<file>` (relative to `TREE_DIR`) and submit it; called once per small-update variant (large/small) |
+
+`adapter_update` takes the target file as its first argument (falling back to
+`SMALL_CHANGE_FILE` when called without one). The harness runs it once per
+configured small-update variant to measure each variant's server storage delta.
 
 Any function returning non-zero aborts the run. Stub adapters fail fast in
 `adapter_server_setup`.

@@ -188,7 +188,8 @@ adapter_pull_elsewhere() {
 
 # Small-update: change ~100 bytes of one file and publish a new revision.
 adapter_update() {
-  client_append_bytes "${TREE_DIR}/${SMALL_CHANGE_FILE}" 100
-  on_client "cd ${TREE_DIR} && ${LORE} stage '${SMALL_CHANGE_FILE}'"
+  local f="${1:-${SMALL_CHANGE_FILE:-}}"
+  client_append_bytes "${TREE_DIR}/${f}" 100
+  on_client "cd ${TREE_DIR} && ${LORE} stage '${f}'"
   on_client "cd ${TREE_DIR} && ${LORE} commit 'benchmark: small update' && ${LORE} push"
 }

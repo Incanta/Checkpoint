@@ -241,8 +241,9 @@ EOF
 # Small-update: change ~100 bytes of one file and push a new commit. A change to
 # an LFS-tracked file produces a whole new LFS object (LFS does not delta).
 adapter_update() {
-  client_append_bytes "${TREE_DIR}/${SMALL_CHANGE_FILE}" 100
-  on_client "TREE_DIR='${TREE_DIR}' FILE='${SMALL_CHANGE_FILE}' bash -seuo pipefail" <<'EOF'
+  local f="${1:-${SMALL_CHANGE_FILE:-}}"
+  client_append_bytes "${TREE_DIR}/${f}" 100
+  on_client "TREE_DIR='${TREE_DIR}' FILE='${f}' bash -seuo pipefail" <<'EOF'
 cd "${TREE_DIR}"
 git add -- "${FILE}"
 git commit -q -m 'benchmark: small update'

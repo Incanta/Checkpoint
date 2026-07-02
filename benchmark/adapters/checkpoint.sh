@@ -338,8 +338,9 @@ adapter_pull_elsewhere() {
 # Small-update: change ~100 bytes of one file and submit. Untimed; the harness
 # only measures the server storage delta around this.
 adapter_update() {
-  client_append_bytes "${TREE_DIR}/${SMALL_CHANGE_FILE}" 100
-  on_client "cd ${TREE_DIR} && ${CHK} add '${SMALL_CHANGE_FILE}' >/dev/null"
+  local f="${1:-${SMALL_CHANGE_FILE:-}}"
+  client_append_bytes "${TREE_DIR}/${f}" 100
+  on_client "cd ${TREE_DIR} && ${CHK} add '${f}' >/dev/null"
   on_client "cd ${TREE_DIR} && ${CHK} submit --no-progress --message 'benchmark: small update'"
 }
 

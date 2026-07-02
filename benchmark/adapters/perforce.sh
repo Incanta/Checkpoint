@@ -222,7 +222,8 @@ EOF
 # Small-update: open one file for edit, change ~100 bytes, and submit. Perforce
 # stores a new revision of the (binary) file, typically the whole file again.
 adapter_update() {
-  on_client "${P4_RELOGIN} && cd ${TREE_DIR} && p4 -c ${WS_MAIN} edit '${SMALL_CHANGE_FILE}'"
-  client_append_bytes "${TREE_DIR}/${SMALL_CHANGE_FILE}" 100
+  local f="${1:-${SMALL_CHANGE_FILE:-}}"
+  on_client "${P4_RELOGIN} && cd ${TREE_DIR} && p4 -c ${WS_MAIN} edit '${f}'"
+  client_append_bytes "${TREE_DIR}/${f}" 100
   on_client "${P4_RELOGIN} && cd ${TREE_DIR} && p4 -q -c ${WS_MAIN} submit -d 'benchmark: small update'"
 }

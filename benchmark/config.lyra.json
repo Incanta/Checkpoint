@@ -1,6 +1,7 @@
 {
   "tarball_url": "https://incantagames.sfo3.digitaloceanspaces.com/checkpoint/lyra.tar.gz",
-  "small_change_file": "Content/Effects/Textures/Flipbooks/SmokeSwirl_3_Flipbook_CHANNELPACK.uasset",
+  "small_change_file_large": "Content/Effects/Textures/Flipbooks/SmokeSwirl_3_Flipbook_CHANNELPACK.uasset",
+  "small_change_file_small": "README.md",
   "region": "sfo3",
   "droplet_size": "m-8vcpu-64gb",
   "data_volume_gb": 400,

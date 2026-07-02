@@ -343,22 +343,23 @@ client_append_bytes() {
   on_client "head -c ${2} /dev/urandom >> '${1}'"
 }
 
-# record_storage_breakdown <before_tsv> <after_tsv>: given two component
+# record_storage_breakdown <prefix> <before_tsv> <after_tsv>: given two component
 # snapshots (each newline-separated "name<TAB>bytes", as produced by an
 # adapter's optional adapter_storage_components hook), record one
-# `update_delta_<name>` storage metric per component (after - before; a
-# component missing from a snapshot counts as 0). Lets an adapter attribute the
-# small-update storage delta to its parts (e.g. content blocks vs version index
-# vs the global store index) instead of a single opaque number.
+# `<prefix><name>` storage metric per component (after - before; a component
+# missing from a snapshot counts as 0). Lets an adapter attribute a small-update
+# storage delta to its parts (e.g. content blocks vs version index vs the global
+# store index) instead of a single opaque number. The prefix
+# (e.g. "update_large_delta_") namespaces the metrics per update variant.
 record_storage_breakdown() {
-  local before="$1" after="$2" names name b a
+  local prefix="$1" before="$2" after="$3" names name b a
   names="$(printf '%s\n%s\n' "$before" "$after" \
     | awk -F'\t' '$1 != "" { print $1 }' | sort -u)"
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     b="$(printf '%s\n' "$before" | awk -F'\t' -v n="$name" '$1 == n { print $2; exit }')"
     a="$(printf '%s\n' "$after"  | awk -F'\t' -v n="$name" '$1 == n { print $2; exit }')"
-    record_storage "update_delta_${name}" "$(( ${a:-0} - ${b:-0} ))"
+    record_storage "${prefix}${name}" "$(( ${a:-0} - ${b:-0} ))"
   done <<< "$names"
 }
 
