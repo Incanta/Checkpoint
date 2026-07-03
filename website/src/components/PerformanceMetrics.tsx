@@ -42,7 +42,7 @@ export default function PerformanceMetrics() {
           Benchmarks performed using Checkpoint CLI on separate Linux client and
           server machines. You can find the benchmark run on{" "}
           <a
-            href="https://github.com/Incanta/Checkpoint/actions/runs/28134934677"
+            href="https://github.com/Incanta/Checkpoint/actions/runs/28631254034"
             target="_blank"
           >
             GitHub
