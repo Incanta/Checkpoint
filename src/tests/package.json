@@ -20,7 +20,7 @@
     "@checkpointvcs/app": "workspace:*",
     "@checkpointvcs/common": "workspace:*",
     "@checkpointvcs/daemon": "workspace:*",
-    "uuid": "^14.0.0"
+    "uuid": "^14.0.1"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
