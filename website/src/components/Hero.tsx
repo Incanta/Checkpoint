@@ -69,10 +69,10 @@ export default function Hero() {
             className="inline-flex items-center gap-3 glass-primary rounded-full px-6 py-2.5 transition-all hover:scale-[1.03] hover:shadow-lg hover:shadow-primary/20"
           >
             <span className="text-sm sm:text-base font-medium text-foreground">
-              typically
+              up to
             </span>
             <span className="text-2xl sm:text-3xl font-extrabold bg-gradient-to-r from-primary-light to-accent bg-clip-text text-transparent">
-              50%+
+              50-70%
             </span>
             <span className="text-sm sm:text-base font-medium text-foreground">
               faster than Perforce
