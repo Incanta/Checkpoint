@@ -14,32 +14,30 @@ export async function register() {
     await verifyLicenseManagerKey();
 
     // Initialize the license client (no-op unless this is the license manager)
-    const { initLicenseClient, getInstanceTier } =
-      await import("~/server/license-client");
+    const { initLicenseClient } = await import("~/server/license-client");
     await initLicenseClient();
 
     // Start weekly anonymous usage telemetry (self-hosted instances only;
     // self-gates on opt-out and on the license-manager instance).
-    const { initTelemetryScheduler } = await import(
-      "~/server/telemetry/scheduler"
-    );
+    const { initTelemetryScheduler } =
+      await import("~/server/telemetry/scheduler");
     initTelemetryScheduler();
 
     const { default: config } = await import("@incanta/config");
 
     Logger.log(`Checkpoint App:`);
-    Logger.log(`  Port:        ${config.get<number>("server.listen-port")}`);
-    Logger.log(`  License:     ${getInstanceTier()}`);
+    Logger.log(`  Port:         ${config.get<number>("server.listen-port")}`);
+    Logger.log(`  Storage:      ${config.get<string>("storage.mode")}`);
+    Logger.log(`  Database:     ${config.get<string>("db.provider")}`);
     Logger.log(
-      `  Storage:     ${config.get<string>("storage.mode") === "r2" ? "R2" : "SeaweedFS"}`,
+      `  Database URL: ${await config.getWithSecrets<string>("db.url")}`,
     );
-    Logger.log(`  Database:    ${config.get<string>("db.provider")}`);
+    Logger.log(`  SMTP:         ${config.get<boolean>("email.enabled")}`);
     if (isLicenseManager()) {
       Logger.log(`  Stripe:      ${config.get<boolean>("stripe.enabled")}`);
       Logger.log(
         `  Newsletter:  ${config.get<boolean>("newsletter.kit.enabled")}`,
       );
-      Logger.log(`  SMTP:        ${config.get<boolean>("email.enabled")}`);
     }
 
     Logger.log("[healthy] App is ready");
