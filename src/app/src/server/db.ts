@@ -22,7 +22,7 @@ const createPrismaClient = () => {
   const url = process.env.DATABASE_URL;
 
   console.log(
-    `Creating prisma client (DATABASE_URL ${url ? "set" : "unset"}) with log level: ${log.join(", ")}`,
+    `Creating prisma client (DATABASE_URL ${url || "unset"}) with log level: ${log.join(", ")}`,
   );
 
   return new PrismaClient({
