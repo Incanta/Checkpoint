@@ -19,7 +19,7 @@
     "preview": "vite preview"
   },
   "peerDependencies": {
-    "@incanta/config": "^2.1.16",
+    "@incanta/config": "^2.1.18",
     "@trpc/client": "^11.11.0",
     "@trpc/server": "^11.11.0",
     "pretty-bytes": "^7.1.0",

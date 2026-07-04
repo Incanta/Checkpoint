@@ -27,7 +27,7 @@
     "audit": "node scripts/audit.js"
   },
   "dependencies": {
-    "@incanta/config": "^2.1.16",
+    "@incanta/config": "^2.1.18",
     "@trpc/client": "^11.11.0",
     "@trpc/server": "^11.11.0",
     "@types/diff": "^8.0.0",
@@ -64,7 +64,7 @@
     "typescript-eslint": "^8.27.0"
   },
   "resolutions": {
-    "@incanta/config": "^2.1.10",
+    "@incanta/config": "^2.1.18",
     "@trpc/client": "^11.11.0",
     "@trpc/server": "^11.11.0",
     "@types/node": "^25.3.3",
