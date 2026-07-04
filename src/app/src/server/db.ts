@@ -11,8 +11,17 @@ const createPrismaClient = () => {
     log.push("query", "warn");
   }
 
+  console.log(
+    `Creating prisma client with url: ${env.DATABASE_URL} and log level: ${log.join(", ")}`,
+  );
+
   return new PrismaClient({
     log,
+    datasources: {
+      db: {
+        url: env.DATABASE_URL,
+      },
+    },
   });
 };
 
