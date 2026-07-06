@@ -44,7 +44,14 @@ export async function register() {
 
     const { default: config } = await import("@incanta/config");
 
+    const { SERVER_API, MIN_SERVER_API, SERVER_VERSION } =
+      await import("~/server/api/api-version");
+
     Logger.log(`Checkpoint App:`);
+    Logger.log(`  Version:      ${SERVER_VERSION}`);
+    Logger.log(
+      `  API version:  ${SERVER_API} (min supported: ${MIN_SERVER_API})`,
+    );
     Logger.log(`  Port:         ${config.get<number>("server.listen-port")}`);
     Logger.log(`  Storage:      ${config.get<string>("storage.mode")}`);
     Logger.log(`  Database:     ${config.get<string>("db.provider")}`);
