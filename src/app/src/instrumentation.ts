@@ -8,6 +8,25 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { Logger } = await import("./server/logging");
 
+    // IMPORTANT: initialize the Prisma query engine (and, with it, the
+    // process-global OpenSSL state) BEFORE any native addon is loaded. The Rust
+    // @checkpointvcs/longtail-addon initializes its own OpenSSL, which corrupts
+    // the OpenSSL used by Prisma's in-process (library) query engine; if
+    // longtail loads first, every Prisma TLS/connection attempt fails with
+    // "Error opening a TLS connection: OpenSSL error". Connecting here makes
+    // Prisma win the init race; once established, later longtail loads and new
+    // pool connections are unaffected. See src/server/db.ts.
+    try {
+      const { db } = await import("~/server/db");
+      await db.$connect();
+    } catch (err) {
+      Logger.error(
+        `[db] Prisma initial connect failed: ${
+          err instanceof Error ? (err.stack ?? err.message) : String(err)
+        }`,
+      );
+    }
+
     // Verify license manager key (Ed25519 via DNS TXT record)
     const { verifyLicenseManagerKey, isLicenseManager } =
       await import("~/server/license-utils");
