@@ -1,0 +1,46 @@
+# Keep the Docker build context lean. The image reinstalls dependencies with
+# `yarn install --immutable`, so nothing here is needed from the host.
+
+# --- Dependencies: reinstalled in-image (~1.7 GB) ---
+node_modules
+**/node_modules
+
+# --- Yarn regenerable state (Yarn itself comes from corepack) ---
+.yarn/cache
+.yarn/unplugged
+.yarn/install-state.gz
+.yarn/build-state.yml
+
+# --- VCS history (~1 GB) ---
+.git
+
+# --- Build outputs regenerated during the image build ---
+.next
+**/.next
+**/target
+**/dist-msvc
+
+# --- Local runtime data / logs (not part of the app build) ---
+# Nested `data` dirs (e.g. src/core/server/data, ~3.6 GB) hold local storage /
+# DB state and can contain sockets/special files that break the context tar.
+data
+**/data
+logs
+.yarnlogs
+**/*.log
+
+# --- Windows junction recreated inside the build by set-db-provider.mjs ---
+# The junction itself has a file mode the context tar can't encode; the real
+# migration dirs (migrations-postgresql / migrations-sqlite) are still included.
+src/app/prisma/migrations
+
+# --- Editor / OS / agent tooling ---
+.vscode
+.idea
+.claude
+.DS_Store
+Thumbs.db
+
+# --- Not needed inside the build context ---
+docker-compose*.yaml
+.dockerignore
