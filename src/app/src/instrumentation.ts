@@ -55,9 +55,6 @@ export async function register() {
     Logger.log(`  Port:         ${config.get<number>("server.listen-port")}`);
     Logger.log(`  Storage:      ${config.get<string>("storage.mode")}`);
     Logger.log(`  Database:     ${config.get<string>("db.provider")}`);
-    Logger.log(
-      `  Database URL: ${await config.getWithSecrets<string>("db.url")}`,
-    );
     Logger.log(`  SMTP:         ${config.get<boolean>("email.enabled")}`);
     if (isLicenseManager()) {
       Logger.log(`  Stripe:      ${config.get<boolean>("stripe.enabled")}`);

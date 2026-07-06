@@ -21,10 +21,6 @@ const createPrismaClient = () => {
   // and no connection is made at build time anyway.
   const url = process.env.DATABASE_URL;
 
-  console.log(
-    `Creating prisma client (DATABASE_URL ${url || "unset"}) with log level: ${log.join(", ")}`,
-  );
-
   return new PrismaClient({
     log,
     ...(url ? { datasourceUrl: url } : {}),
