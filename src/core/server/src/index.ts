@@ -2,6 +2,7 @@ import express from "express";
 import config from "@incanta/config";
 import { routes } from "./routes/index.js";
 import { Logger } from "./logging.js";
+import { SERVER_VERSION } from "@checkpointvcs/common";
 
 // beforeExit does NOT fire when process.exit() is called explicitly.
 // Use "exit" event + monkey-patch to catch all exit paths.
@@ -34,6 +35,7 @@ app.use(routes());
 app.listen(port, () => {
   const mode = config.get<string>("storage.mode");
   Logger.log(`Checkpoint Server:`);
+  Logger.log(`  Version:     ${SERVER_VERSION}`);
   Logger.log(`  Port:        ${port}`);
   Logger.log(`  Storage:     ${mode}`);
 
