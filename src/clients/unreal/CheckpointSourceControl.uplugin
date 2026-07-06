@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 18,
-	"VersionName": "0.4.8",
+	"Version": 19,
+	"VersionName": "0.4.9",
 	"FriendlyName": "Checkpoint SCM",
 	"Description": "Checkpoint source control management",
 	"Category": "Source Control",

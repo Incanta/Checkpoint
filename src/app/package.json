@@ -1,6 +1,6 @@
 {
   "name": "@checkpointvcs/app",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "private": true,
   "type": "module",
   "main": "dist/lib/trpc-client.js",
