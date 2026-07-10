@@ -45,7 +45,11 @@ export default tseslint.config(
   // Core & Desktop — TypeScript + Prettier
   // ===========================================================
   {
-    files: ["src/core/**/*.{ts,tsx}", "src/clients/desktop/**/*.{ts,tsx}"],
+    files: [
+      "src/core/**/*.{ts,tsx}",
+      "src/clients/desktop/**/*.{ts,tsx}",
+      "src/clients/vscode/**/*.{ts,tsx}",
+    ],
     extends: [
       js.configs.recommended,
       ...tseslint.configs.recommended,

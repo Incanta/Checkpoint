@@ -1,0 +1,7 @@
+.vscode/**
+src/**
+node_modules/**
+esbuild.config.mjs
+tsconfig.json
+dist/*.map
+**/*.vsix
