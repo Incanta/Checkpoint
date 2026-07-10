@@ -53,33 +53,32 @@ export async function CreateApiClientAuth(
     user = await GetAuthConfigUser(daemonId);
   } catch (error) {
     //
-  } finally {
-    if (!user) {
-      // eslint-disable-next-line no-unsafe-finally
-      throw new Error(`Could not find a user under daemon ID ${daemonId}`);
-    }
-
-    if (!user.apiToken) {
-      // eslint-disable-next-line no-unsafe-finally
-      throw new Error(`Device isn't authorized yet.`);
-    }
   }
 
-  const client = createTRPCClient<ApiAppRouter>({
-    links: [
-      httpBatchLink({
-        url: `${user.endpoint}/api/trpc`,
-        transformer: superjson,
-        async headers() {
-          return {
-            Authorization: `Bearer ${user.apiToken}`,
-          };
-        },
-      }),
-    ],
-  });
+  // An env-provided token takes precedence over auth.json. This gives headless
+  // / CI runs a zero-file auth path: export CHECKPOINT_API_TOKEN (and, when no
+  // matching auth.json entry exists, CHECKPOINT_ENDPOINT) and run commands.
+  const envToken = process.env["CHECKPOINT_API_TOKEN"];
+  if (envToken) {
+    const endpoint = user?.endpoint ?? process.env["CHECKPOINT_ENDPOINT"];
+    if (!endpoint) {
+      throw new Error(
+        "CHECKPOINT_API_TOKEN is set but no endpoint is configured; " +
+          "set CHECKPOINT_ENDPOINT or log in first.",
+      );
+    }
+    return CreateApiClientAuthManual(endpoint, envToken);
+  }
 
-  return client;
+  if (!user) {
+    throw new Error(`Could not find a user under daemon ID ${daemonId}`);
+  }
+
+  if (!user.apiToken) {
+    throw new Error(`Device isn't authorized yet.`);
+  }
+
+  return CreateApiClientAuthManual(user.endpoint, user.apiToken);
 }
 
 export async function SaveAuthToken(

@@ -67,6 +67,34 @@ Run any command from within a Checkpoint workspace directory. The CLI walks up t
 
 The daemon port is read from `~/.checkpoint/daemon.json` (key: `daemonPort`, default: `13010`).
 
+## Headless / Daemonless Mode
+
+For servers and CI, the CLI can run with no pre-installed daemon. When no resident
+daemon is reachable, it spawns the bundled daemon (shipped alongside the CLI under
+`resources/daemon/`) in an ephemeral, workspace-scoped mode, runs the command, and lets
+it self-terminate after a short idle period. Back-to-back commands reuse the warm daemon.
+
+Install one of the `checkpoint-cli-*` release artifacts (portable `.tar.gz`/`.zip`, or a
+Linux `.deb`/`.rpm`), put `chk` on your `PATH`, then:
+
+```bash
+# Non-interactive login with an API token (mint one in Settings > Devices):
+chk login --token "$CHK_TOKEN" --endpoint https://app.checkpointvcs.com
+
+# ...or skip login entirely and pass the token via the environment:
+export CHECKPOINT_API_TOKEN="..."
+export CHECKPOINT_ENDPOINT="https://app.checkpointvcs.com"
+
+chk status   # spawns an ephemeral daemon on demand
+```
+
+Environment variables:
+
+- `CHECKPOINT_DAEMONLESS=1` — force daemonless mode (same as the `--no-daemon` flag).
+- `CHECKPOINT_API_TOKEN` / `CHECKPOINT_ENDPOINT` — non-interactive auth with no `auth.json`.
+- `CHECKPOINT_DAEMON_BIN` — override the directory containing `checkpoint-daemon` and
+  `daemon-bundle.cjs` (normally discovered relative to the CLI binary).
+
 ## Platform Support
 
 - Windows x64 (MinGW / MSVC)

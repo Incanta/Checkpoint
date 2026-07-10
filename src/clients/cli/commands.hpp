@@ -24,6 +24,7 @@
 #endif
 
 #include "daemon_client.hpp"
+#include "ephemeral_daemon.hpp"
 #include "terminal_menu.hpp"
 #include "types.hpp"
 #include "version.hpp"
@@ -81,13 +82,14 @@ struct WorkspaceContext {
 };
 
 inline WorkspaceContext getWorkspaceContext() {
-  int port = getDaemonPort();
-  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
-  DaemonClient client(baseUrl);
-
   fs::path cwd = fs::current_path();
   fs::path root = findWorkspaceRoot(cwd);
   WorkspaceConfig ws = readWorkspaceConfig(root);
+
+  // Resolve to the resident daemon, or transparently spawn/reuse an ephemeral
+  // one scoped to this workspace (headless / daemonless mode).
+  std::string baseUrl = resolveDaemonBaseUrl(root);
+  DaemonClient client(baseUrl);
 
   return {std::move(client), std::move(ws), root};
 }
@@ -272,8 +274,11 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId,
  * level.
  */
 inline int checkDaemonVersion() {
-  int port = getDaemonPort();
-  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  // Best-effort only: check against a resident daemon if one is running. In
+  // daemonless mode there is nothing to check against (the CLI ships with its
+  // matching daemon bundle), so skip without spawning anything.
+  std::string baseUrl = tryResidentBaseUrl();
+  if (baseUrl.empty()) return 0;
   DaemonClient client(baseUrl);
 
   try {
@@ -312,8 +317,9 @@ inline int checkDaemonVersion() {
  */
 inline void printUpdateBannerIfAvailable() {
   try {
-    int port = getDaemonPort();
-    std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+    // Only meaningful for a resident daemon; never spawn one just for a banner.
+    std::string baseUrl = tryResidentBaseUrl();
+    if (baseUrl.empty()) return;
     DaemonClient client(baseUrl);
 
     auto result = client.query("updater.getStatus");
@@ -1254,9 +1260,8 @@ inline int cmdInit(const std::string& repoArg) {
     return 1;
   }
 
-  // Connect to daemon
-  int port = getDaemonPort();
-  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  // Connect to daemon (resident, or an ephemeral one for headless use)
+  std::string baseUrl = resolveGlobalDaemonBaseUrl();
   DaemonClient client(baseUrl);
 
   // Get authenticated user / daemon id
@@ -1455,8 +1460,7 @@ inline int cmdInit(const std::string& repoArg) {
 // ═════════════════════════════════════════════════════════════════
 
 inline int cmdAccounts() {
-  int port = getDaemonPort();
-  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  std::string baseUrl = resolveGlobalDaemonBaseUrl();
   DaemonClient client(baseUrl);
 
   auto usersResult = client.query("auth.getUsers");
@@ -1505,10 +1509,47 @@ inline int cmdAccounts() {
 //  COMMAND: login (authenticate with a Checkpoint server)
 // ═════════════════════════════════════════════════════════════════
 
-inline int cmdLogin(const std::string& endpoint, const std::string& daemonId) {
-  int port = getDaemonPort();
-  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+inline int cmdLogin(const std::string& endpoint, const std::string& daemonId,
+                    const std::string& token = "") {
+  std::string baseUrl = resolveGlobalDaemonBaseUrl();
   DaemonClient client(baseUrl);
+
+  // Non-interactive, headless/CI login: validate and persist a pre-minted API
+  // token instead of running the browser device-code flow.
+  if (!token.empty()) {
+    nlohmann::json input = {
+        {"endpoint", endpoint},
+        {"daemonId", daemonId},
+        {"token", token},
+    };
+    nlohmann::json result;
+    try {
+      result = client.mutate("auth.loginWithToken", input);
+    } catch (const std::exception& e) {
+      std::cerr << color::red() << "error: login failed: " << e.what()
+                << color::reset() << std::endl;
+      return 1;
+    }
+
+    std::string displayName;
+    if (result.contains("user")) {
+      auto& u = result["user"];
+      std::string name = jsonStr(u, "name");
+      std::string email = jsonStr(u, "email");
+      std::string username = jsonStr(u, "username");
+      displayName = !name.empty() ? name : (!username.empty() ? username : email);
+    }
+
+    std::cout << color::green() << color::bold()
+              << "Authenticated successfully!" << color::reset() << std::endl;
+    if (!displayName.empty()) {
+      std::cout << color::dim() << "  Signed in as: " << displayName
+                << color::reset() << std::endl;
+    }
+    std::cout << color::dim() << "  Daemon ID:    " << daemonId
+              << color::reset() << std::endl;
+    return 0;
+  }
 
   std::cout << "Authenticating with " << color::bold() << endpoint
             << color::reset() << "..." << std::endl;
@@ -1604,8 +1645,7 @@ inline int cmdLogin(const std::string& endpoint, const std::string& daemonId) {
 // ═════════════════════════════════════════════════════════════════
 
 inline int cmdLogout() {
-  int port = getDaemonPort();
-  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  std::string baseUrl = resolveGlobalDaemonBaseUrl();
   DaemonClient client(baseUrl);
 
   auto usersResult = client.query("auth.getUsers");
@@ -1933,9 +1973,8 @@ inline int cmdArtifactUpload(int changelistNumber, const std::vector<std::string
  * Stops watching and removes from daemon.json, but does NOT delete .checkpoint.
  */
 inline int cmdUnlink() {
-  // Connect to daemon
-  int port = getDaemonPort();
-  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  // Connect to daemon (resident, or an ephemeral one for headless use)
+  std::string baseUrl = resolveGlobalDaemonBaseUrl();
   DaemonClient client(baseUrl);
 
   // Get authenticated users
@@ -2049,8 +2088,17 @@ inline int cmdUnlink() {
 // ═════════════════════════════════════════════════════════════════
 
 inline int cmdUpdateCheck() {
-  int port = getDaemonPort();
-  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  // The updater manages a resident daemon install. In headless mode the CLI is
+  // updated by re-downloading its release, so there is nothing to talk to.
+  std::string baseUrl = tryResidentBaseUrl();
+  if (baseUrl.empty()) {
+    std::cout << "No resident Checkpoint daemon is running." << std::endl;
+    std::cout << color::dim()
+              << "  In headless mode, update by re-downloading the latest CLI "
+                 "release."
+              << color::reset() << std::endl;
+    return 0;
+  }
   DaemonClient client(baseUrl);
 
   // Force a fresh poll against GitHub, then read the resulting status.
@@ -2096,8 +2144,15 @@ inline int cmdUpdateCheck() {
 // ═════════════════════════════════════════════════════════════════
 
 inline int cmdUpdateInstall(bool autoYes) {
-  int port = getDaemonPort();
-  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  std::string baseUrl = tryResidentBaseUrl();
+  if (baseUrl.empty()) {
+    std::cout << "No resident Checkpoint daemon is running." << std::endl;
+    std::cout << color::dim()
+              << "  In headless mode, update by re-downloading the latest CLI "
+                 "release."
+              << color::reset() << std::endl;
+    return 0;
+  }
   DaemonClient client(baseUrl);
 
   auto status = client.query("updater.getStatus");

@@ -140,6 +140,63 @@ export class DaemonManager {
     this.startSyncPolling();
   }
 
+  /**
+   * Ephemeral init for a daemonless CLI invocation: registers ONLY the single
+   * workspace rooted at `workspacePath` and skips all background machinery
+   * (fs watchers and the 5-minute sync poll). Change detection still works on
+   * demand via {@link refreshWorkspaceContents} because it recovers state from
+   * the on-disk baseline (state.json / state.db) plus the current filesystem.
+   *
+   * `workspacePath` may be omitted for auth-only invocations (e.g. `login`,
+   * `accounts`), which don't need a workspace registered at all.
+   */
+  public async initEphemeral(workspacePath?: string | null): Promise<void> {
+    await DaemonConfig.Load();
+
+    const config = await DaemonConfig.Get();
+    this.stateBackend = config.stateBackend;
+
+    await InitLogger();
+
+    if (!workspacePath) {
+      // Auth/version-only ephemeral daemon: nothing further to register.
+      return;
+    }
+
+    const wsConfig = await getWorkspaceConfig(workspacePath);
+    if (!wsConfig) {
+      throw new Error(
+        `No Checkpoint workspace found at ${workspacePath} (missing .checkpoint/workspace.json)`,
+      );
+    }
+
+    // .checkpoint/workspace.json stores the lean config shape; the manager
+    // works with the richer server Workspace. The server-owned fields
+    // (userId, orgId, createdAt, deletedAt) are not persisted locally and are
+    // unused by local operations, so fill them with inert placeholders. These
+    // are never written back to the shared daemon.json in ephemeral mode.
+    const workspace: Workspace = {
+      id: wsConfig.id,
+      repoId: wsConfig.repoId,
+      name: wsConfig.workspaceName,
+      branchName: wsConfig.branchName,
+      localPath: workspacePath,
+      daemonId: wsConfig.daemonId,
+      userId: "",
+      orgId: "",
+      createdAt: new Date(0),
+      deletedAt: null,
+    };
+
+    const existing = this.workspaces.get(workspace.daemonId) || [];
+    existing.push(workspace);
+    this.workspaces.set(workspace.daemonId, existing);
+
+    await this.loadWorkspaceState(workspace);
+    await this.scanIgnoreFiles(workspace);
+    // Intentionally NO watchWorkspace() and NO startSyncPolling().
+  }
+
   public async shutdown(): Promise<void> {
     this.stopSyncPolling();
     this.watchers.forEach((watcher) => watcher.close());
