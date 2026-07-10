@@ -18,7 +18,7 @@ const t = initTRPC.context<TRPCContext>().create({
 /**
  * Hard-block middleware: when any connected server reports the daemon below
  * its min_server_api (verdict from ApiVersionChecker), every procedure
- * returns FORBIDDEN — EXCEPT updater.* and version.*, which clients need to
+ * returns FORBIDDEN, EXCEPT updater.* and version.*, which clients need to
  * recover from this state.
  *
  * The literal "update required" substring is matched by the CLI's top-level
@@ -46,3 +46,4 @@ const versionGateMiddleware = t.middleware(({ next, path }) => {
  */
 export const router = t.router;
 export const publicProcedure = t.procedure.use(versionGateMiddleware);
+export const createCallerFactory = t.createCallerFactory;

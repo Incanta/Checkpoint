@@ -5,8 +5,13 @@ import {
   Menu,
   type MenuItemConstructorOptions,
 } from "electron";
+import { CreateDaemonClient } from "@checkpointvcs/daemon";
 
 const isMac = process.platform === "darwin";
+
+// Last known state of the daemon's MCP server, mirrored into the checkbox
+// menu item. Refreshed at startup and after every toggle.
+let mcpEnabled = false;
 
 const DOCS_URL = "https://checkpointvcs.com/docs";
 const ISSUES_URL = "https://github.com/Incanta/Checkpoint/issues";
@@ -33,7 +38,18 @@ function buildTemplate(): MenuItemConstructorOptions[] {
       : []),
     {
       label: "File",
-      submenu: [isMac ? { role: "close" } : { role: "quit" }],
+      submenu: [
+        {
+          label: "MCP Server",
+          type: "checkbox",
+          checked: mcpEnabled,
+          click: (): void => {
+            void toggleMcpServer();
+          },
+        },
+        { type: "separator" },
+        isMac ? { role: "close" } : { role: "quit" },
+      ],
     },
     { role: "editMenu" },
     {
@@ -89,10 +105,50 @@ function buildTemplate(): MenuItemConstructorOptions[] {
 }
 
 /**
+ * Toggles the daemon's MCP server. The daemon starts/stops it immediately and
+ * persists the choice to daemon.json, so no daemon restart is needed.
+ */
+async function toggleMcpServer(): Promise<void> {
+  try {
+    const client = await CreateDaemonClient();
+    const status = await client.mcp.getStatus.query();
+    const next = await client.mcp.setEnabled.mutate({
+      enabled: !status.enabled,
+    });
+    mcpEnabled = next.enabled;
+  } catch (error) {
+    console.error("Failed to toggle the MCP server:", error);
+  }
+  installMenu();
+}
+
+/**
+ * Fetches the MCP server state from the daemon so the checkbox reflects
+ * reality on startup. Silent on error (e.g. the daemon isn't up yet).
+ */
+async function refreshMcpState(): Promise<void> {
+  try {
+    const client = await CreateDaemonClient();
+    const status = await client.mcp.getStatus.query();
+    if (status.enabled !== mcpEnabled) {
+      mcpEnabled = status.enabled;
+      installMenu();
+    }
+  } catch {
+    // Daemon unreachable or too old; leave the default unchecked state.
+  }
+}
+
+function installMenu(): void {
+  const menu = Menu.buildFromTemplate(buildTemplate());
+  Menu.setApplicationMenu(menu);
+}
+
+/**
  * Builds and installs the application menu. Call once after the app is ready
  * and before the renderer loads so the titlebar can fetch it.
  */
 export function setupApplicationMenu(): void {
-  const menu = Menu.buildFromTemplate(buildTemplate());
-  Menu.setApplicationMenu(menu);
+  installMenu();
+  void refreshMcpState();
 }

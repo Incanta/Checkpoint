@@ -5,6 +5,11 @@ import type { Workspace } from "./types/index.js";
 
 export interface DaemonConfigType {
   daemonPort: number;
+  /** Opt-in MCP (Model Context Protocol) server exposing the daemon API */
+  mcp: {
+    enabled: boolean;
+    port: number;
+  };
   workspaces: Workspace[];
   /** "json" (default) keeps state.json; "sqlite" uses a WAL-mode SQLite DB */
   stateBackend: "json" | "sqlite";
@@ -60,6 +65,10 @@ export class DaemonConfig {
     this.vars = {
       // defaults go here
       daemonPort: 13010,
+      mcp: {
+        enabled: false,
+        port: 13011,
+      },
       workspaces: [],
       stateBackend: "sqlite",
       logging: {
@@ -129,6 +138,15 @@ export class DaemonConfig {
       try {
         DaemonConfig.Ensure().vars = JSON.parse(configStr);
         shouldSave = false;
+
+        // Backfill fields missing from configs written by older daemons.
+        if (!DaemonConfig.Ensure().vars.mcp) {
+          DaemonConfig.Ensure().vars.mcp = {
+            enabled: false,
+            port: 13011,
+          };
+          shouldSave = true;
+        }
       } catch (e) {
         //
       }

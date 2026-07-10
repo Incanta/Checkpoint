@@ -22,6 +22,7 @@ var (
 	mStart          *systray.MenuItem
 	mStop           *systray.MenuItem
 	mRestart        *systray.MenuItem
+	mMcp            *systray.MenuItem
 )
 
 // trayDaemonAPI / trayClientVersion come from the generated version.go
@@ -35,6 +36,13 @@ type daemonVersionInfo struct {
 	ClientVersion string `json:"clientVersion"`
 	DaemonAPI     int    `json:"daemonApi"`
 	MinDaemonAPI  int    `json:"minDaemonApi"`
+}
+
+// mcpStatus mirrors the daemon's McpStatus from src/core/daemon/src/mcp-server.ts.
+type mcpStatus struct {
+	Enabled bool `json:"enabled"`
+	Running bool `json:"running"`
+	Port    int  `json:"port"`
 }
 
 // updateStatus mirrors the daemon's UpdateStatus from src/core/daemon/src/updater.ts.
@@ -77,6 +85,12 @@ func onReady() {
 	mStart = systray.AddMenuItem("Start Daemon", "Start the Checkpoint daemon service")
 	mStop = systray.AddMenuItem("Stop Daemon", "Stop the Checkpoint daemon service")
 	mRestart = systray.AddMenuItem("Restart Daemon", "Restart the Checkpoint daemon service")
+	mMcp = systray.AddMenuItemCheckbox(
+		"MCP Server",
+		"Enable or disable the daemon's MCP server for AI tools",
+		false,
+	)
+	mMcp.Disable()
 	systray.AddSeparator()
 	mOpenDesktop := systray.AddMenuItem("Open Desktop App", "Open Checkpoint Desktop")
 	mViewLogs := systray.AddMenuItem("View Logs", "Open the Checkpoint log folder")
@@ -114,6 +128,8 @@ func onReady() {
 				go handleStop()
 			case <-mRestart.ClickedCh:
 				go handleRestart()
+			case <-mMcp.ClickedCh:
+				go handleMcpToggle()
 			case <-mUpdateDownload.ClickedCh:
 				go handleUpdateDownload()
 			case <-mUpdateInstall.ClickedCh:
@@ -248,16 +264,89 @@ func updateDaemonStatus() {
 		mRestart.Enable()
 		checkDaemonVersion()
 		pollUpdateStatus()
+		pollMcpStatus()
 	} else {
 		mStatus.SetTitle("Daemon: Stopped")
 		mStart.Enable()
 		mStop.Disable()
 		mRestart.Disable()
+		mMcp.Disable()
 		mVersionMsg.Hide()
 		mUpdateStatus.Hide()
 		mUpdateDownload.Hide()
 		mUpdateInstall.Hide()
 	}
+}
+
+// pollMcpStatus syncs the MCP checkbox with the daemon's mcp.getStatus. The
+// item stays disabled when the daemon doesn't answer (e.g. an older daemon
+// without the MCP feature).
+func pollMcpStatus() {
+	status, err := getMcpStatus(getDaemonPort())
+	if err != nil {
+		mMcp.Disable()
+		return
+	}
+
+	mMcp.Enable()
+	if status.Enabled {
+		mMcp.Check()
+	} else {
+		mMcp.Uncheck()
+	}
+	if status.Running {
+		mMcp.SetTitle(fmt.Sprintf("MCP Server (port %d)", status.Port))
+	} else {
+		mMcp.SetTitle("MCP Server")
+	}
+}
+
+// getMcpStatus queries the daemon's mcp.getStatus tRPC endpoint.
+func getMcpStatus(port int) (mcpStatus, error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	url := fmt.Sprintf(
+		"http://127.0.0.1:%d/mcp.getStatus?batch=1&input={}", port,
+	)
+	resp, err := client.Get(url)
+	if err != nil {
+		return mcpStatus{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpStatus{}, err
+	}
+	var batch []struct {
+		Result struct {
+			Data struct {
+				JSON mcpStatus `json:"json"`
+			} `json:"data"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &batch); err != nil || len(batch) == 0 {
+		return mcpStatus{}, fmt.Errorf("invalid response")
+	}
+	return batch[0].Result.Data.JSON, nil
+}
+
+// handleMcpToggle flips the daemon's MCP server on or off. The daemon applies
+// the change immediately and persists it to daemon.json.
+func handleMcpToggle() {
+	mMcp.Disable()
+	port := getDaemonPort()
+
+	status, err := getMcpStatus(port)
+	if err != nil {
+		logTray("mcp toggle: failed to read status: %v", err)
+		pollMcpStatus()
+		return
+	}
+
+	input := fmt.Sprintf(`{"enabled":%t}`, !status.Enabled)
+	if err := daemonMutateInput(port, "mcp.setEnabled", input); err != nil {
+		logTray("mcp toggle failed: %v", err)
+	}
+	pollMcpStatus()
 }
 
 func checkDaemonVersion() {
@@ -386,8 +475,13 @@ func getUpdateStatus(port int) (updateStatus, error) {
 // daemonMutate POSTs a tRPC mutation with an empty input object. Used by the
 // updater download/apply click handlers.
 func daemonMutate(port int, procedure string) error {
+	return daemonMutateInput(port, procedure, "{}")
+}
+
+// daemonMutateInput POSTs a tRPC mutation with the given JSON input.
+func daemonMutateInput(port int, procedure string, inputJSON string) error {
 	url := fmt.Sprintf("http://127.0.0.1:%d/%s?batch=1", port, procedure)
-	body := bytes.NewReader([]byte(`{"0":{"json":{}}}`))
+	body := bytes.NewReader([]byte(`{"0":{"json":` + inputJSON + `}}`))
 	req, err := http.NewRequest("POST", url, body)
 	if err != nil {
 		return err

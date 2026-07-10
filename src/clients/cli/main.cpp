@@ -1,5 +1,5 @@
 /**
- * Checkpoint CLI — A command-line client for the Checkpoint daemon.
+ * Checkpoint CLI: A command-line client for the Checkpoint daemon.
  *
  * Usage:
  *   checkpoint <command> [options]
@@ -27,6 +27,7 @@
  *   unshelve <name> [-b branch]   Submit a shelf to a branch
  *   shelf [list|delete <name>]    Manage shelves
  *   artifact upload <cl> <files>  Upload artifacts for a changelist
+ *   mcp [status|enable|disable]   Manage the daemon's MCP server
  */
 
 #include <algorithm>
@@ -245,7 +246,16 @@ int main(int argc, char** argv) {
   configCmd.add_argument("value")
       .help("Config value");
 
-  // update (subcommand) — wraps the daemon's GitHub-Releases updater
+  // mcp (subcommand)
+  argparse::ArgumentParser mcpCmd("mcp");
+  mcpCmd.add_description(
+      "Manage the daemon's MCP server (exposes the daemon API to AI tools)");
+  mcpCmd.add_argument("action")
+      .help("Action: status, enable, disable")
+      .default_value(std::string("status"))
+      .nargs(argparse::nargs_pattern::optional);
+
+  // update (subcommand): wraps the daemon's GitHub-Releases updater
   argparse::ArgumentParser updateCmd("update");
   updateCmd.add_description("Check for and apply Checkpoint updates");
   updateCmd.add_argument("action")
@@ -281,6 +291,7 @@ int main(int argc, char** argv) {
   program.add_subparser(shelfCmd);
   program.add_subparser(artifactCmd);
   program.add_subparser(configCmd);
+  program.add_subparser(mcpCmd);
   program.add_subparser(updateCmd);
 
   // ─── Parse arguments ──────────────────────────────────────────
@@ -338,6 +349,8 @@ int main(int argc, char** argv) {
         std::cerr << artifactCmd;
       } else if (cmd == "config") {
         std::cerr << configCmd;
+      } else if (cmd == "mcp") {
+        std::cerr << mcpCmd;
       } else if (cmd == "update") {
         std::cerr << updateCmd;
       } else {
@@ -353,7 +366,7 @@ int main(int argc, char** argv) {
   // ─── Dispatch commands ─────────────────────────────────────────
 
   try {
-    // Check CLI ↔ Daemon API version compatibility before any command —
+    // Check CLI ↔ Daemon API version compatibility before any command,
     // EXCEPT `update`, which is how the user recovers from a bad version
     // mismatch in the first place.
     if (!program.is_subcommand_used(updateCmd)) {
@@ -526,6 +539,21 @@ int main(int argc, char** argv) {
       }
     }
 
+    if (program.is_subcommand_used(mcpCmd)) {
+      auto action = mcpCmd.get<std::string>("action");
+      if (action == "status" || action.empty()) {
+        return checkpoint::cmdMcpStatus();
+      } else if (action == "enable") {
+        return checkpoint::cmdMcpSetEnabled(true);
+      } else if (action == "disable") {
+        return checkpoint::cmdMcpSetEnabled(false);
+      } else {
+        std::cerr << "error: unknown mcp action '" << action
+                  << "'. Use 'status', 'enable', or 'disable'." << std::endl;
+        return 1;
+      }
+    }
+
     if (program.is_subcommand_used(updateCmd)) {
       auto action = updateCmd.get<std::string>("action");
       bool yes = updateCmd.get<bool>("--yes");
@@ -540,7 +568,7 @@ int main(int argc, char** argv) {
       }
     }
 
-    // No command specified — show help
+    // No command specified: show help
     std::cout << program;
     return 0;
 

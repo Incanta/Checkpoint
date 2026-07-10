@@ -266,7 +266,7 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId,
  * Returns 0 if compatible, 1 if incompatible (hard block).
  *
  * The CLI is bundled with the daemon, so in production this check trivially
- * passes — both sides come from the same versions.json at build time. The
+ * passes, both sides come from the same versions.json at build time. The
  * check exists for dev installs that may have mismatched binaries and for
  * the (separately distributed) Unreal plugin scenario at the API contract
  * level.
@@ -306,7 +306,7 @@ inline int checkDaemonVersion() {
 
 /**
  * Print a one-line "update available" banner to stderr if the daemon's
- * updater reports an update is available. Silent on any error — banner is
+ * updater reports an update is available. Silent on any error, banner is
  * informational and must never block the calling command. Called from
  * `cmdStatus` so we don't spam every CLI invocation.
  */
@@ -330,7 +330,7 @@ inline void printUpdateBannerIfAvailable() {
               << color::reset() << std::endl;
     std::cerr << std::endl;
   } catch (...) {
-    // Daemon unreachable or unexpected payload — skip silently.
+    // Daemon unreachable or unexpected payload, skip silently.
   }
 }
 
@@ -492,7 +492,7 @@ inline int cmdAdd(const std::vector<std::string>& files) {
         continue;
       }
 
-      // No direct match — try expanding as a directory prefix.
+      // No direct match, try expanding as a directory prefix.
       // In a partially tracked directory, the daemon expands individual
       // files instead of collapsing it.  Treat the path as a glob to
       // find all pending children.  Fully untracked child directories
@@ -525,7 +525,7 @@ inline int cmdAdd(const std::vector<std::string>& files) {
         continue;
       }
 
-      // Still no match — the file may live inside a collapsed untracked
+      // Still no match, the file may live inside a collapsed untracked
       // directory.  Walk ancestor paths to detect this case.
       expandedPaths.push_back(p);
       std::string ancestor = p;
@@ -567,7 +567,7 @@ inline int cmdAdd(const std::vector<std::string>& files) {
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  COMMAND: restore (unstage files — unmark for add, or revert)
+//  COMMAND: restore (unstage files, unmark for add, or revert)
 // ═════════════════════════════════════════════════════════════════
 
 inline int cmdRestore(const std::vector<std::string>& files, bool staged) {
@@ -885,7 +885,7 @@ inline FILE* openPager(const std::string& output) {
   if (hOut == INVALID_HANDLE_VALUE) return nullptr;
   DWORD mode;
   if (!GetConsoleMode(hOut, &mode)) return nullptr;
-  // Check if output fits in the terminal — skip pager if so
+  // Check if output fits in the terminal, skip pager if so
   CONSOLE_SCREEN_BUFFER_INFO csbi;
   if (GetConsoleScreenBufferInfo(hOut, &csbi)) {
     int termHeight = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
@@ -899,7 +899,7 @@ inline FILE* openPager(const std::string& output) {
   return pager;
 #else
   if (!isatty(fileno(stdout))) return nullptr;
-  // Check if output fits in the terminal — skip pager if so
+  // Check if output fits in the terminal, skip pager if so
   struct winsize w;
   if (ioctl(fileno(stdout), TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
     int lineCount = 1;
@@ -1282,7 +1282,7 @@ inline int cmdInit(const std::string& repoArg) {
   if (users.size() == 1) {
     user = users[0];
   } else {
-    // Multiple accounts — prompt user to select
+    // Multiple accounts, prompt user to select
     std::vector<std::string> userLabels;
     for (auto& u : users) {
       std::string label = u.name.empty() ? u.username : u.name;
@@ -1513,7 +1513,7 @@ inline int cmdLogin(const std::string& endpoint, const std::string& daemonId) {
   std::cout << "Authenticating with " << color::bold() << endpoint
             << color::reset() << "..." << std::endl;
 
-  // Call auth.login on the daemon — this returns { code, url } immediately
+  // Call auth.login on the daemon, this returns { code, url } immediately
   // and the daemon opens the browser + polls for authorization in the background
   nlohmann::json loginInput = {
       {"endpoint", endpoint},
@@ -1583,7 +1583,7 @@ inline int cmdLogin(const std::string& endpoint, const std::string& daemonId) {
         return 0;
       }
     } catch (...) {
-      // Not yet authorized — keep polling
+      // Not yet authorized, keep polling
     }
 
     // Print a dot every 5 seconds to show progress
@@ -1785,7 +1785,7 @@ inline int cmdShelfList() {
               << ", " << fileCount << " file" << (fileCount != 1 ? "s" : "")
               << ", by " << authorName << ")";
     if (!desc.empty()) {
-      std::cout << " — " << desc;
+      std::cout << " - " << desc;
     }
     std::cout << color::reset() << std::endl;
   }
@@ -1929,7 +1929,7 @@ inline int cmdArtifactUpload(int changelistNumber, const std::vector<std::string
 }
 
 /**
- * chk unlink — Interactively select a workspace to unlink from the daemon.
+ * chk unlink, Interactively select a workspace to unlink from the daemon.
  * Stops watching and removes from daemon.json, but does NOT delete .checkpoint.
  */
 inline int cmdUnlink() {
@@ -2161,7 +2161,7 @@ inline int cmdUpdateInstall(bool autoYes) {
 
       if (!downloading &&
           !cur.value("downloadedInstallerPath", "").empty()) {
-        std::cout << "\r  100% — done       " << std::endl;
+        std::cout << "\r  100% - done       " << std::endl;
         break;
       }
     }
@@ -2170,7 +2170,7 @@ inline int cmdUpdateInstall(bool autoYes) {
   }
 
   // The daemon spawns the installer detached and then exits, so the RPC may
-  // not return cleanly — a connection error here is the expected success path.
+  // not return cleanly, a connection error here is the expected success path.
   std::cout << "Launching installer..." << std::endl;
   try {
     client.mutate("updater.applyUpdate", nlohmann::json::object());
@@ -2186,6 +2186,71 @@ inline int cmdUpdateInstall(bool autoYes) {
   std::cout << color::green() << "Installer launched." << color::reset()
             << " The daemon will restart automatically after installation."
             << std::endl;
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: mcp
+// ═════════════════════════════════════════════════════════════════
+
+inline void printMcpStatus(const nlohmann::json& status) {
+  bool enabled = status.value("enabled", false);
+  bool running = status.value("running", false);
+  int port = status.value("port", 0);
+
+  std::cout << "MCP server: ";
+  if (enabled && running) {
+    std::cout << color::green() << "running" << color::reset();
+  } else if (enabled) {
+    std::cout << color::yellow() << "enabled (not running)" << color::reset();
+  } else {
+    std::cout << color::dim() << "disabled" << color::reset();
+  }
+  std::cout << std::endl;
+
+  if (status.contains("url") && status["url"].is_string()) {
+    std::cout << "  URL:  " << status["url"].get<std::string>() << std::endl;
+  } else if (port > 0) {
+    std::cout << "  Port: " << port << std::endl;
+  }
+
+  if (status.contains("lastError") && status["lastError"].is_string()) {
+    std::cout << color::red() << "  Last error: "
+              << status["lastError"].get<std::string>() << color::reset()
+              << std::endl;
+  }
+}
+
+inline int cmdMcpStatus() {
+  int port = getDaemonPort();
+  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  DaemonClient client(baseUrl);
+
+  auto status = client.query("mcp.getStatus");
+  if (!status.is_object()) {
+    std::cerr << "error: daemon returned unexpected MCP payload" << std::endl;
+    return 1;
+  }
+
+  printMcpStatus(status);
+  return 0;
+}
+
+inline int cmdMcpSetEnabled(bool enabled) {
+  int port = getDaemonPort();
+  std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
+  DaemonClient client(baseUrl);
+
+  nlohmann::json input = {{"enabled", enabled}};
+  auto status = client.mutate("mcp.setEnabled", input);
+  if (!status.is_object()) {
+    std::cerr << "error: daemon returned unexpected MCP payload" << std::endl;
+    return 1;
+  }
+
+  // The daemon applies the change immediately (no restart needed) and
+  // persists it to daemon.json for future daemon starts.
+  printMcpStatus(status);
   return 0;
 }
 

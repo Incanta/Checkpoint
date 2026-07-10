@@ -1,6 +1,7 @@
-import { router } from "./trpc.js";
+import { router, createCallerFactory } from "./trpc.js";
 import type { TRPCContext } from "./trpc.js";
 import { authRouter } from "./routers/auth.js";
+import { mcpRouter } from "./routers/mcp.js";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import { workspacesRouter } from "./routers/workspace/index.js";
 import { orgRouter } from "./routers/org.js";
@@ -42,11 +43,17 @@ const appRouter = router({
   jobs: jobsRouter,
   updater: updaterRouter,
   version: versionRouter,
+  mcp: mcpRouter,
 });
 
 // Export type router type signature,
 // NOT the router itself.
 export type AppRouter = typeof appRouter;
+
+// The router value and an in-process caller are exported for the MCP server,
+// which mirrors every procedure as an MCP tool (see ../mcp-server.ts).
+export { appRouter };
+export const createCaller = createCallerFactory(appRouter);
 
 export async function InitApi(): Promise<void> {
   const server = createHTTPServer({
