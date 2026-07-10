@@ -9743,10 +9743,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"kysely@npm:^0.28.17 || ^0.29.0":
-  version: 0.29.3
-  resolution: "kysely@npm:0.29.3"
-  checksum: 10c0/ab23e82f67c4ed17fce1ed14573ea806944b8516f57d837c3dd3bf2df6eef9d2bc12300525007a865506e595ec1da3d7cd372b8c17029313b5c9e8976a3147f2
+"kysely@npm:^0.28.17":
+  version: 0.28.17
+  resolution: "kysely@npm:0.28.17"
+  checksum: 10c0/70573292d8d60a1e29be9b432c1b25fe21d4806ecd5e9859b5ba8d2af799769878f4b3d91731ffe3e03744c7291476fe843640d31741f3637e20c3c49afea3c5
   languageName: node
   linkType: hard
 
