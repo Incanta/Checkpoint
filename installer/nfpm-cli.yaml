@@ -1,0 +1,43 @@
+# nfpm config template for the headless Checkpoint CLI deb/rpm packages.
+# Built in .github/workflows/build-installers.yaml (package-cli job).
+#
+# This file is a TEMPLATE: render it with `envsubst` before passing it to nfpm
+# (nfpm does not expand env vars inside content `src` globs). Placeholders:
+#   VERSION    the client version (versions.json client_version)
+#   ARCH       package arch (amd64 for deb; nfpm maps it for rpm)
+#   STAGE_DIR  path to the staged checkpoint-cli-<platform>/ tree
+#
+# Layout rationale: the CLI resolves the bundled daemon relative to its own real
+# path (src/clients/cli/ephemeral_daemon.hpp). Installing chk/checkpoint under
+# /usr/lib/checkpoint keeps resources/daemon a sibling, so /proc/self/exe
+# resolution finds it; /usr/bin/* are symlinks onto PATH. findDaemonPaths also
+# hard-codes /usr/lib/checkpoint/resources/daemon as a fallback.
+
+name: checkpoint-cli
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: utils
+priority: optional
+maintainer: Incanta LLC <support@incanta.dev>
+description: |
+  Checkpoint version control CLI (headless).
+  Bundles the Checkpoint daemon and spawns it on demand when none is running,
+  giving a git-like experience with no background service to install.
+homepage: https://checkpointvcs.com
+license: Proprietary
+
+contents:
+  - src: ${STAGE_DIR}/checkpoint
+    dst: /usr/lib/checkpoint/checkpoint
+  - src: ${STAGE_DIR}/chk
+    dst: /usr/lib/checkpoint/chk
+  - src: ${STAGE_DIR}/resources
+    dst: /usr/lib/checkpoint/resources
+    type: tree
+  - src: /usr/lib/checkpoint/chk
+    dst: /usr/bin/chk
+    type: symlink
+  - src: /usr/lib/checkpoint/checkpoint
+    dst: /usr/bin/checkpoint
+    type: symlink

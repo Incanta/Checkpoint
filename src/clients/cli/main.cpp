@@ -71,6 +71,14 @@ int main(int argc, char** argv) {
   argparse::ArgumentParser program(programName, checkpoint::CLIENT_VERSION);
   program.add_description("Checkpoint version control CLI");
 
+  // Global flag: never use or start a resident daemon. When set (or when
+  // CHECKPOINT_DAEMONLESS is set in the environment), workspace commands spawn
+  // a short-lived, workspace-scoped ephemeral daemon instead.
+  program.add_argument("--no-daemon")
+      .help("Force daemonless mode (spawn an ephemeral daemon per command)")
+      .default_value(false)
+      .implicit_value(true);
+
   // ─── Sub-commands ──────────────────────────────────────────────
 
   // status
@@ -185,6 +193,10 @@ int main(int argc, char** argv) {
   loginCmd.add_argument("--id")
       .help("Daemon ID for this credential (default: auto-generated)")
       .default_value(std::string(""));
+  loginCmd.add_argument("--token", "-t")
+      .help("API token for non-interactive login (headless/CI). "
+            "Mint one in the web UI under Settings > Devices.")
+      .default_value(std::string(""));
 
   // logout
   argparse::ArgumentParser logoutCmd("logout");
@@ -287,6 +299,7 @@ int main(int argc, char** argv) {
 
   try {
     program.parse_args(argc, argv);
+    checkpoint::setForceDaemonless(program.get<bool>("--no-daemon"));
   } catch (const std::exception& err) {
     std::cerr << err.what() << std::endl;
     std::cerr << std::endl;
@@ -437,6 +450,7 @@ int main(int argc, char** argv) {
     if (program.is_subcommand_used(loginCmd)) {
       auto endpoint = loginCmd.get<std::string>("--endpoint");
       auto daemonId = loginCmd.get<std::string>("--id");
+      auto token = loginCmd.get<std::string>("--token");
       if (daemonId.empty()) {
         // Generate a unique daemon ID (21-char alphanumeric, similar to nanoid)
         static const char charset[] =
@@ -449,7 +463,7 @@ int main(int argc, char** argv) {
           daemonId += charset[dist(gen)];
         }
       }
-      return checkpoint::cmdLogin(endpoint, daemonId);
+      return checkpoint::cmdLogin(endpoint, daemonId, token);
     }
 
     if (program.is_subcommand_used(logoutCmd)) {

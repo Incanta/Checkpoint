@@ -4,6 +4,7 @@ import {
   CreateApiClientAuthManual,
   DeleteAuthToken,
   GetAllAuthConfigUsers,
+  SaveAuthToken,
 } from "@checkpointvcs/common";
 import { z } from "zod";
 import { User } from "../../types/index.js";
@@ -28,6 +29,38 @@ export const authRouter = router({
       );
 
       return { code, url };
+    }),
+
+  /**
+   * Non-interactive login for headless/CI use. Validates the provided API
+   * token against the endpoint, then persists it to ~/.checkpoint/auth.json
+   * under the given daemonId. Tokens are minted in the web UI at
+   * /settings/devices.
+   */
+  loginWithToken: publicProcedure
+    .input(
+      z.object({
+        endpoint: z.string(),
+        daemonId: z.string(),
+        token: z.string(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const client = await CreateApiClientAuthManual(
+        input.endpoint,
+        input.token,
+      );
+
+      let meResponse: User;
+      try {
+        meResponse = await client.user.me.query();
+      } catch (e: any) {
+        throw new Error("Invalid API token or endpoint");
+      }
+
+      await SaveAuthToken(input.daemonId, input.endpoint, input.token);
+
+      return { user: meResponse };
     }),
 
   logout: publicProcedure

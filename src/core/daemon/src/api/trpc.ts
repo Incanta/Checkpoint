@@ -2,6 +2,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { DaemonManager } from "../daemon-manager.js";
 import { ApiVersionChecker } from "../api-version-checker.js";
+import { recordActivityStart, recordActivityEnd } from "./activity.js";
 
 export interface TRPCContext {
   manager: DaemonManager;
@@ -41,8 +42,23 @@ const versionGateMiddleware = t.middleware(({ next, path }) => {
 });
 
 /**
+ * Records request activity so an ephemeral daemon can detect idleness and
+ * self-terminate. Cheap enough to run unconditionally on the resident daemon.
+ */
+const activityMiddleware = t.middleware(async ({ next }) => {
+  recordActivityStart();
+  try {
+    return await next();
+  } finally {
+    recordActivityEnd();
+  }
+});
+
+/**
  * Export reusable router and procedure helpers
  * that can be used throughout the router
  */
 export const router = t.router;
-export const publicProcedure = t.procedure.use(versionGateMiddleware);
+export const publicProcedure = t.procedure
+  .use(activityMiddleware)
+  .use(versionGateMiddleware);

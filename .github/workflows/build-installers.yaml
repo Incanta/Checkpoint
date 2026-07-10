@@ -250,6 +250,79 @@ jobs:
             src/clients/tray/checkpoint-tray.desktop
 
   # ============================================================
+  # Phase 3c: Package the headless CLI (CLI + bundled daemon)
+  #
+  # Produces self-contained, daemonless CLI packages for every OS target:
+  #   - Windows / macOS: portable archives (.zip / .tar.gz)
+  #   - Linux: portable tarball AND deb/rpm installers
+  # Assembly only moves/archives cross-built artifacts, so the whole matrix
+  # runs on Linux regardless of the target platform.
+  # ============================================================
+  package-cli:
+    needs: [prepare, build-cli, build-daemon]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win32-x64
+          - platform: darwin-x64
+          - platform: darwin-arm64
+          - platform: linux-x64
+            linux_packages: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip gettext-base
+          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.43.0/nfpm_2.43.0_Linux_x86_64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin nfpm
+
+      - name: Download CLI binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-${{ matrix.platform }}
+          path: artifacts/cli
+
+      - name: Download Daemon dist
+        uses: actions/download-artifact@v4
+        with:
+          name: daemon-${{ matrix.platform }}
+          path: artifacts/daemon
+
+      - name: Assemble portable package
+        run: |
+          chmod +x scripts/assemble-cli-package.sh
+          scripts/assemble-cli-package.sh \
+            artifacts/cli artifacts/daemon "${{ matrix.platform }}" dist-cli
+
+      - name: Build deb + rpm (Linux)
+        if: matrix.linux_packages
+        env:
+          ARCH: amd64
+          STAGE_DIR: ${{ github.workspace }}/dist-cli/checkpoint-cli-${{ matrix.platform }}
+        run: |
+          envsubst < installer/nfpm-cli.yaml > dist-cli/nfpm-cli.rendered.yaml
+          nfpm package --config dist-cli/nfpm-cli.rendered.yaml --packager deb --target dist-cli/
+          nfpm package --config dist-cli/nfpm-cli.rendered.yaml --packager rpm --target dist-cli/
+
+      - name: Upload CLI package artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-package-${{ matrix.platform }}
+          path: |
+            dist-cli/*.tar.gz
+            dist-cli/*.zip
+            dist-cli/*.deb
+            dist-cli/*.rpm
+          if-no-files-found: error
+
+  # ============================================================
   # Phase 4: Build installers for each platform
   # ============================================================
   build-installers:
@@ -607,7 +680,7 @@ jobs:
   # Phase 5: Create GitHub Release with all installers
   # ============================================================
   create-release:
-    needs: [prepare, build-installers]
+    needs: [prepare, build-installers, package-cli]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
@@ -619,6 +692,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: installer-*
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Download headless CLI package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cli-package-*
           path: release-assets/
           merge-multiple: true
 
@@ -646,6 +726,8 @@ jobs:
             release-assets/**/*.rpm
             release-assets/**/*.pkg
             release-assets/**/*.dmg
+            release-assets/**/checkpoint-cli-*.tar.gz
+            release-assets/**/checkpoint-cli-*.zip
             release-assets/checkpoint-docker-compose.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
