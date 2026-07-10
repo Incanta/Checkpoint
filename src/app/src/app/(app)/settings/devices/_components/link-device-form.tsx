@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "~/trpc/react";
 import { Button } from "~/app/_components/ui";
+import { TokenCreatedModal } from "./token-created-modal";
 
 export function LinkDeviceForm() {
   return (
@@ -22,6 +23,7 @@ function LinkDeviceFormContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
   useEffect(() => {
@@ -37,8 +39,7 @@ function LinkDeviceFormContent() {
   const utils = api.useUtils();
 
   const createApiToken = api.apiToken.createApiToken.useMutation({
-    onSuccess: () => {
-      setSuccess(true);
+    onSuccess: (data) => {
       setError(null);
       setIsLoading(false);
       setFormData({
@@ -46,6 +47,14 @@ function LinkDeviceFormContent() {
         deviceCode: "",
         expiration: "none",
       });
+      // A codeless token is returned once for the user to copy; a device-code
+      // token is retrieved by the device itself, so just confirm the link.
+      if (data?.apiToken) {
+        setCreatedToken(data.apiToken);
+        setSuccess(false);
+      } else {
+        setSuccess(true);
+      }
       void utils.apiToken.getActiveDevices.invalidate();
     },
     onError: (error) => {
@@ -66,11 +75,7 @@ function LinkDeviceFormContent() {
       return;
     }
 
-    if (!formData.deviceCode.trim()) {
-      setError("Device code is required");
-      setIsLoading(false);
-      return;
-    }
+    // Device code is optional: a blank code creates a copyable token.
 
     let expiresAt: Date | null = null;
     const now = new Date();
@@ -112,6 +117,7 @@ function LinkDeviceFormContent() {
     "w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-50";
 
   return (
+    <>
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
         <label
@@ -137,7 +143,10 @@ function LinkDeviceFormContent() {
           htmlFor="deviceCode"
           className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]"
         >
-          Device Code
+          Device Code{" "}
+          <span className="font-normal text-[var(--color-text-muted)]">
+            (optional)
+          </span>
         </label>
         <input
           type="text"
@@ -145,7 +154,7 @@ function LinkDeviceFormContent() {
           name="deviceCode"
           value={formData.deviceCode}
           onChange={handleInputChange}
-          placeholder="Enter the code from your device"
+          placeholder="Enter the code from your device, or leave empty for a copyable token"
           className={inputClass}
           disabled={isLoading}
         />
@@ -186,8 +195,16 @@ function LinkDeviceFormContent() {
       )}
 
       <Button type="submit" disabled={isLoading} className="w-full">
-        {isLoading ? "Creating Token..." : "Link Device"}
+        {isLoading ? "Creating Token..." : "Create Token"}
       </Button>
     </form>
+
+      {createdToken && (
+        <TokenCreatedModal
+          token={createdToken}
+          onClose={() => setCreatedToken(null)}
+        />
+      )}
+    </>
   );
 }

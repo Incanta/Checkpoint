@@ -38,6 +38,51 @@ describe("apiToken router", () => {
     });
   });
 
+  describe("createApiToken", () => {
+    it("without a device code returns a copyable token and lists it", async () => {
+      const user = await makeUser(testDb.client);
+      const authed = await makeAppCaller({ asUser: user });
+
+      const res = await authed.apiToken.createApiToken({
+        name: "ci-token",
+        deviceCode: null,
+        expiresAt: null,
+      });
+
+      expect(res.apiToken).toMatch(/^[a-f0-9]{64}$/);
+
+      const { activeDevices } = await authed.apiToken.getActiveDevices();
+      expect(activeDevices.map((d) => d.name)).toContain("ci-token");
+    });
+
+    it("treats a blank device code as codeless", async () => {
+      const user = await makeUser(testDb.client);
+      const authed = await makeAppCaller({ asUser: user });
+
+      const res = await authed.apiToken.createApiToken({
+        name: "blank-code",
+        deviceCode: "   ",
+        expiresAt: null,
+      });
+
+      expect(res.apiToken).toMatch(/^[a-f0-9]{64}$/);
+    });
+
+    it("with a device code does not surface the token to the browser", async () => {
+      const user = await makeUser(testDb.client);
+      const authed = await makeAppCaller({ asUser: user });
+
+      const { code } = await authed.apiToken.getCode();
+      const res = await authed.apiToken.createApiToken({
+        name: "paired",
+        deviceCode: code,
+        expiresAt: null,
+      });
+
+      expect(res.apiToken).toBeNull();
+    });
+  });
+
   describe("device pairing flow", () => {
     it("createApiToken + getApiToken hands the token to the device and clears the code", async () => {
       const user = await makeUser(testDb.client);
