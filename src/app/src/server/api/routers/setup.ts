@@ -15,12 +15,12 @@ export const setupRouter = createTRPCRouter({
 
     return {
       hasUsers: userCount > 0,
-      eulaAccepted: !!settings?.eulaAcceptedAt,
-      registrationOpen: userCount === 0 || !!settings?.eulaAcceptedAt,
+      setupCompleted: !!settings?.setupCompletedAt,
+      registrationOpen: userCount === 0 || !!settings?.setupCompletedAt,
     };
   }),
 
-  acceptEula: adminProcedure
+  completeSetup: adminProcedure
     .input(z.object({ telemetryEnabled: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.instanceSettings.findUnique({
@@ -34,13 +34,13 @@ export const setupRouter = createTRPCRouter({
           // Generate the globally-unique installation id the first time the
           // instance is configured. It is sent with anonymous telemetry.
           instanceId: crypto.randomUUID(),
-          eulaAcceptedAt: new Date(),
-          eulaAcceptedBy: ctx.session.user.id,
+          setupCompletedAt: new Date(),
+          setupCompletedBy: ctx.session.user.id,
           telemetryEnabled: input.telemetryEnabled,
         },
         update: {
-          eulaAcceptedAt: new Date(),
-          eulaAcceptedBy: ctx.session.user.id,
+          setupCompletedAt: new Date(),
+          setupCompletedBy: ctx.session.user.id,
           telemetryEnabled: input.telemetryEnabled,
           // Backfill instanceId if a settings row predated this field.
           ...(existing?.instanceId ? {} : { instanceId: crypto.randomUUID() }),

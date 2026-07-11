@@ -24,7 +24,7 @@ export async function GET() {
     db.instanceSettings.findUnique({ where: { id: "default" } }),
   ]);
 
-  const registrationOpen = userCount === 0 || !!settings?.eulaAcceptedAt;
+  const registrationOpen = userCount === 0 || !!settings?.setupCompletedAt;
 
   const showNewsletter =
     isLicenseManager() && config.get<boolean>("newsletter.kit.enabled");

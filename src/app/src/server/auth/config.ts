@@ -114,7 +114,7 @@ async function getAuth() {
               const settings = await db.instanceSettings.findUnique({
                 where: { id: "default" },
               });
-              if (!settings?.eulaAcceptedAt) {
+              if (!settings?.setupCompletedAt) {
                 return false;
               }
             }

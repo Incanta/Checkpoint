@@ -15,7 +15,7 @@ export default async function AppLayout({
     redirect("/signin");
   }
 
-  // Redirect admin to initial setup if EULA has not been accepted
+  // Redirect admin to initial setup if it has not been completed
   const currentUser = await db.user.findUnique({
     where: { id: session.user.id },
     select: { checkpointAdmin: true },
@@ -24,7 +24,7 @@ export default async function AppLayout({
     const instanceSettings = await db.instanceSettings.findUnique({
       where: { id: "default" },
     });
-    if (!instanceSettings?.eulaAcceptedAt) {
+    if (!instanceSettings?.setupCompletedAt) {
       redirect("/setup");
     }
   }

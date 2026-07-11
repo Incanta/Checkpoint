@@ -885,8 +885,10 @@ model InstanceSettings {
   // instance is first configured. Sent with anonymous usage telemetry.
   instanceId String? @unique
 
-  eulaAcceptedAt DateTime?
-  eulaAcceptedBy String?
+  // Marks when the initial instance setup was completed (and by which admin).
+  // Gates registration and the /setup redirect.
+  setupCompletedAt DateTime?
+  setupCompletedBy String?
 
   // Anonymous usage telemetry (org/repo/user counts) reported weekly to
   // Incanta. Defaults to enabled; operators opt out during initial setup.

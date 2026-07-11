@@ -22,7 +22,7 @@ export default async function SetupPage() {
     where: { id: "default" },
   });
 
-  if (settings?.eulaAcceptedAt) {
+  if (settings?.setupCompletedAt) {
     redirect("/");
   }
 
