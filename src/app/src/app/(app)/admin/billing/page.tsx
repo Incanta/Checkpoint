@@ -43,10 +43,10 @@ export default function AdminBillingPage() {
   const { data: user, isLoading: userLoading } = api.user.me.useQuery();
   const { data: orgs, isLoading } = api.admin.getDelinquentOrgs.useQuery(
     undefined,
-    { enabled: !!user?.checkpointAdmin },
+    { enabled: !!user?.checkpointAdmin && !!user?.isLicenseManager },
   );
 
-  if (!userLoading && !user?.checkpointAdmin) {
+  if (!userLoading && !(user?.checkpointAdmin && user?.isLicenseManager)) {
     notFound();
   }
 

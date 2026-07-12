@@ -167,10 +167,10 @@ export default function AdminMetricsPage() {
 
   const { data: metrics, isLoading } = api.admin.getDailyMetrics.useQuery(
     { from: daysAgo(rangeDays), limit: rangeDays },
-    { enabled: !!user?.checkpointAdmin },
+    { enabled: !!user?.checkpointAdmin && !!user?.isLicenseManager },
   );
 
-  if (!userLoading && !user?.checkpointAdmin) {
+  if (!userLoading && !(user?.checkpointAdmin && user?.isLicenseManager)) {
     notFound();
   }
 

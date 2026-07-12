@@ -32,10 +32,10 @@ export default function AdminDashboardPage() {
   useDocumentTitle("Admin · Dashboard");
   const { data: user, isLoading: userLoading } = api.user.me.useQuery();
   const { data: stats, isLoading } = api.admin.getStats.useQuery(undefined, {
-    enabled: !!user?.checkpointAdmin,
+    enabled: !!user?.checkpointAdmin && !!user?.isLicenseManager,
   });
 
-  if (!userLoading && !user?.checkpointAdmin) {
+  if (!userLoading && !(user?.checkpointAdmin && user?.isLicenseManager)) {
     notFound();
   }
 

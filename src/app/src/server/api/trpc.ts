@@ -15,6 +15,7 @@ import { auth } from "~/server/auth/config";
 import { db } from "~/server/db";
 import type { Session } from "~/server/auth/config";
 import { Logger } from "../logging";
+import { isLicenseManager } from "~/server/license-utils";
 
 /**
  * 1. CONTEXT
@@ -187,9 +188,16 @@ export const protectedProcedure = t.procedure
 /**
  * Admin procedure
  *
- * Extends protectedProcedure to also verify the user has checkpointAdmin === true.
+ * Extends protectedProcedure to also verify the user has checkpointAdmin === true
+ * and that this instance is the license manager.
  */
 export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  if (!isLicenseManager()) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Admin is only available on the license manager instance",
+    });
+  }
   const user = await ctx.db.user.findUnique({
     where: { id: ctx.session.user.id },
     select: { checkpointAdmin: true },

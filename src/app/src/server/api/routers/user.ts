@@ -2,12 +2,13 @@ import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { getCheckpointUser } from "../auth-utils";
+import { isLicenseManager } from "~/server/license-utils";
 
 export const userRouter = createTRPCRouter({
   me: protectedProcedure.query(async ({ ctx }) => {
     const checkpointUser = await getCheckpointUser(ctx);
 
-    return checkpointUser;
+    return { ...checkpointUser, isLicenseManager: isLicenseManager() };
   }),
 
   updateUser: protectedProcedure
