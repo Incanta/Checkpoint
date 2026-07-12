@@ -10,9 +10,14 @@ token-expiration-seconds: 3600
 
 # Core server base URL. serverUrl in the token (control plane: /submit,
 # /repo-size); the gateway blob base is derived as serverUrl + /storage.
+#   external-lan: optional LAN-only address (e.g. "http://10.0.0.10:13001").
+#     Reported alongside serverUrl in storage.getToken; the daemon prefers it
+#     when the host is HTTP-reachable, otherwise it falls back to external.
+#     Leave null to disable.
 backend-url:
   internal: "http://localhost:13001"
   external: "http://localhost:13001"
+  external-lan: null
 
 r2:
   account-id: ""

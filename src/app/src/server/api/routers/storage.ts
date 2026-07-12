@@ -55,6 +55,10 @@ export const storageRouter = createTRPCRouter({
       token.setExpiration(Date.now() + expirationSeconds * 1000);
 
       const serverUrl = config.get<string>("storage.backend-url.external");
+      // Optional LAN-only address; the daemon prefers it when the host is
+      // HTTP-reachable, otherwise it falls back to serverUrl. Null when unset.
+      const serverUrlLan =
+        config.tryGet<string>("storage.backend-url.external-lan") ?? null;
       const expiration = Math.floor(Date.now() / 1000) + expirationSeconds;
 
       // R2: the client talks to R2 directly with scoped STS temp credentials.
@@ -77,6 +81,7 @@ export const storageRouter = createTRPCRouter({
           token: token.compact(),
           expiration,
           serverUrl,
+          serverUrlLan,
           r2: {
             accessKeyId: creds.accessKeyId,
             secretAccessKey: creds.secretAccessKey,
@@ -94,7 +99,9 @@ export const storageRouter = createTRPCRouter({
         token: token.compact(),
         expiration,
         serverUrl,
+        serverUrlLan,
         gatewayUrl: `${serverUrl}/storage`,
+        gatewayUrlLan: serverUrlLan ? `${serverUrlLan}/storage` : null,
       };
     }),
 

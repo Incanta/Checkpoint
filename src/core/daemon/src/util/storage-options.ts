@@ -7,7 +7,12 @@ export interface StorageTokenResponse {
   token: string;
   expiration: number;
   serverUrl: string;
+  // Optional LAN-only address (and its derived gateway base). When set and the
+  // host is HTTP-reachable, resolveStorageEndpoints prefers these over
+  // serverUrl/gatewayUrl. Null/absent when the deployment did not configure one.
+  serverUrlLan?: string | null;
   gatewayUrl?: string;
+  gatewayUrlLan?: string | null;
   r2?: {
     accessKeyId: string;
     secretAccessKey: string;
@@ -15,6 +20,55 @@ export interface StorageTokenResponse {
     endpoint: string;
     bucket: string;
   } | null;
+}
+
+/**
+ * Quick HTTP reachability probe. Not an ICMP ping: issues a GET to the host's
+ * root over the same HTTP(S) protocol the storage traffic uses (the core server
+ * answers `GET /` with 200). Any HTTP response, even an error status, proves the
+ * host is reachable; only a network failure or timeout counts as unreachable.
+ */
+async function isHttpReachable(
+  url: string,
+  timeoutMs = 1500,
+): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    // Probe the origin root; we only care that the socket connects and the
+    // server speaks HTTP, not about the specific status/body.
+    const origin = new URL(url).origin;
+    await fetch(origin, { method: "GET", signal: controller.signal });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Resolve the effective storage endpoints for this consumer. When the token
+ * advertises a LAN-only address (serverUrlLan) and that host is HTTP-reachable
+ * from here, swap serverUrl (and the gateway base) to the LAN address so blob
+ * traffic stays on the local network; otherwise return the response unchanged.
+ */
+export async function resolveStorageEndpoints(
+  t: StorageTokenResponse,
+): Promise<StorageTokenResponse> {
+  if (!t.serverUrlLan) {
+    return t;
+  }
+
+  if (!(await isHttpReachable(t.serverUrlLan))) {
+    return t;
+  }
+
+  return {
+    ...t,
+    serverUrl: t.serverUrlLan,
+    gatewayUrl: t.gatewayUrlLan ?? t.gatewayUrl,
+  };
 }
 
 /**

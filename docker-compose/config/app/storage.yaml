@@ -17,6 +17,10 @@ token-expiration-seconds: 3600
 backend-url:
   internal: "http://checkpoint-server:13001"
   external: "http://IP_ADDRESS:13001"
+  # Optional LAN-only address the daemon prefers when reachable (falls back to
+  # external otherwise). Set to your host's LAN address, e.g.
+  # "http://10.0.0.10:13001", or leave null to disable.
+  external-lan: null
 
 # Only used when mode is "r2". account-id is a literal; the credentials are
 # resolved from ./config/.secrets (see the r2_* keys).

@@ -10,7 +10,10 @@ import {
 } from "@checkpointvcs/longtail-addon";
 import { DaemonConfig } from "../daemon-config.js";
 import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
-import { toStorageOptions } from "./storage-options.js";
+import {
+  toStorageOptions,
+  resolveStorageEndpoints,
+} from "./storage-options.js";
 
 export interface ReadFileWorkspace {
   daemonId: string;
@@ -58,14 +61,19 @@ export async function readFileFromVersion(
   const client = await CreateApiClientAuth(workspace.daemonId);
 
   // Get storage token (read-only)
-  const storageTokenResponse = await client.storage.getToken.query({
+  const rawStorageTokenResponse = await client.storage.getToken.query({
     repoId: workspace.repoId,
     write: false,
   });
 
-  if (!storageTokenResponse.expiration) {
+  if (!rawStorageTokenResponse.expiration) {
     throw new Error("Could not get storage token");
   }
+
+  // Prefer the LAN address when the daemon can reach it (falls back otherwise).
+  const storageTokenResponse = await resolveStorageEndpoints(
+    rawStorageTokenResponse,
+  );
 
   const storageOptions = toStorageOptions(storageTokenResponse);
 

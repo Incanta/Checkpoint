@@ -17,7 +17,10 @@ import {
   saveWorkspaceState,
   type Workspace,
 } from "./util.js";
-import { toStorageOptions } from "./storage-options.js";
+import {
+  toStorageOptions,
+  resolveStorageEndpoints,
+} from "./storage-options.js";
 import path from "path";
 import { promises as fs } from "fs";
 import { DaemonConfig } from "../daemon-config.js";
@@ -51,14 +54,19 @@ export async function submit(
 
   const client = await CreateApiClientAuth(workspace.daemonId);
 
-  const storageTokenResponse = await client.storage.getToken.query({
+  const rawStorageTokenResponse = await client.storage.getToken.query({
     repoId: workspace.repoId,
     write: true,
   });
 
-  if (!storageTokenResponse || !storageTokenResponse.expiration) {
+  if (!rawStorageTokenResponse || !rawStorageTokenResponse.expiration) {
     throw new Error("Could not get storage token");
   }
+
+  // Prefer the LAN address when the daemon can reach it (falls back otherwise).
+  const storageTokenResponse = await resolveStorageEndpoints(
+    rawStorageTokenResponse,
+  );
 
   const storageOptions = toStorageOptions(storageTokenResponse);
 

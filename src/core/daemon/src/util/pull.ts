@@ -16,7 +16,10 @@ import {
   saveWorkspaceState,
   type Workspace,
 } from "./util.js";
-import { toStorageOptions } from "./storage-options.js";
+import {
+  toStorageOptions,
+  resolveStorageEndpoints,
+} from "./storage-options.js";
 import { readFileFromChangelist } from "./read-file.js";
 import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 import { autoMergeText } from "./auto-merge.js";
@@ -56,14 +59,19 @@ export async function pull(
     workspace.repoId,
   );
 
-  const storageTokenResponse = await client.storage.getToken.query({
+  const rawStorageTokenResponse = await client.storage.getToken.query({
     repoId: workspace.repoId,
     write: true,
   });
 
-  if (!storageTokenResponse.expiration) {
+  if (!rawStorageTokenResponse.expiration) {
     throw new Error("Could not get storage token");
   }
+
+  // Prefer the LAN address when the daemon can reach it (falls back otherwise).
+  const storageTokenResponse = await resolveStorageEndpoints(
+    rawStorageTokenResponse,
+  );
 
   // Storage backend options (gateway or s3/r2-direct) shared by the pull loops.
   const storageOptions = toStorageOptions(storageTokenResponse);
