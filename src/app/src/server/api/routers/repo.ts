@@ -262,6 +262,39 @@ export const repoRouter = createTRPCRouter({
       return deleted;
     }),
 
+  getDeleteStats: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.id,
+        RepoAccess.ADMIN,
+      );
+
+      const [commitCount, branchCount, checkoutCount] = await Promise.all([
+        // CL 0 is the auto-generated "Repo Creation" changelist; exclude it so
+        // the count reflects real commits.
+        ctx.db.changelist.count({
+          where: { repoId: repo.id, number: { gt: 0 } },
+        }),
+        ctx.db.branch.count({ where: { repoId: repo.id } }),
+        ctx.db.fileCheckout.count({
+          where: { repoId: repo.id, removedAt: null },
+        }),
+      ]);
+
+      return {
+        storageBytes: Number(repo.storageBytes),
+        commitCount,
+        branchCount,
+        checkoutCount,
+      };
+    }),
+
   list: protectedProcedure
     .input(
       z.object({

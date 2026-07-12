@@ -106,6 +106,47 @@ export const orgRouter = createTRPCRouter({
       };
     }),
 
+  getDeleteStats: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const orgUser = await ctx.db.orgUser.findFirst({
+        where: {
+          orgId: input.id,
+          userId: ctx.session.user.id,
+        },
+      });
+
+      if (orgUser?.role !== "ADMIN") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You do not have permission to view this organization",
+        });
+      }
+
+      const repos = await ctx.db.repo.findMany({
+        where: { orgId: input.id, deletedAt: null },
+        select: { id: true, name: true, storageBytes: true },
+        orderBy: { name: "asc" },
+      });
+
+      const reposWithSize = repos.map((r) => ({
+        id: r.id,
+        name: r.name,
+        storageBytes: Number(r.storageBytes),
+      }));
+
+      const totalStorageBytes = reposWithSize.reduce(
+        (sum, r) => sum + r.storageBytes,
+        0,
+      );
+
+      return {
+        repoCount: reposWithSize.length,
+        totalStorageBytes,
+        repos: reposWithSize,
+      };
+    }),
+
   getAdmins: protectedProcedure
     .input(z.object({ orgId: z.string() }))
     .query(async ({ ctx, input }) => {

@@ -6,6 +6,7 @@ import { api } from "~/trpc/react";
 import { Button, Card, Badge } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 import { useLicenseTier } from "~/app/_hooks/use-license-tier";
+import { DeleteEntityModal } from "~/app/_components/delete-entity-modal";
 
 function MergePermissionList({
   repoId,
@@ -155,7 +156,6 @@ export default function RepoSettingsPage() {
   });
 
   const [showDelete, setShowDelete] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState("");
 
   return (
     <div className="space-y-6">
@@ -320,21 +320,22 @@ export default function RepoSettingsPage() {
         <h3 className="mb-3 text-lg font-semibold text-[var(--color-danger)]">
           Danger zone
         </h3>
-        {!showDelete ? (
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => setShowDelete(true)}
-          >
-            Delete this repository
-          </Button>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-[var(--color-text-secondary)]">
-              Type <strong>{repoName}</strong> to confirm. This cannot be
-              undone.
-            </p>
-            {checkoutSettings?.enabled && (
+        <Button variant="danger" size="sm" onClick={() => setShowDelete(true)}>
+          Delete this repository
+        </Button>
+      </Card>
+
+      {showDelete && repoData && (
+        <DeleteEntityModal
+          kind="repo"
+          orgName={orgName}
+          repoName={repoName}
+          repoId={repoData.id}
+          isPending={deleteRepo.isPending}
+          onClose={() => setShowDelete(false)}
+          onConfirm={() => deleteRepo.mutate({ id: repoData.id })}
+          extraWarning={
+            checkoutSettings?.enabled ? (
               <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
                 <p className="text-xs text-amber-400">
                   <strong>Storage billing note:</strong> Storage used by this
@@ -343,36 +344,10 @@ export default function RepoSettingsPage() {
                   after deletion.
                 </p>
               </div>
-            )}
-            <input
-              type="text"
-              value={deleteConfirm}
-              onChange={(e) => setDeleteConfirm(e.target.value)}
-              placeholder={repoName}
-              className="w-full rounded-md border border-[var(--color-danger)]/50 bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none"
-            />
-            <div className="flex gap-2">
-              <Button
-                variant="danger"
-                size="sm"
-                disabled={deleteConfirm !== repoName || deleteRepo.isPending}
-                onClick={() =>
-                  repoData && deleteRepo.mutate({ id: repoData.id })
-                }
-              >
-                {deleteRepo.isPending ? "Deleting..." : "Delete repository"}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowDelete(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
-      </Card>
+            ) : undefined
+          }
+        />
+      )}
     </div>
   );
 }

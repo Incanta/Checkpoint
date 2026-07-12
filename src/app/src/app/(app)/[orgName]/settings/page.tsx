@@ -6,6 +6,7 @@ import { api } from "~/trpc/react";
 import { useSession } from "~/lib/auth-client";
 import { Button, Card, PageHeader } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
+import { DeleteEntityModal } from "~/app/_components/delete-entity-modal";
 import { SettingsTabs } from "./_components/settings-tabs";
 
 export default function OrgSettingsPage() {
@@ -58,7 +59,6 @@ export default function OrgSettingsPage() {
   });
 
   const [showDelete, setShowDelete] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState("");
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,48 +164,26 @@ export default function OrgSettingsPage() {
           <h3 className="mb-3 text-lg font-semibold text-[var(--color-danger)]">
             Danger zone
           </h3>
-          {!showDelete ? (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setShowDelete(true)}
-            >
-              Delete this organization
-            </Button>
-          ) : (
-            <div className="space-y-3">
-              <p className="text-sm text-[var(--color-text-secondary)]">
-                Type <strong>{orgName}</strong> to confirm deletion. This cannot
-                be undone.
-              </p>
-              <input
-                type="text"
-                value={deleteConfirm}
-                onChange={(e) => setDeleteConfirm(e.target.value)}
-                placeholder={orgName}
-                className="w-full rounded-md border border-[var(--color-danger)]/50 bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none"
-              />
-              <div className="flex gap-2">
-                <Button
-                  variant="danger"
-                  size="sm"
-                  disabled={deleteConfirm !== orgName || deleteOrg.isPending}
-                  onClick={() => org && deleteOrg.mutate({ id: org.id })}
-                >
-                  {deleteOrg.isPending ? "Deleting..." : "Delete organization"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowDelete(false)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => setShowDelete(true)}
+          >
+            Delete this organization
+          </Button>
         </Card>
       </div>
+
+      {showDelete && org && (
+        <DeleteEntityModal
+          kind="org"
+          orgName={orgName}
+          orgId={org.id}
+          isPending={deleteOrg.isPending}
+          onClose={() => setShowDelete(false)}
+          onConfirm={() => deleteOrg.mutate({ id: org.id })}
+        />
+      )}
     </div>
   );
 }
