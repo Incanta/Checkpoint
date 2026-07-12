@@ -9,6 +9,12 @@ import {
 import DaemonHandler from "./daemon-handler";
 import { setupApplicationMenu } from "./menu";
 import { ipcOn } from "./channels";
+import {
+  MIN_WIDTH,
+  MIN_HEIGHT,
+  restoreWindowState,
+  trackWindowState,
+} from "./window-state";
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -40,7 +46,14 @@ let win: BrowserWindow | null;
 const daemonHandler = new DaemonHandler(ipcMain);
 
 function createWindow() {
+  // Reopen on the same monitor/size/position as last time, defaulting to the
+  // minimum size when there's no saved state yet.
+  const { options, isMaximized } = restoreWindowState();
+
   win = new BrowserWindow({
+    ...options,
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     icon: path.join(process.env.VITE_PUBLIC, "icon.svg"),
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
@@ -49,14 +62,18 @@ function createWindow() {
     titleBarOverlay: true,
   });
 
+  if (isMaximized) {
+    win.maximize();
+  }
+
+  // Persist size/position/maximized state as the user changes it.
+  trackWindowState(win);
+
   attachTitlebarToWindow(win);
 
   // Install the menu the titlebar renders, before the renderer loads and
   // requests it over IPC.
   setupApplicationMenu();
-
-  // win.setBounds({ x: 1920 + 1920 / 2 - 600 / 2, y: -300 });
-  win.setMinimumSize(940, 530);
 
   // Test active push message to Renderer-process.
   win.webContents.on("did-finish-load", () => {
