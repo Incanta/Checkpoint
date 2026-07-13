@@ -133,8 +133,8 @@ export default function Dashboard(): React.ReactElement {
 
   return (
     <div>
-      <div className="p-[1.5rem] grid grid-rows-[2.5rem_calc(100vh-2.5rem-3rem-30px)] gap-4">
-        <div className="row-span-1 flex items-center gap-2">
+      <div className="p-[1.5rem] grid grid-rows-[3rem_calc(100vh-3rem-3rem-30px)] gap-4">
+        <div className="row-span-1 flex items-middle gap-2">
           {currentUser?.details && (
             <Avatar
               image={currentUser.details.image ?? undefined}
@@ -151,6 +151,7 @@ export default function Dashboard(): React.ReactElement {
               }
               shape="circle"
               size="normal"
+              className="mr-[0.5rem]"
               style={{
                 backgroundColor: currentUser.details.image
                   ? "transparent"
@@ -159,44 +160,58 @@ export default function Dashboard(): React.ReactElement {
               }}
             />
           )}
-          <Dropdown
-            value={currentUser?.details?.id || null}
-            options={users
-              ?.filter((user) => user.details !== null)
-              .map((user) => ({
-                label: user.details!.username || user.details!.email,
-                value: user.details!.id,
-              }))
-              .concat(
-                { label: "Add login credentials...", value: "add" },
-                { label: "Logout", value: "logout" },
-              )}
-            placeholder="Select a User"
-            onChange={(e) => {
-              if (e.value === "add") {
-                setCurrentUser(null);
-                navigate("/login");
-              } else if (e.value === "logout") {
-                handleLogout();
-              } else {
-                const selectedUser = users?.find(
-                  (user) => user.details?.id === e.value,
-                );
-                if (selectedUser) {
-                  setCurrentUser(selectedUser);
+          <div className="flex flex-col gap-1">
+            <span className="text-[0.65em] text-white/50 uppercase tracking-wide">
+              Accounts
+            </span>
+            <Dropdown
+              value={currentUser?.details?.id || null}
+              options={users
+                ?.filter((user) => user.details !== null)
+                .map((user) => ({
+                  label: user.details!.username || user.details!.email,
+                  value: user.details!.id,
+                }))
+                .concat(
+                  { label: "Add login credentials...", value: "add" },
+                  { label: "Logout", value: "logout" },
+                )}
+              placeholder="Select a User"
+              pt={{ trigger: { className: "ml-[0.5rem]" } }}
+              onChange={(e) => {
+                if (e.value === "add") {
+                  setCurrentUser(null);
+                  navigate("/login");
+                } else if (e.value === "logout") {
+                  handleLogout();
+                } else {
+                  const selectedUser = users?.find(
+                    (user) => user.details?.id === e.value,
+                  );
+                  if (selectedUser) {
+                    setCurrentUser(selectedUser);
+                  }
                 }
-              }
-            }}
-          />
-          <Dropdown
-            value={currentOrgId}
-            options={orgs.map((org) => ({ label: org.name, value: org.id }))}
-            onChange={(e) => {
-              setCurrentOrgId(e.value);
-            }}
-            placeholder="Select an Organization"
-            className="ml-[0.5rem]"
-          />
+              }}
+            />
+          </div>
+          <div className="self-stretch w-[2rem] flex justify-center">
+            <div className="w-[0.125rem] h-[60%] m-auto bg-[#343434] rounded-full" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[0.65em] text-white/50 uppercase tracking-wide">
+              Orgs
+            </span>
+            <Dropdown
+              value={currentOrgId}
+              options={orgs.map((org) => ({ label: org.name, value: org.id }))}
+              onChange={(e) => {
+                setCurrentOrgId(e.value);
+              }}
+              placeholder="Select an Organization"
+              pt={{ trigger: { className: "ml-[0.5rem]" } }}
+            />
+          </div>
         </div>
         <div className="row-span-1">
           <Splitter
@@ -248,12 +263,17 @@ export default function Dashboard(): React.ReactElement {
                           boxShadow:
                             "0.13rem 0.13rem 0.13rem rgba(0, 0, 0, 0.3)",
                         }}
-                        className="grid grid-cols-[1.75rem_auto_3rem] items-center"
+                        className="grid grid-cols-[1.75rem_minmax(0,1fr)_3rem] items-center"
                       >
                         <div className="col-span-1">
                           <FontAwesomeIcon icon={faNetworkWired} />
                         </div>
-                        <div className="col-span-1">{repo.name}</div>
+                        <div
+                          className="col-span-1 overflow-hidden text-ellipsis whitespace-nowrap"
+                          title={repo.name}
+                        >
+                          {repo.name}
+                        </div>
                         <div className="col-span-1">
                           <Button
                             label={<FontAwesomeIcon icon={faPlus} />}
@@ -322,9 +342,7 @@ export default function Dashboard(): React.ReactElement {
                                 }}
                               />
                               <Button
-                                label={
-                                  <FontAwesomeIcon icon={faLinkSlash} />
-                                }
+                                label={<FontAwesomeIcon icon={faLinkSlash} />}
                                 tooltip="Unlink workspace"
                                 className="text-[0.8em] p-[0.25rem]"
                                 onClick={() => {
@@ -476,9 +494,9 @@ export default function Dashboard(): React.ReactElement {
         }
       >
         <p className="text-[0.9em]">
-          Are you sure you want to unlink{" "}
-          <strong>{unlinkTarget?.name}</strong>? The workspace directory will not
-          be deleted, but Checkpoint will stop tracking changes.
+          Are you sure you want to unlink <strong>{unlinkTarget?.name}</strong>?
+          The workspace directory will not be deleted, but Checkpoint will stop
+          tracking changes.
         </p>
       </Dialog>
     </div>
