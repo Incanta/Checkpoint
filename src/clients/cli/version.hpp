@@ -9,6 +9,6 @@ constexpr const char* CLIENT_VERSION = "0.4.11";
 
 // Integer daemon-API version this CLI was built against. Compared against
 // the daemon's min_daemon_api at connect time.
-constexpr int DAEMON_API = 1;
+constexpr int DAEMON_API = 2;
 
 }  // namespace checkpoint
