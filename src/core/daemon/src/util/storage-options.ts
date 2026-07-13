@@ -25,8 +25,11 @@ export interface StorageTokenResponse {
 /**
  * Quick HTTP reachability probe. Not an ICMP ping: issues a GET to the host's
  * root over the same HTTP(S) protocol the storage traffic uses (the core server
- * answers `GET /` with 200). Any HTTP response, even an error status, proves the
- * host is reachable; only a network failure or timeout counts as unreachable.
+ * answers `GET /` with 200). Only a 2xx response counts as reachable. A 4xx/5xx
+ * is treated as unreachable: a proxy in front of a down origin (e.g. a
+ * Cloudflare gateway 502/521/523) still answers HTTP, but the host it fronts is
+ * not actually serving, so we must not route traffic there. A network failure or
+ * timeout is likewise unreachable.
  */
 async function isHttpReachable(
   url: string,
@@ -35,11 +38,15 @@ async function isHttpReachable(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    // Probe the origin root; we only care that the socket connects and the
-    // server speaks HTTP, not about the specific status/body.
+    // Probe the origin root. A 2xx proves the host itself is serving; a 4xx/5xx
+    // means either the wrong server answered or a proxy is reporting the origin
+    // is unreachable, so treat those as offline.
     const origin = new URL(url).origin;
-    await fetch(origin, { method: "GET", signal: controller.signal });
-    return true;
+    const response = await fetch(origin, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    return response.ok;
   } catch {
     return false;
   } finally {
