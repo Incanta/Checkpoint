@@ -5112,6 +5112,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/vscode@npm:^1.96.0":
+  version: 1.125.0
+  resolution: "@types/vscode@npm:1.125.0"
+  checksum: 10c0/f183f16fd5ae287e1743d06841db78fecdf628ffb36e806eba63b1072a5be40ea310be46bf77ac260269899ddf68fe5c0ecc2a739924e0aa039630f6079fea99
+  languageName: node
+  linkType: hard
+
 "@types/yauzl@npm:^2.9.1":
   version: 2.10.3
   resolution: "@types/yauzl@npm:2.10.3"
@@ -6568,6 +6575,21 @@ __metadata:
   checksum: 10c0/3f2a11dcaae9079e8e6b8ad077e2ae311f04996f9da14815730891e66215ee8b5f2c0eb70b5a156e5bde0f89a41bae13506dc6153e50fd22dcb282b21eec706f
   languageName: node
   linkType: hard
+
+"checkpoint-vscode@workspace:src/clients/vscode":
+  version: 0.0.0-use.local
+  resolution: "checkpoint-vscode@workspace:src/clients/vscode"
+  dependencies:
+    "@checkpointvcs/daemon": "workspace:*"
+    "@types/node": "npm:^25.3.3"
+    "@types/vscode": "npm:^1.96.0"
+    esbuild: "npm:^0.28.1"
+    typescript: "npm:^5.9.3"
+  peerDependencies:
+    "@trpc/client": ^11.11.0
+    superjson: ^2.2.6
+  languageName: unknown
+  linkType: soft
 
 "chokidar@npm:^4.0.3":
   version: 4.0.3

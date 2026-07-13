@@ -29,6 +29,10 @@
       "path": "src/clients/desktop"
     },
     {
+      "name": "VS Code",
+      "path": "src/clients/vscode"
+    },
+    {
       "name": "Root",
       "path": "."
     }
