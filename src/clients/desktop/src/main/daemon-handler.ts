@@ -16,6 +16,7 @@ import {
 } from "../common/state/daemon";
 import { store } from "../common/state/store";
 import { Channels, ipcOn, ipcSend, ipcHandle } from "./channels";
+import { getLastOpenedWorkspace, setLastOpenedWorkspace } from "./app-config";
 import {
   currentWorkspaceAtom,
   fileHistoryAtom,
@@ -383,6 +384,7 @@ export default class DaemonHandler {
         const client = await CreateDaemonClient();
 
         await this.loadUsers(client);
+        await this.restoreLastOpenedWorkspace(client);
 
         store.set(daemonConnectionAtom, "connected");
         return;
@@ -408,21 +410,21 @@ export default class DaemonHandler {
   ): Promise<void> {
     const client = clientArg ?? (await CreateDaemonClient());
 
-        const users = await client.auth.getUsers.query();
+    const users = await client.auth.getUsers.query();
     const usersValue: User[] = users.users.map((user) => ({
-          daemonId: user.daemonId,
-          endpoint: user.endpoint,
-          details: {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            username: user.username,
-            image: user.image ?? null,
-          },
-          auth: undefined,
-        }));
+      daemonId: user.daemonId,
+      endpoint: user.endpoint,
+      details: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        username: user.username,
+        image: user.image ?? null,
+      },
+      auth: undefined,
+    }));
 
-        store.set(usersAtom, usersValue);
+    store.set(usersAtom, usersValue);
 
     // Keep the active account selected across rechecks; otherwise fall back to
     // the first known account.
@@ -438,16 +440,47 @@ export default class DaemonHandler {
           ?.reachable ?? true)
       : true;
     store.set(serverReachableAtom, currentReachable);
-        }
+  }
 
-        store.set(daemonConnectionAtom, "connected");
+  /**
+   * On launch, reopen the workspace the user last had open (priority 1) so the
+   * app lands directly in the workspace explorer. Only restores when the
+   * account is still known and the workspace still exists locally on disk;
+   * otherwise it's left to the dashboard/sign-in routing. Uses the daemon's
+   * local workspace list so it works even when the remote server is down.
+   */
+  private async restoreLastOpenedWorkspace(
+    client: Awaited<ReturnType<typeof CreateDaemonClient>>,
+  ): Promise<void> {
+    const last = getLastOpenedWorkspace();
+    if (!last) return;
+
+    const users = store.get(usersAtom) || [];
+    const user = users.find((u) => u.daemonId === last.daemonId);
+    if (!user) return;
+
+    try {
+      const localWorkspaces = await client.workspaces.ops.list.local.query({
+        daemonId: last.daemonId,
+      });
+      store.set(workspacesAtom, localWorkspaces.workspaces);
+
+      const workspace = localWorkspaces.workspaces.find(
+        (w) => w.id === last.workspaceId,
+      );
+      if (!workspace || !existsSync(workspace.localPath)) {
+        // No longer available; clear the stale pointer so we don't keep trying.
+        setLastOpenedWorkspace(null);
         return;
-      } catch (error) {
-        console.error("Could not reach the daemon, retrying shortly:", error);
-        await new Promise((resolve) =>
-          setTimeout(resolve, DAEMON_CONNECT_RETRY_MS),
-        );
       }
+
+      // Make the workspace's account active so workspace ops target it, then
+      // open it without pushing a renderer navigation (the launch router reads
+      // currentWorkspaceAtom and routes to /workspace itself).
+      store.set(currentUserAtom, user);
+      await this.selectWorkspace(workspace, { navigate: false });
+    } catch (error) {
+      console.error("Failed to restore last opened workspace:", error);
     }
   }
 
@@ -571,6 +604,12 @@ export default class DaemonHandler {
       );
       store.set(usersAtom, nextUsers.length > 0 ? nextUsers : null);
 
+      // Drop the persisted workspace pointer if it belonged to this account.
+      const last = getLastOpenedWorkspace();
+      if (last?.daemonId === data.daemonId) {
+        setLastOpenedWorkspace(null);
+      }
+
       const currentUser = store.get(currentUserAtom);
       if (currentUser?.daemonId === data.daemonId) {
         if (nextUsers.length > 0) {
@@ -622,6 +661,12 @@ export default class DaemonHandler {
       const activeWorkspace = store.get(currentWorkspaceAtom);
       if (activeWorkspace?.id === data.workspaceId) {
         store.set(currentWorkspaceAtom, null);
+      }
+
+      // Don't try to reopen a workspace we just unlinked.
+      const last = getLastOpenedWorkspace();
+      if (last?.workspaceId === data.workspaceId) {
+        setLastOpenedWorkspace(null);
       }
 
       if (this.webContents) {
@@ -711,13 +756,24 @@ export default class DaemonHandler {
     }
   }
 
-  private async selectWorkspace(workspace: Workspace): Promise<void> {
+  private async selectWorkspace(
+    workspace: Workspace,
+    options?: { navigate?: boolean },
+  ): Promise<void> {
+    const navigate = options?.navigate ?? true;
+
     store.set(currentWorkspaceAtom, workspace);
     store.set(workspaceDirectoriesAtom, {
       [workspace.localPath]: {
         children: [],
         containsChanges: false,
       },
+    });
+
+    // Remember this as the workspace to reopen on next launch.
+    setLastOpenedWorkspace({
+      daemonId: workspace.daemonId,
+      workspaceId: workspace.id,
     });
 
     // Clear previous sync state
@@ -732,7 +788,7 @@ export default class DaemonHandler {
     this.workspaceSyncStatus(true);
     this.getResolveConfirmSuppressed();
 
-    if (this.webContents) {
+    if (navigate && this.webContents) {
       ipcSend(this.webContents, "set-renderer-url", {
         url: "/workspace",
       });
