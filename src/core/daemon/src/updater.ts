@@ -423,13 +423,30 @@ export class Updater {
     const { spawn } = await import("child_process");
 
     switch (p) {
-      case "win32":
-        // NSIS installer supports /S for silent mode
-        spawn(installerPath, ["/S"], {
-          detached: true,
-          stdio: "ignore",
-        }).unref();
+      case "win32": {
+        // The NSIS installer is perMachine + assisted (oneClick:false), so its
+        // manifest requires administrator elevation. The daemon runs as a
+        // non-elevated per-user process (the tray launches it), so spawning the
+        // installer directly via CreateProcess fails: Windows returns
+        // ERROR_ELEVATION_REQUIRED, which libuv surfaces as EACCES. Launch it
+        // through ShellExecute's "runas" verb via PowerShell's Start-Process so
+        // the UAC elevation flow runs. /S keeps the installer silent.
+        const psInstallerPath = installerPath.replace(/'/g, "''");
+        spawn(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-Command",
+            `Start-Process -FilePath '${psInstallerPath}' -ArgumentList '/S' -Verb RunAs`,
+          ],
+          {
+            detached: true,
+            stdio: "ignore",
+            windowsHide: true,
+          },
+        ).unref();
         break;
+      }
 
       case "darwin":
         // macOS .pkg can be installed with the `installer` command
