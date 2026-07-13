@@ -10,7 +10,10 @@ import {
 } from "@checkpointvcs/common";
 import { MockedData } from "../common/mock-data";
 import { User, usersAtom, currentUserAtom } from "../common/state/auth";
-import { daemonConnectionAtom } from "../common/state/daemon";
+import {
+  daemonConnectionAtom,
+  serverReachableAtom,
+} from "../common/state/daemon";
 import { store } from "../common/state/store";
 import { Channels, ipcOn, ipcSend, ipcHandle } from "./channels";
 import {
@@ -138,6 +141,14 @@ export default class DaemonHandler {
 
     ipcOn(this.ipcMain, "auth:logout", async (_event, data) => {
       this.handleLogout(data);
+    });
+
+    ipcOn(this.ipcMain, "auth:recheck", async () => {
+      try {
+        await this.loadUsers();
+      } catch (error) {
+        console.error("Failed to recheck accounts:", error);
+      }
     });
 
     ipcOn(this.ipcMain, "workspace:create", async (event, data) => {
@@ -371,8 +382,34 @@ export default class DaemonHandler {
       try {
         const client = await CreateDaemonClient();
 
+        await this.loadUsers(client);
+
+        store.set(daemonConnectionAtom, "connected");
+        return;
+      } catch (error) {
+        console.error("Could not reach the daemon, retrying shortly:", error);
+        await new Promise((resolve) =>
+          setTimeout(resolve, DAEMON_CONNECT_RETRY_MS),
+        );
+      }
+    }
+  }
+
+  /**
+   * Queries the daemon for the known accounts and reflects them into the
+   * shared atoms. Each account's `reachable` flag reports whether its remote
+   * server answered; the account is kept regardless (existence is a local
+   * fact), and the current account's reachability drives the "server
+   * unreachable" banner. Preserves the currently selected account when it's
+   * still present so a recheck doesn't yank the user's selection.
+   */
+  private async loadUsers(
+    clientArg?: Awaited<ReturnType<typeof CreateDaemonClient>>,
+  ): Promise<void> {
+    const client = clientArg ?? (await CreateDaemonClient());
+
         const users = await client.auth.getUsers.query();
-        const usersValue = users.users.map((user) => ({
+    const usersValue: User[] = users.users.map((user) => ({
           daemonId: user.daemonId,
           endpoint: user.endpoint,
           details: {
@@ -387,9 +424,20 @@ export default class DaemonHandler {
 
         store.set(usersAtom, usersValue);
 
-        // TODO remember the last active user
-        if (usersValue.length > 0) {
-          store.set(currentUserAtom, usersValue[0]);
+    // Keep the active account selected across rechecks; otherwise fall back to
+    // the first known account.
+    const previous = store.get(currentUserAtom);
+    const nextCurrent =
+      (previous && usersValue.find((u) => u.daemonId === previous.daemonId)) ||
+      usersValue[0] ||
+      null;
+    store.set(currentUserAtom, nextCurrent);
+
+    const currentReachable = nextCurrent
+      ? (users.users.find((u) => u.daemonId === nextCurrent.daemonId)
+          ?.reachable ?? true)
+      : true;
+    store.set(serverReachableAtom, currentReachable);
         }
 
         store.set(daemonConnectionAtom, "connected");

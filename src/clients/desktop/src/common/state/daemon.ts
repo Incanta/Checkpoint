@@ -10,3 +10,11 @@ export type DaemonConnectionStatus = "connecting" | "connected";
 
 export const daemonConnectionAtom = atom<DaemonConnectionStatus>("connecting");
 syncAtom(daemonConnectionAtom, "daemonConnection");
+
+// Whether the current account's remote Checkpoint server was reachable the
+// last time we tried. The daemon can be up (daemonConnectionAtom === "connected")
+// while the remote server is down; in that case we still route the app to the
+// dashboard/workspace using cached data and surface a warning banner. Defaults
+// to true so no banner flashes before the first check completes.
+export const serverReachableAtom = atom<boolean>(true);
+syncAtom(serverReachableAtom, "serverReachable");

@@ -14,6 +14,7 @@ import FileHistory from "./components/FileHistory";
 import ChangelistChanges from "./components/ChangelistChanges";
 import UpdateNotification from "./components/UpdateNotification";
 import VersionNotification from "./components/VersionNotification";
+import ServerStatusBanner from "./components/ServerStatusBanner";
 
 window.electron.ipcRenderer.on("set-renderer-url", (data: { url: string }) => {
   window.location.href = data.url;
@@ -51,6 +52,7 @@ if (popoutType === "file-history") {
           </Routes>
           <UpdateNotification />
           <VersionNotification />
+          <ServerStatusBanner />
         </Router>
       </Provider>
     </React.StrictMode>,

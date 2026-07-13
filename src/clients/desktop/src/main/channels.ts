@@ -29,6 +29,9 @@ export type Channels = {
   "app:open-external": { url: string };
 
   "auth:login": { daemonId: string; endpoint: string };
+  // Re-query the daemon for the known users and their reachability. Used by the
+  // "server unreachable" banner's retry button.
+  "auth:recheck": null;
   "auth:logout": { daemonId: string };
   "auth:logout:success": null;
   "auth:logout:error": { message: string };

@@ -4,7 +4,11 @@ import superjson from "superjson";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
-import type { AuthConfig, AuthConfigUser } from "../types/auth-config.js";
+import type {
+  AuthConfig,
+  AuthConfigUser,
+  AuthConfigUserProfile,
+} from "../types/auth-config.js";
 import { existsSync } from "fs";
 
 export type ApiClient = TRPCClient<ApiAppRouter>;
@@ -112,8 +116,45 @@ export async function SaveAuthToken(
   }
 
   authConfig.users[daemonId] = {
+    // Preserve any previously cached profile so re-saving a token (e.g. a
+    // re-login) doesn't wipe the offline-render fallback.
+    ...authConfig.users[daemonId],
     endpoint,
     apiToken,
+  };
+
+  await fs.writeFile(authFilePath, JSON.stringify(authConfig, null, 2));
+}
+
+/**
+ * Caches the user's profile alongside their token so the desktop app can
+ * render the account and route on launch even when the server is unreachable.
+ * No-op if the account isn't present in the auth config.
+ */
+export async function SaveAuthProfile(
+  daemonId: string,
+  profile: AuthConfigUserProfile,
+): Promise<void> {
+  const authFilePath = path.join(os.homedir(), ".checkpoint", "auth.json");
+
+  let authConfig: AuthConfig | null = null;
+
+  if (existsSync(authFilePath)) {
+    const authConfigStr = await fs.readFile(authFilePath, "utf-8");
+    try {
+      authConfig = JSON.parse(authConfigStr);
+    } catch (e) {
+      //
+    }
+  }
+
+  if (authConfig === null || !authConfig.users[daemonId]) {
+    return;
+  }
+
+  authConfig.users[daemonId] = {
+    ...authConfig.users[daemonId],
+    profile,
   };
 
   await fs.writeFile(authFilePath, JSON.stringify(authConfig, null, 2));

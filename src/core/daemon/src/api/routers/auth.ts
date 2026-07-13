@@ -4,6 +4,7 @@ import {
   CreateApiClientAuthManual,
   DeleteAuthToken,
   GetAllAuthConfigUsers,
+  SaveAuthProfile,
   SaveAuthToken,
 } from "@checkpointvcs/common";
 import { z } from "zod";
@@ -101,26 +102,65 @@ export const authRouter = router({
 
     const promises = Object.entries(users)
       .filter(([, user]) => user.apiToken)
-      .map<Promise<(User & { daemonId: string; endpoint: string }) | null>>(
-        async ([daemonId, user]) => {
-          const client = await CreateApiClientAuthManual(
-            user.endpoint,
-            user.apiToken!,
-          );
+      .map<
+        Promise<
+          | (User & {
+              daemonId: string;
+              endpoint: string;
+              reachable: boolean;
+            })
+          | null
+        >
+      >(async ([daemonId, user]) => {
+        const client = await CreateApiClientAuthManual(
+          user.endpoint,
+          user.apiToken!,
+        );
 
-          try {
-            const meResponse = await client.user.me.query();
+        try {
+          const meResponse = await client.user.me.query();
 
-            return {
-              ...meResponse,
-              daemonId,
-              endpoint: user.endpoint,
-            };
-          } catch (e: any) {
-            return null;
-          }
-        },
-      );
+          // Cache the profile so a later launch can still render this account
+          // (and route past the sign-in page) while the server is unreachable.
+          await SaveAuthProfile(daemonId, {
+            id: meResponse.id,
+            email: meResponse.email,
+            name: meResponse.name ?? null,
+            username: meResponse.username ?? null,
+            image: meResponse.image ?? null,
+          });
+
+          return {
+            ...meResponse,
+            daemonId,
+            endpoint: user.endpoint,
+            reachable: true,
+          };
+        } catch (e: any) {
+          // The server is unreachable or the token was rejected. Don't drop the
+          // account: it still exists locally, which is what the desktop app's
+          // launch routing cares about. Fall back to the last cached profile so
+          // the account can still be shown; if we've never reached the server,
+          // surface a minimal placeholder so onboarding lands on the dashboard
+          // rather than the sign-in page.
+          const cached = user.profile;
+
+          return {
+            id: cached?.id ?? "",
+            email: cached?.email ?? "",
+            name: cached?.name ?? null,
+            username: cached?.username ?? null,
+            image: cached?.image ?? null,
+            daemonId,
+            endpoint: user.endpoint,
+            reachable: false,
+          } as User & {
+            daemonId: string;
+            endpoint: string;
+            reachable: boolean;
+          };
+        }
+      });
 
     const results = await Promise.all(promises);
 
