@@ -3,7 +3,7 @@
 //
 // User-facing semver versions:
 //   SERVER_VERSION — src/app + src/core/server share this
-//   CLIENT_VERSION — src/core/daemon + src/clients/{desktop,cli,tray} share this
+//   CLIENT_VERSION — src/core/daemon + src/clients/{desktop,vscode,cli,tray} share this
 //
 // Integer API versions. Bump only when there's an actual wire-format break:
 //   SERVER_API     — current server API the running server speaks
@@ -11,8 +11,8 @@
 //   DAEMON_API     — current daemon API the running daemon speaks
 //   MIN_DAEMON_API — minimum daemon-API a connecting client must speak
 
-export const SERVER_VERSION = "0.4.11";
-export const CLIENT_VERSION = "0.4.11";
+export const SERVER_VERSION = "0.4.12";
+export const CLIENT_VERSION = "0.4.12";
 export const SERVER_API = 2;
 export const MIN_SERVER_API = 2;
 export const DAEMON_API = 2;
