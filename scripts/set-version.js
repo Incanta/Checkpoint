@@ -160,6 +160,7 @@ const CLIENT_PACKAGES = [
   "src/core/common/package.json",
   "src/core/daemon/package.json",
   "src/clients/desktop/package.json",
+  "src/clients/vscode/package.json",
 ];
 
 for (const rel of SERVER_PACKAGES) {
@@ -190,7 +191,7 @@ write(
 //
 // User-facing semver versions:
 //   SERVER_VERSION — src/app + src/core/server share this
-//   CLIENT_VERSION — src/core/daemon + src/clients/{desktop,cli,tray} share this
+//   CLIENT_VERSION — src/core/daemon + src/clients/{desktop,vscode,cli,tray} share this
 //
 // Integer API versions. Bump only when there's an actual wire-format break:
 //   SERVER_API     — current server API the running server speaks
