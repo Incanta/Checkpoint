@@ -386,8 +386,8 @@ func checkDaemonVersion() {
 	// Tray is bundled with the daemon, so this check trivially passes in
 	// production, but it is kept for dev installs that may have mismatched binaries.
 	if info.MinDaemonAPI > 0 && trayDaemonAPI < info.MinDaemonAPI {
-		logTray("daemon API version %d is too old for this tray (requires ≥ %d)",
-			info.DaemonAPI, info.MinDaemonAPI,
+		logTray("daemon API version %d is too old for this tray (requires ≥ %d, tray: %d)",
+			info.DaemonAPI, info.MinDaemonAPI, trayDaemonAPI,
 		)
 		mVersionMsg.SetTitle("⚠ Upgrade required")
 		mVersionMsg.Show()

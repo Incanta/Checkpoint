@@ -7,4 +7,4 @@ const ClientVersion = "0.4.11"
 
 // Integer daemon-API version this tray was built against. Compared against
 // the daemon's min_daemon_api at connect time.
-const DaemonAPI = 1
+const DaemonAPI = 2
