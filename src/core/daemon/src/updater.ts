@@ -95,6 +95,16 @@ function getInstallerAssetPattern(): string {
   }
 }
 
+/**
+ * Pull the semver embedded in a downloaded installer's filename, e.g.
+ * "0.4.11" from "Checkpoint-Windows-x64-0.4.11-Setup.exe" (also matches the
+ * .deb/.rpm/.pkg names). Returns null when no version can be found.
+ */
+function extractVersionFromFilename(name: string): string | null {
+  const match = name.match(/(\d+\.\d+\.\d+)/);
+  return match ? match[1] : null;
+}
+
 function compareVersions(a: string, b: string): number {
   // Strip leading 'v' if present
   const va = a.replace(/^v/, "").split(".").map(Number);
@@ -267,6 +277,12 @@ export class Updater {
 
     this.checkInterval = setInterval(() => {
       void this.checkForUpdates();
+
+      // Prune installers left over from prior updates, even when auto-checking is
+      // disabled. After applyUpdate() the daemon exits and the freshly installed
+      // build starts here, so this removes the installer that was just applied
+      // (now equal to the current version) along with any older leftovers.
+      void this.cleanupOldInstallers();
     }, this.config.checkIntervalMs);
   }
 
@@ -476,6 +492,61 @@ export class Updater {
     setTimeout(() => {
       process.exit(0);
     }, 2000);
+  }
+
+  /**
+   * Permanently delete stale installers in ~/.checkpoint/updates. Any file
+   * whose embedded version is the current version or older is removed; only
+   * installers strictly newer than what we're running (a pending update) are
+   * kept. fs.rm deletes in place and never routes through the OS recycle
+   * bin/trash, so this satisfies the "skip recycle bin" requirement.
+   */
+  public async cleanupOldInstallers(): Promise<void> {
+    const updatesDir = path.join(homedir(), ".checkpoint", "updates");
+
+    let entries: string[];
+    try {
+      entries = await fs.readdir(updatesDir);
+    } catch (err) {
+      // Nothing downloaded yet: the directory simply doesn't exist.
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      Logger.warn(
+        `Could not read updates dir for cleanup: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return;
+    }
+
+    const current = this.status.currentVersion;
+
+    for (const name of entries) {
+      const version = extractVersionFromFilename(name);
+      // Leave anything we can't identify as a versioned installer untouched.
+      if (!version) continue;
+
+      // Keep installers strictly newer than the running version.
+      if (compareVersions(version, current) > 0) continue;
+
+      const filePath = path.join(updatesDir, name);
+      try {
+        await fs.rm(filePath, { force: true });
+        Logger.info(
+          `Removed stale installer: ${name} (v${version} <= v${current})`,
+        );
+
+        // Forget the tracked installer if we just deleted it.
+        if (this.status.downloadedInstallerPath === filePath) {
+          this.status.downloadedInstallerPath = null;
+        }
+      } catch (err) {
+        Logger.warn(
+          `Failed to remove stale installer ${name}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
   }
 }
 
