@@ -86,6 +86,19 @@ const faqs: {
       </span>
     ),
   },
+  {
+    question: "What's the catch?",
+    answer: () => (
+      <span>
+        There is no catch! Originally we were planning on running a managed
+        cloud service for Checkpoint, but we&apos;ve paused that for the
+        foreseeable future to focus on our own internal game development.
+        We&apos;ve open-sourced all of our Checkpoint work to give back to the
+        community. As a small indie studio ourselves, we know how much
+        affordable, high-quality tools can help out.
+      </span>
+    ),
+  },
 ];
 
 function FaqItem({
