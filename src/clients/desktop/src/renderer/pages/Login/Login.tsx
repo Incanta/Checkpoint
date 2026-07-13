@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useAtomValue } from "jotai";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { nanoid } from "nanoid";
+import { faArrowLeft } from "@fortawesome/free-solid-svg-icons/faArrowLeft";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { currentUserAtom } from "../../../common/state/auth";
 import { ipc } from "../ipc";
 import Spinner from "../../components/Spinner";
@@ -15,6 +17,9 @@ export default function Login(): React.ReactElement {
   const [submitting, setSubmitting] = useState(false);
   const [focused, setFocused] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  const cameFromDashboard =
+    (location.state as { from?: string } | null)?.from === "dashboard";
 
   // Device authorization is pending once the daemon has handed us a code but
   // the user hasn't confirmed it in the browser yet.
@@ -62,6 +67,26 @@ export default function Login(): React.ReactElement {
           boxShadow: "0 8px 24px rgba(0, 0, 0, 0.25)",
         }}
       >
+        {cameFromDashboard && (
+          <button
+            onClick={() => navigate("/dashboard")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              marginBottom: "1.25rem",
+              padding: 0,
+              border: "none",
+              background: "none",
+              color: "var(--color-text-secondary)",
+              fontSize: "0.8rem",
+              cursor: "pointer",
+            }}
+          >
+            <FontAwesomeIcon icon={faArrowLeft} />
+            Back
+          </button>
+        )}
         {awaitingAuthorization ? (
           <div
             style={{

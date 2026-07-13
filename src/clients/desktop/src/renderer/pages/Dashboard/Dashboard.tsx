@@ -181,7 +181,7 @@ export default function Dashboard(): React.ReactElement {
               onChange={(e) => {
                 if (e.value === "add") {
                   setCurrentUser(null);
-                  navigate("/login");
+                  navigate("/login", { state: { from: "dashboard" } });
                 } else if (e.value === "logout") {
                   handleLogout();
                 } else {
