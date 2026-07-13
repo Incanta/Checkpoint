@@ -80,7 +80,82 @@ const PLATFORMS: Record<OSKey, PlatformConfig> = {
   },
 };
 
+// Self-contained, daemonless CLI packages (CLI + bundled daemon). Asset names
+// come from scripts/assemble-cli-package.sh (portable archives) and
+// installer/nfpm-cli.yaml (Linux deb/rpm), built by the package-cli job in
+// .github/workflows/build-installers.yaml. Portable archive names have no
+// embedded version (e.g. "checkpoint-cli-linux-x64.tar.gz"); the deb/rpm use
+// nfpm's default naming ("checkpoint-cli_<ver>_amd64.deb",
+// "checkpoint-cli-<ver>.x86_64.rpm").
+const CLI_PLATFORMS: Record<OSKey, PlatformConfig> = {
+  windows: {
+    name: "Windows",
+    Icon: WindowsIcon,
+    variants: [
+      {
+        id: "cli-win-x64",
+        label: "Portable (x64, .zip)",
+        pattern: /checkpoint-cli-win32-x64\.zip$/i,
+        ext: ".zip",
+      },
+    ],
+  },
+  macos: {
+    name: "macOS",
+    Icon: AppleIcon,
+    variants: [
+      {
+        id: "cli-mac-arm64",
+        label: "Portable (Apple Silicon, .tar.gz)",
+        pattern: /checkpoint-cli-darwin-arm64\.tar\.gz$/i,
+        ext: ".tar.gz",
+      },
+      {
+        id: "cli-mac-x64",
+        label: "Portable (Intel, .tar.gz)",
+        pattern: /checkpoint-cli-darwin-x64\.tar\.gz$/i,
+        ext: ".tar.gz",
+      },
+    ],
+  },
+  linux: {
+    name: "Linux",
+    Icon: LinuxIcon,
+    variants: [
+      {
+        id: "cli-linux-x64",
+        label: "Portable (x64, .tar.gz)",
+        pattern: /checkpoint-cli-linux-x64\.tar\.gz$/i,
+        ext: ".tar.gz",
+      },
+      {
+        id: "cli-linux-deb",
+        label: "Debian / Ubuntu installer (.deb)",
+        pattern: /checkpoint-cli[-_].*amd64\.deb$/i,
+        ext: ".deb",
+      },
+      {
+        id: "cli-linux-rpm",
+        label: "Fedora / RHEL installer (.rpm)",
+        pattern: /checkpoint-cli[-_].*\.rpm$/i,
+        ext: ".rpm",
+      },
+    ],
+  },
+};
+
 const OS_ORDER: OSKey[] = ["windows", "macos", "linux"];
+
+/** Look up a variant by id across both the desktop and CLI platform tables. */
+function findVariant(variantId: string): InstallerVariant | null {
+  for (const os of OS_ORDER) {
+    const variant =
+      PLATFORMS[os].variants.find((v) => v.id === variantId) ??
+      CLI_PLATFORMS[os].variants.find((v) => v.id === variantId);
+    if (variant) return variant;
+  }
+  return null;
+}
 
 interface GitHubAsset {
   name: string;
@@ -158,7 +233,7 @@ function triggerDownload(url: string): void {
 export default function DownloadPage() {
   const [release, setRelease] = useState<GitHubRelease | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
-    "loading"
+    "loading",
   );
   const [autoStarted, setAutoStarted] = useState(false);
 
@@ -168,17 +243,11 @@ export default function DownloadPage() {
   const findAsset = useCallback(
     (variantId: string): GitHubAsset | null => {
       if (!release) return null;
-      for (const os of OS_ORDER) {
-        const variant = PLATFORMS[os].variants.find((v) => v.id === variantId);
-        if (variant) {
-          return (
-            release.assets.find((a) => variant.pattern.test(a.name)) ?? null
-          );
-        }
-      }
-      return null;
+      const variant = findVariant(variantId);
+      if (!variant) return null;
+      return release.assets.find((a) => variant.pattern.test(a.name)) ?? null;
     },
-    [release]
+    [release],
   );
 
   useEffect(() => {
@@ -188,7 +257,7 @@ export default function DownloadPage() {
       try {
         const res = await fetch(
           `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
-          { headers: { Accept: "application/vnd.github+json" } }
+          { headers: { Accept: "application/vnd.github+json" } },
         );
         if (!res.ok) throw new Error(`GitHub API responded ${res.status}`);
         const data = (await res.json()) as GitHubRelease;
@@ -308,6 +377,36 @@ export default function DownloadPage() {
                       findAsset={findAsset}
                     />
                   ))}
+                </div>
+
+                {/* Command-line tools */}
+                <div className="mt-16">
+                  <div className="text-center mb-8">
+                    <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
+                      Command-line tools
+                    </h2>
+                    <p className="text-muted max-w-2xl mx-auto">
+                      Headless, self-contained packages with just the{" "}
+                      <code className="text-foreground">chk</code> CLI and a
+                      bundled daemon, no desktop app required. Portable archives
+                      run anywhere once extracted; the Linux installers put{" "}
+                      <code className="text-foreground">chk</code> on your PATH.
+                      The daemon is not enabled as a service and will be
+                      ephemeral by default.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-6 md:grid-cols-3">
+                    {OS_ORDER.map((os) => (
+                      <PlatformCard
+                        key={os}
+                        config={CLI_PLATFORMS[os]}
+                        recommended={false}
+                        recommendedVariantId={null}
+                        findAsset={findAsset}
+                      />
+                    ))}
+                  </div>
                 </div>
 
                 <p className="text-center text-sm text-muted mt-10">
@@ -445,9 +544,7 @@ function DownloadButton({
         {label}
       </span>
       {asset.size > 0 && (
-        <span
-          className={`text-xs ${primary ? "text-white/70" : "text-muted"}`}
-        >
+        <span className={`text-xs ${primary ? "text-white/70" : "text-muted"}`}>
           {formatSize(asset.size)}
         </span>
       )}
