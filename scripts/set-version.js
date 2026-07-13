@@ -13,7 +13,7 @@
 //   - Unreal plugin descriptor (Version int auto-incremented, VersionName set)
 //
 // The four integer API versions (server_api, min_server_api, daemon_api,
-// min_daemon_api) are NOT touched — they're bumped manually in versions.json
+// min_daemon_api) are only touched when their flags are passed. Bump them
 // when there's an actual wire-format break.
 //
 // Usage:
@@ -21,6 +21,12 @@
 //   node scripts/set-version.js --client <semver>   # bumps client only
 //   node scripts/set-version.js --server <semver>   # bumps server only
 //   (combine --client and --server to set them independently)
+//
+//   Integer API versions (independent of the semver flags above):
+//   node scripts/set-version.js --server-api <int>
+//   node scripts/set-version.js --min-server-api <int>
+//   node scripts/set-version.js --daemon-api <int>
+//   node scripts/set-version.js --min-daemon-api <int>
 
 const fs = require("fs");
 const path = require("path");
@@ -34,25 +40,45 @@ const args = process.argv.slice(2);
 let positional = null;
 let clientArg = null;
 let serverArg = null;
+// Integer API-version flags. null means "leave whatever versions.json has".
+const apiArgs = {
+  server_api: null,
+  min_server_api: null,
+  daemon_api: null,
+  min_daemon_api: null,
+};
+// Maps a CLI flag to its versions.json key.
+const API_FLAGS = {
+  "--server-api": "server_api",
+  "--min-server-api": "min_server_api",
+  "--daemon-api": "daemon_api",
+  "--min-daemon-api": "min_daemon_api",
+};
 
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
-  if (a === "--client") {
-    clientArg = args[++i];
-  } else if (a === "--server") {
-    serverArg = args[++i];
-  } else if (a.startsWith("--client=")) {
-    clientArg = a.slice("--client=".length);
-  } else if (a.startsWith("--server=")) {
-    serverArg = a.slice("--server=".length);
+  const eq = a.indexOf("=");
+  const flag = eq === -1 ? a : a.slice(0, eq);
+  const inlineVal = eq === -1 ? null : a.slice(eq + 1);
+  if (flag === "--client") {
+    clientArg = inlineVal ?? args[++i];
+  } else if (flag === "--server") {
+    serverArg = inlineVal ?? args[++i];
+  } else if (Object.prototype.hasOwnProperty.call(API_FLAGS, flag)) {
+    apiArgs[API_FLAGS[flag]] = inlineVal ?? args[++i];
   } else if (!a.startsWith("--")) {
     positional = a;
+  } else {
+    console.error(`unknown flag: ${flag}`);
+    process.exit(1);
   }
 }
 
-if (!positional && !clientArg && !serverArg) {
+const anyApiArg = Object.values(apiArgs).some((v) => v != null);
+if (!positional && !clientArg && !serverArg && !anyApiArg) {
   console.error(
-    "usage: node scripts/set-version.js <semver> [--client <x>] [--server <x>]",
+    "usage: node scripts/set-version.js <semver> [--client <x>] [--server <x>]\n" +
+      "       [--server-api <n>] [--min-server-api <n>] [--daemon-api <n>] [--min-daemon-api <n>]",
   );
   process.exit(1);
 }
@@ -71,12 +97,28 @@ const newServer = serverArg ?? positional;
 if (newClient) assertSemver(newClient, "client_version");
 if (newServer) assertSemver(newServer, "server_version");
 
+function parseApiInt(v, label) {
+  if (!/^\d+$/.test(v)) {
+    console.error(`invalid integer for ${label}: ${v}`);
+    process.exit(1);
+  }
+  return parseInt(v, 10);
+}
+// Resolve API-version integers (null stays null so we leave versions.json alone).
+const newApi = {};
+for (const [key, raw] of Object.entries(apiArgs)) {
+  newApi[key] = raw == null ? null : parseApiInt(raw, key);
+}
+
 // ─── Read versions.json ─────────────────────────────────────────────
 
 const versions = JSON.parse(fs.readFileSync(versionsJsonPath, "utf8"));
 
 if (newClient) versions.client_version = newClient;
 if (newServer) versions.server_version = newServer;
+for (const [key, val] of Object.entries(newApi)) {
+  if (val != null) versions[key] = val;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -100,6 +142,11 @@ function updateJson(rel, mutate, indent) {
 console.log(
   `Setting versions: server=${versions.server_version}, client=${versions.client_version}`,
 );
+if (anyApiArg) {
+  console.log(
+    `Setting API versions: server_api=${versions.server_api}, min_server_api=${versions.min_server_api}, daemon_api=${versions.daemon_api}, min_daemon_api=${versions.min_daemon_api}`,
+  );
+}
 write("versions.json", JSON.stringify(versions, null, 2) + "\n");
 
 // ─── Workspace package.json files ───────────────────────────────────
@@ -224,7 +271,10 @@ const DaemonAPI = ${versions.daemon_api}
 // against an older daemon_api than the current versions.json. This script
 // only bumps the descriptor's VersionName (semver shown in the editor) and
 // auto-increments the integer Version (Unreal's required ascending counter).
-{
+//
+// The descriptor tracks client_version, so only touch it when the client
+// semver changed. An API-only run must not bump the ascending Version.
+if (newClient) {
   const rel = "src/clients/unreal/CheckpointSourceControl.uplugin";
   let nextVersion;
   updateJson(
