@@ -1,0 +1,435 @@
+{
+  "name": "checkpoint-vscode",
+  "displayName": "Checkpoint",
+  "description": "Checkpoint version control for Visual Studio Code",
+  "publisher": "incanta",
+  "private": true,
+  "version": "0.4.10",
+  "license": "(Elastic-2.0 OR AGPL-3.0)",
+  "homepage": "https://checkpointvcs.com",
+  "author": {
+    "name": "Incanta LLC",
+    "email": "support@incanta.dev",
+    "url": "https://checkpointvcs.com"
+  },
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "SCM Providers"
+  ],
+  "keywords": [
+    "scm",
+    "checkpoint",
+    "version control"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "yarn typecheck && node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "package": "yarn build && npx @vscode/vsce package --no-dependencies",
+    "lint": "eslint ."
+  },
+  "peerDependencies": {
+    "@trpc/client": "^11.11.0",
+    "superjson": "^2.2.6"
+  },
+  "devDependencies": {
+    "@checkpointvcs/daemon": "workspace:*",
+    "@types/node": "^25.3.3",
+    "@types/vscode": "^1.96.0",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.9.3"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "checkpoint.refresh",
+        "title": "Refresh",
+        "category": "Checkpoint",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "checkpoint.submit",
+        "title": "Submit Changes",
+        "category": "Checkpoint",
+        "icon": "$(check)"
+      },
+      {
+        "command": "checkpoint.pull",
+        "title": "Pull Latest",
+        "category": "Checkpoint",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "checkpoint.openDiff",
+        "title": "Open Changes",
+        "category": "Checkpoint",
+        "icon": "$(compare-changes)"
+      },
+      {
+        "command": "checkpoint.openFile",
+        "title": "Open File",
+        "category": "Checkpoint",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "checkpoint.revert",
+        "title": "Revert Changes",
+        "category": "Checkpoint",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "checkpoint.markForAdd",
+        "title": "Mark for Add",
+        "category": "Checkpoint",
+        "icon": "$(add)"
+      },
+      {
+        "command": "checkpoint.unmarkForAdd",
+        "title": "Unmark for Add",
+        "category": "Checkpoint",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "checkpoint.checkoutFile",
+        "title": "Check Out File",
+        "category": "Checkpoint",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "checkpoint.checkoutFileLocked",
+        "title": "Check Out File (Locked)",
+        "category": "Checkpoint",
+        "icon": "$(lock)"
+      },
+      {
+        "command": "checkpoint.undoCheckout",
+        "title": "Undo Checkout",
+        "category": "Checkpoint",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "checkpoint.resolveConflicts",
+        "title": "Mark Conflicts as Resolved",
+        "category": "Checkpoint",
+        "icon": "$(check)"
+      },
+      {
+        "command": "checkpoint.switchBranch",
+        "title": "Switch Branch",
+        "category": "Checkpoint",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "checkpoint.createBranch",
+        "title": "Create Branch",
+        "category": "Checkpoint"
+      },
+      {
+        "command": "checkpoint.showHistory",
+        "title": "Show Changelist History",
+        "category": "Checkpoint",
+        "icon": "$(history)"
+      },
+      {
+        "command": "checkpoint.fileHistory",
+        "title": "Show File History",
+        "category": "Checkpoint",
+        "icon": "$(history)"
+      },
+      {
+        "command": "checkpoint.login",
+        "title": "Sign In (Device Code)",
+        "category": "Checkpoint"
+      },
+      {
+        "command": "checkpoint.loginWithToken",
+        "title": "Sign In with API Token",
+        "category": "Checkpoint"
+      },
+      {
+        "command": "checkpoint.logout",
+        "title": "Sign Out",
+        "category": "Checkpoint"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "checkpoint.refresh",
+          "when": "checkpoint.enabled"
+        },
+        {
+          "command": "checkpoint.submit",
+          "when": "checkpoint.enabled"
+        },
+        {
+          "command": "checkpoint.pull",
+          "when": "checkpoint.enabled"
+        },
+        {
+          "command": "checkpoint.openDiff",
+          "when": "checkpoint.enabled && resourceScheme == file"
+        },
+        {
+          "command": "checkpoint.openFile",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.revert",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.markForAdd",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.unmarkForAdd",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.checkoutFile",
+          "when": "checkpoint.enabled && resourceScheme == file"
+        },
+        {
+          "command": "checkpoint.checkoutFileLocked",
+          "when": "checkpoint.enabled && resourceScheme == file"
+        },
+        {
+          "command": "checkpoint.undoCheckout",
+          "when": "checkpoint.enabled && resourceScheme == file"
+        },
+        {
+          "command": "checkpoint.resolveConflicts",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.switchBranch",
+          "when": "checkpoint.enabled"
+        },
+        {
+          "command": "checkpoint.createBranch",
+          "when": "checkpoint.enabled"
+        },
+        {
+          "command": "checkpoint.showHistory",
+          "when": "checkpoint.enabled"
+        },
+        {
+          "command": "checkpoint.fileHistory",
+          "when": "checkpoint.enabled && resourceScheme == file"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "checkpoint.submit",
+          "group": "navigation@1",
+          "when": "scmProvider == checkpoint"
+        },
+        {
+          "command": "checkpoint.pull",
+          "group": "navigation@2",
+          "when": "scmProvider == checkpoint"
+        },
+        {
+          "command": "checkpoint.refresh",
+          "group": "navigation@3",
+          "when": "scmProvider == checkpoint"
+        },
+        {
+          "command": "checkpoint.switchBranch",
+          "group": "1_checkpoint@1",
+          "when": "scmProvider == checkpoint"
+        },
+        {
+          "command": "checkpoint.createBranch",
+          "group": "1_checkpoint@2",
+          "when": "scmProvider == checkpoint"
+        },
+        {
+          "command": "checkpoint.showHistory",
+          "group": "1_checkpoint@3",
+          "when": "scmProvider == checkpoint"
+        }
+      ],
+      "scm/resourceGroup/context": [
+        {
+          "command": "checkpoint.resolveConflicts",
+          "group": "1_modification",
+          "when": "scmProvider == checkpoint && scmResourceGroup == conflicts"
+        },
+        {
+          "command": "checkpoint.revert",
+          "group": "1_modification",
+          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+        },
+        {
+          "command": "checkpoint.markForAdd",
+          "group": "1_modification",
+          "when": "scmProvider == checkpoint && scmResourceGroup == local"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "checkpoint.openDiff",
+          "group": "inline@1",
+          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+        },
+        {
+          "command": "checkpoint.openFile",
+          "group": "inline@2",
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts"
+        },
+        {
+          "command": "checkpoint.revert",
+          "group": "inline@3",
+          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+        },
+        {
+          "command": "checkpoint.markForAdd",
+          "group": "inline@1",
+          "when": "scmProvider == checkpoint && scmResourceGroup == local"
+        },
+        {
+          "command": "checkpoint.openDiff",
+          "group": "navigation@1",
+          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+        },
+        {
+          "command": "checkpoint.openFile",
+          "group": "navigation@2",
+          "when": "scmProvider == checkpoint"
+        },
+        {
+          "command": "checkpoint.revert",
+          "group": "1_modification@1",
+          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+        },
+        {
+          "command": "checkpoint.undoCheckout",
+          "group": "1_modification@2",
+          "when": "scmProvider == checkpoint && scmResourceGroup == changes && scmResourceState =~ /checkedout/"
+        },
+        {
+          "command": "checkpoint.unmarkForAdd",
+          "group": "1_modification@3",
+          "when": "scmProvider == checkpoint && scmResourceGroup == changes && scmResourceState == added"
+        },
+        {
+          "command": "checkpoint.markForAdd",
+          "group": "1_modification@1",
+          "when": "scmProvider == checkpoint && scmResourceGroup == local"
+        },
+        {
+          "command": "checkpoint.resolveConflicts",
+          "group": "1_modification@1",
+          "when": "scmProvider == checkpoint && scmResourceGroup == conflicts"
+        },
+        {
+          "command": "checkpoint.fileHistory",
+          "group": "2_history@1",
+          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Checkpoint",
+      "properties": {
+        "checkpoint.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh pending changes when files in the workspace change."
+        },
+        "checkpoint.syncStatusInterval": {
+          "type": "number",
+          "default": 60,
+          "minimum": 10,
+          "description": "How often (in seconds) to check whether the workspace is behind the remote branch head."
+        },
+        "checkpoint.daemonPort": {
+          "type": "number",
+          "default": 0,
+          "description": "Port of the local Checkpoint daemon. Leave as 0 to read the port from ~/.checkpoint/daemon.json (default 13010)."
+        }
+      }
+    },
+    "colors": [
+      {
+        "id": "checkpointDecoration.addedResourceForeground",
+        "description": "Color for files marked for add.",
+        "defaults": {
+          "light": "#587c0c",
+          "dark": "#81b88b",
+          "highContrast": "#a1e3ad",
+          "highContrastLight": "#374e06"
+        }
+      },
+      {
+        "id": "checkpointDecoration.modifiedResourceForeground",
+        "description": "Color for locally modified files.",
+        "defaults": {
+          "light": "#895503",
+          "dark": "#E2C08D",
+          "highContrast": "#E2C08D",
+          "highContrastLight": "#895503"
+        }
+      },
+      {
+        "id": "checkpointDecoration.deletedResourceForeground",
+        "description": "Color for locally deleted files.",
+        "defaults": {
+          "light": "#ad0707",
+          "dark": "#c74e39",
+          "highContrast": "#c74e39",
+          "highContrastLight": "#ad0707"
+        }
+      },
+      {
+        "id": "checkpointDecoration.untrackedResourceForeground",
+        "description": "Color for local files that are not controlled by Checkpoint.",
+        "defaults": {
+          "light": "#007100",
+          "dark": "#73C991",
+          "highContrast": "#73C991",
+          "highContrastLight": "#007100"
+        }
+      },
+      {
+        "id": "checkpointDecoration.conflictResourceForeground",
+        "description": "Color for conflicted files.",
+        "defaults": {
+          "light": "#ad0707",
+          "dark": "#e4676b",
+          "highContrast": "#c74e39",
+          "highContrastLight": "#ad0707"
+        }
+      },
+      {
+        "id": "checkpointDecoration.checkedOutResourceForeground",
+        "description": "Color for files that are checked out but unchanged.",
+        "defaults": {
+          "light": "#007acc",
+          "dark": "#75BEFF",
+          "highContrast": "#75BEFF",
+          "highContrastLight": "#007acc"
+        }
+      }
+    ]
+  }
+}

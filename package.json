@@ -9,14 +9,15 @@
     "src/core/server",
     "src/core/common",
     "src/clients/desktop",
+    "src/clients/vscode",
     "src/tests"
   ],
   "scripts": {
     "postinstall": "node scripts/check-workspace-deps.js && cd src/app && yarn db:set-provider && yarn db:types && yarn db:migrate:dev",
     "check-workspace-deps": "node scripts/check-workspace-deps.js",
     "check-workspace-deps:fix": "node scripts/check-workspace-deps.js --fix",
-    "lint": "eslint src/app src/core src/clients/desktop src/tests",
-    "lint:fix": "eslint src/app src/core src/clients/desktop src/tests --fix",
+    "lint": "eslint src/app src/core src/clients/desktop src/clients/vscode src/tests",
+    "lint:fix": "eslint src/app src/core src/clients/desktop src/clients/vscode src/tests --fix",
     "build": "cd src/app && yarn build:lib && cd ../core/common && yarn build && cd .. && yarn build && cd ../tests && yarn typecheck",
     "dev": "node dev.js",
     "dev:agent": "node dev-agent.js",
