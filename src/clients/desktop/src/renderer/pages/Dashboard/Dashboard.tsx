@@ -298,7 +298,7 @@ export default function Dashboard(): React.ReactElement {
                               boxShadow:
                                 "0.13rem 0.13rem 0.13rem rgba(0, 0, 0, 0.3)",
                             }}
-                            className="grid grid-cols-[1.75rem_auto_5.5rem] items-center"
+                            className="grid grid-cols-[1.75rem_minmax(0,1fr)_5.5rem] items-center"
                           >
                             <div className="col-span-1">
                               <FontAwesomeIcon
@@ -315,12 +315,15 @@ export default function Dashboard(): React.ReactElement {
                                 }}
                               />
                             </div>
-                            <div className="grid grid-flow-row auto-rows col-span-1">
-                              <div className="text-[0.9em]" title={ws.name}>
+                            <div className="grid grid-flow-row auto-rows col-span-1 min-w-0">
+                              <div
+                                className="text-[0.9em] overflow-hidden text-ellipsis whitespace-nowrap"
+                                title={ws.name}
+                              >
                                 {ws.name}
                               </div>
                               <div
-                                className="text-[0.6em]"
+                                className="text-[0.6em] overflow-hidden text-ellipsis whitespace-nowrap"
                                 title={ws.localPath}
                               >
                                 {ws.localPath}
