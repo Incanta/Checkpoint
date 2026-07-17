@@ -12,17 +12,32 @@ import * as os from "os";
 function loadNativeAddon(): LongtailAddonNative {
   const platform = os.platform();
   const arch = os.arch();
+  const addonName = "longtail_addon.node";
+
+  // When bundled into the daemon (esbuild) and run by the portable Node.js
+  // runtime, this file's __dirname points at the bundle, not the addon
+  // package. The native addon is shipped alongside the runtime instead, so we
+  // also search relative to process.execPath. See scripts/build-daemon.* for
+  // the installed layout (checkpoint-daemon.exe + lib/longtail_addon.node).
+  const execDir = path.dirname(process.execPath);
 
   const candidates = [
+    // Explicit override, if the host sets one.
+    process.env.CHECKPOINT_LONGTAIL_ADDON_PATH,
+    // Dev / npm-package layout (relative to this module).
     path.join(
       __dirname,
       "..",
       "prebuilds",
       `${platform}-${arch}`,
-      "longtail_addon.node",
+      addonName,
     ),
-    path.join(__dirname, "..", "build", "longtail_addon.node"),
-  ];
+    path.join(__dirname, "..", "build", addonName),
+    // Portable-daemon layout (relative to the runtime executable).
+    path.join(execDir, "lib", addonName),
+    path.join(execDir, addonName),
+    path.join(execDir, "prebuilds", `${platform}-${arch}`, addonName),
+  ].filter((c): c is string => Boolean(c));
 
   for (const candidate of candidates) {
     try {
