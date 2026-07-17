@@ -1,6 +1,11 @@
-import React from "react";
+import React, { useEffect } from "react";
 import ReactDOM from "react-dom/client";
-import { MemoryRouter as Router, Routes, Route } from "react-router";
+import {
+  MemoryRouter as Router,
+  Routes,
+  Route,
+  useNavigate,
+} from "react-router";
 import { Provider } from "jotai";
 import { store } from "../common/state/store";
 import "./index.css";
@@ -16,9 +21,22 @@ import UpdateNotification from "./components/UpdateNotification";
 import VersionNotification from "./components/VersionNotification";
 import ServerStatusBanner from "./components/ServerStatusBanner";
 
-window.electron.ipcRenderer.on("set-renderer-url", (data: { url: string }) => {
-  window.location.href = data.url;
-});
+// Bridges main-process navigation requests into react-router. The app uses a
+// MemoryRouter, so we must navigate via the router rather than mutating
+// window.location. In the packaged app the renderer is loaded over file://,
+// where setting window.location.href = "/workspace" resolves to
+// file:///C:/workspace, 404s, and blanks the window (white screen).
+function RendererUrlListener(): null {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    return window.electron.ipcRenderer.on("set-renderer-url", (data) => {
+      navigate(data.url);
+    });
+  }, [navigate]);
+
+  return null;
+}
 
 const urlParams = new URLSearchParams(window.location.search);
 const popoutType = urlParams.get("popout");
@@ -44,6 +62,7 @@ if (popoutType === "file-history") {
     <React.StrictMode>
       <Provider store={store}>
         <Router>
+          <RendererUrlListener />
           <Routes>
             <Route path="/" element={<Loading />} />
             <Route path="/dashboard" element={<Dashboard />} />
