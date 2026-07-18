@@ -1,6 +1,6 @@
 {
-  "server_version": "0.4.14",
-  "client_version": "0.4.14",
+  "server_version": "0.4.15",
+  "client_version": "0.4.15",
   "server_api": 2,
   "min_server_api": 2,
   "daemon_api": 2,
