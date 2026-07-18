@@ -208,6 +208,19 @@ export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   return next({ ctx });
 });
 
+export const licenseManagerAdminProcedure = adminProcedure.use(
+  async ({ ctx, next }) => {
+    if (!isLicenseManager()) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Admin is only available on the license manager instance",
+      });
+    }
+
+    return next({ ctx });
+  },
+);
+
 export type TRPCContextPublic = Awaited<ReturnType<typeof createTRPCContext>>;
 export type TRPCContextPrivate = TRPCContextPublic & {
   session: NonNullable<TRPCContextPublic["session"]>;

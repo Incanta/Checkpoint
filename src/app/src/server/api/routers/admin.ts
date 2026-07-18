@@ -1,11 +1,18 @@
 import { z } from "zod";
-import { createTRPCRouter, adminProcedure } from "~/server/api/trpc";
+import {
+  createTRPCRouter,
+  licenseManagerAdminProcedure,
+} from "~/server/api/trpc";
 import { snapshotStoragePeak } from "~/server/billing/storage-usage";
-import { addCredits, removeCredits, getCreditBalance } from "~/server/billing/credits";
+import {
+  addCredits,
+  removeCredits,
+  getCreditBalance,
+} from "~/server/billing/credits";
 import { Logger } from "~/server/logging";
 
 export const adminRouter = createTRPCRouter({
-  getStats: adminProcedure.query(async ({ ctx }) => {
+  getStats: licenseManagerAdminProcedure.query(async ({ ctx }) => {
     const [totalUsers, totalOrgs, totalRepos, tierCounts, statusCounts] =
       await Promise.all([
         ctx.db.user.count(),
@@ -38,7 +45,7 @@ export const adminRouter = createTRPCRouter({
     };
   }),
 
-  getDelinquentOrgs: adminProcedure.query(async ({ ctx }) => {
+  getDelinquentOrgs: licenseManagerAdminProcedure.query(async ({ ctx }) => {
     const orgs = await ctx.db.org.findMany({
       where: {
         OR: [
@@ -75,7 +82,7 @@ export const adminRouter = createTRPCRouter({
     }));
   }),
 
-  getOrgRepos: adminProcedure
+  getOrgRepos: licenseManagerAdminProcedure
     .input(z.object({ orgId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.db.repo.findMany({
@@ -91,7 +98,7 @@ export const adminRouter = createTRPCRouter({
       });
     }),
 
-  adminDeleteOrgRepos: adminProcedure
+  adminDeleteOrgRepos: licenseManagerAdminProcedure
     .input(z.object({ orgId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const org = await ctx.db.org.findUnique({
@@ -134,7 +141,7 @@ export const adminRouter = createTRPCRouter({
       return { deletedCount: result.count };
     }),
 
-  searchOrgs: adminProcedure
+  searchOrgs: licenseManagerAdminProcedure
     .input(z.object({ query: z.string().min(1).max(100) }))
     .query(async ({ ctx, input }) => {
       const orgs = await ctx.db.org.findMany({
@@ -156,14 +163,14 @@ export const adminRouter = createTRPCRouter({
       return orgs;
     }),
 
-  getOrgCreditBalance: adminProcedure
+  getOrgCreditBalance: licenseManagerAdminProcedure
     .input(z.object({ orgId: z.string() }))
     .query(async ({ ctx, input }) => {
       const balance = await getCreditBalance(input.orgId, ctx.db);
       return { creditBalanceCents: balance };
     }),
 
-  adjustCredit: adminProcedure
+  adjustCredit: licenseManagerAdminProcedure
     .input(
       z.object({
         orgId: z.string(),
@@ -181,9 +188,19 @@ export const adminRouter = createTRPCRouter({
       const fullDescription = `[Admin: ${ctx.session.user.name ?? ctx.session.user.id}] ${input.description}`;
 
       if (input.action === "add") {
-        await addCredits(input.orgId, input.amountCents, fullDescription, ctx.db);
+        await addCredits(
+          input.orgId,
+          input.amountCents,
+          fullDescription,
+          ctx.db,
+        );
       } else {
-        await removeCredits(input.orgId, input.amountCents, fullDescription, ctx.db);
+        await removeCredits(
+          input.orgId,
+          input.amountCents,
+          fullDescription,
+          ctx.db,
+        );
       }
 
       const balance = await getCreditBalance(input.orgId, ctx.db);
@@ -195,7 +212,7 @@ export const adminRouter = createTRPCRouter({
       return { creditBalanceCents: balance };
     }),
 
-  getDailyMetrics: adminProcedure
+  getDailyMetrics: licenseManagerAdminProcedure
     .input(
       z
         .object({
