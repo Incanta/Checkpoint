@@ -192,12 +192,6 @@ export const protectedProcedure = t.procedure
  * and that this instance is the license manager.
  */
 export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
-  if (!isLicenseManager()) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Admin is only available on the license manager instance",
-    });
-  }
   const user = await ctx.db.user.findUnique({
     where: { id: ctx.session.user.id },
     select: { checkpointAdmin: true },
