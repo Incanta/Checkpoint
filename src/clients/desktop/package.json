@@ -1,7 +1,7 @@
 {
   "name": "desktop",
   "private": true,
-  "version": "0.4.13",
+  "version": "0.4.14",
   "description": "Checkpoint desktop client",
   "type": "module",
   "main": "dist/main/main.js",
