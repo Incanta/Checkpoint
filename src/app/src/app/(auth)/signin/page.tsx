@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 import { useTheme } from "~/app/_components/theme-provider";
+import { api } from "~/trpc/react";
 
 interface ProviderInfo {
   id: string;
@@ -17,15 +18,6 @@ interface ProvidersResponse {
   registrationOpen: boolean;
   showNewsletter: boolean;
 }
-
-const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  discord: "Discord",
-  github: "GitHub",
-  gitlab: "GitLab",
-  auth0: "Auth0",
-  okta: "Okta",
-  slack: "Slack",
-};
 
 export default function SignInPage() {
   return (
@@ -49,6 +41,25 @@ function SignInPageContent() {
   const [authError, setAuthError] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const error = searchParams.get("error");
+  const inviteToken = searchParams.get("invite");
+
+  // When arriving from an invite link, validate the token and prefill/lock the
+  // signup form to the invited email.
+  const { data: invite } = api.invite.getByToken.useQuery(
+    { token: inviteToken ?? "" },
+    { enabled: !!inviteToken },
+  );
+  const inviteValid = invite?.valid === true;
+
+  useEffect(() => {
+    if (invite?.valid) {
+      setIsSignUp(true);
+      setEmail(invite.email);
+      if (invite.displayName) {
+        setName(invite.displayName);
+      }
+    }
+  }, [invite]);
 
   useEffect(() => {
     const loadProviders = async () => {
@@ -204,6 +215,23 @@ function SignInPageContent() {
         </div>
       )}
 
+      {inviteValid && (
+        <div className="rounded-md border border-[var(--color-accent)] bg-[var(--color-accent)]/10 p-3">
+          <p className="text-sm text-[var(--color-text-primary)]">
+            You&apos;ve been invited to Checkpoint. Create your account below.
+          </p>
+        </div>
+      )}
+
+      {inviteToken && invite && !invite.valid && (
+        <div className="rounded-md border border-[var(--color-danger)] bg-[var(--color-danger)]/10 p-3">
+          <p className="text-sm text-[var(--color-danger)]">
+            This invitation is no longer valid. It may have been revoked or
+            already used.
+          </p>
+        </div>
+      )}
+
       <div className="space-y-6">
         {/* Email & Password */}
         <form onSubmit={handleEmailSignIn} className="space-y-4">
@@ -239,7 +267,10 @@ function SignInPageContent() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="mt-1 block w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
+              readOnly={inviteValid}
+              className={`mt-1 block w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]${
+                inviteValid ? " cursor-not-allowed opacity-70" : ""
+              }`}
               placeholder="you@example.com"
             />
           </div>
@@ -283,7 +314,7 @@ function SignInPageContent() {
           </button>
           <p className="text-center text-sm text-[var(--color-text-secondary)]">
             {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
-            {registrationOpen || isSignUp ? (
+            {registrationOpen || isSignUp || inviteValid ? (
               <button
                 type="button"
                 onClick={() => {

@@ -3,6 +3,11 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { db } from "~/server/db";
 import { Logger } from "~/server/logging";
+import {
+  consumeInvite,
+  findValidInviteByEmail,
+  getInviteMode,
+} from "~/server/invites";
 
 /**
  * Session type used throughout the app for compatibility.
@@ -108,28 +113,63 @@ async function getAuth() {
     databaseHooks: {
       user: {
         create: {
-          before: async (_user) => {
+          before: async (user) => {
             const userCount = await db.user.count();
-            if (userCount > 0) {
-              const settings = await db.instanceSettings.findUnique({
-                where: { id: "default" },
-              });
-              if (!settings?.setupCompletedAt) {
-                return false;
-              }
+            // The very first account always registers (it bootstraps the
+            // instance and becomes the checkpointAdmin below).
+            if (userCount === 0) {
+              return undefined;
+            }
+
+            const settings = await db.instanceSettings.findUnique({
+              where: { id: "default" },
+            });
+            // Registration stays closed until initial setup is completed.
+            if (!settings?.setupCompletedAt) {
+              return false;
+            }
+
+            const mode = getInviteMode();
+            if (mode === "public") {
+              return undefined;
+            }
+
+            // "member"/"admin": registration requires a matching, valid invite.
+            const email = (user as { email?: string }).email;
+            const invite = email
+              ? await findValidInviteByEmail(db, email)
+              : null;
+            if (!invite) {
+              return false;
             }
             return undefined;
           },
           after: async (user) => {
+            const { id: userId, email } = user as {
+              id: string;
+              email?: string;
+            };
+
             const userCount = await db.user.count();
             if (userCount === 1) {
               await db.user.update({
-                where: { id: (user as { id: string }).id },
+                where: { id: userId },
                 data: { checkpointAdmin: true },
               });
               Logger.info(
-                `[Auth] First user registered — granted checkpointAdmin to ${(user as { id: string }).id}`,
+                `[Auth] First user registered, granted checkpointAdmin to ${userId}`,
               );
+            }
+
+            // Materialize any pending access grants from a matching invite.
+            if (email) {
+              const invite = await findValidInviteByEmail(db, email);
+              if (invite) {
+                await consumeInvite(db, invite.id, userId);
+                Logger.info(
+                  `[Auth] Consumed invite ${invite.id} for user ${userId}`,
+                );
+              }
             }
           },
         },

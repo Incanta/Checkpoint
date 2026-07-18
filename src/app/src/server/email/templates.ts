@@ -106,6 +106,28 @@ export function orgInviteEmail(
   return { subject, html, text };
 }
 
+export function inviteToSignupEmail(
+  inviterName: string,
+  signupUrl: string,
+  orgSummary?: string,
+): EmailTemplate {
+  const subject = "You've been invited to Checkpoint";
+  const accessLine = orgSummary
+    ? `<p>You'll be given access to: <strong>${esc(orgSummary)}</strong>.</p>`
+    : "";
+  const html = layout(subject, `
+    ${heading("You're Invited")}
+    <p><strong>${esc(inviterName)}</strong> has invited you to create an account on Checkpoint.</p>
+    ${accessLine}
+    ${button("Accept Invite & Sign Up", signupUrl)}
+    <p class="muted">If you weren't expecting this, you can safely ignore this email.</p>
+  `);
+  const text = `${inviterName} has invited you to create an account on Checkpoint.${
+    orgSummary ? `\n\nYou'll be given access to: ${orgSummary}.` : ""
+  }\n\nAccept & sign up here: ${signupUrl}\n`;
+  return { subject, html, text };
+}
+
 export function changelistSubmittedEmail(
   userName: string,
   repoName: string,
@@ -173,7 +195,7 @@ export function passwordResetEmail(
 }
 
 /**
- * Generic notification — use when you need a quick one-off email
+ * Generic notification: use when you need a quick one-off email
  * that doesn't warrant its own template function.
  */
 export function genericEmail(

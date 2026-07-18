@@ -60,6 +60,7 @@ function timeAgo(dateStr: string) {
 
 export function AppHeader() {
   const { data: user } = api.user.me.useQuery();
+  const { data: inviteCap } = api.invite.canInvite.useQuery();
   const { data: unreadCount } = api.notification.countUnread.useQuery(
     undefined,
     {
@@ -142,6 +143,12 @@ export function AppHeader() {
         >
           <DropdownItem href="/new/org">New organization</DropdownItem>
           <DropdownItem href="/new/repo">New repository</DropdownItem>
+          {inviteCap?.canInvite && (
+            <>
+              <DropdownDivider />
+              <DropdownItem href="/new/invite">Invite user</DropdownItem>
+            </>
+          )}
         </Dropdown>
 
         {/* Notifications bell */}

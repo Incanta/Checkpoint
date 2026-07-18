@@ -3,6 +3,7 @@ export type { EmailTemplate } from "./templates";
 export {
   welcomeEmail,
   orgInviteEmail,
+  inviteToSignupEmail,
   changelistSubmittedEmail,
   branchCreatedEmail,
   memberAddedEmail,

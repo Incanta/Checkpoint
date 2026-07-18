@@ -1,5 +1,13 @@
 secret: "betterauthsecretthatsatleast32characterslong"
 
+# Controls who may register a new account.
+#   "public" - anyone may register (the invite page is still available to
+#              members so they can pre-provision access).
+#   "member" - only the first user may self-register; everyone else needs an
+#              invitation, and any member may create invitations.
+#   "admin"  - like "member", but only a checkpointAdmin may create invitations.
+invite-only: "admin" # "public" | "member" | "admin"
+
 dev:
   # WARNING: Never enable this in production!
   # This allows automated tests to create API tokens without OAuth flow

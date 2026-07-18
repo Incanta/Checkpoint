@@ -55,6 +55,9 @@ model User {
 
   emailPreferences EmailPreferences?
 
+  invitesSent     Invite[] @relation("InviteCreator")
+  invitesAccepted Invite[] @relation("InviteAcceptor")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -72,6 +75,78 @@ model EmailPreferences {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ── Invitations ──────────────────────────────────────────────────
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
+// An invitation to register an account. Registration is gated on a matching
+// PENDING invite when auth.invite-only is "member" or "admin". The pending
+// org/repo access grants live on the child tables below and are materialized
+// into real OrgUser / RepoRole rows when the invited user registers.
+model Invite {
+  id String @id @default(cuid())
+
+  // Always stored lowercased so email matching is provider-agnostic.
+  email       String
+  displayName String?
+  username    String?
+
+  token  String       @unique @default(cuid())
+  status InviteStatus @default(PENDING)
+
+  invitedBy   User   @relation("InviteCreator", fields: [invitedById], references: [id])
+  invitedById String
+
+  acceptedBy   User?     @relation("InviteAcceptor", fields: [acceptedById], references: [id])
+  acceptedById String?
+  acceptedAt   DateTime?
+
+  expiresAt DateTime?
+
+  orgRoles  InviteOrgRole[]
+  repoRoles InviteRepoRole[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email, status])
+  @@index([invitedById])
+}
+
+// Pending org membership to create once the invited user registers.
+model InviteOrgRole {
+  id String @id @default(cuid())
+
+  invite   Invite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  inviteId String
+
+  org   Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId String
+
+  role OrgRole @default(MEMBER)
+
+  @@unique([inviteId, orgId])
+}
+
+// Pending repo-specific access to create once the invited user registers.
+model InviteRepoRole {
+  id String @id @default(cuid())
+
+  invite   Invite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  inviteId String
+
+  repo   Repo   @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  repoId String
+
+  access RepoAccess @default(WRITE)
+
+  @@unique([inviteId, repoId])
 }
 
 enum RepoAccess {
@@ -122,6 +197,7 @@ model Org {
   invoices                Invoice[]
   cardExpiryNotifications CardExpiryNotification[]
   storagePeaks            OrgStoragePeak[]
+  inviteRoles             InviteOrgRole[]
 }
 
 model OrgUser {
@@ -170,6 +246,7 @@ model Repo {
   shelves          Shelf[]
   issues           Issue[]
   issueLabels      IssueLabel[]
+  inviteRoles      InviteRepoRole[]
 
   @@unique([orgId, name])
 }
