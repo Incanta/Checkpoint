@@ -78,8 +78,8 @@ export default function DropdownButton(props: DropdownButtonProps) {
             top: "100%",
             left: 0,
             marginTop: "2px",
-            backgroundColor: "var(--color-panel)",
-            border: "1px solid var(--color-border-light)",
+            backgroundColor: "var(--color-bg-overlay)",
+            border: "1px solid var(--color-border-default)",
             borderRadius: "0.3rem",
             zIndex: 100,
             minWidth: "100%",
@@ -108,7 +108,7 @@ export default function DropdownButton(props: DropdownButtonProps) {
               }}
               onMouseEnter={(e) => {
                 (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                  "#404040";
+                  "var(--color-bg-surface)";
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLButtonElement).style.backgroundColor =

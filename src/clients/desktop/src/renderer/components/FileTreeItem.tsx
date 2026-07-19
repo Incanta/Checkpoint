@@ -12,9 +12,9 @@ export interface FileTreeNode {
 }
 
 export const changeTypeColors: Record<string, string> = {
-  ADD: "#4CAF50",
-  DELETE: "#F44336",
-  MODIFY: "#2196F3",
+  ADD: "var(--color-success)",
+  DELETE: "var(--color-danger)",
+  MODIFY: "var(--color-info)",
 };
 
 export const changeTypeLabels: Record<string, string> = {
@@ -52,7 +52,7 @@ const labelContainerStyle: React.CSSProperties = {
 
 const dirIconStyle: React.CSSProperties = {
   fontSize: "0.75rem",
-  color: "#9CA3AF",
+  color: "var(--color-text-muted)",
   width: "1rem",
   textAlign: "center",
 };
@@ -93,7 +93,7 @@ const FileTreeItem = React.memo(function FileTreeItem({
   const handleMouseEnter = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!isSelected) {
-        e.currentTarget.style.backgroundColor = "#374151";
+        e.currentTarget.style.backgroundColor = "var(--color-bg-surface)";
       }
     },
     [isSelected],
@@ -116,7 +116,9 @@ const FileTreeItem = React.memo(function FileTreeItem({
           ...itemBaseStyle,
           padding: "0.25rem 0.5rem",
           paddingLeft: `${depth + 0.5}rem`,
-          backgroundColor: isSelected ? "#3A3A3A" : "transparent",
+          backgroundColor: isSelected
+            ? "var(--color-accent-muted)"
+            : "transparent",
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}

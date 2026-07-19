@@ -285,7 +285,7 @@ export function useFileContextMenu() {
       disabled: !isConflicted,
       command: () => {
         if (resolveConfirmSuppressed?.suppressed) {
-          // Suppressed — resolve immediately
+          // Suppressed, resolve immediately
           ipc.sendMessage("file:resolve-conflict", {
             paths: [file.relativePath],
           });
@@ -590,15 +590,15 @@ export default function FileContextMenu({
           root: {
             style: {
               marginTop: "2rem",
-              backgroundColor: "var(--color-panel)",
-              border: "1px solid var(--color-border-light)",
-              borderRadius: "4px",
+              backgroundColor: "var(--color-bg-overlay)",
+              border: "1px solid var(--color-border-default)",
+              borderRadius: "0.5rem",
               minWidth: "200px",
             },
           },
           menu: {
             style: {
-              backgroundColor: "var(--color-panel)",
+              backgroundColor: "var(--color-bg-overlay)",
             },
           },
           menuitem: {
@@ -608,19 +608,19 @@ export default function FileContextMenu({
           },
           action: {
             style: {
-              color: "#e0e0e0",
+              color: "var(--color-text-primary)",
               padding: "0.5rem 1rem",
               fontSize: "0.875rem",
             },
           },
           separator: {
             style: {
-              borderColor: "var(--color-border-light)",
+              borderColor: "var(--color-border-muted)",
             },
           },
           submenuIcon: {
             style: {
-              color: "#e0e0e0",
+              color: "var(--color-text-primary)",
             },
           },
         }}
@@ -637,8 +637,8 @@ export default function FileContextMenu({
               <button
                 className="p-[0.5rem] px-[1rem] text-[0.9em] rounded"
                 style={{
-                  backgroundColor: "var(--color-app-bg)",
-                  border: "1px solid var(--color-border)",
+                  backgroundColor: "var(--color-bg-primary)",
+                  border: "1px solid var(--color-border-default)",
                   color: "var(--color-text-secondary)",
                 }}
                 onClick={() => setLockedWarningVisible(false)}
@@ -648,8 +648,8 @@ export default function FileContextMenu({
               <button
                 className="p-[0.5rem] px-[1rem] text-[0.9em] rounded"
                 style={{
-                  backgroundColor: "#646cff",
-                  border: "1px solid #646cff",
+                  backgroundColor: "var(--color-accent)",
+                  border: "1px solid var(--color-accent)",
                   color: "#fff",
                 }}
                 onClick={confirmLockedCheckout}
@@ -661,28 +661,28 @@ export default function FileContextMenu({
           pt={{
             root: {
               style: {
-                backgroundColor: "var(--color-panel)",
-                border: "1px solid var(--color-border)",
+                backgroundColor: "var(--color-bg-secondary)",
+                border: "1px solid var(--color-border-default)",
               },
             },
             header: {
               style: {
-                backgroundColor: "var(--color-panel)",
+                backgroundColor: "var(--color-bg-secondary)",
                 color: "var(--color-text-secondary)",
-                borderBottom: "1px solid var(--color-border)",
+                borderBottom: "1px solid var(--color-border-default)",
               },
             },
             content: {
               style: {
-                backgroundColor: "var(--color-panel)",
+                backgroundColor: "var(--color-bg-secondary)",
                 color: "var(--color-text-secondary)",
                 padding: "1.5rem",
               },
             },
             footer: {
               style: {
-                backgroundColor: "var(--color-panel)",
-                borderTop: "1px solid var(--color-border)",
+                backgroundColor: "var(--color-bg-secondary)",
+                borderTop: "1px solid var(--color-border-default)",
                 padding: "0.75rem",
               },
             },
@@ -694,7 +694,7 @@ export default function FileContextMenu({
           </p>
           <p
             className="mt-2 text-sm"
-            style={{ color: "var(--color-text-tertiary)" }}
+            style={{ color: "var(--color-text-muted)" }}
           >
             {lockedWarningPath}
           </p>
@@ -716,8 +716,8 @@ export default function FileContextMenu({
               <button
                 className="p-[0.5rem] px-[1rem] text-[0.9em] rounded"
                 style={{
-                  backgroundColor: "var(--color-app-bg)",
-                  border: "1px solid var(--color-border)",
+                  backgroundColor: "var(--color-bg-primary)",
+                  border: "1px solid var(--color-border-default)",
                   color: "var(--color-text-secondary)",
                 }}
                 onClick={() => setResolveDialogVisible(false)}
@@ -727,8 +727,8 @@ export default function FileContextMenu({
               <button
                 className="p-[0.5rem] px-[1rem] text-[0.9em] rounded"
                 style={{
-                  backgroundColor: "#646cff",
-                  border: "1px solid #646cff",
+                  backgroundColor: "var(--color-accent)",
+                  border: "1px solid var(--color-accent)",
                   color: "#fff",
                 }}
                 onClick={confirmResolve}
@@ -740,28 +740,28 @@ export default function FileContextMenu({
           pt={{
             root: {
               style: {
-                backgroundColor: "var(--color-panel)",
-                border: "1px solid var(--color-border)",
+                backgroundColor: "var(--color-bg-secondary)",
+                border: "1px solid var(--color-border-default)",
               },
             },
             header: {
               style: {
-                backgroundColor: "var(--color-panel)",
+                backgroundColor: "var(--color-bg-secondary)",
                 color: "var(--color-text-secondary)",
-                borderBottom: "1px solid var(--color-border)",
+                borderBottom: "1px solid var(--color-border-default)",
               },
             },
             content: {
               style: {
-                backgroundColor: "var(--color-panel)",
+                backgroundColor: "var(--color-bg-secondary)",
                 color: "var(--color-text-secondary)",
                 padding: "1.5rem",
               },
             },
             footer: {
               style: {
-                backgroundColor: "var(--color-panel)",
-                borderTop: "1px solid var(--color-border)",
+                backgroundColor: "var(--color-bg-secondary)",
+                borderTop: "1px solid var(--color-border-default)",
                 padding: "0.75rem",
               },
             },
@@ -774,7 +774,7 @@ export default function FileContextMenu({
           </p>
           <p
             className="mt-2 text-sm"
-            style={{ color: "var(--color-text-tertiary)" }}
+            style={{ color: "var(--color-text-muted)" }}
           >
             {resolveDialogPath}
           </p>
@@ -784,7 +784,7 @@ export default function FileContextMenu({
               id="resolve-dont-ask"
               checked={resolveDontAsk}
               onChange={(e) => setResolveDontAsk?.(e.target.checked)}
-              style={{ accentColor: "#646cff" }}
+              style={{ accentColor: "var(--color-accent)" }}
             />
             <label
               htmlFor="resolve-dont-ask"
@@ -803,8 +803,8 @@ export default function FileContextMenu({
                 }
                 className="ml-2 text-sm rounded px-2 py-1"
                 style={{
-                  backgroundColor: "var(--color-app-bg)",
-                  border: "1px solid var(--color-border)",
+                  backgroundColor: "var(--color-bg-primary)",
+                  border: "1px solid var(--color-border-default)",
                   color: "var(--color-text-secondary)",
                 }}
               >

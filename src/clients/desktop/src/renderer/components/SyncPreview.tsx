@@ -20,6 +20,7 @@ import {
   buildFileTree as buildFileTreeGeneric,
   collectDirPaths,
 } from "./build-file-tree";
+import { Button, EmptyState } from "./ui";
 
 /**
  * Aggregates file changes across all incoming changelists into a single
@@ -198,40 +199,15 @@ export default function SyncPreview() {
     }, [aggregatedFiles]);
 
   return (
-    <div className="grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4">
+    <div className="absolute inset-0 grid grid-rows-[2.5rem_1fr]">
       {/* Header bar */}
-      <div
-        className="row-span-1 flex items-center space-x-2"
-        style={{
-          backgroundColor: "var(--color-panel)",
-          borderColor: "var(--color-border)",
-          borderWidth: "0 0 1px 0",
-          borderStyle: "solid",
-          padding: "0.3rem",
-        }}
-      >
-        <button
+      <div className="row-span-1 flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={handleClose}
           title="Close sync preview"
-          style={{
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            padding: "0.3rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: "0.25rem",
-            color: "var(--color-text-secondary)",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-              "#404040";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-              "transparent";
-          }}
+          className="!p-1.5"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -246,10 +222,10 @@ export default function SyncPreview() {
           >
             <polyline points="15 18 9 12 15 6" />
           </svg>
-        </button>
-        <span>
-          <span style={{ fontWeight: "bold" }}>Incoming Changes</span>
-          <span style={{ color: "#9CA3AF" }}>
+        </Button>
+        <span className="text-sm text-[var(--color-text-primary)]">
+          <span className="font-semibold">Incoming Changes</span>
+          <span className="text-[var(--color-text-muted)]">
             {" "}
             &mdash; {syncPreview.syncStatus.changelistsBehind} changelist
             {syncPreview.syncStatus.changelistsBehind !== 1 ? "s" : ""} behind
@@ -274,50 +250,26 @@ export default function SyncPreview() {
           }}
         >
           <SplitterPanel className="flex flex-col" size={30}>
-            <div
-              className="h-full overflow-y-auto"
-              style={{ backgroundColor: "var(--color-surface)" }}
-            >
+            <div className="h-full overflow-y-auto bg-[var(--color-bg-secondary)]">
               {/* View mode toggle */}
-              <div
-                style={{
-                  display: "flex",
-                  borderBottom: "1px solid #374151",
-                }}
-              >
+              <div className="flex border-b border-[var(--color-border-default)]">
                 <button
                   onClick={() => setViewMode("files")}
-                  style={{
-                    flex: 1,
-                    padding: "0.4rem",
-                    fontSize: "0.75rem",
-                    border: "none",
-                    cursor: "pointer",
-                    backgroundColor:
-                      viewMode === "files" ? "#374151" : "transparent",
-                    color:
-                      viewMode === "files"
-                        ? "#fff"
-                        : "var(--color-text-secondary)",
-                  }}
+                  className={`flex-1 cursor-pointer py-1.5 text-xs transition-colors ${
+                    viewMode === "files"
+                      ? "bg-[var(--color-bg-surface)] text-[var(--color-text-primary)]"
+                      : "bg-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                  }`}
                 >
                   Files ({totalFiles})
                 </button>
                 <button
                   onClick={() => setViewMode("changelists")}
-                  style={{
-                    flex: 1,
-                    padding: "0.4rem",
-                    fontSize: "0.75rem",
-                    border: "none",
-                    cursor: "pointer",
-                    backgroundColor:
-                      viewMode === "changelists" ? "#374151" : "transparent",
-                    color:
-                      viewMode === "changelists"
-                        ? "#fff"
-                        : "var(--color-text-secondary)",
-                  }}
+                  className={`flex-1 cursor-pointer py-1.5 text-xs transition-colors ${
+                    viewMode === "changelists"
+                      ? "bg-[var(--color-bg-surface)] text-[var(--color-text-primary)]"
+                      : "bg-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                  }`}
                 >
                   Changelists ({syncPreview.changelists.length})
                 </button>
@@ -326,17 +278,7 @@ export default function SyncPreview() {
               {viewMode === "files" ? (
                 <>
                   {/* File summary */}
-                  <div
-                    style={{
-                      padding: "0.4rem 0.75rem",
-                      fontSize: "0.75rem",
-                      color: "#9CA3AF",
-                      borderBottom: "1px solid #374151",
-                      marginBottom: "0.25rem",
-                      display: "flex",
-                      gap: "0.75rem",
-                    }}
-                  >
+                  <div className="mb-1 flex gap-3 border-b border-[var(--color-border-muted)] px-3 py-1.5 text-xs text-[var(--color-text-muted)]">
                     <span>
                       {totalFiles} file{totalFiles !== 1 ? "s" : ""}
                     </span>
@@ -358,11 +300,9 @@ export default function SyncPreview() {
                   </div>
 
                   {totalFiles === 0 ? (
-                    <div className="p-4 text-gray-500 text-center">
-                      No incoming file changes
-                    </div>
+                    <EmptyState title="No incoming file changes" />
                   ) : (
-                    <div style={{ padding: "0.25rem 0" }}>
+                    <div className="py-1">
                       {treeNodes.map((node) => (
                         <FileTreeItem
                           key={node.path}
@@ -379,119 +319,80 @@ export default function SyncPreview() {
                 </>
               ) : (
                 /* Changelist list view */
-                <div style={{ padding: "0.25rem 0" }}>
+                <div className="py-1">
                   {syncPreview.changelists.map((cl) => (
                     <div
                       key={cl.changelistNumber}
-                      style={{
-                        padding: "0.5rem 0.75rem",
-                        borderBottom: "1px solid #374151",
-                      }}
+                      className="border-b border-[var(--color-border-muted)] px-3 py-2"
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginBottom: "0.25rem",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontWeight: "bold",
-                            fontSize: "0.85rem",
-                          }}
-                        >
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="text-sm font-semibold text-[var(--color-text-primary)]">
                           CL {cl.changelistNumber}
                         </span>
-                        <span
-                          style={{
-                            fontSize: "0.7rem",
-                            color: "#9CA3AF",
-                          }}
-                        >
+                        <span className="text-xs text-[var(--color-text-muted)]">
                           {cl.files.length} file
                           {cl.files.length !== 1 ? "s" : ""}
                         </span>
                       </div>
                       {cl.message && (
-                        <div
-                          style={{
-                            fontSize: "0.8rem",
-                            color: "#D1D5DB",
-                            marginBottom: "0.2rem",
-                          }}
-                        >
+                        <div className="mb-1 text-sm text-[var(--color-text-secondary)]">
                           {cl.message}
                         </div>
                       )}
-                      <div
-                        style={{
-                          fontSize: "0.7rem",
-                          color: "#6B7280",
-                        }}
-                      >
+                      <div className="text-xs text-[var(--color-text-muted)]">
                         {cl.user} &mdash;{" "}
                         {new Date(cl.date).toLocaleDateString()}
                       </div>
                       {/* File list within changelist */}
-                      <div style={{ marginTop: "0.3rem" }}>
-                        {cl.files.map((file) => (
-                          <div
-                            key={file.path}
-                            onClick={() => handleSelectFile(file.path)}
-                            style={{
-                              padding: "0.15rem 0.5rem",
-                              fontSize: "0.8rem",
-                              cursor: "pointer",
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              backgroundColor:
-                                syncPreview.selectedFilePath === file.path
-                                  ? "#3A3A3A"
+                      <div className="mt-1.5">
+                        {cl.files.map((file) => {
+                          const isSelected =
+                            syncPreview.selectedFilePath === file.path;
+                          return (
+                            <div
+                              key={file.path}
+                              onClick={() => handleSelectFile(file.path)}
+                              className="flex cursor-pointer items-center justify-between rounded-sm px-2 py-0.5 text-sm text-[var(--color-text-secondary)]"
+                              style={{
+                                backgroundColor: isSelected
+                                  ? "var(--color-accent-muted)"
                                   : "transparent",
-                              borderRadius: "0.15rem",
-                            }}
-                            onMouseEnter={(e) => {
-                              if (syncPreview.selectedFilePath !== file.path) {
-                                (
-                                  e.currentTarget as HTMLDivElement
-                                ).style.backgroundColor = "#374151";
-                              }
-                            }}
-                            onMouseLeave={(e) => {
-                              if (syncPreview.selectedFilePath !== file.path) {
-                                (
-                                  e.currentTarget as HTMLDivElement
-                                ).style.backgroundColor = "transparent";
-                              }
-                            }}
-                          >
-                            <span
-                              style={{
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!isSelected) {
+                                  (
+                                    e.currentTarget as HTMLDivElement
+                                  ).style.backgroundColor =
+                                    "var(--color-bg-overlay)";
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!isSelected) {
+                                  (
+                                    e.currentTarget as HTMLDivElement
+                                  ).style.backgroundColor = "transparent";
+                                }
                               }}
                             >
-                              {file.path}
-                            </span>
-                            <span
-                              style={{
-                                fontSize: "0.65rem",
-                                fontWeight: "bold",
-                                color:
-                                  changeTypeColors[file.changeType] ||
-                                  "var(--color-text-secondary)",
-                                marginLeft: "0.5rem",
-                                flexShrink: 0,
-                              }}
-                            >
-                              {changeTypeLabels[file.changeType]}
-                            </span>
-                          </div>
-                        ))}
+                              <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                                {file.path}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: "0.65rem",
+                                  fontWeight: "bold",
+                                  color:
+                                    changeTypeColors[file.changeType] ||
+                                    "var(--color-text-secondary)",
+                                  marginLeft: "0.5rem",
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {changeTypeLabels[file.changeType]}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
@@ -501,46 +402,17 @@ export default function SyncPreview() {
           </SplitterPanel>
           <SplitterPanel className="flex flex-col" size={70}>
             {selectedFile && syncPreview.diffContent ? (
-              <div
-                style={{
-                  height: "100%",
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
-                <div
-                  style={{
-                    backgroundColor: "#252525",
-                    padding: "0.5rem 0.75rem",
-                    borderBottom: "1px solid #374151",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "0.875rem",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
+              <div className="flex h-full flex-col">
+                <div className="flex items-center justify-between border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3 py-2">
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap text-sm text-[var(--color-text-primary)]">
                     {selectedFile.path}
                   </span>
                   <span
+                    className="flex-shrink-0 rounded px-2 py-0.5 text-xs font-bold text-white"
                     style={{
-                      fontSize: "0.7rem",
-                      fontWeight: "bold",
-                      paddingLeft: "0.5rem",
-                      paddingRight: "0.5rem",
-                      paddingTop: "0.125rem",
-                      paddingBottom: "0.125rem",
-                      borderRadius: "0.25rem",
                       backgroundColor:
                         changeTypeColors[selectedFile.changeType] ||
-                        "var(--color-border-lighter)",
-                      flexShrink: 0,
+                        "var(--color-bg-surface)",
                     }}
                   >
                     {selectedFile.changeType}
@@ -549,16 +421,8 @@ export default function SyncPreview() {
                 <div style={{ flex: 1 }} ref={monacoEl}></div>
               </div>
             ) : (
-              <div
-                style={{
-                  height: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#6B7280",
-                }}
-              >
-                Select a file to view the incoming diff
+              <div className="flex h-full items-center justify-center">
+                <EmptyState title="Select a file to view the incoming diff" />
               </div>
             )}
           </SplitterPanel>

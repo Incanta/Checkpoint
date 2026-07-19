@@ -1,10 +1,12 @@
 // Disable no-unused-vars, broken for spread args
 /* eslint no-unused-vars: off */
 import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
-import { Titlebar, TitlebarColor } from "@incanta/custom-electron-titlebar";
 import { Channels, InvokeChannels } from "./channels";
 
 const electronHandler = {
+  // Exposed so the renderer can adapt the custom titlebar to the OS (e.g.
+  // leave room for the macOS traffic lights on the left).
+  platform: process.platform,
   ipcRenderer: {
     sendMessage<T extends keyof Channels>(channel: T, data: Channels[T]): void {
       ipcRenderer.send(channel, data);
@@ -42,13 +44,3 @@ const electronHandler = {
 contextBridge.exposeInMainWorld("electron", electronHandler);
 
 export type ElectronHandler = typeof electronHandler;
-
-window.addEventListener("DOMContentLoaded", () => {
-  // Title bar implementation
-  new Titlebar({
-    backgroundColor: TitlebarColor.fromHex("#2f243d"),
-    titleHorizontalAlignment: "center",
-    minWidth: 940,
-    minHeight: 530,
-  } as any);
-});

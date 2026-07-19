@@ -1,16 +1,143 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/*
+ * Tailwind v4, CSS-first. We intentionally import the theme + utilities layers
+ * but NOT preflight: the app predates Tailwind and relies on its own base
+ * styling + PrimeReact overrides, so enabling preflight's global resets would
+ * regress screens wholesale. This mirrors the old `preflight: false` config.
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/*
+ * Design tokens. The palette is shared with the webapp (src/app): a neutral
+ * GitHub-Primer canvas with a purple brand accent. Raw values live on
+ * :root / [data-theme] and swap by theme; @theme re-exposes them to Tailwind
+ * (bg-bg-primary, text-text-secondary, ...) and emits them as real CSS vars
+ * (--color-*) so existing `var(--color-*)` references keep resolving.
+ */
+@theme {
+  --font-sans: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji";
+
+  /* Surfaces / borders / text (values come from :root / [data-theme]) */
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-overlay: var(--bg-overlay);
+  --color-border-default: var(--border-default);
+  --color-border-muted: var(--border-muted);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+
+  /* Brand accent + semantic status */
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-muted: var(--accent-muted);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-warning: var(--warning);
+
+  /* Per-feature accents (sidebar tabs, file/branch iconography) */
+  --color-files: var(--files);
+  --color-pending: var(--pending);
+  --color-history: var(--history);
+  --color-branches: var(--branches);
+  --color-labels: var(--labels);
+}
+
+/* ──────────────── Dark theme (default) ──────────────── */
+:root,
+[data-theme="dark"] {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-surface: #1c2128;
+  --bg-overlay: #2d333b;
+  --border-default: #30363d;
+  --border-muted: #21262d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #656d76;
+  --accent: #9b5de5; /* purple derived from #6D00F7 */
+  --accent-hover: #6d00f7; /* logo purple */
+  --accent-muted: #2d1a54;
+  --success: #3fb950;
+  --danger: #f85149;
+  --info: #58a6ff;
+  --warning: #d29922;
+
+  --files: #ffca3b;
+  --pending: #f85149;
+  --history: #58a6ff;
+  --branches: #3fb950;
+  --labels: #bc8cff;
+
+  color-scheme: dark;
+}
+
+/* ──────────────── Light theme ──────────────── */
+[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-surface: #f0f2f5;
+  --bg-overlay: #e4e7eb;
+  --border-default: #d0d7de;
+  --border-muted: #e4e7eb;
+  --text-primary: #1f2328;
+  --text-secondary: #59636e;
+  --text-muted: #8b949e;
+  --accent: #6d00f7; /* logo purple */
+  --accent-hover: #5800cc;
+  --accent-muted: #ede0fd;
+  --success: #1a7f37;
+  --danger: #cf222e;
+  --info: #0969da;
+  --warning: #9a6700;
+
+  --files: #b45309;
+  --pending: #cf222e;
+  --history: #0969da;
+  --branches: #1a7f37;
+  --labels: #8250df;
+
+  color-scheme: light;
+}
+
+/*
+ * Legacy token aliases. These names are used across existing components; we
+ * remap them onto the shared palette so every screen adopts the new look
+ * immediately, before it is individually refined. Prefer the semantic tokens
+ * above in new/updated code.
+ */
+:root {
+  --color-app-bg: var(--bg-primary);
+  --color-panel: var(--bg-secondary);
+  --color-panel-strong: var(--bg-surface);
+  --color-surface: var(--bg-primary);
+  --color-border: var(--border-default);
+  --color-border-light: var(--border-muted);
+  --color-border-lighter: var(--text-muted);
+}
+
+:root {
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  font-weight: 400;
+
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 
 @keyframes cp-spin {
   to {
     transform: rotate(360deg);
   }
-}
-
-/* Hide the centered window title in the custom titlebar. */
-.cet-title {
-  display: none !important;
 }
 
 #root {
@@ -19,120 +146,110 @@
   overflow: hidden;
 }
 
-#root > div {
+/*
+ * Only the app container (the first child) should fill #root. The routed
+ * screen renders first; fixed-position overlays (notification banners) render
+ * as later siblings and must NOT be stretched to the full viewport, or this
+ * high-specificity rule would override their own sizing.
+ */
+#root > div:first-child {
   width: 100% !important;
   height: 100% !important;
 }
 
-:root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+/*
+ * Element defaults live in the `base` layer so Tailwind utilities (in the
+ * later `utilities` layer) win. The ported UI primitives rely on this: their
+ * utility classes must override the bare-element styling below.
+ */
+@layer base {
+  a {
+    font-weight: 500;
+    color: var(--accent);
+    text-decoration: inherit;
+  }
+  a:hover {
+    color: var(--accent-hover);
+  }
 
-  color-scheme: dark;
+  body {
+    margin: 0;
+    display: flex;
+    place-items: center;
+    width: 100vw;
+    height: 100vh;
+  }
 
-  --color-app-bg: #272727;
-  --color-panel: #2c2c2c;
-  --color-panel-strong: #383838;
-  --color-surface: #1e1e1e;
-  --color-border: #1a1a1a;
-  --color-border-light: #444444;
-  --color-border-lighter: #888888;
-  --color-text-primary: #e3e3e3;
-  --color-text-secondary: #dddddd;
-  --color-files: #ffca3b;
-  --color-pending: #d43935;
-  --color-history: #3dc3f5;
-  --color-branches: #21bd43;
-  --color-labels: #8b21bd;
-
-  --color-app-bg: #252526;
-  --color-panel: #333333;
-  --color-panel-strong: #2f243d;
-  --color-surface: #242424;
-  --color-border: #1b1b1b;
-  --color-border-light: #444444;
-  --color-border-lighter: #888888;
-  --color-text-primary: #e3e3e3;
-  --color-text-secondary: #dddddd;
-  --color-files: #ffca3b;
-  --color-pending: #d43935;
-  --color-history: #3dc3f5;
-  --color-branches: #21bd43;
-  --color-labels: #8b21bd;
-
-  color: var(--color-text-primary);
-  background-color: var(--color-app-bg);
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  width: 100vw;
-  height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 0.3rem;
-  border: 1px solid var(--color-border);
-  padding: 0.4rem 0.8rem;
-  font-size: 0.85em;
-  font-family: inherit;
-  background-color: #404040;
-  color: var(--color-text-secondary);
-}
-button:hover {
-  background-color: #555555;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  /*
+   * Neutral default for bare <button> elements not yet migrated to the Button
+   * primitive. New UI should use the Button component instead.
+   */
+  button {
+    border-radius: 0.375rem;
+    border: 1px solid var(--border-default);
+    padding: 0.375rem 0.75rem;
+    font-size: 0.85em;
+    font-family: inherit;
+    background-color: var(--bg-overlay);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease;
+  }
+  button:hover {
+    background-color: var(--border-default);
+  }
+  button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
 }
 
 button.p-treetable-toggler {
   border: none;
+  background: transparent;
+  padding: 0;
 }
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
-}
-
-button.treetable-toggler:hover {
+button.p-treetable-toggler:hover {
+  background: transparent;
   border-color: transparent;
 }
-button.treetable-toggler:focus,
-button.treetable-toggler:focus-visible {
+button.p-treetable-toggler:focus,
+button.p-treetable-toggler:focus-visible {
   outline: 0;
 }
+
+/*
+ * Custom window titlebar drag regions. The app draws its own titlebar (see
+ * TitleBar.tsx) over the native window-controls overlay; `.app-drag` makes a
+ * region move the window, `.app-no-drag` restores normal interaction for
+ * controls inside it.
+ */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Scrollbars, themed to tokens (mirrors webapp) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ──────────────── PrimeReact overrides (no base theme is imported) ──────────────── */
 
 .p-treetable-toggler + .p-checkbox {
   display: inline-block;
@@ -162,24 +279,27 @@ button.treetable-toggler:focus-visible {
   z-index: 1;
   outline: 0 none;
   cursor: pointer;
-
-  border: 2px solid #424b57;
-  border-radius: 6px;
 }
 
 .p-checkbox-box {
-  border: 1px solid #101013;
-  background: #2e2e2e;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
   width: 1.2rem;
   height: 1.2rem;
-  color: rgba(255, 255, 255, 0.87);
+  color: #ffffff;
   border-radius: 0.25rem;
   transition:
-    background-color 0.2s,
-    color 0.2s,
-    border-color 0.2s,
-    box-shadow 0.2s;
+    background-color 0.15s,
+    color 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
   outline-color: transparent;
+}
+
+.p-checkbox.p-highlight .p-checkbox-box,
+.p-checkbox-box.p-highlight {
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .p-checkbox-box > .p-icon {
@@ -190,77 +310,92 @@ button.treetable-toggler:focus-visible {
   left: 0.18rem;
 }
 
+.p-splitter {
+  background: transparent;
+  border: none;
+}
+
 .p-splitter-gutter {
   transition: background-color 0.2s;
+  background-color: var(--bg-secondary);
 }
 
 .pending-changes-splitter-gutter:nth-last-child(4) {
-  border-bottom: 1px solid black;
+  border-bottom: 1px solid var(--border-default);
   height: calc(4px + 0.4rem) !important;
   padding: 0.15rem 0 !important;
-  background-color: var(--color-panel);
+  background-color: var(--bg-secondary);
 }
 
 .pending-changes-splitter-gutter:nth-last-child(2) {
-  border-top: 1px solid black;
-  border-bottom: 1px solid black;
+  border-top: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-default);
   height: calc(4px + 0.4rem) !important;
   padding: 0.15rem 0 !important;
-  background-color: var(--color-panel);
+  background-color: var(--bg-secondary);
 }
 
 .file-history-splitter-gutter:nth-last-child(4) {
-  border-right: 1px solid black;
+  border-right: 1px solid var(--border-default);
   width: calc(4px + 0.4rem) !important;
   padding: 0 0.15rem !important;
-  background-color: var(--color-panel);
+  background-color: var(--bg-secondary);
 }
 
 .file-history-splitter-gutter:nth-last-child(2) {
-  border-left: 1px solid black;
-  border-right: 1px solid black;
+  border-left: 1px solid var(--border-default);
+  border-right: 1px solid var(--border-default);
   width: calc(4px + 0.4rem) !important;
   padding: 0 0.15rem !important;
-  background-color: var(--color-panel);
+  background-color: var(--bg-secondary);
 }
 
 .p-splitter-gutter-handle {
-  background-color: #ffffff33;
+  background-color: var(--border-lighter, var(--text-muted));
   border-radius: 0.5rem;
 }
 
 .p-splitter-gutter:hover {
-  background-color: #646cff;
+  background-color: var(--accent);
   transition: background-color 0.2s 0.5s;
 }
 
 .p-splitter-gutter-resizing {
-  background-color: #646cff;
+  background-color: var(--accent);
 }
 
 .workspace-menu-item:hover {
-  background-color: #ffffff22 !important;
+  background-color: var(--bg-overlay) !important;
 }
 
 .p-dropdown-panel {
-  background-color: #00000088;
-  backdrop-filter: blur(10px);
-  padding: 0.5rem;
-  border-radius: 0.3rem;
+  background-color: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  padding: 0.375rem;
+  border-radius: 0.5rem;
+  box-shadow:
+    0 10px 15px -3px rgb(0 0 0 / 0.3),
+    0 4px 6px -4px rgb(0 0 0 / 0.3);
 }
 
 .p-dropdown-items li {
   padding: 0.5rem;
-  border-radius: 0.3rem;
+  border-radius: 0.375rem;
+  color: var(--text-primary);
 }
 
 .p-dropdown-items li:hover {
-  background-color: #ffffff22 !important;
+  background-color: var(--bg-surface) !important;
+}
+
+.p-dropdown-items li.p-highlight {
+  background-color: var(--accent-muted) !important;
+  color: var(--text-primary);
 }
 
 .p-dialog-mask {
-  background-color: rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(0.05rem);
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(1px);
 }
 
 /* TreeTable sort icon customization */
@@ -305,31 +440,32 @@ button.treetable-toggler:focus-visible {
 }
 
 .p-treetable .p-treetable-tbody > tr:hover:not(.category-row:hover) {
-  background-color: #3a3a3a !important;
+  background-color: var(--bg-surface) !important;
 }
 
 .p-treetable .p-treetable-tbody > tr.p-highlight,
 .p-treetable .p-treetable-tbody > tr.p-row-selected {
-  background-color: #3b5998 !important;
+  background-color: var(--accent-muted) !important;
+  color: var(--text-primary);
 }
 
 .p-treetable .p-treetable-tbody > tr.p-highlight:hover,
 .p-treetable .p-treetable-tbody > tr.p-row-selected:hover {
-  background-color: #4a68a8 !important;
+  background-color: color-mix(in srgb, var(--accent-muted), var(--accent) 25%) !important;
 }
 
 /* Row highlighted for diff preview (separate from checkbox selection) */
 .p-treetable .p-treetable-tbody > tr.row-highlighted {
-  background-color: #4a4a4a !important;
+  background-color: var(--bg-overlay) !important;
 }
 
 .p-treetable
   .p-treetable-tbody
   > tr.row-highlighted:hover:not(.category-row:hover) {
-  background-color: #5a5a5a !important;
+  background-color: color-mix(in srgb, var(--bg-overlay), white 8%) !important;
 }
 
-/* Remove blue selection highlight for pending changes component */
+/* Remove selection highlight for pending changes (checkboxes convey selection) */
 .pending-changes-tree.p-treetable .p-treetable-tbody > tr.p-highlight,
 .pending-changes-tree.p-treetable .p-treetable-tbody > tr.p-row-selected {
   background-color: transparent !important;
@@ -341,7 +477,7 @@ button.treetable-toggler:focus-visible {
 .pending-changes-tree.p-treetable
   .p-treetable-tbody
   > tr.p-row-selected:hover:not(.category-row:hover) {
-  background-color: #3a3a3a !important;
+  background-color: var(--bg-surface) !important;
 }
 
 /* Row highlighted for diff preview takes priority over selection */
@@ -352,7 +488,7 @@ button.treetable-toggler:focus-visible {
   .p-treetable-tbody
   > tr.row-highlighted.p-row-selected,
 .pending-changes-tree.p-treetable .p-treetable-tbody > tr.row-highlighted {
-  background-color: #2b3e72 !important;
+  background-color: var(--accent-muted) !important;
 }
 
 .pending-changes-tree.p-treetable
@@ -364,23 +500,43 @@ button.treetable-toggler:focus-visible {
 .pending-changes-tree.p-treetable
   .p-treetable-tbody
   > tr.row-highlighted:hover {
-  background-color: #405caa !important;
+  background-color: color-mix(in srgb, var(--accent-muted), var(--accent) 25%) !important;
 }
 
 .p-contextmenu {
   z-index: 100000;
+  background-color: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: 0.5rem;
+  padding: 0.375rem;
+  box-shadow:
+    0 10px 15px -3px rgb(0 0 0 / 0.3),
+    0 4px 6px -4px rgb(0 0 0 / 0.3);
 }
 
-/* Context menu separator styling (PrimeReact has no base CSS imported) */
+.p-contextmenu .p-menuitem-content {
+  border-radius: 0.375rem;
+}
+
+.p-contextmenu .p-menuitem-link {
+  padding: 0.4rem 0.6rem;
+  color: var(--text-primary);
+}
+
+.p-contextmenu .p-menuitem:not(.p-disabled) > .p-menuitem-content:hover {
+  background-color: var(--bg-surface);
+}
+
+/* Context menu separator */
 .p-menuitem-separator {
   border: none;
-  border-top: 1px solid #444;
+  border-top: 1px solid var(--border-default);
   margin: 0.25rem 0;
   padding: 0;
   list-style: none;
 }
 
-/* Context menu disabled item styling */
+/* Context menu disabled item */
 .p-menuitem.p-disabled > .p-menuitem-content {
   opacity: 0.45;
   pointer-events: none;
@@ -389,5 +545,5 @@ button.treetable-toggler:focus-visible {
 
 .p-menuitem-link.p-disabled {
   cursor: default;
-  color: #888888 !important;
+  color: var(--text-muted) !important;
 }

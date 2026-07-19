@@ -37,6 +37,9 @@ import FileContextMenu, {
 } from "./FileContextMenu";
 import prettyBytes from "pretty-bytes";
 import { FileIcon } from "./FileIcon";
+import { EmptyState } from "./ui";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faCircleCheck } from "@fortawesome/free-solid-svg-icons/faCircleCheck";
 
 // ─── Hoisted constants (never recreated) ────────────────────────────
 const itemBodyStyle: React.CSSProperties = {
@@ -536,14 +539,15 @@ export default function WorkspacePendingChanges() {
     () => ({
       headerCell: {
         style: {
-          borderColor: "var(--color-border)",
+          borderColor: "var(--color-border-default)",
           borderWidth: "0 1px 1px 0",
           borderStyle: "solid",
           paddingLeft: "0.5rem",
           fontSize: "0.75em",
           position: "sticky",
           top: 0,
-          backgroundColor: "var(--color-app-bg)",
+          // Solid surface token so scrolling rows pass under the sticky header.
+          backgroundColor: "var(--color-bg-secondary)",
           zIndex: 1,
         },
       },
@@ -571,7 +575,7 @@ export default function WorkspacePendingChanges() {
       resizeHelper: {
         style: {
           width: "0.1rem",
-          backgroundColor: "var(--color-border-lighter)",
+          backgroundColor: "var(--color-border-default)",
         },
       },
       tbody: {
@@ -649,19 +653,10 @@ export default function WorkspacePendingChanges() {
   );
 
   return (
-    <div className="grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4">
-      <div
-        className="row-span-1 space-x-[0.3rem]"
-        style={{
-          backgroundColor: "var(--color-panel)",
-          borderColor: "var(--color-border)",
-          borderWidth: "0 0 1px 0",
-          borderStyle: "solid",
-          padding: "0.3rem",
-        }}
-      >
+    <div className="grid h-full grid-rows-[2.5rem_1fr]">
+      <div className="row-span-1 flex items-center gap-2 bg-[var(--color-bg-secondary)] px-3">
         <DropdownButton
-          className="p-[0.3rem] text-[0.8em]"
+          className="px-3 py-1 text-xs"
           label="Refresh"
           disabled={isSubmitting}
           onClick={() => {
@@ -677,7 +672,7 @@ export default function WorkspacePendingChanges() {
           ]}
         />
         <Button
-          className="p-[0.3rem] text-[0.8em]"
+          className="px-3 py-1 text-xs"
           label={isSubmitting ? "Submitting..." : "Submit"}
           disabled={isSubmitting || !hasSelectedFiles}
           onClick={() => {
@@ -728,7 +723,7 @@ export default function WorkspacePendingChanges() {
           }}
         />
         <Button
-          className="p-[0.3rem] text-[0.8em]"
+          className="px-3 py-1 text-xs"
           label="Undo"
           disabled={isSubmitting}
         />
@@ -750,22 +745,16 @@ export default function WorkspacePendingChanges() {
             className="flex"
             size={10}
             style={{
-              backgroundColor: "var(--color-panel)",
+              backgroundColor: "var(--color-bg-secondary)",
             }}
           >
             <textarea
-              className="w-full m-[0.5rem] p-[0.5rem]"
+              className="m-2 w-full resize-none rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-text-secondary)] focus:border-[var(--color-accent)] focus:outline-none"
               placeholder="Add a message to submit..."
               disabled={isSubmitting}
               style={{
                 textAlign: "start",
-                resize: "none",
-                backgroundColor: "var(--color-app-bg)",
-                borderRadius: "0.3rem",
-                border: "1px solid var(--color-border)",
-                color: "var(--color-text-secondary)",
                 marginBottom: "0",
-                outlineColor: "#646cff",
                 zIndex: 1,
                 opacity: isSubmitting ? 0.5 : 1,
               }}
@@ -778,21 +767,31 @@ export default function WorkspacePendingChanges() {
             size={60}
             style={{ overflow: "hidden" }}
           >
-            <PendingChangesTree
-              treeTableRef={treeTableRef}
-              nodes={nodes}
-              selectedNodeKeys={selectedNodeKeys}
-              onSelectionChange={handleSelectionChange}
-              expandedKeys={expandedKeys}
-              onToggle={handleToggle}
-              onExpand={handleExpand}
-              highlightedRowKey={highlightedRowKey}
-              onRowClick={handleRowClick}
-              onContextMenu={handleContextMenu}
-              treeTablePt={treeTablePt}
-              columnPt={columnPt}
-              itemBodyTemplate={itemBodyTemplate}
-            />
+            {nodes.length === 0 ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <EmptyState
+                  icon={<FontAwesomeIcon icon={faCircleCheck} size="2x" />}
+                  title="No Pending Changes"
+                  description="Your workspace is up to date. Edited files will show up here."
+                />
+              </div>
+            ) : (
+              <PendingChangesTree
+                treeTableRef={treeTableRef}
+                nodes={nodes}
+                selectedNodeKeys={selectedNodeKeys}
+                onSelectionChange={handleSelectionChange}
+                expandedKeys={expandedKeys}
+                onToggle={handleToggle}
+                onExpand={handleExpand}
+                highlightedRowKey={highlightedRowKey}
+                onRowClick={handleRowClick}
+                onContextMenu={handleContextMenu}
+                treeTablePt={treeTablePt}
+                columnPt={columnPt}
+                itemBodyTemplate={itemBodyTemplate}
+              />
+            )}
           </SplitterPanel>
           <SplitterPanel
             className="flex"
@@ -805,10 +804,10 @@ export default function WorkspacePendingChanges() {
             {!workspaceDiff && (
               <div
                 className="h-full w-full"
-                style={{ backgroundColor: "var(--color-panel)" }}
+                style={{ backgroundColor: "var(--color-bg-secondary)" }}
               >
                 <div
-                  className="m-auto text-gray-500"
+                  className="m-auto text-sm text-[var(--color-text-muted)]"
                   style={{ textAlign: "center" }}
                 >
                   Select a file to view the diff
@@ -828,34 +827,37 @@ export default function WorkspacePendingChanges() {
           <Button
             label="OK"
             onClick={() => setErrorModalVisible(false)}
-            className="p-[0.5rem] text-[0.9em]"
+            className="px-4 py-1.5 text-sm"
           />
         }
         pt={{
           root: {
             style: {
-              backgroundColor: "var(--color-panel)",
-              border: "1px solid var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+              border: "1px solid var(--color-border-default)",
+              borderRadius: "0.5rem",
+              overflow: "hidden",
             },
           },
           header: {
             style: {
-              backgroundColor: "var(--color-panel)",
-              color: "var(--color-text-secondary)",
-              borderBottom: "1px solid var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+              color: "var(--color-text-primary)",
+              fontWeight: 600,
+              borderBottom: "1px solid var(--color-border-default)",
             },
           },
           content: {
             style: {
-              backgroundColor: "var(--color-panel)",
+              backgroundColor: "var(--color-bg-secondary)",
               color: "var(--color-text-secondary)",
               padding: "1.5rem",
             },
           },
           footer: {
             style: {
-              backgroundColor: "var(--color-panel)",
-              borderTop: "1px solid var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+              borderTop: "1px solid var(--color-border-default)",
               padding: "0.75rem",
             },
           },

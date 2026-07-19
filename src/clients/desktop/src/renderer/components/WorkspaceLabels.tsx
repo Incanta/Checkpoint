@@ -4,6 +4,7 @@ import {
   workspaceLabelsAtom,
 } from "../../common/state/workspace";
 import Button from "./Button";
+import { Button as UiButton } from "./ui";
 import { ipc } from "../pages/ipc";
 import { TreeTable } from "primereact/treetable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -172,7 +173,7 @@ export default function WorkspaceLabels() {
         { separator: true },
         {
           label: "Delete",
-          style: { color: "#ff6b6b" },
+          style: { color: "var(--color-danger)" },
           command: () => {
             if (contextLabelRef.current) {
               setDeleteDialogVisible(true);
@@ -221,7 +222,7 @@ export default function WorkspaceLabels() {
     () => ({
       headerCell: {
         style: {
-          borderColor: "var(--color-border)",
+          borderColor: "var(--color-border-default)",
           borderWidth: "0 1px 0 0",
           borderStyle: "solid",
           paddingLeft: "0.5rem",
@@ -247,28 +248,29 @@ export default function WorkspaceLabels() {
     () => ({
       root: {
         style: {
-          backgroundColor: "var(--color-panel)",
-          border: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          border: "1px solid var(--color-border-default)",
         },
       },
       header: {
         style: {
-          backgroundColor: "var(--color-panel)",
-          color: "var(--color-text-secondary)",
-          borderBottom: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          color: "var(--color-text-primary)",
+          fontWeight: 600,
+          borderBottom: "1px solid var(--color-border-default)",
         },
       },
       content: {
         style: {
-          backgroundColor: "var(--color-panel)",
+          backgroundColor: "var(--color-bg-secondary)",
           color: "var(--color-text-secondary)",
           padding: "1.5rem",
         },
       },
       footer: {
         style: {
-          backgroundColor: "var(--color-panel)",
-          borderTop: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          borderTop: "1px solid var(--color-border-default)",
           padding: "0.75rem",
         },
       },
@@ -280,7 +282,7 @@ export default function WorkspaceLabels() {
     () => ({
       thead: {
         style: {
-          borderColor: "var(--color-border)",
+          borderColor: "var(--color-border-default)",
           borderWidth: "0 0 1px 0",
           borderStyle: "solid",
           paddingLeft: "0.5rem",
@@ -304,7 +306,7 @@ export default function WorkspaceLabels() {
       resizeHelper: {
         style: {
           width: "0.1rem",
-          backgroundColor: "var(--color-border-lighter)",
+          backgroundColor: "var(--color-border-default)",
         },
       },
       tbody: {
@@ -326,15 +328,15 @@ export default function WorkspaceLabels() {
           root: {
             style: {
               marginTop: "2rem",
-              backgroundColor: "var(--color-panel)",
-              border: "1px solid var(--color-border-light)",
-              borderRadius: "4px",
+              backgroundColor: "var(--color-bg-overlay)",
+              border: "1px solid var(--color-border-default)",
+              borderRadius: "0.5rem",
               minWidth: "200px",
             },
           },
           menu: {
             style: {
-              backgroundColor: "var(--color-panel)",
+              backgroundColor: "var(--color-bg-overlay)",
             },
           },
           menuitem: {
@@ -344,46 +346,41 @@ export default function WorkspaceLabels() {
           },
           action: {
             style: {
-              color: "#e0e0e0",
+              color: "var(--color-text-secondary)",
               padding: "0.5rem 1rem",
               fontSize: "0.875rem",
             },
           },
           separator: {
             style: {
-              borderColor: "var(--color-border-light)",
+              borderColor: "var(--color-border-muted)",
             },
           },
           submenuIcon: {
             style: {
-              color: "#e0e0e0",
+              color: "var(--color-text-secondary)",
             },
           },
         }}
       />
-      <div className="grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4">
-        <div
-          className="row-span-1 space-x-[0.3rem]"
-          style={{
-            backgroundColor: "var(--color-panel)",
-            borderColor: "var(--color-border)",
-            borderWidth: "0 0 1px 0",
-            borderStyle: "solid",
-            padding: "0.3rem",
-          }}
-        >
-          <Button
-            className="p-[0.3rem] text-[0.8em]"
-            label="Refresh"
+      <div className="grid h-full grid-rows-[2.5rem_1fr]">
+        <div className="row-span-1 flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
+          <UiButton
+            variant="secondary"
+            size="sm"
             onClick={() => {
               ipc.sendMessage("workspace:labels", null);
             }}
-          />
-          <Button
-            className="p-[0.3rem] text-[0.8em]"
-            label="Create Label"
+          >
+            Refresh
+          </UiButton>
+          <UiButton
+            variant="primary"
+            size="sm"
             onClick={() => setCreateLabelVisible(true)}
-          />
+          >
+            Create Label
+          </UiButton>
         </div>
         <div
           className="row-span-1"
@@ -511,7 +508,10 @@ export default function WorkspaceLabels() {
         pt={dialogPt}
       >
         <div className="flex flex-col gap-2">
-          <label htmlFor="rename-input" style={{ color: "#aaa" }}>
+          <label
+            htmlFor="rename-input"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
             New name
           </label>
           <InputText
@@ -523,13 +523,13 @@ export default function WorkspaceLabels() {
             }}
             autoFocus
             style={{
-              backgroundColor: "var(--color-surface)",
-              color: "var(--color-text-secondary)",
-              border: "1px solid var(--color-border-light)",
+              backgroundColor: "var(--color-bg-surface)",
+              color: "var(--color-text-primary)",
+              border: "1px solid var(--color-border-default)",
             }}
           />
           {renameError && (
-            <small style={{ color: "#ff6b6b" }}>{renameError}</small>
+            <small style={{ color: "var(--color-danger)" }}>{renameError}</small>
           )}
         </div>
       </Dialog>
@@ -565,7 +565,10 @@ export default function WorkspaceLabels() {
         pt={dialogPt}
       >
         <div className="flex flex-col gap-2">
-          <label htmlFor="changecl-input" style={{ color: "#aaa" }}>
+          <label
+            htmlFor="changecl-input"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
             Changelist number
           </label>
           <InputText
@@ -584,13 +587,13 @@ export default function WorkspaceLabels() {
             keyfilter="int"
             autoFocus
             style={{
-              backgroundColor: "var(--color-surface)",
-              color: "var(--color-text-secondary)",
-              border: "1px solid var(--color-border-light)",
+              backgroundColor: "var(--color-bg-surface)",
+              color: "var(--color-text-primary)",
+              border: "1px solid var(--color-border-default)",
             }}
           />
           {changeClError && (
-            <small style={{ color: "#ff6b6b" }}>{changeClError}</small>
+            <small style={{ color: "var(--color-danger)" }}>{changeClError}</small>
           )}
         </div>
       </Dialog>

@@ -20,7 +20,7 @@ export default function Spinner({
         height: `${size}px`,
         borderRadius: "50%",
         background:
-          "conic-gradient(from 90deg, rgba(100,108,255,0) 0%, #646cff 100%)",
+          "conic-gradient(from 90deg, transparent 0%, var(--color-accent) 100%)",
         WebkitMask: ring,
         mask: ring,
         animation: "cp-spin 0.9s linear infinite",

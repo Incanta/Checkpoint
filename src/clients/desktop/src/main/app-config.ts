@@ -17,7 +17,15 @@ export interface LastOpenedWorkspace {
 
 interface AppConfig {
   lastOpenedWorkspace?: LastOpenedWorkspace | null;
+  /** Renderer zoom factor (1 = 100%). */
+  zoomFactor?: number;
 }
+
+// Clamp zoom to a sane range so a bad persisted value can't render the UI
+// unusable.
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2;
+const DEFAULT_ZOOM = 1;
 
 function configFilePath(): string {
   return path.join(app.getPath("userData"), CONFIG_FILE);
@@ -68,4 +76,22 @@ export function setLastOpenedWorkspace(
   const config = readAppConfig();
   config.lastOpenedWorkspace = workspace;
   writeAppConfig(config);
+}
+
+/** Returns the persisted zoom factor (clamped), defaulting to 100%. */
+export function getZoomFactor(): number {
+  const value = readAppConfig().zoomFactor;
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return DEFAULT_ZOOM;
+  }
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+}
+
+/** Persists the zoom factor (clamped) and returns the value stored. */
+export function setZoomFactor(factor: number): number {
+  const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, factor));
+  const config = readAppConfig();
+  config.zoomFactor = clamped;
+  writeAppConfig(config);
+  return clamped;
 }

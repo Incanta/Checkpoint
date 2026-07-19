@@ -2,19 +2,46 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import {
-  setupTitlebar,
-  attachTitlebarToWindow,
-} from "@incanta/custom-electron-titlebar/main";
 import DaemonHandler from "./daemon-handler";
 import { setupApplicationMenu } from "./menu";
 import { ipcOn } from "./channels";
+import { registerSettingsHandlers } from "./settings-handler";
+import { getZoomFactor } from "./app-config";
 import {
   MIN_WIDTH,
   MIN_HEIGHT,
   restoreWindowState,
   trackWindowState,
 } from "./window-state";
+
+// Height of our custom titlebar strip (the draggable top bar the renderer
+// draws). The native window-controls overlay is sized to match so the OS
+// min/max/close buttons line up with our bar.
+export const TITLEBAR_HEIGHT = 40;
+
+const isMac = process.platform === "darwin";
+
+// Per-platform window-chrome options. On Windows/Linux we use the native
+// Window Controls Overlay (min/max/close painted top-right over our bar);
+// colors are refreshed from the renderer on theme change, so these are just
+// dark-theme defaults. On macOS we keep the hidden titlebar and nudge the
+// traffic lights to vertically center them in our bar.
+function windowChromeOptions(): Electron.BrowserWindowConstructorOptions {
+  if (isMac) {
+    return {
+      titleBarStyle: "hidden",
+      trafficLightPosition: { x: 12, y: (TITLEBAR_HEIGHT - 16) / 2 },
+    };
+  }
+  return {
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: "#161b22",
+      symbolColor: "#e6edf3",
+      height: TITLEBAR_HEIGHT,
+    },
+  };
+}
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -35,8 +62,6 @@ export const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 export const MAIN_DIST = path.join(process.env.APP_ROOT, "dist/main");
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist/renderer");
 
-setupTitlebar();
-
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, "public")
   : RENDERER_DIST;
@@ -44,6 +69,9 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 let win: BrowserWindow | null;
 
 const daemonHandler = new DaemonHandler(ipcMain);
+
+// Settings dialog IPC (MCP toggle, versions, zoom, titlebar overlay colors).
+registerSettingsHandlers(ipcMain, () => win);
 
 function createWindow() {
   // Reopen on the same monitor/size/position as last time, defaulting to the
@@ -58,8 +86,7 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
     },
-    titleBarStyle: "hidden",
-    titleBarOverlay: true,
+    ...windowChromeOptions(),
   });
 
   if (isMaximized) {
@@ -69,14 +96,14 @@ function createWindow() {
   // Persist size/position/maximized state as the user changes it.
   trackWindowState(win);
 
-  attachTitlebarToWindow(win);
-
-  // Install the menu the titlebar renders, before the renderer loads and
-  // requests it over IPC.
+  // Install the application menu (a minimal native menu on macOS; removed
+  // entirely on Windows/Linux, where the app has no menu bar).
   setupApplicationMenu();
 
   // Test active push message to Renderer-process.
   win.webContents.on("did-finish-load", () => {
+    // Restore the persisted zoom level once the page is loaded.
+    win?.webContents.setZoomFactor(getZoomFactor());
     win?.webContents.send("main-process-message", new Date().toLocaleString());
   });
 
@@ -116,12 +143,9 @@ function createPopoutWindow(popoutType: string, title: string) {
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
     },
-    titleBarStyle: "hidden",
-    titleBarOverlay: true,
+    ...windowChromeOptions(),
     title,
   });
-
-  attachTitlebarToWindow(popout);
 
   if (VITE_DEV_SERVER_URL) {
     popout.loadURL(`${VITE_DEV_SERVER_URL}?popout=${popoutType}`);

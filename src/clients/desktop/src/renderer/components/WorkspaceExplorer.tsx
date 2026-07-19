@@ -310,14 +310,15 @@ export default function WorkspaceExplorer() {
     () => ({
       headerCell: {
         style: {
-          borderColor: "var(--color-border)",
+          borderColor: "var(--color-border-default)",
           borderWidth: "0 1px 1px 0",
           borderStyle: "solid",
           paddingLeft: "0.5rem",
           fontSize: "0.75em",
           position: "sticky",
           top: 0,
-          backgroundColor: "var(--color-app-bg)",
+          // Solid surface token so scrolling rows pass under the sticky header.
+          backgroundColor: "var(--color-bg-secondary)",
           zIndex: 1,
         },
       },
@@ -349,7 +350,7 @@ export default function WorkspaceExplorer() {
       resizeHelper: {
         style: {
           width: "0.1rem",
-          backgroundColor: "var(--color-border-lighter)",
+          backgroundColor: "var(--color-border-default)",
         },
       },
       tbody: {
@@ -408,19 +409,10 @@ export default function WorkspaceExplorer() {
       {fileHistory ? (
         <FileHistory />
       ) : (
-        <div className="grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4">
-          <div
-            className="row-span-1 space-x-[0.3rem]"
-            style={{
-              backgroundColor: "var(--color-panel)",
-              borderColor: "var(--color-border)",
-              borderWidth: "0 0 1px 0",
-              borderStyle: "solid",
-              padding: "0.3rem",
-            }}
-          >
+        <div className="grid h-full grid-rows-[2.5rem_1fr]">
+          <div className="row-span-1 flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
             <DropdownButton
-              className="p-[0.3rem] text-[0.8em]"
+              className="px-3 py-1 text-xs"
               label="Refresh"
               onClick={() => {
                 ipc.sendMessage("workspace:refresh", null);
@@ -435,7 +427,7 @@ export default function WorkspaceExplorer() {
               ]}
             />
             <Button
-              className="p-[0.3rem] text-[0.8em]"
+              className="px-3 py-1 text-xs"
               label="Pull"
               onClick={() => {
                 ipc.sendMessage("workspace:pull", {

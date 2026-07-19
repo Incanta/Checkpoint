@@ -8,8 +8,8 @@ import {
 } from "react-router";
 import { Provider } from "jotai";
 import { store } from "../common/state/store";
+import { ThemeProvider } from "./theme";
 import "./index.css";
-import "tailwindcss";
 import "file-icon-vectors/dist/file-icon-square-o.min.css";
 import Loading from "./pages/Loading/Loading";
 import Login from "./pages/Login/Login";
@@ -45,7 +45,9 @@ if (popoutType === "file-history") {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <Provider store={store}>
-        <FileHistory isPopout />
+        <ThemeProvider>
+          <FileHistory isPopout />
+        </ThemeProvider>
       </Provider>
     </React.StrictMode>,
   );
@@ -53,7 +55,9 @@ if (popoutType === "file-history") {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <Provider store={store}>
-        <ChangelistChanges isPopout />
+        <ThemeProvider>
+          <ChangelistChanges isPopout />
+        </ThemeProvider>
       </Provider>
     </React.StrictMode>,
   );
@@ -61,18 +65,20 @@ if (popoutType === "file-history") {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <Provider store={store}>
-        <Router>
-          <RendererUrlListener />
-          <Routes>
-            <Route path="/" element={<Loading />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/workspace" element={<Workspace />} />
-          </Routes>
-          <UpdateNotification />
-          <VersionNotification />
-          <ServerStatusBanner />
-        </Router>
+        <ThemeProvider>
+          <Router>
+            <RendererUrlListener />
+            <Routes>
+              <Route path="/" element={<Loading />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/workspace" element={<Workspace />} />
+            </Routes>
+            <UpdateNotification />
+            <VersionNotification />
+            <ServerStatusBanner />
+          </Router>
+        </ThemeProvider>
       </Provider>
     </React.StrictMode>,
   );

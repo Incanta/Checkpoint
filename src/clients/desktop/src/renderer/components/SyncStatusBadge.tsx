@@ -36,7 +36,7 @@ function ProgressBar() {
         alignItems: "center",
         gap: "0.5rem",
         fontSize: "0.75rem",
-        color: "#60A5FA",
+        color: "var(--color-info)",
         padding: "0 0.5rem",
         flex: 1,
         minWidth: 0,
@@ -74,7 +74,7 @@ function ProgressBar() {
               minWidth: "60px",
               maxWidth: "180px",
               height: "6px",
-              backgroundColor: "rgba(255,255,255,0.1)",
+              backgroundColor: "var(--color-bg-surface)",
               borderRadius: "3px",
               overflow: "hidden",
             }}
@@ -83,7 +83,7 @@ function ProgressBar() {
               style={{
                 width: `${percent}%`,
                 height: "100%",
-                backgroundColor: "#60A5FA",
+                backgroundColor: "var(--color-info)",
                 borderRadius: "3px",
                 transition: "width 0.3s ease",
               }}
@@ -91,7 +91,11 @@ function ProgressBar() {
           </div>
 
           <span
-            style={{ flexShrink: 0, whiteSpace: "nowrap", color: "#9CA3AF" }}
+            style={{
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+              color: "var(--color-text-muted)",
+            }}
           >
             {percent}%{eta ? ` (${eta})` : ""}
           </span>
@@ -134,7 +138,7 @@ export default function SyncStatusBadge() {
           alignItems: "center",
           gap: "0.4rem",
           fontSize: "0.75rem",
-          color: "#6B7280",
+          color: "var(--color-text-muted)",
           padding: "0 0.5rem",
         }}
       >
@@ -157,7 +161,7 @@ export default function SyncStatusBadge() {
           alignItems: "center",
           gap: "0.4rem",
           fontSize: "0.75rem",
-          color: "#4CAF50",
+          color: "var(--color-success)",
           padding: "0 0.5rem",
         }}
       >
@@ -192,7 +196,7 @@ export default function SyncStatusBadge() {
         alignItems: "center",
         gap: "0.4rem",
         fontSize: "0.75rem",
-        color: "#F59E0B",
+        color: "var(--color-warning)",
         padding: "0 0.5rem",
       }}
     >
@@ -230,13 +234,15 @@ export default function SyncStatusBadge() {
           alignItems: "center",
           justifyContent: "center",
           borderRadius: "0.15rem",
-          color: "#9CA3AF",
+          color: "var(--color-text-muted)",
         }}
         onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "#fff";
+          (e.currentTarget as HTMLButtonElement).style.color =
+            "var(--color-text-primary)";
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "#9CA3AF";
+          (e.currentTarget as HTMLButtonElement).style.color =
+            "var(--color-text-muted)";
         }}
       >
         <svg

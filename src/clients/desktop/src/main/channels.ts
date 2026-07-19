@@ -190,6 +190,9 @@ export type Channels = {
 
   // API version check
   "version:dismiss": null;
+
+  // Window chrome: update the native controls overlay colors on theme change.
+  "window:set-titlebar-overlay": { color: string; symbolColor: string };
 };
 
 export type InvokeChannels = {
@@ -200,6 +203,28 @@ export type InvokeChannels = {
       previousChangelistNumber: number | null;
     };
     response: { left: string; right: string } | null;
+  };
+
+  // Settings dialog
+  "settings:mcp:get-status": {
+    request: null;
+    response: { enabled: boolean; available: boolean };
+  };
+  "settings:mcp:set-enabled": {
+    request: { enabled: boolean };
+    response: { enabled: boolean; available: boolean };
+  };
+  "settings:get-app-info": {
+    request: null;
+    response: { appVersion: string; electron: string; chrome: string };
+  };
+  "settings:zoom:get": {
+    request: null;
+    response: { factor: number };
+  };
+  "settings:zoom:set": {
+    request: { factor: number };
+    response: { factor: number };
   };
 };
 

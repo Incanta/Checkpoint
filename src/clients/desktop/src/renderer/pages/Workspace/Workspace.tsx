@@ -16,9 +16,23 @@ import WorkspaceLabels from "../../components/WorkspaceLabels";
 import WorkspaceBranches from "../../components/WorkspaceBranches";
 import SyncPreview from "../../components/SyncPreview";
 import SyncStatusBadge from "../../components/SyncStatusBadge";
+import TitleBar from "../../components/TitleBar";
+import { Badge } from "../../components/ui";
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCodeBranch } from "@fortawesome/free-solid-svg-icons/faCodeBranch";
+
+const dropdownPt = {
+  root: {
+    className:
+      "inline-flex items-center rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] pl-3 pr-2 py-1 transition-colors hover:border-[var(--color-text-muted)]",
+  },
+  input: {
+    className:
+      "text-sm text-[var(--color-text-primary)] outline-none bg-transparent",
+  },
+  trigger: { className: "ml-2 text-[var(--color-text-muted)]" },
+};
 
 export default function Workspace(): React.ReactElement {
   const workspaces = useAtomValue(workspacesAtom);
@@ -28,67 +42,69 @@ export default function Workspace(): React.ReactElement {
   const [expanded, setExpanded] = useState<boolean>(true);
   const navigate = useNavigate();
 
+  const tabs = [
+    <WorkspaceExplorer key="explorer" />,
+    <WorkspacePendingChanges key="pending" />,
+    <WorkspaceHistory key="history" />,
+    <WorkspaceBranches key="branches" />,
+    <WorkspaceLabels key="labels" />,
+  ];
+
   return (
-    <div className="grid grid-rows-[2.5rem_calc(100vh-4rem-30px)_1.5rem] gap-4">
-      <div
-        className="row-span-1 flex"
-        style={{
-          backgroundColor: "var(--color-panel)",
-          borderColor: "var(--color-border)",
-          borderWidth: "0 0 1px 0",
-          borderStyle: "solid",
-          zIndex: 1,
-          alignItems: "center",
-          marginLeft: "0.5rem",
-        }}
-      >
-        <span className="mr-[0.5rem]">Workspace:</span>
-        <Dropdown
-          value={currentWorkspace?.id}
-          onChange={(e) => {
-            if (e.value === "configure") {
-              navigate("/dashboard");
-            } else {
-              ipc.sendMessage("workspace:select", {
-                id: e.value,
-              });
-            }
-          }}
-          options={(
-            workspaces?.map((ws) => ({ label: ws.name, value: ws.id })) || []
-          ).concat({ label: "Configure...", value: "configure" })}
-          placeholder="Select a Workspace"
-          pt={{
-            trigger: {
-              style: {
-                marginLeft: "0.2rem",
-              },
-            },
-          }}
-        />
-        {currentWorkspace && (
-          <span
-            className="ml-4 flex items-center"
-            style={{ color: "var(--color-text-secondary)", fontSize: "0.85em" }}
-          >
-            <FontAwesomeIcon
-              icon={faCodeBranch}
-              style={{ color: "var(--color-branches)", marginRight: "0.3rem" }}
-            />
-            {currentWorkspace.branchName}
-          </span>
-        )}
-      </div>
-      <div className="row-span-1 flex">
+    <div className="flex h-screen flex-col bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
+      {/* Top bar doubles as the draggable window titlebar. */}
+      <TitleBar
+        left={
+          <>
+            <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+              Workspace
+            </span>
+            <span className="app-no-drag">
+              <Dropdown
+                value={currentWorkspace?.id}
+                onChange={(e) => {
+                  if (e.value === "configure") {
+                    navigate("/dashboard");
+                  } else {
+                    ipc.sendMessage("workspace:select", {
+                      id: e.value,
+                    });
+                  }
+                }}
+                options={(
+                  workspaces?.map((ws) => ({
+                    label: ws.name,
+                    value: ws.id,
+                  })) || []
+                ).concat({ label: "Configure...", value: "configure" })}
+                placeholder="Select a Workspace"
+                pt={dropdownPt}
+              />
+            </span>
+            {currentWorkspace && (
+              <Badge variant="default" className="gap-1.5">
+                <FontAwesomeIcon
+                  icon={faCodeBranch}
+                  style={{ color: "var(--color-branches)" }}
+                />
+                {currentWorkspace.branchName}
+              </Badge>
+            )}
+          </>
+        }
+      />
+
+      {/* Body */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {syncPreview ? (
-          <div style={{ width: "100%" }}>
+          <div className="relative w-full overflow-hidden">
             <SyncPreview />
           </div>
         ) : (
-          <div
-            className={`grid grid-cols-[8rem_calc(100vw-8rem)] [&.collapsed]:grid-cols-[3rem_calc(100vw-3rem)] w-full ${!expanded ? "collapsed" : ""}`}
-          >
-            <div className="col-span-1 flex w-full">
+          <>
+            <div
+              className={`flex shrink-0 flex-col ${expanded ? "w-35" : "w-14"}`}
+            >
               <WorkspaceMenu
                 activeIndex={activeTabIndex}
                 setActiveIndex={setActiveTabIndex}
@@ -96,65 +112,26 @@ export default function Workspace(): React.ReactElement {
                 setExpanded={setExpanded}
               />
             </div>
-            <div className="col-span-1 flex">
-              <div
-                style={{
-                  display: activeTabIndex === 0 ? "initial" : "none",
-                  width: "100%",
-                }}
-              >
-                <WorkspaceExplorer />
-              </div>
-              <div
-                style={{
-                  display: activeTabIndex === 1 ? "initial" : "none",
-                  width: "100%",
-                }}
-              >
-                <WorkspacePendingChanges />
-              </div>
-              <div
-                style={{
-                  display: activeTabIndex === 2 ? "initial" : "none",
-                  width: "100%",
-                }}
-              >
-                <WorkspaceHistory />
-              </div>
-              <div
-                style={{
-                  display: activeTabIndex === 3 ? "initial" : "none",
-                  width: "100%",
-                }}
-              >
-                <WorkspaceBranches />
-              </div>
-              <div
-                style={{
-                  display: activeTabIndex === 4 ? "initial" : "none",
-                  width: "100%",
-                }}
-              >
-                <WorkspaceLabels />
-              </div>
+            <div className="relative min-w-0 flex-1 overflow-hidden">
+              {tabs.map((tab, index) => (
+                <div
+                  key={index}
+                  className={`absolute inset-0 ${
+                    activeTabIndex === index ? "" : "hidden"
+                  }`}
+                >
+                  {tab}
+                </div>
+              ))}
             </div>
-          </div>
+          </>
         )}
       </div>
-      <div
-        className="row-span-1 flex"
-        style={{
-          backgroundColor: "var(--color-panel-strong)",
-          borderColor: "var(--color-border)",
-          borderWidth: "1px 0 0 0",
-          borderStyle: "solid",
-          zIndex: 1,
-          alignItems: "center",
-          justifyContent: "flex-end",
-        }}
-      >
+
+      {/* Status bar */}
+      <footer className="flex h-6 shrink-0 items-center justify-end border-t border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
         <SyncStatusBadge />
-      </div>
+      </footer>
     </div>
   );
 }

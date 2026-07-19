@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Dialog } from "primereact/dialog";
 import { InputText } from "primereact/inputtext";
-import Button from "./Button";
+import { Button } from "./ui";
 import { ipc } from "../pages/ipc";
 
 interface CreateLabelDialogProps {
@@ -75,31 +75,40 @@ export default function CreateLabelDialog({
   const dialogPt = {
     root: {
       style: {
-        backgroundColor: "var(--color-panel)",
-        border: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1px solid var(--color-border-default)",
+        borderRadius: "0.5rem",
+        overflow: "hidden",
       },
     },
     header: {
       style: {
-        backgroundColor: "var(--color-panel)",
-        color: "var(--color-text-secondary)",
-        borderBottom: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
+        color: "var(--color-text-primary)",
+        fontWeight: 600,
+        borderBottom: "1px solid var(--color-border-default)",
       },
     },
     content: {
       style: {
-        backgroundColor: "var(--color-panel)",
+        backgroundColor: "var(--color-bg-secondary)",
         color: "var(--color-text-secondary)",
         padding: "1.5rem",
       },
     },
     footer: {
       style: {
-        backgroundColor: "var(--color-panel)",
-        borderTop: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
+        borderTop: "1px solid var(--color-border-default)",
         padding: "0.75rem",
       },
     },
+  };
+
+  const inputStyle = {
+    backgroundColor: "var(--color-bg-surface)",
+    color: "var(--color-text-primary)",
+    border: "1px solid var(--color-border-default)",
   };
 
   return (
@@ -110,24 +119,28 @@ export default function CreateLabelDialog({
       onHide={onHide}
       footer={
         <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onHide} disabled={isPending}>
+            Cancel
+          </Button>
           <Button
-            label="Cancel"
-            onClick={onHide}
-            disabled={isPending}
-            className="p-[0.5rem] text-[0.9em]"
-          />
-          <Button
-            label={isPending ? "Creating..." : "Create"}
             onClick={handleSubmit}
             disabled={isPending || !name.trim() || !isClValid}
-            className="p-[0.5rem] text-[0.9em]"
-          />
+          >
+            {isPending ? "Creating..." : "Create"}
+          </Button>
         </div>
       }
       pt={dialogPt}
     >
       <div className="flex flex-col gap-3">
-        {error && <p className="text-[0.85em] text-red-400">{error}</p>}
+        {error && (
+          <p
+            className="text-[0.85em]"
+            style={{ color: "var(--color-danger)" }}
+          >
+            {error}
+          </p>
+        )}
         <label className="flex flex-col gap-2 text-[0.85em]">
           <span>Changelist Number</span>
           {changelistNumber !== null ? (
@@ -135,11 +148,7 @@ export default function CreateLabelDialog({
               className="w-full"
               value={String(changelistNumber)}
               disabled
-              style={{
-                backgroundColor: "var(--color-surface)",
-                color: "var(--color-text-secondary)",
-                border: "1px solid var(--color-border-light)",
-              }}
+              style={inputStyle}
             />
           ) : (
             <InputText
@@ -150,11 +159,7 @@ export default function CreateLabelDialog({
               placeholder="e.g. 42"
               keyfilter="int"
               disabled={isPending}
-              style={{
-                backgroundColor: "var(--color-surface)",
-                color: "var(--color-text-secondary)",
-                border: "1px solid var(--color-border-light)",
-              }}
+              style={inputStyle}
             />
           )}
         </label>
@@ -168,11 +173,7 @@ export default function CreateLabelDialog({
             onKeyDown={handleKeyDown}
             placeholder="e.g. v1.0.0"
             disabled={isPending}
-            style={{
-              backgroundColor: "var(--color-surface)",
-              color: "var(--color-text-secondary)",
-              border: "1px solid var(--color-border-light)",
-            }}
+            style={inputStyle}
           />
         </label>
       </div>

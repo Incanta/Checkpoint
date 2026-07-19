@@ -3,7 +3,7 @@ import { Dialog } from "primereact/dialog";
 import { InputText } from "primereact/inputtext";
 import { Dropdown } from "primereact/dropdown";
 import { InputNumber } from "primereact/inputnumber";
-import Button from "./Button";
+import { Button } from "./ui";
 import { ipc } from "../pages/ipc";
 
 export interface CreateBranchDialogProps {
@@ -85,37 +85,40 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
   const dialogPt = {
     root: {
       style: {
-        backgroundColor: "var(--color-panel)",
-        border: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1px solid var(--color-border-default)",
+        borderRadius: "0.5rem",
+        overflow: "hidden",
       },
     },
     header: {
       style: {
-        backgroundColor: "var(--color-panel)",
-        color: "var(--color-text-secondary)",
-        borderBottom: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
+        color: "var(--color-text-primary)",
+        fontWeight: 600,
+        borderBottom: "1px solid var(--color-border-default)",
       },
     },
     content: {
       style: {
-        backgroundColor: "var(--color-panel)",
+        backgroundColor: "var(--color-bg-secondary)",
         color: "var(--color-text-secondary)",
         padding: "1.5rem",
       },
     },
     footer: {
       style: {
-        backgroundColor: "var(--color-panel)",
-        borderTop: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
+        borderTop: "1px solid var(--color-border-default)",
         padding: "0.75rem",
       },
     },
   };
 
   const inputStyle = {
-    backgroundColor: "var(--color-surface)",
-    color: "var(--color-text-secondary)",
-    border: "1px solid var(--color-border-light)",
+    backgroundColor: "var(--color-bg-surface)",
+    color: "var(--color-text-primary)",
+    border: "1px solid var(--color-border-default)",
     width: "100%",
   };
 
@@ -129,18 +132,15 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
       }}
       footer={
         <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={props.onHide} disabled={pending}>
+            Cancel
+          </Button>
           <Button
-            label="Cancel"
-            onClick={props.onHide}
-            disabled={pending}
-            className="p-[0.5rem] text-[0.9em]"
-          />
-          <Button
-            label={pending ? "Creating..." : "Create"}
             onClick={handleCreate}
             disabled={pending || !name.trim()}
-            className="p-[0.5rem] text-[0.9em]"
-          />
+          >
+            {pending ? "Creating..." : "Create"}
+          </Button>
         </div>
       }
       pt={dialogPt}
@@ -149,7 +149,7 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
         <div className="flex flex-col gap-1">
           <label
             htmlFor="branch-name"
-            style={{ color: "#aaa", fontSize: "0.85em" }}
+            style={{ color: "var(--color-text-secondary)", fontSize: "0.85em" }}
           >
             Branch name
           </label>
@@ -168,7 +168,7 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
         <div className="flex flex-col gap-1">
           <label
             htmlFor="branch-type"
-            style={{ color: "#aaa", fontSize: "0.85em" }}
+            style={{ color: "var(--color-text-secondary)", fontSize: "0.85em" }}
           >
             Branch type
           </label>
@@ -185,7 +185,7 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
           <div className="flex flex-col gap-1">
             <label
               htmlFor="branch-parent"
-              style={{ color: "#aaa", fontSize: "0.85em" }}
+              style={{ color: "var(--color-text-secondary)", fontSize: "0.85em" }}
             >
               Parent branch
             </label>
@@ -201,7 +201,7 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
         <div className="flex flex-col gap-1">
           <label
             htmlFor="branch-head"
-            style={{ color: "#aaa", fontSize: "0.85em" }}
+            style={{ color: "var(--color-text-secondary)", fontSize: "0.85em" }}
           >
             Starting changelist number
           </label>
@@ -216,7 +216,9 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
           />
         </div>
 
-        {error && <small style={{ color: "#ff6b6b" }}>{error}</small>}
+        {error && (
+          <small style={{ color: "var(--color-danger)" }}>{error}</small>
+        )}
       </div>
     </Dialog>
   );

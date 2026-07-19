@@ -6,6 +6,7 @@ import {
 } from "../../common/state/workspace";
 import { currentUserAtom } from "../../common/state/auth";
 import Button from "./Button";
+import { Button as UiButton, Badge } from "./ui";
 import { ipc } from "../pages/ipc";
 import { TreeTable } from "primereact/treetable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -200,7 +201,7 @@ export default function WorkspaceBranches() {
       const isCurrentBranch = branchesState?.currentBranchName === branch.name;
       const userId = currentUser?.details?.id;
       const isCreator = branch.createdById === userId;
-      // Assume admin for now — the server will enforce permissions
+      // Assume admin for now (the server will enforce permissions)
       const isAdmin = true;
       const isArchived = !!branch.archivedAt;
 
@@ -287,7 +288,7 @@ export default function WorkspaceBranches() {
       if (branch.type === "FEATURE" && (isAdmin || isCreator)) {
         items.push({
           label: "Delete",
-          style: { color: "#ff6b6b" },
+          style: { color: "var(--color-danger)" },
           command: () => {
             setDeleteDialogVisible(true);
           },
@@ -350,19 +351,19 @@ export default function WorkspaceBranches() {
 
   const typeTemplate = useCallback((node: TreeNode) => {
     const type = node.data?.type as string;
-    const colors: Record<string, string> = {
-      Mainline: "#6bb5ff",
-      Release: "#a0e86b",
-      Feature: "#e8c36b",
+    const variants: Record<string, "info" | "success" | "warning"> = {
+      Mainline: "info",
+      Release: "success",
+      Feature: "warning",
     };
-    return <span style={{ color: colors[type] || "#ccc" }}>{type}</span>;
+    return <Badge variant={variants[type] ?? "default"}>{type}</Badge>;
   }, []);
 
   const columnPt = useMemo<ColumnPassThroughOptions>(
     () => ({
       headerCell: {
         style: {
-          borderColor: "var(--color-border)",
+          borderColor: "var(--color-border-default)",
           borderWidth: "0 1px 0 0",
           borderStyle: "solid",
           paddingLeft: "0.5rem",
@@ -389,15 +390,15 @@ export default function WorkspaceBranches() {
       root: {
         style: {
           marginTop: "2rem",
-          backgroundColor: "var(--color-panel)",
-          border: "1px solid var(--color-border-light)",
-          borderRadius: "4px",
+          backgroundColor: "var(--color-bg-overlay)",
+          border: "1px solid var(--color-border-default)",
+          borderRadius: "0.5rem",
           minWidth: "200px",
         },
       },
       menu: {
         style: {
-          backgroundColor: "var(--color-panel)",
+          backgroundColor: "var(--color-bg-overlay)",
         },
       },
       menuitem: {
@@ -407,19 +408,19 @@ export default function WorkspaceBranches() {
       },
       action: {
         style: {
-          color: "#e0e0e0",
+          color: "var(--color-text-secondary)",
           padding: "0.5rem 1rem",
           fontSize: "0.875rem",
         },
       },
       separator: {
         style: {
-          borderColor: "var(--color-border-light)",
+          borderColor: "var(--color-border-muted)",
         },
       },
       submenuIcon: {
         style: {
-          color: "#e0e0e0",
+          color: "var(--color-text-secondary)",
         },
       },
     }),
@@ -430,28 +431,29 @@ export default function WorkspaceBranches() {
     () => ({
       root: {
         style: {
-          backgroundColor: "var(--color-panel)",
-          border: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          border: "1px solid var(--color-border-default)",
         },
       },
       header: {
         style: {
-          backgroundColor: "var(--color-panel)",
-          color: "var(--color-text-secondary)",
-          borderBottom: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          color: "var(--color-text-primary)",
+          fontWeight: 600,
+          borderBottom: "1px solid var(--color-border-default)",
         },
       },
       content: {
         style: {
-          backgroundColor: "var(--color-panel)",
+          backgroundColor: "var(--color-bg-secondary)",
           color: "var(--color-text-secondary)",
           padding: "1.5rem",
         },
       },
       footer: {
         style: {
-          backgroundColor: "var(--color-panel)",
-          borderTop: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          borderTop: "1px solid var(--color-border-default)",
           padding: "0.75rem",
         },
       },
@@ -463,7 +465,7 @@ export default function WorkspaceBranches() {
     () => ({
       thead: {
         style: {
-          borderColor: "var(--color-border)",
+          borderColor: "var(--color-border-default)",
           borderWidth: "0 0 1px 0",
           borderStyle: "solid",
           paddingLeft: "0.5rem",
@@ -487,7 +489,7 @@ export default function WorkspaceBranches() {
       resizeHelper: {
         style: {
           width: "0.1rem",
-          backgroundColor: "var(--color-border-lighter)",
+          backgroundColor: "var(--color-text-muted)",
         },
       },
       tbody: {
@@ -507,28 +509,15 @@ export default function WorkspaceBranches() {
         breakpoint="767px"
         pt={contextMenuPt}
       />
-      <div className="grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4">
-        <div
-          className="row-span-1 space-x-[0.3rem] flex items-center"
-          style={{
-            backgroundColor: "var(--color-panel)",
-            borderColor: "var(--color-border)",
-            borderWidth: "0 0 1px 0",
-            borderStyle: "solid",
-            padding: "0.3rem",
-          }}
-        >
-          <Button
-            className="p-[0.3rem] text-[0.8em]"
-            label="Refresh"
-            onClick={refreshBranches}
-          />
-          <Button
-            className="p-[0.3rem] text-[0.8em]"
-            label="New Branch"
-            onClick={handleNewBranch}
-          />
-          <div className="flex items-center ml-4" style={{ gap: "0.3rem" }}>
+      <div className="grid h-full grid-rows-[2.5rem_1fr]">
+        <div className="row-span-1 flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
+          <UiButton variant="secondary" size="sm" onClick={refreshBranches}>
+            Refresh
+          </UiButton>
+          <UiButton variant="primary" size="sm" onClick={handleNewBranch}>
+            New Branch
+          </UiButton>
+          <div className="ml-4 flex items-center gap-2">
             <Checkbox
               inputId="show-archived"
               checked={showArchived}
@@ -536,8 +525,8 @@ export default function WorkspaceBranches() {
               pt={{
                 box: {
                   style: {
-                    backgroundColor: "var(--color-surface)",
-                    borderColor: "var(--color-border-light)",
+                    backgroundColor: "var(--color-bg-surface)",
+                    borderColor: "var(--color-border-default)",
                   },
                 },
               }}
@@ -689,7 +678,13 @@ export default function WorkspaceBranches() {
           Merge <strong>&quot;{contextBranchRef.current?.name}&quot;</strong>{" "}
           into <strong>&quot;{branchesState?.currentBranchName}&quot;</strong>?
         </p>
-        <p style={{ color: "#aaa", fontSize: "0.85em", marginTop: "0.5rem" }}>
+        <p
+          style={{
+            color: "var(--color-text-muted)",
+            fontSize: "0.85em",
+            marginTop: "0.5rem",
+          }}
+        >
           This will create a squash merge changelist and delete the incoming
           branch.
         </p>

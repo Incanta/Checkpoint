@@ -1,10 +1,5 @@
-import React from "react";
-import { Menu } from "primereact/menu";
-import { Badge } from "primereact/badge";
-import { Avatar } from "primereact/avatar";
-import { classNames } from "primereact/utils";
-import { MenuItem } from "primereact/menuitem";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import { faFolder } from "@fortawesome/free-solid-svg-icons/faFolder";
 import { faPlay } from "@fortawesome/free-solid-svg-icons/faPlay";
 import { faClock } from "@fortawesome/free-solid-svg-icons/faClock";
@@ -20,144 +15,74 @@ export interface WorkspaceMenuProps {
   setExpanded: (expanded: boolean) => void;
 }
 
-export default function WorkspaceMenu(props: WorkspaceMenuProps) {
-  const itemRenderer = (item: MenuItem) => {
-    return (
-      <div
-        className="p-menuitem-content workspace-menu-item"
-        title={item.label || ""}
-        style={{
-          backgroundColor:
-            props.activeIndex === item.data?.index
-              ? "#ffffff11"
-              : "transparent",
-          color: "#fff !important",
-        }}
-      >
-        <a className="flex align-items-center p-menuitem-link">
-          <div className="m-[0.8rem]">
-            {item.icon}
-            {props.expanded && (
-              <span
-                className="mx-2 ml-[0.4rem]"
-                style={{
-                  color: "var(--color-text-secondary)",
-                  fontWeight: "normal",
-                }}
-              >
-                {item.label}
-              </span>
-            )}
-          </div>
-        </a>
-      </div>
-    );
-  };
+interface NavItem {
+  label: string;
+  icon: IconDefinition;
+  /** Per-feature accent color, kept from the original design for identity. */
+  color: string;
+  rotate?: boolean;
+}
 
-  const items: MenuItem[] = [
-    {
-      label: "Files",
-      icon: (
-        <FontAwesomeIcon
-          icon={faFolder}
-          style={{
-            color: "var(--color-files)",
-          }}
-        />
-      ),
-      template: itemRenderer,
-      command: () => props.setActiveIndex(0),
-      data: {
-        index: 0,
-      },
-    },
-    {
-      label: "Pending",
-      icon: (
-        <FontAwesomeIcon
-          icon={faPlay}
-          style={{ transform: "rotate(-90deg)", color: "var(--color-pending)" }}
-        />
-      ),
-      template: itemRenderer,
-      command: () => props.setActiveIndex(1),
-      data: {
-        index: 1,
-      },
-    },
-    {
-      label: "History",
-      icon: (
-        <FontAwesomeIcon
-          icon={faClock}
-          style={{ color: "var(--color-history)" }}
-        />
-      ),
-      template: itemRenderer,
-      command: () => props.setActiveIndex(2),
-      data: {
-        index: 2,
-      },
-    },
-    {
-      label: "Branches",
-      icon: (
-        <FontAwesomeIcon
-          icon={faCodeBranch}
-          style={{ color: "var(--color-branches)" }}
-        />
-      ),
-      template: itemRenderer,
-      command: () => props.setActiveIndex(3),
-      data: {
-        index: 3,
-      },
-    },
-    {
-      label: "Labels",
-      icon: (
-        <FontAwesomeIcon
-          icon={faTag}
-          style={{ color: "var(--color-labels)" }}
-        />
-      ),
-      template: itemRenderer,
-      command: () => props.setActiveIndex(4),
-      data: {
-        index: 4,
-      },
-    },
-  ];
+const items: NavItem[] = [
+  { label: "Files", icon: faFolder, color: "var(--color-files)" },
+  {
+    label: "Pending",
+    icon: faPlay,
+    color: "var(--color-pending)",
+    rotate: true,
+  },
+  { label: "History", icon: faClock, color: "var(--color-history)" },
+  { label: "Branches", icon: faCodeBranch, color: "var(--color-branches)" },
+  { label: "Labels", icon: faTag, color: "var(--color-labels)" },
+];
 
+export default function WorkspaceMenu(
+  props: WorkspaceMenuProps,
+): React.ReactElement {
   return (
-    <div
-      className="w-full"
-      style={{
-        backgroundColor: "var(--color-panel)",
-        borderColor: "var(--color-border)",
-        borderWidth: "0 1px 0 0",
-        borderStyle: "solid",
-        position: "relative",
-      }}
-    >
-      <Menu model={items} className="w-full md:w-15rem" />
-      <div
-        className="workspace-menu-item"
-        style={{
-          color: "#fff !important",
-          position: "absolute",
-          bottom: 0,
-          width: "100%",
-          cursor: "pointer",
-        }}
-        onClick={() => props.setExpanded(!props.expanded)}
-      >
-        <div className="m-[0.5rem] text-center">
+    <nav className="flex min-h-0 w-full flex-1 flex-col border-r border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] py-2">
+      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2">
+        {items.map((item, index) => {
+          const active = props.activeIndex === index;
+          return (
+            <button
+              key={item.label}
+              type="button"
+              title={item.label}
+              onClick={() => props.setActiveIndex(index)}
+              className={`flex h-9 items-center rounded-md border-0 bg-transparent text-sm transition-colors ${
+                props.expanded ? "gap-3 px-3" : "justify-center px-0"
+              } ${
+                active
+                  ? "bg-[var(--color-bg-overlay)] font-medium text-[var(--color-text-primary)]"
+                  : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-overlay)] hover:text-[var(--color-text-primary)]"
+              }`}
+            >
+              <FontAwesomeIcon
+                icon={item.icon}
+                className="w-4 shrink-0 text-center"
+                style={{
+                  color: item.color,
+                  transform: item.rotate ? "rotate(-90deg)" : undefined,
+                }}
+              />
+              {props.expanded && <span>{item.label}</span>}
+            </button>
+          );
+        })}
+      </div>
+      <div className="px-2">
+        <button
+          type="button"
+          onClick={() => props.setExpanded(!props.expanded)}
+          title={props.expanded ? "Collapse sidebar" : "Expand sidebar"}
+          className="flex w-full items-center justify-center rounded-md border-0 bg-transparent py-2 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-bg-overlay)] hover:text-[var(--color-text-primary)]"
+        >
           <FontAwesomeIcon
             icon={props.expanded ? faAnglesLeft : faAnglesRight}
           />
-        </div>
+        </button>
       </div>
-    </div>
+    </nav>
   );
 }

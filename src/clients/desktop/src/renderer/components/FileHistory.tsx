@@ -18,9 +18,9 @@ interface ChangelistItemProps {
 
 function ChangelistItem({ entry, isSelected, onSelect }: ChangelistItemProps) {
   const changeTypeColors: Record<string, string> = {
-    ADD: "#4CAF50",
-    DELETE: "#F44336",
-    MODIFY: "#2196F3",
+    ADD: "var(--color-success)",
+    DELETE: "var(--color-danger)",
+    MODIFY: "var(--color-info)",
   };
 
   return (
@@ -29,17 +29,18 @@ function ChangelistItem({ entry, isSelected, onSelect }: ChangelistItemProps) {
       style={{
         padding: "0.5rem",
         cursor: "pointer",
-        borderBottom: "1px solid #374151",
-        backgroundColor: isSelected ? "#3A3A3A" : "var(--color-panel)",
+        borderBottom: "1px solid var(--color-border-muted)",
+        backgroundColor: isSelected ? "var(--color-accent-muted)" : "transparent",
       }}
       onMouseEnter={(e) => {
         if (!isSelected)
-          (e.currentTarget as HTMLDivElement).style.backgroundColor = "#374151";
+          (e.currentTarget as HTMLDivElement).style.backgroundColor =
+            "var(--color-bg-surface)";
       }}
       onMouseLeave={(e) => {
         if (!isSelected)
           (e.currentTarget as HTMLDivElement).style.backgroundColor =
-            "var(--color-panel)";
+            "transparent";
       }}
     >
       <div
@@ -61,7 +62,7 @@ function ChangelistItem({ entry, isSelected, onSelect }: ChangelistItemProps) {
               borderRadius: "0.25rem",
               backgroundColor:
                 changeTypeColors[entry.changeType] ||
-                "var(--color-border-lighter)",
+                "var(--color-text-muted)",
             }}
           >
             {entry.changeType}
@@ -71,7 +72,7 @@ function ChangelistItem({ entry, isSelected, onSelect }: ChangelistItemProps) {
       <div
         style={{
           fontSize: "0.875rem",
-          color: "#9CA3AF",
+          color: "var(--color-text-secondary)",
           marginTop: "0.25rem",
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -83,7 +84,7 @@ function ChangelistItem({ entry, isSelected, onSelect }: ChangelistItemProps) {
       <div
         style={{
           fontSize: "0.75rem",
-          color: "#6B7280",
+          color: "var(--color-text-muted)",
           marginTop: "0.25rem",
         }}
       >
@@ -232,8 +233,8 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
       <div
         className="row-span-1 flex items-center space-x-2"
         style={{
-          backgroundColor: "var(--color-panel)",
-          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          borderColor: "var(--color-border-default)",
           borderWidth: "0 0 1px 0",
           borderStyle: "solid",
           padding: "0.3rem",
@@ -255,7 +256,7 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
           }}
           onMouseEnter={(e) => {
             (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-              "#404040";
+              "var(--color-bg-surface)";
           }}
           onMouseLeave={(e) => {
             (e.currentTarget as HTMLButtonElement).style.backgroundColor =
@@ -298,7 +299,7 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
             }}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                "#404040";
+                "var(--color-bg-surface)";
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLButtonElement).style.backgroundColor =
@@ -339,10 +340,10 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
           <SplitterPanel className="flex flex-col" size={35}>
             <div
               className="h-full overflow-y-auto"
-              style={{ backgroundColor: "var(--color-surface)" }}
+              style={{ backgroundColor: "var(--color-bg-secondary)" }}
             >
               {fileHistory.entries.length === 0 ? (
-                <div className="p-4 text-gray-500 text-center">
+                <div className="p-4 text-center text-[var(--color-text-muted)]">
                   No history found for this file
                 </div>
               ) : (
@@ -373,9 +374,9 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
               >
                 <div
                   style={{
-                    backgroundColor: "#252525",
+                    backgroundColor: "var(--color-bg-secondary)",
                     padding: "0.75rem",
-                    borderBottom: "1px solid #374151",
+                    borderBottom: "1px solid var(--color-border-muted)",
                   }}
                 >
                   <div
@@ -389,7 +390,12 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
                     <span style={{ fontWeight: "bold", fontSize: "1.125rem" }}>
                       CL {selectedEntry.changelistNumber}
                     </span>
-                    <span style={{ color: "#9CA3AF", fontSize: "0.875rem" }}>
+                    <span
+                      style={{
+                        color: "var(--color-text-muted)",
+                        fontSize: "0.875rem",
+                      }}
+                    >
                       {new Date(
                         selectedEntry.changelist.createdAt,
                       ).toLocaleString()}
@@ -401,7 +407,7 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
                   <div
                     style={{
                       fontSize: "0.75rem",
-                      color: "#6B7280",
+                      color: "var(--color-text-muted)",
                       marginTop: "0.25rem",
                     }}
                   >
@@ -421,7 +427,7 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  color: "#6B7280",
+                  color: "var(--color-text-muted)",
                 }}
               >
                 Select a changelist to view the diff

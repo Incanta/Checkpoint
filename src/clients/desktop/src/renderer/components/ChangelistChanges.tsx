@@ -14,6 +14,7 @@ import { ipc } from "../pages/ipc";
 import FileTreeItem, { changeTypeColors } from "./FileTreeItem";
 import type { FileTreeNode } from "./FileTreeItem";
 import { buildFileTree, collectDirPaths } from "./build-file-tree";
+import { Button, EmptyState } from "./ui";
 
 interface ChangelistChangesProps {
   isPopout?: boolean;
@@ -199,38 +200,13 @@ export default function ChangelistChanges({
           : "grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4"
       }
     >
-      <div
-        className="row-span-1 flex items-center space-x-2"
-        style={{
-          backgroundColor: "var(--color-panel)",
-          borderColor: "var(--color-border)",
-          borderWidth: "0 0 1px 0",
-          borderStyle: "solid",
-          padding: "0.3rem",
-        }}
-      >
-        <button
+      <div className="row-span-1 flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={handleBack}
           title="Back to history"
-          style={{
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            padding: "0.3rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: "0.25rem",
-            color: "var(--color-text-secondary)",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-              "#404040";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-              "transparent";
-          }}
+          className="!p-1.5"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -245,43 +221,26 @@ export default function ChangelistChanges({
           >
             <polyline points="15 18 9 12 15 6" />
           </svg>
-        </button>
-        <span>
+        </Button>
+        <span className="text-sm text-[var(--color-text-primary)]">
           Changes in{" "}
-          <span style={{ fontWeight: "bold" }}>
+          <span className="font-semibold">
             CL {changelistChanges.changelistNumber}
           </span>
           {changelistChanges.message && (
-            <span style={{ color: "#9CA3AF" }}>
+            <span className="text-[var(--color-text-muted)]">
               {" "}
               &mdash; {changelistChanges.message}
             </span>
           )}
         </span>
         {!isPopout && (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleOpenInNewWindow}
             title="Open in new window"
-            style={{
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              padding: "0.3rem",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: "0.25rem",
-              color: "var(--color-text-secondary)",
-              marginLeft: "auto",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                "#404040";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                "transparent";
-            }}
+            className="!ml-auto !p-1.5"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -298,7 +257,7 @@ export default function ChangelistChanges({
               <polyline points="15 3 21 3 21 9" />
               <line x1="10" y1="14" x2="21" y2="3" />
             </svg>
-          </button>
+          </Button>
         )}
       </div>
       <div
@@ -315,25 +274,12 @@ export default function ChangelistChanges({
           }}
         >
           <SplitterPanel className="flex flex-col" size={30}>
-            <div
-              className="h-full overflow-y-auto"
-              style={{ backgroundColor: "var(--color-surface)" }}
-            >
+            <div className="h-full overflow-y-auto bg-[var(--color-bg-secondary)]">
               {changelistChanges.files.length === 0 ? (
-                <div className="p-4 text-gray-500 text-center">
-                  No files changed in this changelist
-                </div>
+                <EmptyState title="No files changed in this changelist" />
               ) : (
-                <div style={{ padding: "0.25rem 0" }}>
-                  <div
-                    style={{
-                      padding: "0.4rem 0.75rem",
-                      fontSize: "0.75rem",
-                      color: "#9CA3AF",
-                      borderBottom: "1px solid #374151",
-                      marginBottom: "0.25rem",
-                    }}
-                  >
+                <div className="py-1">
+                  <div className="mb-1 border-b border-[var(--color-border-muted)] px-3 py-1.5 text-xs text-[var(--color-text-muted)]">
                     {changelistChanges.files.length} file
                     {changelistChanges.files.length !== 1 ? "s" : ""} changed
                   </div>
@@ -354,46 +300,17 @@ export default function ChangelistChanges({
           </SplitterPanel>
           <SplitterPanel className="flex flex-col" size={70}>
             {selectedFile && changelistChanges.diffContent ? (
-              <div
-                style={{
-                  height: "100%",
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
-                <div
-                  style={{
-                    backgroundColor: "#252525",
-                    padding: "0.5rem 0.75rem",
-                    borderBottom: "1px solid #374151",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "0.875rem",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
+              <div className="flex h-full flex-col">
+                <div className="flex items-center justify-between border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3 py-2">
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap text-sm text-[var(--color-text-primary)]">
                     {selectedFile.path}
                   </span>
                   <span
+                    className="flex-shrink-0 rounded px-2 py-0.5 text-xs font-bold text-white"
                     style={{
-                      fontSize: "0.7rem",
-                      fontWeight: "bold",
-                      paddingLeft: "0.5rem",
-                      paddingRight: "0.5rem",
-                      paddingTop: "0.125rem",
-                      paddingBottom: "0.125rem",
-                      borderRadius: "0.25rem",
                       backgroundColor:
                         changeTypeColors[selectedFile.changeType] ||
-                        "var(--color-border-lighter)",
-                      flexShrink: 0,
+                        "var(--color-bg-surface)",
                     }}
                   >
                     {selectedFile.changeType}
@@ -402,16 +319,8 @@ export default function ChangelistChanges({
                 <div style={{ flex: 1 }} ref={monacoEl}></div>
               </div>
             ) : (
-              <div
-                style={{
-                  height: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#6B7280",
-                }}
-              >
-                Select a file to view the diff
+              <div className="flex h-full items-center justify-center">
+                <EmptyState title="Select a file to view the diff" />
               </div>
             )}
           </SplitterPanel>

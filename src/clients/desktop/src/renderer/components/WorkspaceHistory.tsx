@@ -5,7 +5,7 @@ import {
   changelistChangesAtom,
   workspaceBranchesAtom,
 } from "../../common/state/workspace";
-import Button from "./Button";
+import { Button } from "./ui";
 import { ipc } from "../pages/ipc";
 import { TreeTable } from "primereact/treetable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -156,7 +156,7 @@ export default function WorkspaceHistory() {
     () => ({
       headerCell: {
         style: {
-          borderColor: "var(--color-border)",
+          borderColor: "var(--color-border-default)",
           borderWidth: "0 1px 0 0",
           borderStyle: "solid",
           paddingLeft: "0.5rem",
@@ -182,7 +182,7 @@ export default function WorkspaceHistory() {
     () => ({
       thead: {
         style: {
-          borderColor: "var(--color-border)",
+          borderColor: "var(--color-border-default)",
           borderWidth: "0 0 1px 0",
           borderStyle: "solid",
           paddingLeft: "0.5rem",
@@ -206,7 +206,7 @@ export default function WorkspaceHistory() {
       resizeHelper: {
         style: {
           width: "0.1rem",
-          backgroundColor: "var(--color-border-lighter)",
+          backgroundColor: "var(--color-border-default)",
         },
       },
       tbody: {
@@ -233,15 +233,15 @@ export default function WorkspaceHistory() {
           root: {
             style: {
               marginTop: "2rem",
-              backgroundColor: "var(--color-panel)",
-              border: "1px solid var(--color-border-light)",
-              borderRadius: "4px",
+              backgroundColor: "var(--color-bg-overlay)",
+              border: "1px solid var(--color-border-default)",
+              borderRadius: "0.5rem",
               minWidth: "200px",
             },
           },
           menu: {
             style: {
-              backgroundColor: "var(--color-panel)",
+              backgroundColor: "var(--color-bg-overlay)",
             },
           },
           menuitem: {
@@ -251,41 +251,34 @@ export default function WorkspaceHistory() {
           },
           action: {
             style: {
-              color: "#e0e0e0",
+              color: "var(--color-text-secondary)",
               padding: "0.5rem 1rem",
               fontSize: "0.875rem",
             },
           },
           separator: {
             style: {
-              borderColor: "var(--color-border-light)",
+              borderColor: "var(--color-border-muted)",
             },
           },
           submenuIcon: {
             style: {
-              color: "#e0e0e0",
+              color: "var(--color-text-secondary)",
             },
           },
         }}
       />
-      <div className="grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4">
-        <div
-          className="row-span-1 space-x-[0.3rem]"
-          style={{
-            backgroundColor: "var(--color-panel)",
-            borderColor: "var(--color-border)",
-            borderWidth: "0 0 1px 0",
-            borderStyle: "solid",
-            padding: "0.3rem",
-          }}
-        >
+      <div className="grid h-full grid-rows-[2.5rem_1fr]">
+        <div className="row-span-1 flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
           <Button
-            className="p-[0.3rem] text-[0.8em]"
-            label="Refresh"
+            variant="secondary"
+            size="sm"
             onClick={() => {
               ipc.sendMessage("workspace:history", null);
             }}
-          />
+          >
+            Refresh
+          </Button>
         </div>
         <div
           className="row-span-1"

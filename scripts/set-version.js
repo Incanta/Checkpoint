@@ -30,6 +30,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
 
 const repoRoot = path.resolve(__dirname, "..");
 const versionsJsonPath = path.join(repoRoot, "versions.json");
@@ -40,6 +41,9 @@ const args = process.argv.slice(2);
 let positional = null;
 let clientArg = null;
 let serverArg = null;
+// When true, skip the post-write rebuild of @checkpointvcs/common. Useful in
+// CI where a full build runs afterward anyway.
+let noBuild = false;
 // Integer API-version flags. null means "leave whatever versions.json has".
 const apiArgs = {
   server_api: null,
@@ -64,6 +68,8 @@ for (let i = 0; i < args.length; i++) {
     clientArg = inlineVal ?? args[++i];
   } else if (flag === "--server") {
     serverArg = inlineVal ?? args[++i];
+  } else if (flag === "--no-build") {
+    noBuild = true;
   } else if (Object.prototype.hasOwnProperty.call(API_FLAGS, flag)) {
     apiArgs[API_FLAGS[flag]] = inlineVal ?? args[++i];
   } else if (!a.startsWith("--")) {
@@ -78,7 +84,8 @@ const anyApiArg = Object.values(apiArgs).some((v) => v != null);
 if (!positional && !clientArg && !serverArg && !anyApiArg) {
   console.error(
     "usage: node scripts/set-version.js <semver> [--client <x>] [--server <x>]\n" +
-      "       [--server-api <n>] [--min-server-api <n>] [--daemon-api <n>] [--min-daemon-api <n>]",
+      "       [--server-api <n>] [--min-server-api <n>] [--daemon-api <n>] [--min-daemon-api <n>]\n" +
+      "       [--no-build]",
   );
   process.exit(1);
 }
@@ -291,6 +298,33 @@ if (newClient) {
   console.log(
     `  Unreal plugin: Version=${nextVersion}, VersionName=${versions.client_version}`,
   );
+}
+
+// ─── Rebuild @checkpointvcs/common ──────────────────────────────────
+// The constants above are written as TypeScript SOURCE. The copy that other
+// workspaces actually import is the compiled output under
+// src/core/common/lib/ (gitignored), which only refreshes when the package
+// is built. Without this step the lib/ output silently drifts: consumers
+// keep reading the previous version until someone rebuilds by hand.
+// Pass --no-build to skip (e.g. in CI, where a full build follows anyway).
+if (!noBuild) {
+  const commonDir = path.join(repoRoot, "src/core/common");
+  console.log("Rebuilding @checkpointvcs/common (lib/ output)...");
+  try {
+    execSync("yarn build", {
+      cwd: commonDir,
+      stdio: "inherit",
+    });
+  } catch (err) {
+    console.error(
+      "WARNING: failed to rebuild @checkpointvcs/common. versions.json and\n" +
+        "the generated sources were updated, but lib/ is now stale. Run\n" +
+        "`yarn build` in src/core/common (or `yarn build` at the repo root)\n" +
+        "before relying on the compiled version constants.",
+    );
+    console.error(err.message);
+    process.exitCode = 1;
+  }
 }
 
 console.log("done");

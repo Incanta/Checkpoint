@@ -42,7 +42,7 @@ export default function ConnectingScreen(): React.ReactElement {
         justifyContent: "center",
         gap: "1.5rem",
         padding: 0,
-        backgroundColor: "var(--color-app-bg)",
+        backgroundColor: "var(--color-bg-primary)",
         color: "var(--color-text-primary)",
         userSelect: "none",
       }}
@@ -63,7 +63,7 @@ export default function ConnectingScreen(): React.ReactElement {
           style={{
             marginTop: "0.35rem",
             fontSize: "0.8rem",
-            color: "#9CA3AF",
+            color: "var(--color-text-muted)",
           }}
         >
           {isConnecting
@@ -79,8 +79,8 @@ export default function ConnectingScreen(): React.ReactElement {
             marginTop: "0.5rem",
             padding: "1rem 1.15rem",
             borderRadius: "0.6rem",
-            border: "1px solid var(--color-border-light)",
-            backgroundColor: "var(--color-panel)",
+            border: "1px solid var(--color-border-default)",
+            backgroundColor: "var(--color-bg-secondary)",
             boxShadow: "0 8px 24px rgba(0, 0, 0, 0.25)",
             animation: "cp-connecting-fade-in 0.3s ease",
             textAlign: "center",
@@ -100,7 +100,7 @@ export default function ConnectingScreen(): React.ReactElement {
               margin: "0.5rem 0 0",
               fontSize: "0.8rem",
               lineHeight: 1.5,
-              color: "#B5B5B5",
+              color: "var(--color-text-secondary)",
             }}
           >
             Make sure the Checkpoint daemon is running. You can start it from
@@ -115,7 +115,7 @@ export default function ConnectingScreen(): React.ReactElement {
               backgroundColor: "transparent",
               border: "none",
               padding: 0,
-              color: "#646cff",
+              color: "var(--color-accent)",
               fontSize: "0.8rem",
               fontWeight: 500,
               cursor: "pointer",

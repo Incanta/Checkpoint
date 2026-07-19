@@ -7,15 +7,14 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { currentUserAtom } from "../../../common/state/auth";
 import { ipc } from "../ipc";
 import Spinner from "../../components/Spinner";
-
-const ACCENT = "#646cff";
+import TitleBar from "../../components/TitleBar";
+import { Button } from "../../components/ui";
 
 export default function Login(): React.ReactElement {
   const [daemonId] = useState(nanoid());
   const user = useAtomValue(currentUserAtom);
   const [url, setUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [focused, setFocused] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const cameFromDashboard =
@@ -45,152 +44,64 @@ export default function Login(): React.ReactElement {
   const isBusy = submitting && !awaitingAuthorization;
 
   return (
-    <div
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "var(--color-app-bg)",
-        color: "var(--color-text-primary)",
-      }}
-    >
-      <div
-        style={{
-          width: "22rem",
-          maxWidth: "calc(100% - 2rem)",
-          padding: "2rem",
-          borderRadius: "0.6rem",
-          border: "1px solid var(--color-border-light)",
-          backgroundColor: "var(--color-panel)",
-          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.25)",
-        }}
-      >
+    <div className="flex h-full w-full flex-col bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
+      <TitleBar />
+      <div className="flex flex-1 items-center justify-center p-4">
+        <div className="w-[22rem] max-w-[calc(100%-2rem)] rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-8 shadow-lg">
         {cameFromDashboard && (
           <button
             onClick={() => navigate("/dashboard")}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.4rem",
-              marginBottom: "1.25rem",
-              padding: 0,
-              border: "none",
-              background: "none",
-              color: "var(--color-text-secondary)",
-              fontSize: "0.8rem",
-              cursor: "pointer",
-            }}
+            className="mb-5 flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-xs text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
           >
             <FontAwesomeIcon icon={faArrowLeft} />
             Back
           </button>
         )}
         {awaitingAuthorization ? (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              textAlign: "center",
-              gap: "1.25rem",
-            }}
-          >
+          <div className="flex flex-col items-center gap-5 text-center">
             <Spinner size={40} />
             <div>
-              <div style={{ fontSize: "1.05rem", fontWeight: 600 }}>
+              <div className="text-base font-semibold">
                 Authorize this device
               </div>
-              <p
-                style={{
-                  margin: "0.4rem 0 0",
-                  fontSize: "0.8rem",
-                  lineHeight: 1.5,
-                  color: "#9CA3AF",
-                }}
-              >
+              <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-text-secondary)]">
                 Open the authorization page and confirm the code below to finish
                 signing in.
               </p>
             </div>
 
-            <div
-              style={{
-                width: "100%",
-                padding: "0.85rem",
-                borderRadius: "0.45rem",
-                backgroundColor: "var(--color-surface)",
-                border: "1px solid var(--color-border)",
-                fontFamily:
-                  "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                fontSize: "1.4rem",
-                fontWeight: 600,
-                letterSpacing: "0.25em",
-                userSelect: "text",
-              }}
-            >
+            <div className="w-full select-text rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3.5 font-mono text-2xl font-semibold tracking-[0.25em]">
               {user?.auth?.code}
             </div>
 
-            <button
+            <Button
+              className="w-full"
               onClick={() => {
                 if (user?.auth?.url) {
                   ipc.sendMessage("app:open-external", { url: user.auth.url });
                 }
               }}
-              style={{
-                width: "100%",
-                padding: "0.6rem",
-                border: "none",
-                borderRadius: "0.4rem",
-                backgroundColor: ACCENT,
-                color: "#fff",
-                fontSize: "0.85rem",
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
             >
               Open authorization page
-            </button>
+            </Button>
 
-            <div style={{ fontSize: "0.75rem", color: "#9CA3AF" }}>
+            <div className="text-xs text-[var(--color-text-muted)]">
               Waiting for confirmation in your browser…
             </div>
           </div>
         ) : (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "1.25rem",
-            }}
-          >
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: "1.15rem", fontWeight: 600 }}>
-                Sign in to Checkpoint
-              </div>
-              <p
-                style={{
-                  margin: "0.4rem 0 0",
-                  fontSize: "0.8rem",
-                  lineHeight: 1.5,
-                  color: "#9CA3AF",
-                }}
-              >
+          <div className="flex flex-col gap-5">
+            <div className="text-center">
+              <div className="text-lg font-semibold">Sign in to Checkpoint</div>
+              <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-text-secondary)]">
                 Connect to your Checkpoint server to get started.
               </p>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column" }}>
+            <div className="flex flex-col">
               <label
                 htmlFor="login-server-url"
-                style={{
-                  fontSize: "0.75rem",
-                  fontWeight: 500,
-                  color: "var(--color-text-secondary)",
-                  marginBottom: "0.4rem",
-                }}
+                className="mb-1.5 text-xs font-medium text-[var(--color-text-secondary)]"
               >
                 Server URL
               </label>
@@ -202,54 +113,26 @@ export default function Login(): React.ReactElement {
                 disabled={isBusy}
                 autoFocus
                 onChange={(e) => setUrl(e.target.value)}
-                onFocus={() => setFocused(true)}
-                onBlur={() => setFocused(false)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     handleSignIn();
                   }
                 }}
-                style={{
-                  width: "100%",
-                  padding: "0.6rem 0.75rem",
-                  borderRadius: "0.4rem",
-                  border: `1px solid ${
-                    focused ? ACCENT : "var(--color-border-light)"
-                  }`,
-                  backgroundColor: "var(--color-surface)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.85rem",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
+                className="w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-accent)]"
               />
             </div>
 
-            <button
+            <Button
+              className="w-full"
               onClick={handleSignIn}
               disabled={isBusy || url.trim().length === 0}
-              style={{
-                width: "100%",
-                padding: "0.6rem",
-                border: "none",
-                borderRadius: "0.4rem",
-                backgroundColor: ACCENT,
-                color: "#fff",
-                fontSize: "0.85rem",
-                fontWeight: 600,
-                cursor: isBusy ? "default" : "pointer",
-                opacity: isBusy || url.trim().length === 0 ? 0.6 : 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "0.5rem",
-              }}
             >
               {isBusy && <Spinner size={16} thickness={2} />}
               {isBusy ? "Connecting…" : "Sign in"}
-            </button>
+            </Button>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
