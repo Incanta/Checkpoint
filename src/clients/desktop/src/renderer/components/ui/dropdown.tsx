@@ -80,5 +80,5 @@ export function DropdownItem({
 }
 
 export function DropdownDivider(): React.ReactElement {
-  return <div className="my-1 border-t border-[var(--color-border-default)]" />;
+  return <div className="my-1 border-t" style={{ borderColor: "#4e5658" }} />;
 }
