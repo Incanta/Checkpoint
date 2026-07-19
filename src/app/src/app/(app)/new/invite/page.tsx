@@ -233,7 +233,9 @@ export default function NewInvitePage() {
                             className="rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-2 py-1 text-xs text-[var(--color-text-primary)] outline-none"
                           >
                             <option value="MEMBER">Member</option>
-                            <option value="BILLING">Billing</option>
+                            {cap?.isLicenseManager && (
+                              <option value="BILLING">Billing</option>
+                            )}
                             <option value="ADMIN">Admin</option>
                           </select>
                         )}

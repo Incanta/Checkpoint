@@ -9,6 +9,7 @@ import {
 } from "~/server/api/trpc";
 import { getCheckpointUser } from "~/server/api/auth-utils";
 import { getInviteMode, normalizeEmail } from "~/server/invites";
+import { isLicenseManager } from "~/server/license-utils";
 import { sendEmail, isEmailEnabled, inviteToSignupEmail } from "~/server/email";
 import { Logger } from "~/server/logging";
 import type { PrismaClient } from "@prisma/client";
@@ -89,7 +90,9 @@ export const inviteRouter = createTRPCRouter({
     const mode = getInviteMode();
     const user = await getCheckpointUser(ctx);
     const canInvite = mode === "admin" ? user.checkpointAdmin : true;
-    return { canInvite, mode };
+    // The BILLING org role only makes sense on license-manager instances; the
+    // UI uses this to hide it as a grantable option elsewhere.
+    return { canInvite, mode, isLicenseManager: isLicenseManager() };
   }),
 
   /**
@@ -236,6 +239,18 @@ export const inviteRouter = createTRPCRouter({
           code: "CONFLICT",
           message: "There is already a pending invite for that email",
         });
+      }
+
+      // The BILLING org role is only meaningful on license-manager instances.
+      if (!isLicenseManager()) {
+        for (const orgRole of input.orgRoles) {
+          if (orgRole.role === "BILLING") {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "The Billing role is not available on this instance",
+            });
+          }
+        }
       }
 
       // Validate the requested grants against what this user may bestow.
