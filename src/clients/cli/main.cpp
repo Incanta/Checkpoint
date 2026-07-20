@@ -118,7 +118,24 @@ int main(int argc, char** argv) {
   // pull
   argparse::ArgumentParser pullCmd("pull");
   pullCmd.add_description("Sync changes from remote");
+  pullCmd.add_argument("--changelist", "-c")
+      .help("Sync to a specific changelist number instead of the branch head")
+      .scan<'i', int>();
   pullCmd.add_argument("--no-progress")
+      .help("Disable the progress bar (also skips progress callbacks entirely)")
+      .default_value(false)
+      .implicit_value(true);
+
+  // clean
+  argparse::ArgumentParser cleanCmd("clean");
+  cleanCmd.add_description(
+      "Restore the workspace to a pristine copy of its current changelist "
+      "(reverts modified files, removes untracked files, releases checkouts)");
+  cleanCmd.add_argument("--yes", "-y")
+      .help("Skip the confirmation prompt (for CI/automation)")
+      .default_value(false)
+      .implicit_value(true);
+  cleanCmd.add_argument("--no-progress")
       .help("Disable the progress bar (also skips progress callbacks entirely)")
       .default_value(false)
       .implicit_value(true);
@@ -176,6 +193,13 @@ int main(int argc, char** argv) {
       .help("Repository in orgName/repoName format (interactive if omitted)")
       .default_value(std::string(""))
       .nargs(argparse::nargs_pattern::optional);
+  initCmd.add_argument("--branch", "-b")
+      .help("Branch to base the workspace on (default: main)")
+      .default_value(std::string("main"));
+  initCmd.add_argument("--account")
+      .help("Account email or username to use when multiple accounts are "
+            "logged in (avoids the interactive picker; useful for CI)")
+      .default_value(std::string(""));
 
   // unlink
   argparse::ArgumentParser unlinkCmd("unlink");
@@ -286,6 +310,7 @@ int main(int argc, char** argv) {
   program.add_subparser(restoreCmd);
   program.add_subparser(submitCmd);
   program.add_subparser(pullCmd);
+  program.add_subparser(cleanCmd);
   program.add_subparser(logCmd);
   program.add_subparser(branchCmd);
   program.add_subparser(switchCmd);
@@ -328,6 +353,8 @@ int main(int argc, char** argv) {
         std::cerr << submitCmd;
       } else if (cmd == "pull") {
         std::cerr << pullCmd;
+      } else if (cmd == "clean") {
+        std::cerr << cleanCmd;
       } else if (cmd == "log") {
         std::cerr << logCmd;
       } else if (cmd == "branch") {
@@ -409,7 +436,14 @@ int main(int argc, char** argv) {
     }
 
     if (program.is_subcommand_used(pullCmd)) {
-      return checkpoint::cmdPull(pullCmd.get<bool>("--no-progress"));
+      auto changelist = pullCmd.present<int>("--changelist");
+      return checkpoint::cmdPull(pullCmd.get<bool>("--no-progress"),
+                                 changelist);
+    }
+
+    if (program.is_subcommand_used(cleanCmd)) {
+      return checkpoint::cmdClean(cleanCmd.get<bool>("--no-progress"),
+                                  cleanCmd.get<bool>("--yes"));
     }
 
     if (program.is_subcommand_used(logCmd)) {
@@ -449,7 +483,9 @@ int main(int argc, char** argv) {
 
     if (program.is_subcommand_used(initCmd)) {
       auto repo = initCmd.get<std::string>("repo");
-      return checkpoint::cmdInit(repo);
+      auto branch = initCmd.get<std::string>("--branch");
+      auto account = initCmd.get<std::string>("--account");
+      return checkpoint::cmdInit(repo, branch, account);
     }
 
     if (program.is_subcommand_used(unlinkCmd)) {

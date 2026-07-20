@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    Path to an Unreal Engine checkout containing the Horde source this plugin builds against.
+    Set the HORDE_ENGINE_DIR environment variable (or pass -p:HordeEngineDir=...) to point at
+    the engine root, e.g. E:/epic/engine/UE_Incanta. Only projects that reference Horde/EpicGames
+    assemblies need it; Checkpoint.Api builds standalone.
+  -->
+  <PropertyGroup>
+    <HordeEngineDir Condition="'$(HordeEngineDir)' == ''">$(HORDE_ENGINE_DIR)</HordeEngineDir>
+    <HordeSourceDir>$(HordeEngineDir)\Engine\Source\Programs\Horde</HordeSourceDir>
+    <HordeSharedDir>$(HordeEngineDir)\Engine\Source\Programs\Shared</HordeSharedDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+</Project>

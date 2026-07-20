@@ -6,10 +6,6 @@ sidebar_position: 2
 
 This guide gets you from zero to a working Checkpoint setup using the official released artifacts: a self-hosted server (via Docker Compose) and the desktop client (from the GitHub Releases installers).
 
-:::info Self-hosting is free and fully featured
-Self-hosted Checkpoint instances have access to all features with no license required. You only need a license/subscription if you use Incanta's hosted cloud offering.
-:::
-
 Checkpoint has two pieces:
 
 - **The server**: the app (web UI + API) plus the core storage server. You run this once, somewhere your team can reach it.
@@ -88,10 +84,10 @@ Once it's healthy, open `http://YOUR_HOST:13000` in a browser and create your fi
 
 Each team member installs the desktop client from the **[latest GitHub Release](https://github.com/Incanta/Checkpoint/releases/latest)**. Download the installer for your platform:
 
-| Platform | Asset                          |
-| -------- | ------------------------------ |
-| Windows  | `.exe` installer               |
-| macOS    | `.pkg` installer               |
+| Platform | Asset                                          |
+| -------- | ---------------------------------------------- |
+| Windows  | `.exe` installer                               |
+| macOS    | `.pkg` installer                               |
 | Linux    | `.deb` (Debian/Ubuntu) or `.rpm` (Fedora/RHEL) |
 
 The installer includes the desktop app, the `checkpoint` (`chk`) CLI, the background sync daemon, and the tray app.

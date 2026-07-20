@@ -740,7 +740,8 @@ inline int cmdSubmit(const std::string& message, bool noProgress = false) {
 //  COMMAND: pull (sync changes down)
 // ═════════════════════════════════════════════════════════════════
 
-inline int cmdPull(bool noProgress = false) {
+inline int cmdPull(bool noProgress = false,
+                   std::optional<int> changelist = std::nullopt) {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
@@ -758,19 +759,33 @@ inline int cmdPull(bool noProgress = false) {
     from_json(syncResult, syncStatus);
   }
 
-  if (syncStatus.upToDate) {
-    std::cout << "Already up to date." << std::endl;
-    return 0;
+  if (changelist.has_value()) {
+    // Targeted sync: only skip the pull when we're already exactly at the
+    // requested changelist (upToDate refers to the branch head, not the target)
+    if (syncStatus.localChangelistNumber == changelist.value()) {
+      std::cout << "Already at changelist #" << changelist.value() << "."
+                << std::endl;
+      return 0;
+    }
+    std::cout << "Syncing to changelist #" << changelist.value() << "..."
+              << std::endl;
+  } else {
+    if (syncStatus.upToDate) {
+      std::cout << "Already up to date." << std::endl;
+      return 0;
+    }
+
+    std::cout << "Pulling " << syncStatus.changelistsBehind
+              << " changelist(s) from remote..." << std::endl;
   }
 
-  std::cout << "Pulling " << syncStatus.changelistsBehind
-            << " changelist(s) from remote..." << std::endl;
-
-  // Pull all changes (null changelistId = pull all, null filePaths = all files)
+  // Pull changes (null changelistId = pull to head, null filePaths = all files)
   nlohmann::json pullInput = {
       {"daemonId", ws.daemonId},
       {"workspaceId", ws.id},
-      {"changelistId", nullptr},
+      {"changelistId",
+       changelist.has_value() ? nlohmann::json(changelist.value())
+                              : nlohmann::json(nullptr)},
       {"filePaths", nullptr},
       {"noProgress", noProgress},
   };
@@ -819,7 +834,83 @@ inline int cmdPull(bool noProgress = false) {
     }
   }
 
-  std::cout << "Updated to changelist #" << syncStatus.remoteHeadNumber << "." << std::endl;
+  std::cout << "Updated to changelist #"
+            << (changelist.has_value() ? changelist.value()
+                                       : syncStatus.remoteHeadNumber)
+            << "." << std::endl;
+
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: clean (restore pristine workspace state)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdClean(bool noProgress = false, bool autoYes = false) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  if (!autoYes) {
+    std::cout << color::yellow() << color::bold()
+              << "This will restore the workspace to a pristine copy of its "
+                 "current changelist:"
+              << color::reset() << std::endl;
+    std::cout << "  - local modifications to tracked files are reverted"
+              << std::endl;
+    std::cout << "  - untracked files and directories are DELETED" << std::endl;
+    std::cout << "  - checkouts held by this workspace are released"
+              << std::endl;
+    std::cout << std::endl;
+    std::cout << "Type " << color::bold() << "YES" << color::reset()
+              << " to continue: ";
+    std::cout.flush();
+    std::string input;
+    std::getline(std::cin, input);
+    if (input != "YES") {
+      std::cout << "Cancelled." << std::endl;
+      return 1;
+    }
+  }
+
+  std::cout << "Cleaning workspace (reverting local changes and removing "
+               "untracked files)..."
+            << std::endl;
+
+  nlohmann::json cleanInput = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"noProgress", noProgress},
+  };
+
+  auto cleanResult = client.mutate("workspaces.sync.clean", cleanInput);
+
+  std::string jobId = cleanResult.value("jobId", "");
+  if (jobId.empty()) {
+    std::cerr << "error: No job ID returned from clean." << std::endl;
+    return 1;
+  }
+
+  auto jobResult = pollJob(client, jobId, !noProgress);
+
+  if (jobResult.status == "failed") {
+    std::cerr << color::red() << "error: " << jobResult.error
+              << color::reset() << std::endl;
+    return 1;
+  }
+
+  int restored = 0;
+  int deleted = 0;
+  if (!jobResult.result.is_null()) {
+    restored = jobResult.result.value("restoredFiles", 0);
+    deleted = jobResult.result.value("deletedFiles", 0);
+  }
+
+  std::cout << color::green() << color::bold() << "Clean complete."
+            << color::reset() << std::endl;
+  std::cout << color::dim() << "  Restored: " << restored
+            << " file(s), removed: " << deleted << " file(s)."
+            << color::reset() << std::endl;
 
   return 0;
 }
@@ -1250,7 +1341,9 @@ inline int cmdDiff(const std::string& file) {
 //  COMMAND: init (initialize a workspace)
 // ═════════════════════════════════════════════════════════════════
 
-inline int cmdInit(const std::string& repoArg) {
+inline int cmdInit(const std::string& repoArg,
+                   const std::string& branchName = "main",
+                   const std::string& accountArg = "") {
   fs::path cwd = fs::current_path();
 
   // Check if workspace already exists
@@ -1284,7 +1377,22 @@ inline int cmdInit(const std::string& repoArg) {
   }
 
   User user;
-  if (users.size() == 1) {
+  if (!accountArg.empty()) {
+    // Non-interactive account selection by email or username (for CI)
+    bool found = false;
+    for (auto& u : users) {
+      if (u.email == accountArg || u.username == accountArg) {
+        user = u;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      std::cerr << color::red() << "error: no logged-in account matches '"
+                << accountArg << "'." << color::reset() << std::endl;
+      return 1;
+    }
+  } else if (users.size() == 1) {
     user = users[0];
   } else {
     // Multiple accounts, prompt user to select
@@ -1440,7 +1548,7 @@ inline int cmdInit(const std::string& repoArg) {
       {"name", workspaceName},
       {"repoId", selectedRepoId},
       {"path", localPath},
-      {"defaultBranchName", "main"},
+      {"defaultBranchName", branchName.empty() ? "main" : branchName},
   };
 
   auto result = client.mutate("workspaces.ops.create", createInput);

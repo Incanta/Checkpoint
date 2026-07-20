@@ -1,10 +1,17 @@
 import { publicProcedure, router } from "../../trpc.js";
 import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
+import fs from "fs/promises";
+import path from "path";
 
-import { pull, checkConflicts } from "../../../util/index.js";
+import {
+  pull,
+  checkConflicts,
+  readFileFromChangelist,
+} from "../../../util/index.js";
 import { TRPCError } from "@trpc/server";
 import { ApiTypes } from "../../../types/api-types.js";
+import { FileStatus, FileType } from "../../../types/index.js";
 import { Logger } from "../../../logging.js";
 import { JobManager } from "../../../job-manager.js";
 
@@ -53,7 +60,7 @@ export const syncRouter = router({
         }`,
       );
 
-      // Check for conflicts before pulling (sync — fail fast)
+      // Check for conflicts before pulling (sync, fail fast)
       const pendingChanges = manager.workspacePendingChanges.get(workspace.id);
       if (pendingChanges && pendingChanges.numChanges > 0) {
         Logger.debug(
@@ -140,6 +147,177 @@ export const syncRouter = router({
         } catch (e: any) {
           Logger.error(
             `Pull failed for workspace ${workspace.name}: ${e.message}`,
+          );
+          jobManager.failJob(job.id, e.message ?? String(e));
+        } finally {
+          await manager.endVcsOperation(workspace.id);
+        }
+      })();
+
+      return { jobId: job.id };
+    }),
+
+  /**
+   * Restores the workspace to a pristine copy of its current changelist:
+   * locally modified/deleted tracked files are re-downloaded, untracked files
+   * and directories are removed, marks-for-add are cleared, and checkouts held
+   * by this workspace are released. Used by CI (e.g. the Horde agent conform
+   * step) via `checkpoint clean`.
+   */
+  clean: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        noProgress: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = ctx.manager;
+      const workspaces = manager.workspaces.get(input.daemonId);
+
+      if (!workspaces) {
+        throw new Error(
+          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+        );
+      }
+
+      const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      const jobManager = JobManager.Get();
+      const job = jobManager.createJob("clean");
+
+      const reportProgress = !input.noProgress;
+
+      // Fire-and-forget: run the clean in the background
+      (async () => {
+        manager.beginVcsOperation(workspace.id);
+        try {
+          if (reportProgress) {
+            jobManager.updateStep(job.id, "Scanning workspace for changes");
+          }
+          const pending = await manager.refreshWorkspaceContents(workspace, {
+            forceFullRefresh: true,
+          });
+          const state = manager.getWorkspaceState(workspace.id);
+
+          // Statuses that never require touching the file on disk
+          const skipStatuses = new Set<FileStatus>([
+            FileStatus.Unknown,
+            FileStatus.NotInWorkspaceRoot,
+            FileStatus.Ignored,
+            FileStatus.HiddenChanges,
+            FileStatus.Artifact,
+            FileStatus.ReadOnlyControlled,
+            FileStatus.WritableControlled,
+          ]);
+
+          let deletedFiles = 0;
+          let restoredFiles = 0;
+          const errors: Array<{ path: string; error: string }> = [];
+
+          const entries = Object.values(pending.files);
+          if (reportProgress) {
+            jobManager.updateStep(job.id, "Cleaning workspace");
+          }
+
+          let done = 0;
+          for (const file of entries) {
+            const localFilePath = path.join(workspace.localPath, file.path);
+            const tracked = state?.files[file.path];
+
+            try {
+              if (!skipStatuses.has(file.status)) {
+                if (tracked && tracked.changelist) {
+                  if (file.status !== FileStatus.NotChangedCheckedOut) {
+                    // Tracked file that was modified or deleted locally:
+                    // restore the pristine copy for the workspace's CL
+                    const result = await readFileFromChangelist({
+                      workspace: {
+                        daemonId: input.daemonId,
+                        repoId: workspace.repoId,
+                        localPath: workspace.localPath,
+                      },
+                      filePath: file.path,
+                      changelistNumber: tracked.changelist,
+                    });
+                    await fs.mkdir(path.dirname(localFilePath), {
+                      recursive: true,
+                    });
+                    await fs.copyFile(result.cachePath, localFilePath);
+                    restoredFiles++;
+                  }
+                } else {
+                  // Untracked file, marked-for-add file, or untracked
+                  // directory entry: remove it from disk entirely
+                  await fs.rm(localFilePath, {
+                    recursive: file.type === FileType.Directory,
+                    force: true,
+                  });
+                  deletedFiles++;
+                }
+              }
+
+              // Release any checkout this workspace holds on the file
+              if (
+                file.checkouts.length > 0 ||
+                file.status === FileStatus.ChangedCheckedOut ||
+                file.status === FileStatus.NotChangedCheckedOut
+              ) {
+                try {
+                  await client.file.undoCheckout.mutate({
+                    repoId: workspace.repoId,
+                    workspaceId: workspace.id,
+                    filePath: file.path,
+                  });
+                } catch {
+                  // Not checked out by this workspace; nothing to release
+                }
+              }
+            } catch (e: any) {
+              errors.push({
+                path: file.path,
+                error: e?.message ?? String(e),
+              });
+            }
+
+            done++;
+            if (reportProgress) {
+              jobManager.updateProgress(job.id, done, entries.length);
+            }
+          }
+
+          // Clear all marks-for-add
+          const markedForAdd = manager.getMarkedForAdd(workspace.id);
+          if (markedForAdd.size > 0) {
+            await manager.unmarkForAdd(workspace, [...markedForAdd]);
+          }
+
+          // Invalidate cached pending/sync state so the next query rescans
+          manager.workspacePendingChanges.delete(workspace.id);
+          manager.clearSyncStatus(workspace.id);
+
+          Logger.info(
+            `Clean completed for workspace ${workspace.name}: restored ${restoredFiles}, deleted ${deletedFiles}, errors ${errors.length}`,
+          );
+
+          if (errors.length > 0) {
+            jobManager.failJob(
+              job.id,
+              `Clean finished with ${errors.length} error(s); first error (${errors[0].path}): ${errors[0].error}`,
+            );
+          } else {
+            jobManager.completeJob(job.id, { restoredFiles, deletedFiles });
+          }
+        } catch (e: any) {
+          Logger.error(
+            `Clean failed for workspace ${workspace.name}: ${e.message}`,
           );
           jobManager.failJob(job.id, e.message ?? String(e));
         } finally {

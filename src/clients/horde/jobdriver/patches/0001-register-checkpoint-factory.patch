@@ -1,0 +1,9 @@
+Documentation of the change build.ps1 applies to DriverApp.cs (applied in-place at build
+time via anchored replacement, then reverted; this file is for review, not for git apply).
+
+--- a/Drivers/JobDriver/DriverApp.cs
++++ b/Drivers/JobDriver/DriverApp.cs
+@@
+ 			services.AddSingleton<IWorkspaceMaterializerFactory, ManagedWorkspaceMaterializerFactory>();
+ 			services.AddSingleton<IWorkspaceMaterializerFactory, PerforceMaterializerFactory>();
++			services.AddSingleton<IWorkspaceMaterializerFactory, CheckpointMaterializerFactory>();

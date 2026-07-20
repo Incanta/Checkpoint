@@ -420,7 +420,7 @@ export async function pull(
       onProgress?.("Updating artifact state", 0, artTotal);
 
       if (artFilesToHash.length > 0) {
-        // Stat files in parallel — hashes are deferred until change detection
+        // Stat files in parallel; hashes are deferred until change detection
         // actually needs them (size+mtime baseline is sufficient).
         const artStatResults = await Promise.all(
           artFilesToHash.map(async (entry) => {
@@ -461,6 +461,94 @@ export async function pull(
         }
         deletedCount++;
         onProgress?.("Deleting removed files", deletedCount, deleteTotal);
+      }
+    }
+
+    // ─── Downgrade correction pass ──────────────────────────────────
+    // When syncing BACKWARD (target < current), the version indices applied
+    // above can overwrite paths with stale content: a pulled CL B may have
+    // touched a path whose target-state reference is a newer CL C that is not
+    // itself in the pull set (only possible for paths unchanged between the
+    // two states). Forward pulls cannot hit this (every pulled CL is newer
+    // than the previous state, so any path it touches is a changed path whose
+    // target reference is >= that CL). Detect such paths by computing the
+    // last pulled writer per path and restore the ones whose last writer is
+    // not the CL the target state references. Stray paths written by a pulled
+    // index but absent from the target state entirely are removed.
+    const isDowngrade =
+      changelistResponse.number < workspaceState.changelistNumber;
+    if (isDowngrade && sortedChangelists.length > 0) {
+      onStep?.("Verifying downgraded files");
+
+      // Expected per-path reference in the TARGET state: unchanged paths keep
+      // the previous state's reference; changed paths come from the diff.
+      const expectedCl = new Map<string, number>();
+      for (const [p, f] of Object.entries(workspaceState.files)) {
+        expectedCl.set(p, f.changelist);
+      }
+      for (const removedPath of diff.removed) {
+        expectedCl.delete(removedPath);
+      }
+      for (const change of [...diff.added, ...diff.modified]) {
+        expectedCl.set(change.path, change.cl);
+      }
+
+      // Last pulled CL that wrote each path (ascending apply order, so the
+      // newest pulled writer is what's on disk now)
+      const lastWriter = new Map<string, number>();
+      for (const cl of sortedChangelists) {
+        const clFiles = await client.changelist.getChangelistFiles.query({
+          repoId: workspace.repoId,
+          changelistNumber: (cl as any).number,
+        });
+        for (const f of clFiles) {
+          if (f.changeType === "DELETE") continue;
+          const normalized = f.path.replace(/^\//, "").replace(/\\/g, "/");
+          lastWriter.set(normalized, (cl as any).number);
+        }
+      }
+
+      const toRestore: Array<{ relativePath: string; cl: number }> = [];
+      const toRemove: string[] = [];
+      for (const [p, writer] of lastWriter) {
+        const expected = expectedCl.get(p);
+        if (expected === undefined) {
+          toRemove.push(p);
+        } else if (expected !== writer) {
+          toRestore.push({ relativePath: p, cl: expected });
+        }
+      }
+
+      if (toRestore.length > 0 || toRemove.length > 0) {
+        Logger.info(
+          `Downgrade correction: restoring ${toRestore.length} file(s), removing ${toRemove.length} stray file(s)`,
+        );
+
+        for (const strayPath of toRemove) {
+          const fullPath = path.join(workspace.localPath, strayPath);
+          if (existsSync(fullPath)) {
+            await fs.rm(fullPath, { force: true });
+          }
+        }
+
+        let restoredCount = 0;
+        onProgress?.("Verifying downgraded files", 0, toRestore.length);
+        for (const entry of toRestore) {
+          const result = await readFileFromChangelist({
+            workspace,
+            filePath: entry.relativePath,
+            changelistNumber: entry.cl,
+          });
+          const fullPath = path.join(workspace.localPath, entry.relativePath);
+          await fs.mkdir(path.dirname(fullPath), { recursive: true });
+          await fs.copyFile(result.cachePath, fullPath);
+          restoredCount++;
+          onProgress?.(
+            "Verifying downgraded files",
+            restoredCount,
+            toRestore.length,
+          );
+        }
       }
     }
 
@@ -589,7 +677,7 @@ export async function pull(
     throw new Error("Pull failed: " + lastStep);
   }
 
-  // Should not reach here — errored throws above, and !errored returns above
+  // Should not reach here: errored throws above, and !errored returns above
   return { cleanMerges: [], conflictMerges: [] };
 }
 
@@ -605,7 +693,7 @@ export async function pull(
  * @param workspace  - The workspace to operate on
  * @param orgId      - Organisation ID (unused here but kept for API consistency)
  * @param submitPaths - Normalised relative paths the user is about to submit
- * @returns Merge result — if `conflictMerges` is non-empty the caller should
+ * @returns Merge result; if `conflictMerges` is non-empty the caller should
  *          block the submit.
  */
 export async function pullTextFilesForSubmit(
@@ -637,7 +725,7 @@ export async function pullTextFilesForSubmit(
 
   const remoteHeadNumber = branchResponse.headNumber;
 
-  // Already at head — nothing to do
+  // Already at head, nothing to do
   if (workspaceState.changelistNumber === remoteHeadNumber) {
     return { cleanMerges: [], conflictMerges: [] };
   }
@@ -758,7 +846,7 @@ export async function pullTextFilesForSubmit(
     }
   }
 
-  // Save workspace state with patched file entries — head CL is NOT changed
+  // Save workspace state with patched file entries; head CL is NOT changed
   await saveWorkspaceState(workspace, workspaceState, textPullBackend);
 
   return mergeResult;

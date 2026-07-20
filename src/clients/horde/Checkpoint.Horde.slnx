@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Checkpoint.Api/Checkpoint.Api.csproj" />
+    <Project Path="src/HordeServer.Checkpoint/HordeServer.Checkpoint.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Checkpoint.Api.Tests/Checkpoint.Api.Tests.csproj" />
+    <Project Path="tests/Checkpoint.Integration.Tests/Checkpoint.Integration.Tests.csproj" />
+  </Folder>
+</Solution>

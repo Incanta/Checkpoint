@@ -1,0 +1,30 @@
+Documentation of the change build.ps1 applies to Execution/ConformExecutor.cs (applied
+in-place at build time via anchored replacement, then reverted; for review, not git apply).
+
+Checkpoint workspaces would otherwise land in the "managed workspace" bucket and be conformed
+through PerforceExecutor.ConformAsync (real p4 operations, which fail against the Checkpoint
+pseudo-cluster). This routes them through the generic materializer-based conform instead, which
+resolves CheckpointWorkspaceMaterializer by the Method name and calls its ConformAsync.
+
+--- a/Drivers/JobDriver/Execution/ConformExecutor.cs
++++ b/Drivers/JobDriver/Execution/ConformExecutor.cs
+@@
++				List<RpcAgentWorkspace> checkpointWorkspaces = pendingWorkspaces
++					.Where(x => String.Equals(PerforceExecutor.GetMaterializerName(x.Method), CheckpointWorkspaceMaterializer.TypeName, StringComparison.OrdinalIgnoreCase))
++					.ToList();
++
+ 				List<RpcAgentWorkspace> managedWorkspaces = pendingWorkspaces
+ 					.Where(x => !String.Equals(PerforceExecutor.GetMaterializerName(x.Method), PerforceExecutor.Name, StringComparison.OrdinalIgnoreCase))
++					.Where(x => !checkpointWorkspaces.Contains(x))
+ 					.ToList();
+@@
+ 					if (perforceWorkspaces.Count > 0)
+ 					{
+ 						_logger.LogInformation("Conforming PerforceMaterializers...");
+ 						await PerforceExecutor.ConformMaterializersAsync(_materializerFactories, _workingDir, perforceWorkspaces, removeUntrackedFiles, workspaceMetadataDirs, _tracer, _logger, cancellationToken);
+ 					}
++					if (checkpointWorkspaces.Count > 0)
++					{
++						_logger.LogInformation("Conforming Checkpoint workspaces...");
++						await PerforceExecutor.ConformMaterializersAsync(_materializerFactories, _workingDir, checkpointWorkspaces, removeUntrackedFiles, workspaceMetadataDirs, _tracer, _logger, cancellationToken);
++					}

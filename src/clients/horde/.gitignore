@@ -1,0 +1,5 @@
+bin/
+obj/
+artifacts/
+jobdriver/work/
+*.user

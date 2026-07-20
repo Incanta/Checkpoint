@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- The assembly name must match the server's HordeServer.*.dll plugin scan pattern. -->
+    <AssemblyName>HordeServer.Checkpoint</AssemblyName>
+    <RootNamespace>HordeServer</RootNamespace>
+    <Description>Checkpoint version control plugin for the Unreal Horde server</Description>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="CheckHordeEngineDir" BeforeTargets="Restore;CollectPackageReferences;BeforeBuild">
+    <Error Condition="'$(HordeEngineDir)' == '' OR !Exists('$(HordeSourceDir)')"
+           Text="HordeEngineDir is not set or does not contain Horde source. Set the HORDE_ENGINE_DIR environment variable to an Unreal Engine checkout root (e.g. E:/epic/engine/UE_Incanta)." />
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Checkpoint.Api\Checkpoint.Api.csproj" />
+  </ItemGroup>
+
+  <!--
+    Horde/EpicGames assemblies are provided by the server at runtime; Private=false keeps them
+    out of our output folder so the release artifact is only HordeServer.Checkpoint.dll and
+    Checkpoint.Api.dll.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="$(HordeSharedDir)\EpicGames.Core\EpicGames.Core.csproj" Private="false" />
+    <ProjectReference Include="$(HordeSharedDir)\EpicGames.Horde\EpicGames.Horde.csproj" Private="false" />
+    <ProjectReference Include="$(HordeSourceDir)\HordeServer.Shared\HordeServer.Shared.csproj" Private="false" />
+    <ProjectReference Include="$(HordeSourceDir)\Plugins\Build\HordeServer.Build\HordeServer.Build.csproj" Private="false" />
+    <ProjectReference Include="$(HordeSourceDir)\Plugins\Compute\HordeServer.Compute\HordeServer.Compute.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>

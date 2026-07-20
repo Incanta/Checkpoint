@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Checkpoint.Api</RootNamespace>
+    <Description>Checkpoint version control HTTP API client (tRPC + superjson wire format)</Description>
+    <!--
+      This assembly is loaded into the Horde server's default assembly load context alongside
+      Epic's own dependencies. It must not pull in any NuGet packages that could collide with
+      DLLs the server already ships, so it depends only on the shared framework.
+    -->
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>
