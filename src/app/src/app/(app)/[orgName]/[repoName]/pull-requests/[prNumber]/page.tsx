@@ -2,36 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import type { Options as MdOptions } from "react-markdown";
-import type RemarkGfm from "remark-gfm";
 import { api, type RouterOutputs } from "~/trpc/react";
 import { Button, Card, Badge, Avatar, EmptyState } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
+import { useIssueLinker } from "~/app/_hooks/use-issue-linker";
+import { MarkdownContent } from "~/app/_components/markdown";
 import { useSession } from "~/lib/auth-client";
 import { diffLines } from "diff";
-
-// ── Markdown renderer (lazy-loaded) ─────────────────────────────
-function MarkdownContent({ content }: { content: string }) {
-  const [Md, setMd] = useState<React.ComponentType<MdOptions> | null>(null);
-  const [remarkGfm, setRemarkGfm] = useState<typeof RemarkGfm | null>(null);
-
-  useEffect(() => {
-    void Promise.all([import("react-markdown"), import("remark-gfm")]).then(
-      ([md, gfm]) => {
-        setMd(() => md.default);
-        setRemarkGfm(() => gfm.default);
-      },
-    );
-  }, []);
-
-  if (!Md) return <span className="text-[var(--color-text-muted)]">…</span>;
-
-  return (
-    <div className="prose prose-sm prose-invert max-w-none">
-      <Md remarkPlugins={remarkGfm ? [remarkGfm] : []}>{content}</Md>
-    </div>
-  );
-}
 
 // ── Virtual file list (reused from history page pattern) ────────
 const ITEM_HEIGHT = 28;
@@ -353,6 +330,7 @@ function DiscussionTab({
   const [descDraft, setDescDraft] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [commentEditDraft, setCommentEditDraft] = useState("");
+  const { issueLink } = useIssueLinker(orgName, repoName);
 
   // Get org members for reviewer picker
   const { data: orgData } = api.org.getOrg.useQuery({
@@ -435,7 +413,7 @@ function DiscussionTab({
     <div className="space-y-4">
       {/* Top row: Description + Review sidebar */}
       <div className="flex items-start gap-4">
-        {/* Description — left */}
+        {/* Description (left) */}
         <div className="min-w-0 flex-1">
           <Card>
             <div className="mb-2 flex items-center justify-between">
@@ -500,7 +478,7 @@ function DiscussionTab({
                 </div>
               </div>
             ) : pr.description ? (
-              <MarkdownContent content={pr.description} />
+              <MarkdownContent content={pr.description} issueLink={issueLink} />
             ) : (
               <p className="text-sm text-[var(--color-text-muted)] italic">
                 No description provided.
@@ -509,9 +487,9 @@ function DiscussionTab({
           </Card>
         </div>
 
-        {/* Review sidebar — right */}
+        {/* Review sidebar (right) */}
         <div className="w-64 shrink-0 space-y-3">
-          {/* Reviews list — always visible */}
+          {/* Reviews list, always visible */}
           <Card>
             <h4 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
               Reviewers
@@ -696,7 +674,7 @@ function DiscussionTab({
         </div>
       </div>
 
-      {/* Comments — full width below */}
+      {/* Comments, full width below */}
       {pr.comments.map((comment) => (
         <Card key={comment.id}>
           <div className="mb-2 flex items-center justify-between">
@@ -778,7 +756,7 @@ function DiscussionTab({
               </div>
             </div>
           ) : (
-            <MarkdownContent content={comment.body} />
+            <MarkdownContent content={comment.body} issueLink={issueLink} />
           )}
         </Card>
       ))}
@@ -1058,7 +1036,7 @@ function FileDiff({
   if (diffResult?.binary) {
     return (
       <div className="px-4 py-3 text-xs text-[var(--color-text-muted)] italic">
-        Binary file — diff not available
+        Binary file, diff not available
       </div>
     );
   }
@@ -1092,7 +1070,7 @@ function FileDiff({
     }
   }
 
-  // Collapse context lines far from changes — show 3 lines around each add/remove
+  // Collapse context lines far from changes: show 3 lines around each add/remove
   const CONTEXT = 3;
   const changeIndices = new Set<number>();
   lines.forEach((l, i) => {

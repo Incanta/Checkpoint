@@ -33,7 +33,8 @@ export default function RepoLayout({
   const { hasFeature } = useLicenseTier(org?.id);
   const showPullRequests = hasFeature("pullRequests");
   const showShelves = hasFeature("shelves");
-  const showIssues = hasFeature("issues");
+  const showIssues =
+    hasFeature("issues") && repoData?.issuesPlatform !== "DISABLED";
 
   const { data: openPrCount } = api.pullRequest.countOpen.useQuery(
     { repoId: repoData?.id ?? "" },
@@ -42,7 +43,12 @@ export default function RepoLayout({
 
   const { data: openIssueCount } = api.issue.countOpen.useQuery(
     { repoId: repoData?.id ?? "" },
-    { enabled: !!repoData?.id && showIssues },
+    {
+      enabled:
+        !!repoData?.id &&
+        showIssues &&
+        repoData?.issuesPlatform === "CHECKPOINT",
+    },
   );
 
   return (

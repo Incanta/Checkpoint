@@ -14,6 +14,7 @@ import { labelRouter } from "./routers/label";
 import { pullRequestRouter } from "./routers/pullRequest";
 import { licenseRouter } from "./routers/license";
 import { issueRouter } from "./routers/issue";
+import { issueTrackerRouter } from "./routers/issue-tracker";
 import { notificationRouter } from "./routers/notification";
 import { shelfRouter } from "./routers/shelf";
 import { artifactRouter } from "./routers/artifact";
@@ -45,6 +46,7 @@ export const appRouter = createTRPCRouter({
   pullRequest: pullRequestRouter,
   license: licenseRouter,
   issue: issueRouter,
+  issueTracker: issueTrackerRouter,
   notification: notificationRouter,
   shelf: shelfRouter,
   artifact: artifactRouter,

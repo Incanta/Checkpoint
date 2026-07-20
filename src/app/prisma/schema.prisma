@@ -235,6 +235,8 @@ model Repo {
   requiredReviews      Int     @default(0)
   mergePermissionsSame Boolean @default(true)
 
+  issuesPlatform IssuesPlatform @default(CHECKPOINT)
+
   files            File[]
   changelists      Changelist[]
   branches         Branch[]          @relation("RepoBranch")
@@ -247,6 +249,8 @@ model Repo {
   issues           Issue[]
   issueLabels      IssueLabel[]
   inviteRoles      InviteRepoRole[]
+
+  issueTrackerConfig RepoIssueTrackerConfig?
 
   @@unique([orgId, name])
 }
@@ -663,6 +667,36 @@ model ShelfFileChange {
 }
 
 // ── Issues ──────────────────────────────────────────────────────
+
+enum IssuesPlatform {
+  CHECKPOINT
+  JIRA
+  CODECKS
+  HACKNPLAN
+  DISABLED
+}
+
+model RepoIssueTrackerConfig {
+  id String @id @default(cuid())
+
+  repo   Repo   @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  repoId String @unique
+
+  jiraBaseUrl    String?
+  jiraEmail      String?
+  jiraProjectKey String?
+
+  codecksSubdomain String?
+
+  hacknplanProjectId Int?
+
+  // AES-256-GCM payload, format "v1:<iv-b64>:<tag-b64>:<ct-b64>".
+  // Must never be selected by client-facing queries.
+  encryptedToken String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
 
 enum IssueStatus {
   OPEN

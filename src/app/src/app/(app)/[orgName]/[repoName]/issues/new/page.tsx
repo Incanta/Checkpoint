@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, notFound } from "next/navigation";
 import { api } from "~/trpc/react";
 import { Card, Button } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
@@ -17,6 +17,11 @@ export default function NewIssuePage() {
   const { data: org } = api.org.getOrg.useQuery({ id: orgName, idIsName: true, includeUsers: true });
   const repoData = org?.repos?.find((r: { name: string }) => r.name === repoName);
   const members = ((org as Record<string, unknown> | undefined)?.users ?? []) as Array<{ user: { id: string; name: string | null; email: string; image: string | null } }>;
+
+  // Built-in issue pages only exist on the Checkpoint platform
+  if (repoData && repoData.issuesPlatform !== "CHECKPOINT") {
+    notFound();
+  }
 
   const { data: labels } = api.issue.listLabels.useQuery(
     { repoId: repoData?.id ?? "" },

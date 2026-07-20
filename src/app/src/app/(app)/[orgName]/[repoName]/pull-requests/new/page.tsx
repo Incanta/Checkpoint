@@ -5,8 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { api } from "~/trpc/react";
 import { Button, Card } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
-import type { Options as MdOptions } from "react-markdown";
-import type RemarkGfm from "remark-gfm";
+import { useIssueLinker } from "~/app/_hooks/use-issue-linker";
+import { MarkdownContent } from "~/app/_components/markdown";
 
 export default function NewPullRequestPage() {
   const params = useParams<{ orgName: string; repoName: string }>();
@@ -14,6 +14,7 @@ export default function NewPullRequestPage() {
   const repoName = decodeURIComponent(params.repoName);
   useDocumentTitle(`New Pull Request · ${repoName} in ${orgName}`);
   const router = useRouter();
+  const { issueLink } = useIssueLinker(orgName, repoName);
 
   const { data: org } = api.org.getOrg.useQuery({
     id: orgName,
@@ -155,7 +156,11 @@ export default function NewPullRequestPage() {
             {previewMd ? (
               <div className="min-h-[120px] rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)]">
                 {description ? (
-                  <MarkdownPreview content={description} />
+                  <MarkdownContent
+                    content={description}
+                    issueLink={issueLink}
+                    loadingFallback="Loading preview…"
+                  />
                 ) : (
                   <span className="text-[var(--color-text-muted)]">
                     Nothing to preview
@@ -207,28 +212,3 @@ export default function NewPullRequestPage() {
   );
 }
 
-function MarkdownPreview({ content }: { content: string }) {
-  // Lazy-load react-markdown to keep bundle small
-  const [Md, setMd] = useState<React.ComponentType<MdOptions> | null>(null);
-  const [remarkGfm, setRemarkGfm] = useState<typeof RemarkGfm | null>(null);
-
-  useEffect(() => {
-    void Promise.all([import("react-markdown"), import("remark-gfm")]).then(
-      ([md, gfm]) => {
-        setMd(() => md.default);
-        setRemarkGfm(() => gfm.default);
-      },
-    );
-  }, []);
-
-  if (!Md)
-    return (
-      <span className="text-[var(--color-text-muted)]">Loading preview…</span>
-    );
-
-  return (
-    <div className="prose prose-sm prose-invert max-w-none">
-      <Md remarkPlugins={remarkGfm ? [remarkGfm] : []}>{content}</Md>
-    </div>
-  );
-}

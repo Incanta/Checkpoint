@@ -1,0 +1,8 @@
+# Key used to encrypt third-party integration secrets (e.g. issue tracker
+# API tokens) at rest with AES-256-GCM. Provide 32 random bytes encoded as
+# base64 (e.g. `openssl rand -base64 32`).
+#
+# If left empty, a key is derived from auth.secret; note that changing
+# auth.secret will then invalidate any stored secrets and they will need to
+# be re-entered.
+encryption-key: ""

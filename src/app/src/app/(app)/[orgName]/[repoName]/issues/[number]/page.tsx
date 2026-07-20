@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, notFound } from "next/navigation";
 import { api } from "~/trpc/react";
 import { Card, Button, Badge, Avatar, EmptyState } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
+import { useIssueLinker } from "~/app/_hooks/use-issue-linker";
+import { MarkdownContent } from "~/app/_components/markdown";
 import { useSession } from "~/lib/auth-client";
 
 export default function IssueDetailPage() {
@@ -41,6 +43,12 @@ export default function IssueDetailPage() {
     };
   }>;
   const utils = api.useUtils();
+  const { issueLink } = useIssueLinker(orgName, repoName);
+
+  // Built-in issue pages only exist on the Checkpoint platform
+  if (repoData && repoData.issuesPlatform !== "CHECKPOINT") {
+    notFound();
+  }
 
   const { data: issue, isLoading } = api.issue.get.useQuery(
     { repoId: repoData?.id ?? "", number: issueNumber },
@@ -294,16 +302,7 @@ export default function IssueDetailPage() {
                   </div>
                 </div>
               ) : issue.body ? (
-                <div className="prose-sm text-[var(--color-text-primary)]">
-                  {issue.body.split("\n").map((line: string, i: number) => {
-                    if (line.trim() === "") return <br key={i} />;
-                    return (
-                      <p key={i} className="mb-1 text-sm">
-                        {line}
-                      </p>
-                    );
-                  })}
-                </div>
+                <MarkdownContent content={issue.body} issueLink={issueLink} />
               ) : (
                 <p className="text-sm text-[var(--color-text-muted)] italic">
                   No description provided.
@@ -385,16 +384,10 @@ export default function IssueDetailPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="text-sm text-[var(--color-text-primary)]">
-                    {comment.body.split("\n").map((line: string, i: number) => {
-                      if (line.trim() === "") return <br key={i} />;
-                      return (
-                        <p key={i} className="mb-1">
-                          {line}
-                        </p>
-                      );
-                    })}
-                  </div>
+                  <MarkdownContent
+                    content={comment.body}
+                    issueLink={issueLink}
+                  />
                 )}
               </div>
             </Card>

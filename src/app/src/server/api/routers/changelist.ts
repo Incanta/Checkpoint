@@ -59,6 +59,16 @@ export const changelistRouter = createTRPCRouter({
             number: input.changelistNumber,
           },
         },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              username: true,
+            },
+          },
+        },
       });
     }),
 
@@ -77,6 +87,16 @@ export const changelistRouter = createTRPCRouter({
           repoId: input.repoId,
           number: {
             in: input.numbers,
+          },
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              username: true,
+            },
           },
         },
       });
@@ -135,7 +155,14 @@ export const changelistRouter = createTRPCRouter({
       }
 
       let startChangelist:
-        | (Changelist & { user: { email: string } | null })
+        | (Changelist & {
+            user: {
+              id: string;
+              email: string;
+              name: string | null;
+              username: string | null;
+            } | null;
+          })
         | null = null;
       if (typeof startNumber === "object") {
         // must be a date; find the first changelist less than this date
@@ -152,7 +179,10 @@ export const changelistRouter = createTRPCRouter({
           include: {
             user: {
               select: {
+                id: true,
                 email: true,
+                name: true,
+                username: true,
               },
             },
           },
@@ -168,7 +198,10 @@ export const changelistRouter = createTRPCRouter({
           include: {
             user: {
               select: {
+                id: true,
                 email: true,
+                name: true,
+                username: true,
               },
             },
           },
@@ -202,7 +235,10 @@ export const changelistRouter = createTRPCRouter({
           include: {
             user: {
               select: {
+                id: true,
                 email: true,
+                name: true,
+                username: true,
               },
             },
           },

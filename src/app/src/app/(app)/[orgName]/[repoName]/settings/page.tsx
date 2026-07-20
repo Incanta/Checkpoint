@@ -94,6 +94,255 @@ function MergePermissionList({
   );
 }
 
+const INPUT_CLASS =
+  "w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)]";
+
+const ISSUE_PLATFORMS = [
+  { value: "CHECKPOINT", label: "Checkpoint" },
+  { value: "JIRA", label: "Jira" },
+  { value: "CODECKS", label: "Codecks" },
+  { value: "HACKNPLAN", label: "HacknPlan" },
+  { value: "DISABLED", label: "Disabled" },
+] as const;
+
+type IssuePlatformValue = (typeof ISSUE_PLATFORMS)[number]["value"];
+
+function IssueTrackerCard({ repoId }: { repoId: string }) {
+  const utils = api.useUtils();
+  const { data: config } = api.issueTracker.getConfig.useQuery({ repoId });
+
+  const [platform, setPlatform] = useState<IssuePlatformValue>("CHECKPOINT");
+  const [jiraBaseUrl, setJiraBaseUrl] = useState("");
+  const [jiraEmail, setJiraEmail] = useState("");
+  const [jiraProjectKey, setJiraProjectKey] = useState("");
+  const [codecksSubdomain, setCodecksSubdomain] = useState("");
+  const [hacknplanProjectId, setHacknplanProjectId] = useState("");
+  const [token, setToken] = useState("");
+  const [initialized, setInitialized] = useState(false);
+
+  if (config && !initialized) {
+    setPlatform(config.platform);
+    setJiraBaseUrl(config.jiraBaseUrl ?? "");
+    setJiraEmail(config.jiraEmail ?? "");
+    setJiraProjectKey(config.jiraProjectKey ?? "");
+    setCodecksSubdomain(config.codecksSubdomain ?? "");
+    setHacknplanProjectId(
+      config.hacknplanProjectId ? String(config.hacknplanProjectId) : "",
+    );
+    setInitialized(true);
+  }
+
+  const updateConfig = api.issueTracker.updateConfig.useMutation({
+    onSuccess: () => {
+      setToken("");
+      void utils.org.getOrg.invalidate();
+      void utils.issueTracker.getConfig.invalidate();
+      void utils.issueTracker.getLinkInfo.invalidate();
+    },
+  });
+  const testConnection = api.issueTracker.testConnection.useMutation();
+
+  const isExternal =
+    platform === "JIRA" || platform === "CODECKS" || platform === "HACKNPLAN";
+  // A saved token only counts for the platform it was saved under
+  const hasSavedToken =
+    !!config?.hasToken && (!config || platform === config.platform);
+  const tokenLabel = platform === "HACKNPLAN" ? "API key" : "API token";
+
+  const handleSave = () => {
+    updateConfig.mutate({
+      repoId,
+      platform,
+      jiraBaseUrl:
+        platform === "JIRA" ? jiraBaseUrl.trim() || undefined : undefined,
+      jiraEmail:
+        platform === "JIRA" ? jiraEmail.trim() || undefined : undefined,
+      jiraProjectKey:
+        platform === "JIRA" ? jiraProjectKey.trim() || undefined : undefined,
+      codecksSubdomain:
+        platform === "CODECKS"
+          ? codecksSubdomain.trim() || undefined
+          : undefined,
+      hacknplanProjectId:
+        platform === "HACKNPLAN"
+          ? parseInt(hacknplanProjectId) || undefined
+          : undefined,
+      token: token.trim() || undefined,
+    });
+  };
+
+  return (
+    <Card>
+      <h3 className="mb-4 text-sm font-semibold text-[var(--color-text-primary)]">
+        Issues
+      </h3>
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
+            Issues platform
+          </label>
+          <p className="mb-1.5 text-xs text-[var(--color-text-muted)]">
+            Where issues for this repository are tracked. External platforms
+            show a read-only list that links to the tracker, and issue mentions
+            like #123 in pull requests and changelists link there too.
+          </p>
+          <select
+            value={platform}
+            onChange={(e) => setPlatform(e.target.value as IssuePlatformValue)}
+            className={INPUT_CLASS}
+          >
+            {ISSUE_PLATFORMS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {platform === "JIRA" && (
+          <>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
+                Jira base URL
+              </label>
+              <input
+                type="url"
+                value={jiraBaseUrl}
+                onChange={(e) => setJiraBaseUrl(e.target.value)}
+                placeholder="https://your-site.atlassian.net"
+                className={INPUT_CLASS}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
+                Account email
+              </label>
+              <input
+                type="email"
+                value={jiraEmail}
+                onChange={(e) => setJiraEmail(e.target.value)}
+                placeholder="you@example.com"
+                className={INPUT_CLASS}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
+                Project key
+              </label>
+              <input
+                type="text"
+                value={jiraProjectKey}
+                onChange={(e) => setJiraProjectKey(e.target.value)}
+                placeholder="PROJ"
+                className={INPUT_CLASS}
+              />
+            </div>
+          </>
+        )}
+
+        {platform === "CODECKS" && (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
+              Codecks subdomain
+            </label>
+            <p className="mb-1.5 text-xs text-[var(--color-text-muted)]">
+              The subdomain of your Codecks account, e.g. &quot;your-team&quot;
+              for your-team.codecks.io.
+            </p>
+            <input
+              type="text"
+              value={codecksSubdomain}
+              onChange={(e) => setCodecksSubdomain(e.target.value)}
+              placeholder="your-team"
+              className={INPUT_CLASS}
+            />
+          </div>
+        )}
+
+        {platform === "HACKNPLAN" && (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
+              Project ID
+            </label>
+            <input
+              type="number"
+              min={1}
+              value={hacknplanProjectId}
+              onChange={(e) => setHacknplanProjectId(e.target.value)}
+              placeholder="12345"
+              className={INPUT_CLASS}
+            />
+          </div>
+        )}
+
+        {isExternal && (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
+              {tokenLabel}
+            </label>
+            <input
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder={
+                hasSavedToken
+                  ? "•••••••• (saved, leave blank to keep)"
+                  : `Enter ${tokenLabel}`
+              }
+              autoComplete="off"
+              className={INPUT_CLASS}
+            />
+          </div>
+        )}
+
+        {updateConfig.error && (
+          <p className="text-sm text-[var(--color-danger)]">
+            {updateConfig.error.message}
+          </p>
+        )}
+        {updateConfig.isSuccess && !updateConfig.isPending && (
+          <p className="text-sm text-[var(--color-success)]">
+            Issue settings saved.
+          </p>
+        )}
+        {testConnection.data && (
+          <p
+            className={
+              testConnection.data.ok
+                ? "text-sm text-[var(--color-success)]"
+                : "text-sm text-[var(--color-danger)]"
+            }
+          >
+            {testConnection.data.ok
+              ? `Connection succeeded (${testConnection.data.count} issues found).`
+              : testConnection.data.message}
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2">
+          {isExternal && config?.platform === platform && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={testConnection.isPending}
+              onClick={() => testConnection.mutate({ repoId })}
+            >
+              {testConnection.isPending ? "Testing..." : "Test connection"}
+            </Button>
+          )}
+          <Button
+            size="sm"
+            disabled={updateConfig.isPending}
+            onClick={handleSave}
+          >
+            {updateConfig.isPending ? "Saving..." : "Save issue settings"}
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function RepoSettingsPage() {
   const params = useParams<{ orgName: string; repoName: string }>();
   const orgName = decodeURIComponent(params.orgName);
@@ -121,6 +370,7 @@ export default function RepoSettingsPage() {
 
   const { hasFeature } = useLicenseTier(org?.id);
   const showPrSettings = hasFeature("pullRequests");
+  const showIssueSettings = hasFeature("issues");
 
   const [name, setName] = useState("");
   const [isPublic, setIsPublic] = useState(false);
@@ -313,6 +563,11 @@ export default function RepoSettingsPage() {
             </Card>
           )}
         </>
+      )}
+
+      {/* Issue tracker settings (Pro+ only) */}
+      {showIssueSettings && repoData && (
+        <IssueTrackerCard repoId={repoData.id} />
       )}
 
       {/* Danger zone */}

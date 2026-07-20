@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { api } from "~/trpc/react";
 import { Card, Badge, EmptyState } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
+import { useIssueLinker } from "~/app/_hooks/use-issue-linker";
 
 const ITEM_HEIGHT = 28; // px per file row
 const VISIBLE_COUNT = 50; // items visible at once
@@ -37,7 +38,7 @@ function VirtualFileList({
   }, []);
 
   if (!needsVirtualization) {
-    // Small list — render everything, no virtualization needed
+    // Small list: render everything, no virtualization needed
     return (
       <div className="space-y-0">
         {files.map((f, i) => (
@@ -114,6 +115,8 @@ export default function RepoHistoryPage() {
     (r: { name: string }) => r.name === repoName,
   );
 
+  const { linkify } = useIssueLinker(orgName, repoName);
+
   const { data: branches } = api.branch.listBranches.useQuery(
     { repoId: repoData?.id ?? "" },
     { enabled: !!repoData?.id },
@@ -176,11 +179,21 @@ export default function RepoHistoryPage() {
           <div className="divide-y divide-[var(--color-border-default)]">
             {changelists.map((cl) => (
               <div key={cl.number}>
-                <button
-                  type="button"
+                {/* div instead of button so issue-mention links can nest */}
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() =>
                     setExpandedCl(expandedCl === cl.number ? null : cl.number)
                   }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setExpandedCl(
+                        expandedCl === cl.number ? null : cl.number,
+                      );
+                    }
+                  }}
                   className="flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-surface)]"
                 >
                   <div className="shrink-0 pt-0.5">
@@ -195,7 +208,7 @@ export default function RepoHistoryPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-[var(--color-text-primary)]">
-                      {cl.message}
+                      {linkify(cl.message)}
                     </div>
                     <div className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
                       {cl.user?.email ?? "unknown"} ·{" "}
@@ -217,7 +230,7 @@ export default function RepoHistoryPage() {
                   >
                     <path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z" />
                   </svg>
-                </button>
+                </div>
 
                 {/* Expanded: file changes */}
                 {expandedCl === cl.number && clFiles && (
