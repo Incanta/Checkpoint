@@ -1507,7 +1507,7 @@ __metadata:
     eslint: "npm:^9.34.0"
     next: "npm:^16.2.11"
     nodemailer: "npm:^9.0.1"
-    postcss: "npm:^8.5.25"
+    postcss: "npm:^8.5.23"
     prettier: "npm:^3.6.2"
     prettier-plugin-tailwindcss: "npm:^0.6.11"
     prisma: "npm:^6.5.0"
