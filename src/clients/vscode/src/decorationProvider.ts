@@ -22,9 +22,17 @@ export class CheckpointDecorationProvider
   public constructor(private readonly model: CheckpointModel) {
     this.disposables.push(
       vscode.window.registerFileDecorationProvider(this),
-      model.onDidChangeRepositoryStatus(() => {
-        this._onDidChangeFileDecorations.fire(undefined);
+      // Firing `undefined` invalidates every decoration VS Code is holding,
+      // which re-renders every visible explorer row, editor tab and
+      // breadcrumb. Pending-change updates carry the affected URIs so only
+      // those rows (and, via propagation, their parent folders) repaint.
+      model.onDidChangeRepositoryStatus((e) => {
+        if (e.uris.length > 0) {
+          this._onDidChangeFileDecorations.fire(e.uris);
+        }
       }),
+      // Adding or removing a whole workspace is rare enough that a blanket
+      // invalidation is the right call.
       model.onDidChangeRepositories(() => {
         this._onDidChangeFileDecorations.fire(undefined);
       }),

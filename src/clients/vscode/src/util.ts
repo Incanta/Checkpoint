@@ -61,25 +61,47 @@ export function relativeWorkspacePath(root: string, fsPath: string): string {
   return path.relative(root, fsPath).replace(/\\/g, "/");
 }
 
+/**
+ * Trailing-edge debounce with an optional upper bound on how long a call can
+ * be deferred.
+ *
+ * A plain debounce starves under sustained churn: an AI agent (or a build)
+ * rewriting files every few hundred milliseconds keeps resetting the timer, so
+ * the SCM view never updates until the burst ends. `maxWaitMs` guarantees the
+ * function still runs at least that often while events keep arriving.
+ */
 export function debounce<T extends (...args: never[]) => void>(
   fn: T,
   delayMs: number,
+  maxWaitMs?: number,
 ): T & { dispose: () => void } {
   let timer: NodeJS.Timeout | undefined;
+  let deadline: number | undefined;
+
   const wrapped = ((...args: never[]) => {
+    const now = Date.now();
+    if (deadline === undefined) {
+      deadline =
+        maxWaitMs !== undefined && maxWaitMs > 0 ? now + maxWaitMs : Infinity;
+    }
+
     if (timer) {
       clearTimeout(timer);
     }
+    const wait = Math.max(0, Math.min(delayMs, deadline - now));
     timer = setTimeout(() => {
       timer = undefined;
+      deadline = undefined;
       fn(...args);
-    }, delayMs);
+    }, wait);
   }) as T & { dispose: () => void };
+
   wrapped.dispose = (): void => {
     if (timer) {
       clearTimeout(timer);
       timer = undefined;
     }
+    deadline = undefined;
   };
   return wrapped;
 }

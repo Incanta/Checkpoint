@@ -1,7 +1,12 @@
 import { promises as fs } from "fs";
 import * as vscode from "vscode";
 import type { CheckpointModel } from "./model";
-import { CHECKPOINT_SCHEME, fromCheckpointUri, toCheckpointUri } from "./util";
+import {
+  CHECKPOINT_SCHEME,
+  fromCheckpointUri,
+  relativeWorkspacePath,
+  toCheckpointUri,
+} from "./util";
 
 /**
  * Serves checkpoint: documents — the read-only side of diff editors and the
@@ -23,23 +28,37 @@ export class CheckpointContentProvider
         CHECKPOINT_SCHEME,
         this,
       ),
-      // When a repository refreshes, the baseline may have moved (pull,
-      // submit); poke any open head documents so diffs re-render.
-      model.onDidChangeRepositoryStatus((repository) => {
-        for (const doc of vscode.workspace.textDocuments) {
-          if (doc.uri.scheme !== CHECKPOINT_SCHEME) {
-            continue;
-          }
-          try {
-            const params = fromCheckpointUri(doc.uri);
-            if (params.ref.type === "head" && params.root === repository.root) {
-              this._onDidChange.fire(doc.uri);
+      // Poke open head documents so diffs re-render, but only the ones that
+      // actually have changed: the files whose status moved, plus (when
+      // the baseline itself moved) every head document for this repository.
+      // Firing for all of them on every refresh made open diffs re-fetch from
+      // the daemon several times a second during a burst of edits.
+      model.onDidChangeRepositoryStatus(
+        ({ repository, uris, baselineChanged }) => {
+          const changed = new Set(
+            uris.map((uri) =>
+              relativeWorkspacePath(repository.root, uri.fsPath),
+            ),
+          );
+          for (const doc of vscode.workspace.textDocuments) {
+            if (doc.uri.scheme !== CHECKPOINT_SCHEME) {
+              continue;
             }
-          } catch {
-            // Ignore malformed URIs.
+            try {
+              const params = fromCheckpointUri(doc.uri);
+              if (
+                params.ref.type === "head" &&
+                params.root === repository.root &&
+                (baselineChanged || changed.has(params.path))
+              ) {
+                this._onDidChange.fire(doc.uri);
+              }
+            } catch {
+              // Ignore malformed URIs.
+            }
           }
-        }
-      }),
+        },
+      ),
     );
   }
 

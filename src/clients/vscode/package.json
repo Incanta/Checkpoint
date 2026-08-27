@@ -356,6 +356,29 @@
           "default": true,
           "description": "Automatically refresh pending changes when files in the workspace change."
         },
+        "checkpoint.autoRefreshDelay": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 100,
+          "description": "How long (in milliseconds) to wait after the last file change before refreshing pending changes."
+        },
+        "checkpoint.autoRefreshMaxDelay": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 100,
+          "description": "Upper bound (in milliseconds) on how long a refresh can be deferred while files keep changing. Prevents a sustained burst of edits (a build, or an AI agent rewriting files) from starving the refresh entirely."
+        },
+        "checkpoint.autoRefreshExcludeDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            ".git",
+            "node_modules"
+          ],
+          "description": "Directory names whose file changes never trigger an automatic refresh. Matched against any path segment. Paths under .checkpoint are always excluded."
+        },
         "checkpoint.syncStatusInterval": {
           "type": "number",
           "default": 60,

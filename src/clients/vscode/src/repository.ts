@@ -154,12 +154,30 @@ export class CheckpointRepository implements vscode.Disposable {
 
   /** Pending files keyed by workspace-relative path (forward slashes). */
   private pendingFiles = new Map<string, File>();
+  /**
+   * The resource state currently handed to VS Code, keyed the same way.
+   * Instances are reused across refreshes so the SCM tree only re-renders rows
+   * whose status actually changed.
+   */
+  private resources = new Map<string, CheckpointResource>();
+  /** False until the first successful refresh has populated the groups. */
+  private applied = false;
+  /**
+   * Set by operations that move the workspace baseline (pull, submit, branch
+   * switch) so the next apply re-reads open head documents even when no
+   * pending status changed. Cleared once consumed.
+   */
+  private baselineMoved = false;
   private syncStatus: SyncStatusSummary | null = null;
   private syncTimer: NodeJS.Timeout | undefined;
+  /** Last value written to sourceControl.count, to avoid redundant writes. */
+  private lastCount = -1;
+  /** Signature of the last status bar render, to avoid redundant writes. */
+  private lastStatusBar = "";
 
   private refreshing = false;
   private refreshQueued = false;
-  private readonly debouncedRefresh: (() => void) & { dispose: () => void };
+  private debouncedRefresh: (() => void) & { dispose: () => void };
 
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -208,9 +226,7 @@ export class CheckpointRepository implements vscode.Disposable {
       this.localGroup,
     );
 
-    this.debouncedRefresh = debounce(() => {
-      void this.refresh();
-    }, 500);
+    this.debouncedRefresh = this.createDebouncedRefresh();
 
     // The daemon watches the workspace itself; this watcher only tells us
     // when to re-query it so the SCM view stays current.
@@ -218,7 +234,7 @@ export class CheckpointRepository implements vscode.Disposable {
       new vscode.RelativePattern(rootUri, "**/*"),
     );
     const onFsEvent = (uri: vscode.Uri): void => {
-      if (uri.fsPath.split(path.sep).includes(".checkpoint")) {
+      if (this.isRefreshExcluded(uri)) {
         return;
       }
       const autoRefresh = vscode.workspace
@@ -231,13 +247,22 @@ export class CheckpointRepository implements vscode.Disposable {
     watcher.onDidChange(onFsEvent, this, this.disposables);
     watcher.onDidCreate(onFsEvent, this, this.disposables);
     watcher.onDidDelete(onFsEvent, this, this.disposables);
-    this.disposables.push(watcher, this.debouncedRefresh);
+    this.disposables.push(watcher, {
+      dispose: () => this.debouncedRefresh.dispose(),
+    });
 
     this.restartSyncTimer();
     vscode.workspace.onDidChangeConfiguration(
       (e) => {
         if (e.affectsConfiguration("checkpoint.syncStatusInterval")) {
           this.restartSyncTimer();
+        }
+        if (
+          e.affectsConfiguration("checkpoint.autoRefreshDelay") ||
+          e.affectsConfiguration("checkpoint.autoRefreshMaxDelay")
+        ) {
+          this.debouncedRefresh.dispose();
+          this.debouncedRefresh = this.createDebouncedRefresh();
         }
       },
       this,
@@ -267,6 +292,39 @@ export class CheckpointRepository implements vscode.Disposable {
     return uri.scheme === "file" && isDescendant(this.root, uri.fsPath);
   }
 
+  private createDebouncedRefresh(): (() => void) & { dispose: () => void } {
+    const config = vscode.workspace.getConfiguration("checkpoint");
+    const delay = Math.max(100, config.get<number>("autoRefreshDelay", 1000));
+    const maxDelay = Math.max(
+      delay,
+      config.get<number>("autoRefreshMaxDelay", 5000),
+    );
+    return debounce(
+      () => {
+        void this.refresh();
+      },
+      delay,
+      maxDelay,
+    );
+  }
+
+  /**
+   * Filters filesystem events that can never affect pending changes. The
+   * daemon applies .chkignore itself, but a churning directory (an agent
+   * rewriting sources, a build writing into node_modules) would otherwise wake
+   * a round trip to the daemon for every single write.
+   */
+  private isRefreshExcluded(uri: vscode.Uri): boolean {
+    const segments = uri.fsPath.split(/[\\/]/);
+    if (segments.includes(".checkpoint")) {
+      return true;
+    }
+    const excluded = vscode.workspace
+      .getConfiguration("checkpoint")
+      .get<string[]>("autoRefreshExcludeDirs", []);
+    return excluded.some((dir) => segments.includes(dir));
+  }
+
   // ─── Refresh ───────────────────────────────────────────────────────
 
   public async refresh(): Promise<void> {
@@ -284,36 +342,7 @@ export class CheckpointRepository implements vscode.Disposable {
         workspaceId: this.workspaceId,
       });
 
-      const files = pending?.files ?? {};
-      this.pendingFiles = new Map(Object.entries(files));
-
-      const groups: Record<GroupId, CheckpointResource[]> = {
-        conflicts: [],
-        changes: [],
-        local: [],
-      };
-
-      for (const [relPath, file] of this.pendingFiles) {
-        const info = getStatusInfo(file.status);
-        if (!info) {
-          continue;
-        }
-        groups[info.group].push(
-          new CheckpointResource(this, relPath, file, info.group),
-        );
-      }
-
-      for (const group of Object.values(groups)) {
-        group.sort((a, b) => a.relPath.localeCompare(b.relPath));
-      }
-
-      this.conflictsGroup.resourceStates = groups.conflicts;
-      this.changesGroup.resourceStates = groups.changes;
-      this.localGroup.resourceStates = groups.local;
-      this.sourceControl.count =
-        groups.conflicts.length + groups.changes.length;
-
-      this.model.notifyRepositoryChanged(this);
+      this.applyPendingFiles(new Map(Object.entries(pending?.files ?? {})));
     } catch (error) {
       this.model.handleDaemonError("refreshing pending changes", error);
     } finally {
@@ -324,6 +353,126 @@ export class CheckpointRepository implements vscode.Disposable {
       }
     }
     this.updateStatusBar();
+  }
+
+  /**
+   * Reconciles a freshly fetched pending set against what VS Code is currently
+   * showing and writes back only the difference.
+   *
+   * The daemon re-sends the full pending set on every refresh, and a File
+   * carries volatile metadata (`size`, `modifiedAt`) that changes on every
+   * save even when the file's status does not. Assigning `resourceStates`
+   * and firing a blanket decoration invalidation each time made the SCM view
+   * and every explorer badge re-render several times a second while an agent
+   * was editing files. Only `status` drives what is rendered, so that is what
+   * we diff on: unchanged rows keep their existing CheckpointResource
+   * instance, untouched groups are never reassigned, and the decoration event
+   * carries just the URIs whose badge actually changed.
+   */
+  private applyPendingFiles(next: Map<string, File>): void {
+    const changedUris: vscode.Uri[] = [];
+    const dirtyGroups = new Set<GroupId>();
+    const resources = new Map<string, CheckpointResource>();
+
+    for (const [relPath, file] of next) {
+      const previousStatus = this.pendingFiles.get(relPath)?.status;
+      if (previousStatus !== file.status) {
+        changedUris.push(this.uriFor(relPath));
+        const previousInfo =
+          previousStatus === undefined
+            ? undefined
+            : getStatusInfo(previousStatus);
+        if (previousInfo) {
+          dirtyGroups.add(previousInfo.group);
+        }
+      }
+
+      const info = getStatusInfo(file.status);
+      if (!info) {
+        continue;
+      }
+      if (previousStatus !== file.status) {
+        dirtyGroups.add(info.group);
+      }
+
+      const existing = this.resources.get(relPath);
+      resources.set(
+        relPath,
+        existing && existing.file.status === file.status
+          ? existing
+          : new CheckpointResource(this, relPath, file, info.group),
+      );
+    }
+
+    for (const [relPath, file] of this.pendingFiles) {
+      if (next.has(relPath)) {
+        continue;
+      }
+      changedUris.push(this.uriFor(relPath));
+      const info = getStatusInfo(file.status);
+      if (info) {
+        dirtyGroups.add(info.group);
+      }
+    }
+
+    this.pendingFiles = next;
+    this.resources = resources;
+
+    const baselineChanged = this.baselineMoved;
+    this.baselineMoved = false;
+
+    const firstApply = !this.applied;
+    if (dirtyGroups.size === 0 && !firstApply) {
+      // Nothing user-visible changed; leave the tree and decorations alone.
+      // Open diffs still need re-reading if the baseline itself moved.
+      if (baselineChanged) {
+        this.model.notifyRepositoryChanged(this, [], true);
+      }
+      return;
+    }
+    this.applied = true;
+
+    const groups: Record<GroupId, CheckpointResource[]> = {
+      conflicts: [],
+      changes: [],
+      local: [],
+    };
+    for (const resource of resources.values()) {
+      groups[resource.groupId].push(resource);
+    }
+
+    for (const groupId of Object.keys(groups) as GroupId[]) {
+      if (!firstApply && !dirtyGroups.has(groupId)) {
+        continue;
+      }
+      groups[groupId].sort((a, b) => a.relPath.localeCompare(b.relPath));
+      this.groupFor(groupId).resourceStates = groups[groupId];
+    }
+
+    const count = groups.conflicts.length + groups.changes.length;
+    if (count !== this.lastCount) {
+      this.lastCount = count;
+      this.sourceControl.count = count;
+    }
+
+    if (changedUris.length > 0 || baselineChanged) {
+      this.model.notifyRepositoryChanged(this, changedUris, baselineChanged);
+    }
+  }
+
+  private groupFor(groupId: GroupId): vscode.SourceControlResourceGroup {
+    switch (groupId) {
+      case "conflicts":
+        return this.conflictsGroup;
+      case "changes":
+        return this.changesGroup;
+      case "local":
+        return this.localGroup;
+    }
+  }
+
+  private uriFor(relPath: string): vscode.Uri {
+    return vscode.Uri.file(path.join(this.root, relPath));
   }
 
   /**
@@ -402,6 +551,14 @@ export class CheckpointRepository implements vscode.Disposable {
         syncTooltip = `Checkpoint: pull to update to CL ${this.syncStatus.remoteHeadNumber}`;
       }
     }
+
+    // Reassigning statusBarCommands pushes a new array to the SCM view even
+    // when the contents are identical, so only write when something changed.
+    const signature = `${branch.title}|${syncTitle}|${syncTooltip}`;
+    if (signature === this.lastStatusBar) {
+      return;
+    }
+    this.lastStatusBar = signature;
 
     this.sourceControl.statusBarCommands = [
       branch,
@@ -523,6 +680,7 @@ export class CheckpointRepository implements vscode.Disposable {
         }),
       );
       this.sourceControl.inputBox.value = "";
+      this.baselineMoved = true;
       void vscode.window.showInformationMessage(
         `Checkpoint: submitted ${modifications.length} file(s).`,
       );
@@ -548,6 +706,8 @@ export class CheckpointRepository implements vscode.Disposable {
             filePaths: null,
           }),
       );
+
+      this.baselineMoved = true;
 
       const mergeResult = result.result as {
         cleanMerges: string[];
@@ -762,6 +922,7 @@ export class CheckpointRepository implements vscode.Disposable {
             workspaceId: this.workspaceId,
             branchName: picked.branch.name,
           });
+          this.baselineMoved = true;
         },
       );
     } catch (error) {
@@ -820,6 +981,7 @@ export class CheckpointRepository implements vscode.Disposable {
           workspaceId: this.workspaceId,
           branchName: name.trim(),
         });
+        this.baselineMoved = true;
         await this.refresh();
         await this.updateSyncStatus(true);
       }

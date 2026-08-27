@@ -12,6 +12,21 @@ import { isDescendant, normalizeFsPath } from "./util";
 const CONNECT_RETRY_MS = 15000;
 
 /**
+ * A repository's pending changes changed. `uris` lists exactly the files whose
+ * status changed, so listeners can invalidate those instead of everything.
+ */
+export interface RepositoryStatusChange {
+  repository: CheckpointRepository;
+  uris: vscode.Uri[];
+  /**
+   * True when the workspace baseline itself moved (pull, submit, branch
+   * switch). A file's head content can change without its pending status
+   * changing, so open diffs must be re-read even for URIs not in `uris`.
+   */
+  baselineChanged: boolean;
+}
+
+/**
  * Discovers Checkpoint workspaces for the open VS Code workspace folders and
  * owns the daemon connection shared by all of them.
  *
@@ -32,7 +47,7 @@ export class CheckpointModel implements vscode.Disposable {
   public readonly onDidChangeRepositories = this._onDidChangeRepositories.event;
 
   private readonly _onDidChangeRepositoryStatus =
-    new vscode.EventEmitter<CheckpointRepository>();
+    new vscode.EventEmitter<RepositoryStatusChange>();
   public readonly onDidChangeRepositoryStatus =
     this._onDidChangeRepositoryStatus.event;
 
@@ -162,8 +177,16 @@ export class CheckpointModel implements vscode.Disposable {
     void this.ensureConnection();
   }
 
-  public notifyRepositoryChanged(repository: CheckpointRepository): void {
-    this._onDidChangeRepositoryStatus.fire(repository);
+  public notifyRepositoryChanged(
+    repository: CheckpointRepository,
+    uris: vscode.Uri[],
+    baselineChanged = false,
+  ): void {
+    this._onDidChangeRepositoryStatus.fire({
+      repository,
+      uris,
+      baselineChanged,
+    });
   }
 
   // ─── Workspace discovery ───────────────────────────────────────────
