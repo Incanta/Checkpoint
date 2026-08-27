@@ -25,7 +25,7 @@ const PUBLIC_CONFIG_SELECT = {
   hacknplanProjectId: true,
 } as const;
 
-interface PublicConfig {
+export interface PublicConfig {
   platform: IssuesPlatform;
   jiraBaseUrl: string | null;
   jiraEmail: string | null;

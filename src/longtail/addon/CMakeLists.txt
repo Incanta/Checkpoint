@@ -71,7 +71,9 @@ FetchContent_MakeAvailable(curl)
 
 set(WRAPPER_DIR "${CMAKE_SOURCE_DIR}/../wrapper")
 
-file(GLOB WRAPPER_SOURCES
+# CONFIGURE_DEPENDS re-runs the glob at build time, so adding a wrapper source
+# rebuilds correctly instead of failing to link against a cached file list.
+file(GLOB WRAPPER_SOURCES CONFIGURE_DEPENDS
   "${WRAPPER_DIR}/src/exposed/*.cpp"
   "${WRAPPER_DIR}/src/util/*.cpp"
 )

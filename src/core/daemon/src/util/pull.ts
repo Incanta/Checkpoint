@@ -1,5 +1,4 @@
 import {
-  DiffState,
   CreateApiClientAuth,
   type WorkspaceStateFile,
   hashFileMD5,
@@ -48,6 +47,15 @@ export async function pull(
   logLevel?: LongtailLogLevel,
   onStep?: (step: string) => void,
   onProgress?: (step: string, done: number, total: number) => void,
+  /**
+   * Optional hook supplying gitignore-style include rules for the native pull.
+   * Called once the target changelist is resolved, so the caller can compile
+   * its filter against the config that actually applies to what is being
+   * synced. Returning null (the default) pulls every file in the version;
+   * otherwise longtail drops non-matching assets from the diff and never
+   * downloads them.
+   */
+  resolveIncludePaths?: (changelistNumber: number) => Promise<string[] | null>,
 ): Promise<PullMergeResult> {
   const daemonConfig = await DaemonConfig.Get();
   const resolvedLogLevel =
@@ -107,6 +115,12 @@ export async function pull(
 
     changelistNumber = branchResponse.headNumber;
   }
+
+  // Resolved after changelistNumber is known so the caller can compile its
+  // filter against the config that applies to the CL being synced.
+  const includePaths = resolveIncludePaths
+    ? await resolveIncludePaths(changelistNumber)
+    : null;
 
   const changelistResponse = await client.changelist.getChangelist.query({
     repoId: workspace.repoId,
@@ -217,6 +231,7 @@ export async function pull(
       localRootPath: workspace.localPath,
       remoteBasePath: `/${orgId}/${workspace.repoId}`,
       cachePath: blockCachePath,
+      ...(includePaths && includePaths.length > 0 ? { includePaths } : {}),
       ...storageOptions,
       logLevel: GetLogLevel(resolvedLogLevel),
     });
@@ -263,189 +278,10 @@ export async function pull(
     }
   }
 
-  // ─── Artifact pull (optional) ──────────────────────────────────
-  const newArtifactFiles: Record<string, WorkspaceStateFile> = {};
-  const artifactStateTree = changelistResponse.artifactStateTree as Record<
-    string,
-    number
-  > | null;
-
-  if (!errored && artifactStateTree) {
-    const artifactDiff = DiffState(
-      workspaceState.artifactFiles ?? {},
-      artifactStateTree,
-    );
-
-    if (artifactDiff.changelistsToPull.length > 0) {
-      const artifactCls =
-        await client.changelist.getChangelistsWithNumbers.mutate({
-          repoId: workspace.repoId,
-          numbers: artifactDiff.changelistsToPull,
-        });
-
-      const sortedArtifactCls = artifactCls.sort(
-        (a: any, b: any) => a.number - b.number,
-      );
-
-      for (const cl of sortedArtifactCls) {
-        const artVersionIndex = (cl as any).artifactVersionIndex;
-        if (!artVersionIndex || artVersionIndex === "") continue;
-
-        Logger.debug(
-          `Starting longtail pull for artifact version index ${artVersionIndex}...`,
-        );
-
-        const handle = pullAsync({
-          versionIndex: artVersionIndex,
-          enableMmapIndexing: daemonConfig.longtail.enableMmapIndexing,
-          enableMmapBlockStore: daemonConfig.longtail.enableMmapBlockStore,
-          localRootPath: workspace.localPath,
-          remoteBasePath: `/${orgId}/${workspace.repoId}`,
-          cachePath: blockCachePath,
-          ...storageOptions,
-          logLevel: GetLogLevel(resolvedLogLevel),
-        });
-
-        if (!handle) {
-          Logger.error("Failed to create longtail handle for artifact pull");
-          break;
-        }
-
-        const artifactPollOptions: Parameters<typeof pollHandle>[1] = {
-          onTokenRefresh: refreshStorageToken,
-        };
-        if (onStep) {
-          artifactPollOptions.onStep = (step) =>
-            onStep(`[artifacts] ${step}`);
-        }
-        if (onProgress) {
-          artifactPollOptions.onProgress = (step, done, total) =>
-            onProgress(`[artifacts] ${step}`, done, total);
-        }
-        if (!onStep && !onProgress) {
-          artifactPollOptions.intervalMs = 250;
-        }
-        const { status } = await pollHandle(handle, artifactPollOptions);
-
-        freeHandle(handle);
-
-        if (status.error !== 0) {
-          Logger.error(
-            `Artifact pull failed: ${status.error} ${status.currentStep}`,
-          );
-          break;
-        }
-      }
-    }
-
-    // Batch-fetch all artifact file info in one API call
-    const artFileIds = Object.keys(artifactStateTree);
-    const artAllIds = [...new Set([...artifactDiff.deletions, ...artFileIds])];
-    const artAllFilesResponse =
-      artAllIds.length > 0
-        ? await client.file.getFiles.mutate({
-            ids: artAllIds,
-            repoId: workspace.repoId,
-          })
-        : [];
-    const artFilesById = new Map(
-      artAllFilesResponse.map((f: any) => [f.id, f]),
-    );
-
-    // Handle artifact deletions
-    if (artifactDiff.deletions.length > 0) {
-      for (const delId of artifactDiff.deletions) {
-        const file = artFilesById.get(delId);
-        if (file?.path) {
-          const filePath = path.join(workspace.localPath, file.path);
-          if (existsSync(filePath)) {
-            await fs.rm(filePath, { force: true });
-          }
-        }
-      }
-    }
-
-    // Build artifact file state
-    if (artFileIds.length > 0) {
-      onStep?.("Updating artifact state");
-      const artFilesResponse = artFileIds
-        .map((id) => artFilesById.get(id))
-        .filter(Boolean);
-
-      // Collect artifact files that need hashing
-      const oldArtFileIdToEntry = new Map<
-        string,
-        { path: string; file: WorkspaceStateFile }
-      >();
-      if (workspaceState.artifactFiles) {
-        for (const [fp, f] of Object.entries(workspaceState.artifactFiles)) {
-          oldArtFileIdToEntry.set(f.fileId, { path: fp, file: f });
-        }
-      }
-
-      const artFilesToHash: {
-        normalizedPath: string;
-        fullPath: string;
-        fileId: string;
-        changelist: number;
-      }[] = [];
-
-      for (const file of artFilesResponse) {
-        if (!file.path) continue;
-        const normalizedPath = file.path.replace(/^\//, "").replace(/\\/g, "/");
-        const filePath = path.join(workspace.localPath, normalizedPath);
-        const changelist = artifactStateTree[file.id];
-
-        if (!existsSync(filePath)) continue;
-
-        const oldEntry = oldArtFileIdToEntry.get(file.id);
-        if (
-          oldEntry &&
-          oldEntry.file.changelist === changelist &&
-          oldEntry.path === normalizedPath
-        ) {
-          newArtifactFiles[normalizedPath] = { ...oldEntry.file };
-          continue;
-        }
-
-        artFilesToHash.push({
-          normalizedPath,
-          fullPath: filePath,
-          fileId: file.id,
-          changelist,
-        });
-      }
-
-      const artTotal = artFilesToHash.length;
-      onProgress?.("Updating artifact state", 0, artTotal);
-
-      if (artFilesToHash.length > 0) {
-        // Stat files in parallel; hashes are deferred until change detection
-        // actually needs them (size+mtime baseline is sufficient).
-        const artStatResults = await Promise.all(
-          artFilesToHash.map(async (entry) => {
-            const stat = await fs.stat(entry.fullPath);
-            return { entry, stat };
-          }),
-        );
-
-        for (let i = 0; i < artStatResults.length; i++) {
-          const { entry, stat } = artStatResults[i]!;
-
-          newArtifactFiles[entry.normalizedPath] = {
-            fileId: entry.fileId,
-            changelist: entry.changelist,
-            md5: "",
-            size: stat.size,
-            mtime: stat.mtimeMs,
-          };
-
-          onProgress?.("Updating artifact state", i + 1, artTotal);
-        }
-      }
-    }
-  }
-
+  // Precompiled-binary (artifact) application no longer happens inline here.
+  // It is an opt-in, per-workspace step decoupled from the source changelist
+  // (see util/game-sync/artifacts.ts applyArtifacts, invoked by the sync
+  // pipeline). Existing artifact files are preserved across a source pull.
   if (!errored) {
     // Handle deletions (paths come straight from the diff; no getFiles needed).
     if (diff.removed.length > 0) {
@@ -663,9 +499,12 @@ export async function pull(
     await saveWorkspaceState(
       workspace,
       {
+        ...workspaceState,
         changelistNumber: changelistResponse.number,
         files: newFiles,
-        artifactFiles: newArtifactFiles,
+        // Preserve any already-applied artifacts; the pipeline's applyArtifacts
+        // step owns changes to this map.
+        artifactFiles: workspaceState.artifactFiles ?? {},
       },
       stateBackend,
     );

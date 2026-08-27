@@ -30,6 +30,12 @@ import {
   type WorkspaceState,
 } from "./util/index.js";
 import {
+  GameSyncScheduler,
+  type ScheduledWorkspace,
+} from "./util/game-sync/scheduler.js";
+import { runSyncPipeline } from "./util/game-sync/sync-pipeline.js";
+import { WORKSPACE_STATE_VERSION } from "./util/util.js";
+import {
   parseIgnoreFile,
   buildIgnoreCacheFromPatterns,
   getFileStatuses as computeFileStatuses,
@@ -79,6 +85,9 @@ export class DaemonManager {
 
   /** Interval handle for sync polling */
   private syncPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  /** Daemon-owned scheduled-sync driver (Game Sync). */
+  private gameSyncScheduler: GameSyncScheduler | null = null;
 
   /**
    * Workspaces currently undergoing a VCS operation (pull/submit/merge).
@@ -138,6 +147,73 @@ export class DaemonManager {
 
     // Start sync polling for all workspaces
     this.startSyncPolling();
+
+    // Start the daemon-owned scheduled-sync driver (Game Sync).
+    this.startGameSyncScheduler();
+  }
+
+  /**
+   * Start the Game Sync scheduled-sync driver. It periodically runs the sync
+   * pipeline for workspaces that have a daily schedule configured, even while
+   * the desktop app is closed.
+   */
+  private startGameSyncScheduler(): void {
+    if (this.gameSyncScheduler) return;
+
+    this.gameSyncScheduler = new GameSyncScheduler({
+      listScheduled: async () => {
+        const items: ScheduledWorkspace[] = [];
+        for (const workspaces of this.workspaces.values()) {
+          for (const workspace of workspaces) {
+            const config = await getWorkspaceConfig(workspace.localPath);
+            if (config?.gameSync?.scheduledSync?.enabled) {
+              items.push({ workspace: config, orgId: workspace.orgId });
+            }
+          }
+        }
+        return items;
+      },
+      isBusy: (workspaceId) =>
+        this.vcsOperationActive.get(workspaceId) === true,
+      runScheduledSync: async (item, targetChangelist) => {
+        const { workspace, orgId } = item;
+        // The manager workspace (registry entry) is needed for state reload;
+        // the util workspace (config) drives the pipeline.
+        const managerWorkspace = this.findWorkspaceById(workspace.id);
+        this.beginVcsOperation(workspace.id);
+        try {
+          await runSyncPipeline(workspace, orgId, {
+            changelistId: targetChangelist,
+            filePaths: null,
+            reportProgress: false,
+          });
+          if (managerWorkspace) {
+            await this.reloadWorkspaceState(managerWorkspace);
+          }
+          this.clearSyncStatus(workspace.id);
+        } finally {
+          await this.endVcsOperation(workspace.id);
+        }
+
+        // Persist the run time so the schedule does not re-fire on restart.
+        const backend = this.stateBackend;
+        const state = await getWorkspaceState(workspace.localPath, backend);
+        await saveWorkspaceState(
+          workspace,
+          {
+            ...state,
+            version: WORKSPACE_STATE_VERSION,
+            gameSync: {
+              ...(state.gameSync ?? {}),
+              lastScheduledSyncAt: new Date().toISOString(),
+            },
+          },
+          backend,
+        );
+      },
+    });
+
+    this.gameSyncScheduler.start();
   }
 
   /**
@@ -186,6 +262,8 @@ export class DaemonManager {
       orgId: "",
       createdAt: new Date(0),
       deletedAt: null,
+      syncedChangelistNumber: null,
+      syncedAt: null,
     };
 
     const existing = this.workspaces.get(workspace.daemonId) || [];

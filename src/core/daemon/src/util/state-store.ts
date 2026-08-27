@@ -8,7 +8,13 @@ import {
 } from "fs";
 import type { WorkspaceStateFile } from "@checkpointvcs/common";
 import BetterSqlite3 from "better-sqlite3";
-import type { WorkspaceState } from "./util.js";
+import {
+  WORKSPACE_STATE_VERSION,
+  type ArtifactStateFile,
+  type BisectVerdict,
+  type WorkspaceGameSyncState,
+  type WorkspaceState,
+} from "./util.js";
 import { DaemonConfigType } from "../daemon-config.js";
 
 // ── public interface ──────────────────────────────────────────────
@@ -66,6 +72,8 @@ class JsonStateStore implements StateStore {
   public async load(): Promise<WorkspaceState> {
     try {
       const raw = await fs.readFile(this.statePath, "utf-8");
+      // v1 files simply lack the optional v2 fields (version, gameSync,
+      // artifactType); no structural migration is needed for JSON.
       return JSON.parse(raw) as WorkspaceState;
     } catch {
       return { changelistNumber: 0, files: {}, markedForAdd: [] };
@@ -74,7 +82,10 @@ class JsonStateStore implements StateStore {
 
   public async save(state: WorkspaceState): Promise<void> {
     await fs.mkdir(path.dirname(this.statePath), { recursive: true });
-    await fs.writeFile(this.statePath, JSON.stringify(state, null, 2));
+    await fs.writeFile(
+      this.statePath,
+      JSON.stringify({ ...state, version: WORKSPACE_STATE_VERSION }, null, 2),
+    );
   }
 
   public close(): void {
@@ -110,14 +121,17 @@ class SqliteStateStore implements StateStore {
 
     if (isNew) {
       this.createSchema();
+      this.setSchemaVersion(WORKSPACE_STATE_VERSION);
       this.migrateFromJson();
     } else {
-      this.ensureSchema();
+      this.runMigrations();
     }
 
     return this.db;
   }
 
+  // Creates the CURRENT (v2) schema. Older databases are upgraded stepwise
+  // via runMigrations instead.
   private createSchema(): void {
     this.db!.exec(`
       CREATE TABLE IF NOT EXISTS workspace_meta (
@@ -133,22 +147,73 @@ class SqliteStateStore implements StateStore {
         mtime      REAL
       );
       CREATE TABLE IF NOT EXISTS artifact_files (
-        path       TEXT PRIMARY KEY,
-        file_id    TEXT NOT NULL,
-        changelist INTEGER NOT NULL,
-        hash       TEXT NOT NULL,
-        size       INTEGER NOT NULL,
-        mtime      REAL
+        path          TEXT PRIMARY KEY,
+        file_id       TEXT NOT NULL,
+        changelist    INTEGER NOT NULL,
+        hash          TEXT NOT NULL,
+        size          INTEGER NOT NULL,
+        mtime         REAL,
+        artifact_type TEXT
       );
       CREATE TABLE IF NOT EXISTS marked_for_add (
         path TEXT PRIMARY KEY
       );
+      CREATE TABLE IF NOT EXISTS bisect (
+        changelist INTEGER PRIMARY KEY,
+        verdict    TEXT NOT NULL
+      );
     `);
   }
 
-  private ensureSchema(): void {
-    // Idempotent — IF NOT EXISTS guards prevent errors on re-open.
-    this.createSchema();
+  private getSchemaVersion(): number {
+    const row = this.db!.prepare(
+      "SELECT value FROM workspace_meta WHERE key = 'schemaVersion'",
+    ).get() as { value: string } | undefined;
+    // Pre-versioning databases are schema version 1.
+    return row ? parseInt(row.value, 10) : 1;
+  }
+
+  private setSchemaVersion(version: number): void {
+    this.db!.prepare(
+      "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('schemaVersion', ?)",
+    ).run(String(version));
+  }
+
+  // Ordered, stepwise migrations keyed by TARGET schema version. Each entry
+  // upgrades from (version - 1) to version.
+  private static readonly MIGRATIONS: Record<number, string[]> = {
+    2: [
+      "ALTER TABLE artifact_files ADD COLUMN artifact_type TEXT",
+      `CREATE TABLE IF NOT EXISTS bisect (
+        changelist INTEGER PRIMARY KEY,
+        verdict    TEXT NOT NULL
+      )`,
+    ],
+  };
+
+  private runMigrations(): void {
+    const db = this.db!;
+    let version = this.getSchemaVersion();
+
+    while (version < WORKSPACE_STATE_VERSION) {
+      const target = version + 1;
+      const statements = SqliteStateStore.MIGRATIONS[target];
+      if (!statements) {
+        throw new Error(
+          `No state-store migration path from schema version ${version} to ${target}`,
+        );
+      }
+
+      const migrate = db.transaction(() => {
+        for (const statement of statements) {
+          db.exec(statement);
+        }
+        this.setSchemaVersion(target);
+      });
+      migrate();
+
+      version = target;
+    }
   }
 
   /**
@@ -166,7 +231,7 @@ class SqliteStateStore implements StateStore {
       // Keep the old file around with a .bak extension for safety.
       renameSync(jsonPath, jsonPath + ".bak");
     } catch {
-      // migration failure is non-fatal — we start with empty state
+      // migration failure is non-fatal; we start with empty state
     }
   }
 
@@ -208,7 +273,7 @@ class SqliteStateStore implements StateStore {
       };
     }
 
-    const artifactFiles: Record<string, WorkspaceStateFile> = {};
+    const artifactFiles: Record<string, ArtifactStateFile> = {};
     const artRows = db.prepare("SELECT * FROM artifact_files").all() as Array<{
       path: string;
       file_id: string;
@@ -216,6 +281,7 @@ class SqliteStateStore implements StateStore {
       hash: string;
       size: number;
       mtime: number | null;
+      artifact_type: string | null;
     }>;
     for (const r of artRows) {
       artifactFiles[r.path] = {
@@ -224,6 +290,7 @@ class SqliteStateStore implements StateStore {
         md5: r.hash,
         size: r.size,
         ...(r.mtime != null && { mtime: r.mtime }),
+        ...(r.artifact_type != null && { artifactType: r.artifact_type }),
       };
     }
 
@@ -232,7 +299,77 @@ class SqliteStateStore implements StateStore {
       .all() as Array<{ path: string }>;
     const markedForAdd = markedRows.map((r) => r.path);
 
-    return { changelistNumber, files, artifactFiles, markedForAdd };
+    const gameSync = this.loadGameSync(db);
+
+    return {
+      version: WORKSPACE_STATE_VERSION,
+      changelistNumber,
+      files,
+      artifactFiles,
+      markedForAdd,
+      ...(gameSync !== undefined && { gameSync }),
+    };
+  }
+
+  private loadGameSync(
+    db: BetterSqlite3.Database,
+  ): WorkspaceGameSyncState | undefined {
+    const metaRows = db
+      .prepare(
+        `SELECT key, value FROM workspace_meta
+         WHERE key IN ('syncFilterHash', 'lastBuiltChangelist',
+                       'lastScheduledSyncAt', 'appliedArtifacts')`,
+      )
+      .all() as Array<{ key: string; value: string }>;
+    const meta = new Map(metaRows.map((r) => [r.key, r.value]));
+
+    const bisectRows = db.prepare("SELECT * FROM bisect").all() as Array<{
+      changelist: number;
+      verdict: BisectVerdict;
+    }>;
+
+    const gameSync: WorkspaceGameSyncState = {};
+    let hasValue = false;
+
+    const syncFilterHash = meta.get("syncFilterHash");
+    if (syncFilterHash !== undefined) {
+      gameSync.syncFilterHash = syncFilterHash;
+      hasValue = true;
+    }
+
+    const lastBuiltChangelist = meta.get("lastBuiltChangelist");
+    if (lastBuiltChangelist !== undefined) {
+      gameSync.lastBuiltChangelist = parseInt(lastBuiltChangelist, 10);
+      hasValue = true;
+    }
+
+    const lastScheduledSyncAt = meta.get("lastScheduledSyncAt");
+    if (lastScheduledSyncAt !== undefined) {
+      gameSync.lastScheduledSyncAt = lastScheduledSyncAt;
+      hasValue = true;
+    }
+
+    const appliedArtifacts = meta.get("appliedArtifacts");
+    if (appliedArtifacts !== undefined) {
+      try {
+        gameSync.appliedArtifacts = JSON.parse(
+          appliedArtifacts,
+        ) as WorkspaceGameSyncState["appliedArtifacts"];
+        hasValue = true;
+      } catch {
+        // corrupted JSON: treat as unset
+      }
+    }
+
+    if (bisectRows.length > 0) {
+      gameSync.bisect = {};
+      for (const row of bisectRows) {
+        gameSync.bisect[row.changelist] = row.verdict;
+      }
+      hasValue = true;
+    }
+
+    return hasValue ? gameSync : undefined;
   }
 
   // ── save ──
@@ -253,11 +390,16 @@ class SqliteStateStore implements StateStore {
     );
     const clearArtifacts = db.prepare("DELETE FROM artifact_files");
     const insertArtifact = db.prepare(
-      "INSERT INTO artifact_files (path, file_id, changelist, hash, size, mtime) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO artifact_files (path, file_id, changelist, hash, size, mtime, artifact_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     const clearMarked = db.prepare("DELETE FROM marked_for_add");
     const insertMarked = db.prepare(
       "INSERT INTO marked_for_add (path) VALUES (?)",
+    );
+    const deleteMeta = db.prepare("DELETE FROM workspace_meta WHERE key = ?");
+    const clearBisect = db.prepare("DELETE FROM bisect");
+    const insertBisect = db.prepare(
+      "INSERT INTO bisect (changelist, verdict) VALUES (?, ?)",
     );
 
     const runTransaction = db.transaction(() => {
@@ -285,6 +427,7 @@ class SqliteStateStore implements StateStore {
             f.md5,
             f.size,
             f.mtime ?? null,
+            f.artifactType ?? null,
           );
         }
       }
@@ -293,6 +436,38 @@ class SqliteStateStore implements StateStore {
       if (state.markedForAdd) {
         for (const p of state.markedForAdd) {
           insertMarked.run(p);
+        }
+      }
+
+      const gameSync = state.gameSync;
+      const scalars: [string, string | undefined][] = [
+        ["syncFilterHash", gameSync?.syncFilterHash],
+        [
+          "lastBuiltChangelist",
+          gameSync?.lastBuiltChangelist !== undefined
+            ? String(gameSync.lastBuiltChangelist)
+            : undefined,
+        ],
+        ["lastScheduledSyncAt", gameSync?.lastScheduledSyncAt],
+        [
+          "appliedArtifacts",
+          gameSync?.appliedArtifacts !== undefined
+            ? JSON.stringify(gameSync.appliedArtifacts)
+            : undefined,
+        ],
+      ];
+      for (const [key, value] of scalars) {
+        if (value === undefined) {
+          deleteMeta.run(key);
+        } else {
+          upsertMeta.run(key, value);
+        }
+      }
+
+      clearBisect.run();
+      if (gameSync?.bisect) {
+        for (const [changelist, verdict] of Object.entries(gameSync.bisect)) {
+          insertBisect.run(parseInt(changelist, 10), verdict);
         }
       }
     });

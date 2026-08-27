@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import DaemonHandler from "./daemon-handler";
+import GameSyncHandler from "./game-sync-handler";
 import { setupApplicationMenu } from "./menu";
 import { ipcOn } from "./channels";
 import { registerSettingsHandlers } from "./settings-handler";
@@ -69,6 +70,26 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 let win: BrowserWindow | null;
 
 const daemonHandler = new DaemonHandler(ipcMain);
+const gameSyncHandler = new GameSyncHandler(ipcMain);
+
+// The app deliberately has no tray icon of its own. Checkpoint's tray presence
+// is the standalone Go tray (src/clients/tray), which outlives this app and
+// already owns the daemon lifecycle, updates, and the Game Sync status/"Sync
+// Latest" actions. A second Electron tray would just duplicate it.
+
+// Single-instance: focus the existing window instead of launching a second
+// copy (which would fight over the daemon).
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
+}
 
 // Settings dialog IPC (MCP toggle, versions, zoom, titlebar overlay colors).
 registerSettingsHandlers(ipcMain, () => win);
@@ -115,6 +136,8 @@ function createWindow() {
   }
 
   daemonHandler.init(win.webContents);
+  gameSyncHandler.init(win.webContents);
+  gameSyncHandler.setWindow(win);
 }
 
 // Quit when all windows are closed, except on macOS. There, it's common
@@ -164,4 +187,6 @@ ipcOn(ipcMain, "workspace:history:open-window", () => {
   createPopoutWindow("changelist-changes", "Changelist Changes");
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+});

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { FileChangeType, RepoAccess, type Changelist } from "@prisma/client";
+import { FileChangeType, RepoAccess } from "@prisma/client";
 import {
   assertWorkspaceOwnership,
   getUserAndRepoWithAccess,
@@ -15,6 +15,8 @@ import {
   diffStateTrees,
 } from "~/server/state-tree";
 import type { InputJsonValue } from "@prisma/client/runtime/library";
+import { walkChangelistAncestry } from "~/server/changelist-walk";
+import { classifyPaths } from "~/server/game-sync/classify";
 
 export const changelistRouter = createTRPCRouter({
   // Path-keyed diff between two changelists' state trees. The daemon's sync
@@ -111,7 +113,7 @@ export const changelistRouter = createTRPCRouter({
           number: z.number().nullable(),
           timestamp: z.date().nullable(),
         }),
-        count: z.number().min(1).max(100),
+        count: z.number().min(1).max(250),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -154,19 +156,10 @@ export const changelistRouter = createTRPCRouter({
         });
       }
 
-      let startChangelist:
-        | (Changelist & {
-            user: {
-              id: string;
-              email: string;
-              name: string | null;
-              username: string | null;
-            } | null;
-          })
-        | null = null;
+      let resolvedStartNumber: number;
       if (typeof startNumber === "object") {
-        // must be a date; find the first changelist less than this date
-        startChangelist = await ctx.db.changelist.findFirst({
+        // must be a date; find the first changelist at or before this date
+        const startByDate = await ctx.db.changelist.findFirst({
           where: {
             repoId: input.repoId,
             createdAt: {
@@ -176,83 +169,63 @@ export const changelistRouter = createTRPCRouter({
           orderBy: {
             createdAt: "desc",
           },
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                username: true,
-              },
-            },
+          select: {
+            number: true,
           },
         });
+
+        if (!startByDate) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message:
+              "Could not find a start number to retrieve changelists from",
+          });
+        }
+
+        resolvedStartNumber = startByDate.number;
       } else {
-        startChangelist = await ctx.db.changelist.findUnique({
-          where: {
-            repoId_number: {
-              repoId: input.repoId,
-              number: startNumber,
-            },
-          },
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                username: true,
-              },
-            },
-          },
-        });
+        resolvedStartNumber = startNumber;
       }
 
-      if (!startChangelist) {
-        // this probably shouldn't happen
+      const { numbers } = await walkChangelistAncestry(
+        ctx.db,
+        input.repoId,
+        resolvedStartNumber,
+        input.count,
+      );
+
+      if (numbers.length === 0) {
+        // the start changelist itself doesn't exist
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Could not find a start number to retrieve changelists from",
         });
       }
 
-      // TODO MIKE HERE now we need to find the recursive parents; let's be dumb about it for now
-      const changelists = [startChangelist];
-      while (changelists.length < input.count) {
-        const lastChangelist = changelists.at(-1)!;
-
-        if (lastChangelist.parentNumber === null) {
-          break;
-        }
-
-        const parentChangelist = await ctx.db.changelist.findUnique({
-          where: {
-            repoId_number: {
-              repoId: input.repoId,
-              number: lastChangelist.parentNumber,
+      const changelists = await ctx.db.changelist.findMany({
+        where: {
+          repoId: input.repoId,
+          number: {
+            in: numbers,
+          },
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              username: true,
             },
           },
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                username: true,
-              },
-            },
-          },
-        });
+        },
+      });
 
-        if (!parentChangelist) {
-          // TODO MIKE HERE: should log this invalid parent number
-          break;
-        }
-
-        changelists.push(parentChangelist);
-      }
-
-      return changelists;
+      // findMany does not preserve order; restore newest-first walk order
+      const byNumber = new Map(changelists.map((cl) => [cl.number, cl]));
+      return numbers
+        .map((number) => byNumber.get(number))
+        .filter((cl) => cl !== undefined);
     }),
 
   getChangelistFiles: protectedProcedure
@@ -491,6 +464,9 @@ export const changelistRouter = createTRPCRouter({
         paths.entries(),
       );
 
+      // Classify code vs content from the modified paths (already in memory)
+      const { hasCodeChanges, hasContentChanges } = classifyPaths(allPaths);
+
       // Create the changelist (inherit artifact state from parent)
       const changelist = await ctx.db.changelist.create({
         data: {
@@ -504,6 +480,8 @@ export const changelistRouter = createTRPCRouter({
             parentChangelist.artifactStateTree as InputJsonValue,
           repoId: input.repoId,
           userId: ctx.session.user.id,
+          hasCodeChanges,
+          hasContentChanges,
         },
       });
 

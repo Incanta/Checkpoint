@@ -18,6 +18,9 @@ import { issueTrackerRouter } from "./routers/issue-tracker";
 import { notificationRouter } from "./routers/notification";
 import { shelfRouter } from "./routers/shelf";
 import { artifactRouter } from "./routers/artifact";
+import { gameSyncRouter } from "./routers/game-sync";
+import { buildBadgeRouter } from "./routers/build-badge";
+import { changelistReviewRouter } from "./routers/changelist-review";
 import { emailRouter } from "./routers/email";
 import { setupRouter } from "./routers/setup";
 import { billingRouter } from "./routers/billing";
@@ -50,6 +53,9 @@ export const appRouter = createTRPCRouter({
   notification: notificationRouter,
   shelf: shelfRouter,
   artifact: artifactRouter,
+  gameSync: gameSyncRouter,
+  buildBadge: buildBadgeRouter,
+  changelistReview: changelistReviewRouter,
   email: emailRouter,
   setup: setupRouter,
   billing: billingRouter,

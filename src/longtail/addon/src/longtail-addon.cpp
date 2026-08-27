@@ -86,6 +86,8 @@ WrapperAsyncHandle* PullAsync(
     const char* S3SecretAccessKey,
     const char* S3SessionToken,
     const char* CachePath,
+    const char* const* IncludePaths,
+    uint32_t NumIncludePaths,
     int LogLevel);
 
 ReadFileAsyncHandle* ReadFileFromVersionAsync(
@@ -128,6 +130,10 @@ struct HandleContext {
 
   // Modification structs for SubmitAsync
   std::vector<Checkpoint::Modification> modifications;
+
+  // Include-rule pointers for PullAsync; the strings themselves live in
+  // `strings` above.
+  std::vector<const char*> includePaths;
 
   // Buffer data for MergeAsync
   std::vector<uint8_t> bufferData;
@@ -302,6 +308,26 @@ static Napi::Value NapiPullAsync(const Napi::CallbackInfo& info) {
   int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
   const char* cachePath = OptStr(ctx, opts, "cachePath", nullptr);
 
+  // Optional gitignore-style include rules. PullAsync compiles these into a
+  // Checkpoint::PathFilter before it spawns its worker thread, so the pointers
+  // below only need to stay valid for the duration of this call; they live on
+  // `ctx` anyway, like every other string argument.
+  ctx->includePaths.clear();
+  Napi::Value includePathsVal = opts.Get("includePaths");
+  if (includePathsVal.IsArray()) {
+    Napi::Array includePathsArray = includePathsVal.As<Napi::Array>();
+    const uint32_t numIncludePaths = includePathsArray.Length();
+    ctx->includePaths.reserve(numIncludePaths);
+    for (uint32_t i = 0; i < numIncludePaths; ++i) {
+      Napi::Value entry = includePathsArray.Get(i);
+      if (!entry.IsString()) {
+        continue;
+      }
+      ctx->includePaths.push_back(
+          StoreString(ctx, entry.As<Napi::String>().Utf8Value()));
+    }
+  }
+
   WrapperAsyncHandle* handle = ::PullAsync(
       versionIndex,
       enableMmapIndexing, enableMmapBlockStore,
@@ -309,6 +335,8 @@ static Napi::Value NapiPullAsync(const Napi::CallbackInfo& info) {
       storageType, gatewayUrl, jwt, jwtExpirationMs,
       s3Endpoint, s3Region, s3Bucket, s3AccessKeyId, s3SecretAccessKey, s3SessionToken,
       cachePath,
+      ctx->includePaths.empty() ? nullptr : ctx->includePaths.data(),
+      static_cast<uint32_t>(ctx->includePaths.size()),
       logLevel);
 
   if (!handle) {

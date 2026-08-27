@@ -23,6 +23,7 @@ namespace Checkpoint.Api.Models;
 [JsonSerializable(typeof(FileContentInfo))]
 [JsonSerializable(typeof(ChangedPathsInfo))]
 [JsonSerializable(typeof(List<ArtifactFileInfo>))]
+[JsonSerializable(typeof(ArtifactSetInfo))]
 [JsonSerializable(typeof(List<int>))]
 public sealed partial class CheckpointJsonContext : JsonSerializerContext
 {

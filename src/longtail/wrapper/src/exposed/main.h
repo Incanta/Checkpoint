@@ -31,6 +31,7 @@
 
 #include "../util/json.h"
 #include "../util/gateway.h"
+#include "../util/path-filter.h"
 #include "../util/s3.h"
 #include "exposed.h"
 #include "wrapper-handle.h"
@@ -76,7 +77,7 @@ int32_t SubmitSync(
     const Checkpoint::Modification* Modifications,
     WrapperAsyncHandle* handle);
 
-int32_t PullSync(
+int PullSync(
     const char* VersionIndex,
     bool EnableMmapIndexing,
     bool EnableMmapBlockStore,
@@ -92,6 +93,8 @@ int32_t PullSync(
     const char* S3AccessKeyId,
     const char* S3SecretAccessKey,
     const char* S3SessionToken,
+    const char* CachePath,
+    const Checkpoint::PathFilter& IncludeFilter,
     WrapperAsyncHandle* handle);
 
 // Extended handle for ReadFileFromVersion that includes the file data

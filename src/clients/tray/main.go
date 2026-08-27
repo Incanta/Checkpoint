@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -92,6 +93,10 @@ func onReady() {
 	)
 	mMcp.Disable()
 	systray.AddSeparator()
+	// Game Sync status + "Sync Latest". Both stay hidden until the daemon
+	// reports an Unreal workspace, so non-Unreal installs see no change.
+	initGameSyncMenu()
+	systray.AddSeparator()
 	mOpenDesktop := systray.AddMenuItem("Open Desktop App", "Open Checkpoint Desktop")
 	mViewLogs := systray.AddMenuItem("View Logs", "Open the Checkpoint log folder")
 	systray.AddSeparator()
@@ -118,6 +123,8 @@ func onReady() {
 			updateDaemonStatus()
 		}
 	}()
+
+	startGameSyncPoll()
 
 	go func() {
 		for {
@@ -301,32 +308,67 @@ func pollMcpStatus() {
 	}
 }
 
-// getMcpStatus queries the daemon's mcp.getStatus tRPC endpoint.
-func getMcpStatus(port int) (mcpStatus, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	url := fmt.Sprintf(
-		"http://127.0.0.1:%d/mcp.getStatus?batch=1&input={}", port,
+// daemonQuery performs a tRPC GET query against the daemon and decodes the
+// procedure's result into out. Pass "" as inputJSON for input-less procedures;
+// otherwise pass the raw input object, which is wrapped for the batch link and
+// superjson transformer the daemon is configured with.
+func daemonQuery(port int, procedure string, inputJSON string, out any) error {
+	input := "{}"
+	if inputJSON != "" {
+		input = `{"0":{"json":` + inputJSON + `}}`
+	}
+
+	endpoint := fmt.Sprintf(
+		"http://127.0.0.1:%d/%s?batch=1&input=%s",
+		port, procedure, url.QueryEscape(input),
 	)
-	resp, err := client.Get(url)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(endpoint)
 	if err != nil {
-		return mcpStatus{}, err
+		return err
 	}
 	defer resp.Body.Close()
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return mcpStatus{}, err
+		return err
 	}
+
+	// tRPC batch response: [{"result":{"data":{"json":...}}}], or an "error"
+	// member in place of "result" when the procedure threw.
 	var batch []struct {
 		Result struct {
 			Data struct {
-				JSON mcpStatus `json:"json"`
+				JSON json.RawMessage `json:"json"`
 			} `json:"data"`
 		} `json:"result"`
+		Error *struct {
+			JSON struct {
+				Message string `json:"message"`
+			} `json:"json"`
+		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &batch); err != nil || len(batch) == 0 {
-		return mcpStatus{}, fmt.Errorf("invalid response")
+		return fmt.Errorf("%s: invalid response", procedure)
 	}
-	return batch[0].Result.Data.JSON, nil
+	if batch[0].Error != nil {
+		return fmt.Errorf("%s: %s", procedure, batch[0].Error.JSON.Message)
+	}
+	if len(batch[0].Result.Data.JSON) == 0 {
+		return fmt.Errorf("%s: empty result", procedure)
+	}
+
+	return json.Unmarshal(batch[0].Result.Data.JSON, out)
+}
+
+// getMcpStatus queries the daemon's mcp.getStatus tRPC endpoint.
+func getMcpStatus(port int) (mcpStatus, error) {
+	var status mcpStatus
+	if err := daemonQuery(port, "mcp.getStatus", "", &status); err != nil {
+		return mcpStatus{}, err
+	}
+	return status, nil
 }
 
 // handleMcpToggle flips the daemon's MCP server on or off. The daemon applies
@@ -350,38 +392,10 @@ func handleMcpToggle() {
 }
 
 func checkDaemonVersion() {
-	port := getDaemonPort()
-	client := &http.Client{Timeout: 5 * time.Second}
-
-	url := fmt.Sprintf(
-		"http://127.0.0.1:%d/version.check?batch=1&input={}",
-		port,
-	)
-
-	resp, err := client.Get(url)
-	if err != nil {
+	var info daemonVersionInfo
+	if err := daemonQuery(getDaemonPort(), "version.check", "", &info); err != nil {
 		return
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return
-	}
-
-	// tRPC batch response: [{"result":{"data":{"json":{...}}}}]
-	var batch []struct {
-		Result struct {
-			Data struct {
-				JSON daemonVersionInfo `json:"json"`
-			} `json:"data"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(body, &batch); err != nil || len(batch) == 0 {
-		return
-	}
-
-	info := batch[0].Result.Data.JSON
 
 	// Tray is bundled with the daemon, so this check trivially passes in
 	// production, but it is kept for dev installs that may have mismatched binaries.
@@ -446,30 +460,11 @@ func pollUpdateStatus() {
 // getUpdateStatus queries the daemon's updater.getStatus tRPC endpoint and
 // returns the unmarshalled status struct.
 func getUpdateStatus(port int) (updateStatus, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	url := fmt.Sprintf(
-		"http://127.0.0.1:%d/updater.getStatus?batch=1&input={}", port,
-	)
-	resp, err := client.Get(url)
-	if err != nil {
+	var status updateStatus
+	if err := daemonQuery(port, "updater.getStatus", "", &status); err != nil {
 		return updateStatus{}, err
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return updateStatus{}, err
-	}
-	var batch []struct {
-		Result struct {
-			Data struct {
-				JSON updateStatus `json:"json"`
-			} `json:"data"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(body, &batch); err != nil || len(batch) == 0 {
-		return updateStatus{}, fmt.Errorf("invalid response")
-	}
-	return batch[0].Result.Data.JSON, nil
+	return status, nil
 }
 
 // daemonMutate POSTs a tRPC mutation with an empty input object. Used by the
@@ -478,11 +473,13 @@ func daemonMutate(port int, procedure string) error {
 	return daemonMutateInput(port, procedure, "{}")
 }
 
-// daemonMutateInput POSTs a tRPC mutation with the given JSON input.
+// daemonMutateInput POSTs a tRPC mutation with the given JSON input. A
+// procedure that throws answers 200 with an "error" member rather than an HTTP
+// error status, so the body is decoded to surface the message to the caller.
 func daemonMutateInput(port int, procedure string, inputJSON string) error {
-	url := fmt.Sprintf("http://127.0.0.1:%d/%s?batch=1", port, procedure)
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d/%s?batch=1", port, procedure)
 	body := bytes.NewReader([]byte(`{"0":{"json":` + inputJSON + `}}`))
-	req, err := http.NewRequest("POST", url, body)
+	req, err := http.NewRequest("POST", endpoint, body)
 	if err != nil {
 		return err
 	}
@@ -493,6 +490,27 @@ func daemonMutateInput(port int, procedure string, inputJSON string) error {
 		return err
 	}
 	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		// The mutation was accepted; we just couldn't read the reply. Some
+		// mutations (updater.applyUpdate) kill the daemon before responding.
+		return nil
+	}
+
+	var batch []struct {
+		Error *struct {
+			JSON struct {
+				Message string `json:"message"`
+			} `json:"json"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &batch); err != nil || len(batch) == 0 {
+		return nil
+	}
+	if batch[0].Error != nil {
+		return fmt.Errorf("%s: %s", procedure, batch[0].Error.JSON.Message)
+	}
 	return nil
 }
 

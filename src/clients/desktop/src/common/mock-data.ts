@@ -32,6 +32,8 @@ export namespace MockedData {
       localPath: "E:/epic/engine/UE_Redwood",
       daemonId: "daemon-1",
       branchName: "main",
+      syncedChangelistNumber: null,
+      syncedAt: null,
     },
   ];
 }

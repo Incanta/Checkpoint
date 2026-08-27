@@ -4,11 +4,8 @@ import { z } from "zod";
 import fs from "fs/promises";
 import path from "path";
 
-import {
-  pull,
-  checkConflicts,
-  readFileFromChangelist,
-} from "../../../util/index.js";
+import { checkConflicts, readFileFromChangelist } from "../../../util/index.js";
+import { runSyncPipeline } from "../../../util/game-sync/sync-pipeline.js";
 import { TRPCError } from "@trpc/server";
 import { ApiTypes } from "../../../types/api-types.js";
 import { FileStatus, FileType } from "../../../types/index.js";
@@ -118,20 +115,23 @@ export const syncRouter = router({
         manager.beginVcsOperation(workspace.id);
         try {
           const reportProgress = !input.noProgress;
-          const mergeResult = await pull(
+          const pipelineResult = await runSyncPipeline(
             workspaceInfo,
             repo.orgId,
-            input.changelistId,
-            input.filePaths,
-            undefined,
-            reportProgress
-              ? (step) => jobManager.updateStep(job.id, step)
-              : undefined,
-            reportProgress
-              ? (step, done, total) =>
-                  jobManager.updateProgress(job.id, done, total)
-              : undefined,
+            {
+              changelistId: input.changelistId,
+              filePaths: input.filePaths,
+              reportProgress,
+              onStep: reportProgress
+                ? (step) => jobManager.updateStep(job.id, step)
+                : undefined,
+              onProgress: reportProgress
+                ? (step, done, total) =>
+                    jobManager.updateProgress(job.id, done, total)
+                : undefined,
+            },
           );
+          const mergeResult = pipelineResult.mergeResult;
 
           Logger.debug(
             `Pull completed for workspace ${workspace.name}. Merge result: ${mergeResult.conflictMerges.length === 0 ? "success" : "failure"}. Conflicts: ${

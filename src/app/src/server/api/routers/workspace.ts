@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { getUserAndRepoWithAccess } from "../auth-utils";
+import {
+  assertWorkspaceOwnership,
+  getUserAndRepoWithAccess,
+} from "../auth-utils";
 import { RepoAccess } from "@prisma/client";
 
 export const workspaceRouter = createTRPCRouter({
@@ -39,5 +42,29 @@ export const workspaceRouter = createTRPCRouter({
       });
 
       return newWorkspace;
+    }),
+
+  // Game Sync presence: the daemon reports the CL a workspace synced to after
+  // each successful pull so other clients can show "N users synced here".
+  updateSyncStatus: protectedProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        changelistNumber: z.number().nullable(),
+      }),
+    )
+    .output(z.object({ ok: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertWorkspaceOwnership(ctx, input.workspaceId);
+
+      await ctx.db.workspace.update({
+        where: { id: input.workspaceId },
+        data: {
+          syncedChangelistNumber: input.changelistNumber,
+          syncedAt: new Date(),
+        },
+      });
+
+      return { ok: true as const };
     }),
 });

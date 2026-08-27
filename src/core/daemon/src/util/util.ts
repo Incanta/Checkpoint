@@ -4,6 +4,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import {
   CreateApiClientAuth,
+  type GameSyncBuildStep,
   type WorkspaceStateFile,
 } from "@checkpointvcs/common";
 import { getStateStore } from "./state-store.js";
@@ -59,12 +60,51 @@ export async function exec(
   return result;
 }
 
+export type BisectVerdict = "pass" | "fail" | "include" | "exclude";
+
+export interface AppliedArtifactInfo {
+  /** The changelist the artifact set was attached at (Y). */
+  changelistNumber: number;
+  /** The source changelist the workspace was synced to when applied (X). */
+  sourceChangelistNumber: number;
+  /** ISO timestamp. */
+  appliedAt: string;
+  /**
+   * Set when a local compile overwrote files from this set; forces the next
+   * applyArtifacts to re-extract instead of skipping matching entries.
+   */
+  invalidatedByLocalBuild?: boolean;
+}
+
+export interface WorkspaceGameSyncState {
+  /** Hash of the sync filter in effect for the files currently on disk. */
+  syncFilterHash?: string;
+  /** Last changelist a successful local build ran at (ForceClean boundaries). */
+  lastBuiltChangelist?: number;
+  /** Artifact type -> applied set info. */
+  appliedArtifacts?: Record<string, AppliedArtifactInfo>;
+  /** Changelist number -> bisect verdict. */
+  bisect?: Record<number, BisectVerdict>;
+  /** ISO timestamp of the last scheduled sync run. */
+  lastScheduledSyncAt?: string;
+}
+
+export type ArtifactStateFile = WorkspaceStateFile & {
+  /** Artifact channel the file came from (absent on legacy state: "editor"). */
+  artifactType?: string;
+};
+
+export const WORKSPACE_STATE_VERSION = 2;
+
 export interface WorkspaceState {
+  /** State schema version; absent = 1. Current: WORKSPACE_STATE_VERSION. */
+  version?: number;
   changelistNumber: number;
   files: Record<string, WorkspaceStateFile>; // path -> file info
-  artifactFiles?: Record<string, WorkspaceStateFile>; // path -> artifact file info
+  artifactFiles?: Record<string, ArtifactStateFile>; // path -> artifact file info
   /** Relative paths of files explicitly marked for add */
   markedForAdd?: string[];
+  gameSync?: WorkspaceGameSyncState;
 }
 
 export interface WorkspaceConfig {
@@ -81,10 +121,54 @@ export interface WorkspaceConfig {
   suppressResolveConfirmUntil?: string | null;
   /**
    * The remote branch head CL number that was last checked during sync status.
-   * Used to guard resolveConflicts against stale conflict data — if the remote
+   * Used to guard resolveConflicts against stale conflict data: if the remote
    * head has moved since this value was recorded, resolve is rejected.
    */
   lastSyncStatusRemoteHead?: number | null;
+  gameSync?: WorkspaceGameSyncSettings;
+}
+
+export interface WorkspaceScheduledSyncSettings {
+  enabled: boolean;
+  /** Local time of day, "HH:MM". */
+  timeOfDay: string;
+  target: "latest" | "latest-good" | "latest-starred";
+}
+
+export interface WorkspaceGameSyncSettings {
+  /** Category id -> enabled override vs the repo config default. */
+  categoryOverrides?: Record<string, boolean>;
+  /** Ordered gitignore-style rules applied after category rules. */
+  customIncludeRules?: string[];
+  customExcludeRules?: string[];
+  /** Preset name from repo config, if one is applied. */
+  preset?: string | null;
+  usePrecompiledBinaries?: boolean;
+  /** Artifact channels to apply when usePrecompiledBinaries is on. */
+  artifactTypes?: string[];
+  /** Repo-relative .uproject path when the workspace holds several. */
+  selectedProject?: string;
+  editorConfiguration?: string;
+  /** Opt-in: write the synced CL into Engine/Build/Build.version after syncs. */
+  writeVersionFiles?: boolean;
+  afterSync?: {
+    build?: boolean;
+    generateProjectFiles?: boolean;
+    runEditor?: boolean;
+    openSolution?: boolean;
+  };
+  /** Step id -> enabled override for repo-config and default steps. */
+  buildStepOverrides?: Record<string, { enabled?: boolean }>;
+  /** User-defined steps, merged after repo config steps. */
+  customBuildSteps?: GameSyncBuildStep[];
+  scheduledSync?: WorkspaceScheduledSyncSettings;
+  lastScheduledSyncResult?: {
+    at: string;
+    target: string;
+    changelistNumber: number | null;
+    status: "success" | "failed" | "skipped";
+    error?: string;
+  };
 }
 
 export interface Workspace extends WorkspaceConfig {

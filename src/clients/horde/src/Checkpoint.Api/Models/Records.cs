@@ -148,6 +148,42 @@ public sealed record ArtifactFileInfo
 }
 
 /// <summary>
+/// One build badge to post via buildBadge.postBatch. state is one of
+/// "STARTING", "FAILURE", "WARNING", "SUCCESS", or "SKIPPED".
+/// </summary>
+public sealed record BadgeInput
+{
+	public int ChangelistNumber { get; init; }
+	public string Name { get; init; } = String.Empty;
+	public string State { get; init; } = String.Empty;
+	public string? Group { get; init; }
+	public string? Url { get; init; }
+}
+
+/// <summary>
+/// One modification in an artifact set attach (artifact.attachToChangelist).
+/// Delete removes the path from the set; otherwise the path is added/overwritten.
+/// </summary>
+public sealed record ArtifactModification
+{
+	public bool Delete { get; init; }
+	public string Path { get; init; } = String.Empty;
+	public string? OldPath { get; init; }
+}
+
+/// <summary>
+/// Response of artifact.findLatestSet: the newest matching artifact set of a type
+/// at or before a changelist. StateTree maps fileId to the changelist number that
+/// last wrote that file.
+/// </summary>
+public sealed record ArtifactSetInfo
+{
+	public int ChangelistNumber { get; init; }
+	public string VersionIndex { get; init; } = String.Empty;
+	public Dictionary<string, int> StateTree { get; init; } = new();
+}
+
+/// <summary>
 /// Reads a long from either a JSON number or a string token (superjson bigint fields arrive as strings).
 /// </summary>
 public sealed class FlexibleLongConverter : JsonConverter<long>

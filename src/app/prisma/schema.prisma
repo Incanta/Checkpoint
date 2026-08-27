@@ -44,6 +44,10 @@ model User {
   issueComments    IssueComment[]
   issueAssignments IssueAssignee[]
 
+  buildBadgesPosted  BuildBadge[]        @relation("BuildBadgePoster")
+  changelistReviews  ChangelistReview[]
+  changelistComments ChangelistComment[]
+
   notifications      Notification[]            @relation("NotificationRecipient")
   actedNotifications Notification[]            @relation("NotificationActor")
   issueSubscriptions IssueSubscription[]
@@ -330,9 +334,18 @@ model Changelist {
   children     Changelist[] @relation("ChangelistToParent")
   parentNumber Int? // NOTE: Merges are handled via forced squashing
 
-  fileChanges FileChange[]
-  labels      ChangelistLabel[]
-  artifacts   ArtifactFile[]
+  // Code/content classification for the Game Sync changelist browser.
+  // Null = not yet classified (rows predating the feature; lazily backfilled).
+  hasCodeChanges    Boolean?
+  hasContentChanges Boolean?
+
+  fileChanges  FileChange[]
+  labels       ChangelistLabel[]
+  artifacts    ArtifactFile[]
+  artifactSets ArtifactSet[]
+  buildBadges  BuildBadge[]
+  reviews      ChangelistReview[]
+  clComments   ChangelistComment[]
 
   @@unique([repoId, number])
 }
@@ -400,7 +413,112 @@ model ArtifactFile {
 
   size BigInt
 
-  @@unique([repoId, changelistNumber, fileId])
+  // Artifact channel this file belongs to (e.g. "editor", "game-win64").
+  type String @default("editor")
+
+  @@unique([repoId, changelistNumber, type, fileId])
+  @@index([repoId, changelistNumber])
+}
+
+// One row per (changelist, type) where CI attached artifacts EXACTLY at that
+// changelist. The legacy Changelist.artifactVersionIndex/artifactStateTree
+// overlay remains the "editor"-typed compatibility view; this model is the
+// authoritative typed source for nearest-at-or-before artifact lookups.
+model ArtifactSet {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  changelist       Changelist @relation(fields: [repoId, changelistNumber], references: [repoId, number])
+  repoId           String
+  changelistNumber Int
+
+  type         String @default("editor")
+  versionIndex String
+  stateTree    Json // fileId -> sourceChangelistNumber
+
+  @@unique([repoId, changelistNumber, type])
+  @@index([repoId, type, changelistNumber])
+}
+
+enum BuildBadgeState {
+  STARTING
+  FAILURE
+  WARNING
+  SUCCESS
+  SKIPPED
+}
+
+// Per-changelist CI build health (UGS badge parity). Latest-state-only:
+// re-posting the same (repoId, changelistNumber, name) overwrites the row.
+model BuildBadge {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  changelist       Changelist @relation(fields: [repoId, changelistNumber], references: [repoId, number])
+  repoId           String
+  changelistNumber Int
+
+  name     String
+  group    String?
+  state    BuildBadgeState
+  url      String?
+  metadata Json?
+
+  postedBy   User?   @relation("BuildBadgePoster", fields: [postedById], references: [id])
+  postedById String?
+
+  @@unique([repoId, changelistNumber, name])
+  @@index([repoId, changelistNumber])
+  @@index([repoId, name, changelistNumber])
+}
+
+enum ChangelistVote {
+  COMPILE_SUCCESS
+  COMPILE_FAILURE
+  GOOD
+  BAD
+}
+
+// One row per (user, changelist): vote + star + investigation state
+// (UGS EventMonitor parity).
+model ChangelistReview {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  changelist       Changelist @relation(fields: [repoId, changelistNumber], references: [repoId, number])
+  repoId           String
+  changelistNumber Int
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  vote               ChangelistVote?
+  starred            Boolean         @default(false)
+  investigating      Boolean         @default(false)
+  investigatingSince DateTime?
+  resolvedAt         DateTime?
+
+  @@unique([repoId, changelistNumber, userId])
+  @@index([repoId, changelistNumber])
+}
+
+model ChangelistComment {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  body String
+
+  changelist       Changelist @relation(fields: [repoId, changelistNumber], references: [repoId, number])
+  repoId           String
+  changelistNumber Int
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
   @@index([repoId, changelistNumber])
 }
 
@@ -454,7 +572,13 @@ model Workspace {
   orgId String
   org   Org    @relation(fields: [orgId], references: [id])
 
+  // Game Sync presence: last changelist this workspace successfully synced to.
+  syncedChangelistNumber Int?
+  syncedAt               DateTime?
+
   fileCheckouts FileCheckout[]
+
+  @@index([repoId, syncedChangelistNumber])
 }
 
 model ApiToken {

@@ -17,7 +17,7 @@ import WorkspaceBranches from "../../components/WorkspaceBranches";
 import SyncPreview from "../../components/SyncPreview";
 import SyncStatusBadge from "../../components/SyncStatusBadge";
 import TitleBar from "../../components/TitleBar";
-import { Badge } from "../../components/ui";
+import { Badge, Button } from "../../components/ui";
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCodeBranch } from "@fortawesome/free-solid-svg-icons/faCodeBranch";
@@ -89,6 +89,22 @@ export default function Workspace(): React.ReactElement {
                 />
                 {currentWorkspace.branchName}
               </Badge>
+            )}
+            {currentWorkspace && (
+              <span className="app-no-drag">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    ipc.sendMessage("game-sync:enter", {
+                      workspaceId: currentWorkspace.id,
+                    });
+                    navigate("/game-sync");
+                  }}
+                >
+                  Game Sync
+                </Button>
+              </span>
             )}
           </>
         }

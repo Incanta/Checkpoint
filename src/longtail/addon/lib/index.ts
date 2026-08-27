@@ -161,6 +161,27 @@ export interface PullAsyncOptions extends StorageOptions {
   remoteBasePath: string;
   logLevel: number;
   cachePath?: string;
+  /**
+   * Optional gitignore-style include rules applied to repo-relative,
+   * forward-slash asset paths. When present and non-empty, only assets whose
+   * path matches at least one rule are pulled; every other asset in the target
+   * version is dropped from the version diff, so its blocks are never
+   * downloaded and no file is written. When absent or empty, the whole version
+   * is pulled, exactly as before.
+   *
+   * Supported syntax (see wrapper/src/util/path-filter.h for the matcher):
+   * a leading "/" anchors a rule to the repo root, as does any other embedded
+   * "/"; a rule with no separator other than a trailing one ("Engine/",
+   * "*.uasset") matches at any depth; a rule that matches a directory pulls in
+   * that directory's whole subtree; "*" matches within one segment, "**"
+   * across segments, and "?" matches one non-separator character.
+   *
+   * NOT supported: "!" negation and "[...]" character classes. Callers must
+   * withhold rules that use them rather than passing them through. Because a
+   * caller that filters again after the pull can only lose work, not
+   * correctness, erring toward broader rules here is always the safe choice.
+   */
+  includePaths?: string[];
 }
 
 export interface MergeAsyncOptions extends StorageOptions {

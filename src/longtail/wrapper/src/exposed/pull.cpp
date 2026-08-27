@@ -3,8 +3,93 @@
 #include <cacheblockstore/longtail_cacheblockstore.h>
 
 #include "../util/existing-content.h"
+#include "../util/path-filter.h"
 #include "../util/progress.h"
 #include "main.h"
+
+/** The repo-relative path of an asset in a version index. */
+static const char* AssetPath(
+    const struct Longtail_VersionIndex* version_index,
+    uint32_t asset_index) {
+  return &version_index->m_NameData[version_index->m_NameOffsets[asset_index]];
+}
+
+/**
+ * Drop every asset the filter excludes from `version_diff`, in place, and
+ * return how many were dropped.
+ *
+ * The diff's arrays are parallel (a source index and a target index per
+ * modified asset), so each kept entry is copied down to the next free slot of
+ * every array in its group and the group's count is lowered. Relative order is
+ * preserved, and the diff still occupies one allocation, so it is freed exactly
+ * as before.
+ *
+ * This is the right seam for include filtering. Filtering the *local* scan
+ * instead would be actively wrong: an excluded file that is missing from the
+ * local version index reads as "added" in the diff and gets downloaded, the
+ * opposite of the intent. Filtering here means excluded assets are never asked
+ * for by Longtail_GetRequiredChunkHashes and never written by
+ * Longtail_ChangeVersion, so their blocks are never fetched at all.
+ *
+ * m_SourceRemovedCount is not filtered because the caller zeroes it
+ * unconditionally: Checkpoint versions are incremental, so diff removals are
+ * always false positives.
+ */
+static uint32_t FilterVersionDiff(
+    struct Longtail_VersionDiff* version_diff,
+    const struct Longtail_VersionIndex* target_version_index,
+    const Checkpoint::PathFilter& filter) {
+  uint32_t dropped = 0;
+
+  // Added assets carry only a target index.
+  const uint32_t added_count = *version_diff->m_TargetAddedCount;
+  uint32_t added_kept = 0;
+  for (uint32_t i = 0; i < added_count; ++i) {
+    const uint32_t target = version_diff->m_TargetAddedAssetIndexes[i];
+    if (!filter.Includes(AssetPath(target_version_index, target))) {
+      ++dropped;
+      continue;
+    }
+    version_diff->m_TargetAddedAssetIndexes[added_kept++] = target;
+  }
+  *version_diff->m_TargetAddedCount = added_kept;
+
+  // Content changes pair a source index with a target index.
+  const uint32_t modified_count = *version_diff->m_ModifiedContentCount;
+  uint32_t modified_kept = 0;
+  for (uint32_t i = 0; i < modified_count; ++i) {
+    const uint32_t target = version_diff->m_TargetContentModifiedAssetIndexes[i];
+    if (!filter.Includes(AssetPath(target_version_index, target))) {
+      ++dropped;
+      continue;
+    }
+    version_diff->m_SourceContentModifiedAssetIndexes[modified_kept] =
+        version_diff->m_SourceContentModifiedAssetIndexes[i];
+    version_diff->m_TargetContentModifiedAssetIndexes[modified_kept] = target;
+    ++modified_kept;
+  }
+  *version_diff->m_ModifiedContentCount = modified_kept;
+
+  // Permission-only changes are paired the same way.
+  const uint32_t permissions_count = *version_diff->m_ModifiedPermissionsCount;
+  uint32_t permissions_kept = 0;
+  for (uint32_t i = 0; i < permissions_count; ++i) {
+    const uint32_t target =
+        version_diff->m_TargetPermissionsModifiedAssetIndexes[i];
+    if (!filter.Includes(AssetPath(target_version_index, target))) {
+      ++dropped;
+      continue;
+    }
+    version_diff->m_SourcePermissionsModifiedAssetIndexes[permissions_kept] =
+        version_diff->m_SourcePermissionsModifiedAssetIndexes[i];
+    version_diff->m_TargetPermissionsModifiedAssetIndexes[permissions_kept] =
+        target;
+    ++permissions_kept;
+  }
+  *version_diff->m_ModifiedPermissionsCount = permissions_kept;
+
+  return dropped;
+}
 
 int PullSync(
     const char* VersionIndex,
@@ -23,6 +108,7 @@ int PullSync(
     const char* S3SecretAccessKey,
     const char* S3SessionToken,
     const char* CachePath,
+    const Checkpoint::PathFilter& IncludeFilter,
     WrapperAsyncHandle* handle) {
   struct Longtail_HashRegistryAPI* hash_registry = Longtail_CreateFullHashRegistry();
   struct Longtail_JobAPI* job_api = Longtail_CreateBikeshedJobAPI(Longtail_GetCPUCount(), 0);
@@ -43,7 +129,7 @@ int PullSync(
       0,
       EnableMmapBlockStore);
 
-  // Persistent block cache — stores compressed blocks locally to avoid re-downloads
+  // Persistent block cache: stores compressed blocks locally to avoid re-downloads
   struct Longtail_StorageAPI* cache_storage_api = 0;
   struct Longtail_BlockStoreAPI* local_cache_store_api = 0;
   struct Longtail_BlockStoreAPI* cache_block_store_api = 0;
@@ -260,6 +346,12 @@ int PullSync(
   // for removals. This will override prevents ChangeVersion from deleting files
   *version_diff->m_SourceRemovedCount = 0;
 
+  // Apply the caller's include rules before anything reads the diff, so
+  // excluded assets are never requested from the block store and never written.
+  if (!IncludeFilter.IsNoOp()) {
+    FilterVersionDiff(version_diff, remote_version_index, IncludeFilter);
+  }
+
   if ((*version_diff->m_ModifiedContentCount == 0) &&
       (*version_diff->m_TargetAddedCount == 0) &&
       (*version_diff->m_ModifiedPermissionsCount == 0 /*|| !retain_permissions*/))  // TODO
@@ -439,6 +531,8 @@ PullAsync(
     const char* S3SecretAccessKey,
     const char* S3SessionToken,
     const char* CachePath,
+    const char* const* IncludePaths,
+    uint32_t NumIncludePaths,
     int LogLevel = 4) {
   SetLogging(LogLevel);
 
@@ -450,6 +544,10 @@ PullAsync(
   memset(handle, 0, sizeof(WrapperAsyncHandle));
 
   SetHandleStep(handle, "Initializing");
+
+  // Compile the rules here and capture the filter by value, so the worker
+  // thread does not depend on the caller's string array outliving this call.
+  Checkpoint::PathFilter include_filter(IncludePaths, NumIncludePaths);
 
   std::thread merge_thread([=]() {
     int32_t err = PullSync(
@@ -469,6 +567,7 @@ PullAsync(
         S3SecretAccessKey,
         S3SessionToken,
         CachePath,
+        include_filter,
         handle);
 
     if (err) {
