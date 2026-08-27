@@ -1,11 +1,12 @@
 import ignore, { type Ignore } from "ignore";
 import path from "path";
-import { promises as fs, constants } from "fs";
+import { promises as fs, constants, type Dirent } from "fs";
 import { FileStatus } from "./types/index.js";
 import type { WorkspaceState } from "./util/index.js";
 
 export const IGNORE_FILE = ".chkignore";
 export const HIDDEN_FILE = ".chkhidden";
+export const CHECKPOINT_DIR = ".checkpoint";
 
 export interface IgnoreCache {
   ignore: Ignore;
@@ -35,7 +36,87 @@ export interface WorkspaceIgnorePatterns {
   hidden: IgnoreFileEntry[];
 }
 
+// ─── Separator Normalization ─────────────────────────────────────────
+
+/**
+ * Rewrites `\` as `/` and collapses repeated separators.
+ *
+ * Checkpoint runs on Windows, so both hand-written `.chkignore` lines and
+ * paths handed to the daemon use backslashes, often mixed with forward
+ * slashes in a single string (`path\to\some/folder/file.txt`). The `ignore`
+ * package only understands `/`: it treats `\` as a literal character, so
+ * `Saved\Config` silently matches nothing. Repeated separators matter too:
+ * a doubled slash after a `**` segment stops the pattern matching anything.
+ *
+ * This deliberately diverges from gitignore, where `\` is an escape
+ * character. Checkpoint has never supported those escapes (the parser strips
+ * `#` comments without honouring `\#`), and treating `\` as a separator is
+ * what a Windows user writing `.chkignore` actually means.
+ */
+export function normalizeSeparators(value: string): string {
+  return value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+}
+
+/**
+ * Normalizes a workspace-relative path into the exact form the `ignore`
+ * package accepts.
+ *
+ * On top of separator normalization this strips the leading `./` or `/` that
+ * callers sometimes carry, and maps `.` to the empty string. Those forms are
+ * not merely unmatched by `ignore`, they make it **throw**, so every path
+ * entering a matcher goes through here.
+ */
+export function normalizeRelativePath(relativePath: string): string {
+  const normalized = normalizeSeparators(relativePath)
+    .replace(/^\.\//, "")
+    .replace(/^\//, "");
+  return normalized === "." ? "" : normalized;
+}
+
 // ─── Pattern Parsing Helpers ─────────────────────────────────────────
+
+/**
+ * Rewrites a single pattern line from a nested ignore/hidden file so it is
+ * scoped to that file's directory, following gitignore semantics:
+ *
+ * - A leading `!` (negation) must stay at the front of the rewritten pattern.
+ * - A pattern containing a `/` anywhere other than at the very end is anchored
+ *   to the directory holding the ignore file (`build/out` → `sub/build/out`).
+ * - A pattern with no `/` may match at any depth beneath that directory
+ *   (`*.log` → `sub/**\/*.log`; `**` also matches zero directories, so this
+ *   still matches `sub/a.log`).
+ * - A trailing `/` (directory-only pattern) is preserved.
+ *
+ * Separators are normalized first, so `Saved\Config` anchors exactly like
+ * `Saved/Config` and `Binaries\` is a directory-only rule.
+ */
+export function prefixIgnorePattern(relativeDir: string, line: string): string {
+  const dir = normalizeRelativePath(relativeDir).replace(/\/+$/, "");
+  const pattern = normalizeSeparators(line);
+
+  if (!dir) return pattern;
+
+  let body = pattern;
+  let negation = "";
+  if (body.startsWith("!")) {
+    negation = "!";
+    body = body.slice(1);
+  }
+
+  let dirOnly = "";
+  if (body.endsWith("/")) {
+    dirOnly = "/";
+    body = body.slice(0, -1);
+  }
+
+  // A separator anywhere in the remaining body anchors the pattern to the
+  // ignore file's own directory; otherwise it floats to any depth below it.
+  const anchored = body.includes("/");
+  const core = body.replace(/^\/+/, "");
+  const scoped = anchored ? `${dir}/${core}` : `${dir}/**/${core}`;
+
+  return `${negation}${scoped}${dirOnly}`;
+}
 
 /**
  * Reads a single ignore/hidden file and returns the parsed pattern lines,
@@ -58,11 +139,7 @@ export async function parseIgnoreFile(
       .filter((line) => line && !line.startsWith("#"));
 
     for (const line of lines) {
-      if (relativeDirFromWorkspace) {
-        patterns.push(`${relativeDirFromWorkspace}/${line}`);
-      } else {
-        patterns.push(line);
-      }
+      patterns.push(prefixIgnorePattern(relativeDirFromWorkspace, line));
     }
   } catch {
     // File may not be readable
@@ -70,7 +147,142 @@ export async function parseIgnoreFile(
   return patterns;
 }
 
+// ─── Working-Tree Scanning ───────────────────────────────────────────
+
+/**
+ * Walks the **working tree** looking for `.chkignore` / `.chkhidden` files.
+ *
+ * Discovery is deliberately driven by what is on disk right now rather than by
+ * the submitted baseline (state.json): a brand-new repo that has never
+ * submitted anything still needs its `.chkignore` honoured, otherwise the first
+ * `chk status` reports every build artifact in the tree.
+ *
+ * The walk is top-down and prunes subtrees that the already-discovered ignore
+ * patterns exclude, which both matches git's behaviour (an ignored directory's
+ * `.gitignore` has no effect) and keeps the scan cheap on Unreal-shaped trees
+ * where `Saved/`, `Intermediate/` and `DerivedDataCache/` dominate the file
+ * count. Entries are returned parent-first so deeper files can negate
+ * shallower rules.
+ */
+export async function scanWorkspaceIgnoreFiles(
+  workspacePath: string,
+): Promise<WorkspaceIgnorePatterns> {
+  const ignoreEntries: IgnoreFileEntry[] = [];
+  const hiddenEntries: IgnoreFileEntry[] = [];
+
+  // Ignore patterns discovered so far, used to prune the walk as we descend.
+  const discovered: string[] = [`${CHECKPOINT_DIR}/`];
+  let matcher: Ignore = ignore().add(discovered);
+
+  const walk = async (relativeDir: string): Promise<void> => {
+    const fullDir = relativeDir
+      ? path.join(workspacePath, relativeDir)
+      : workspacePath;
+
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(fullDir, { withFileTypes: true });
+    } catch {
+      // Directory disappeared or is not readable
+      return;
+    }
+
+    // Parse this directory's ignore/hidden files first so their patterns are
+    // in effect before we decide which children to descend into.
+    let addedPatterns = false;
+    for (const fileName of [IGNORE_FILE, HIDDEN_FILE]) {
+      if (!entries.some((e) => e.name === fileName && !e.isDirectory())) {
+        continue;
+      }
+
+      const absolutePath = path.join(fullDir, fileName).replace(/\\/g, "/");
+      const patterns = await parseIgnoreFile(workspacePath, absolutePath);
+      const entry: IgnoreFileEntry = { absolutePath, relativeDir, patterns };
+
+      if (fileName === IGNORE_FILE) {
+        ignoreEntries.push(entry);
+        if (patterns.length > 0) {
+          discovered.push(...patterns);
+          addedPatterns = true;
+        }
+      } else {
+        // Hidden patterns never prune the walk: hidden files are still
+        // tracked, their changes are just not surfaced by default.
+        hiddenEntries.push(entry);
+      }
+    }
+
+    if (addedPatterns) {
+      matcher = ignore().add(discovered);
+    }
+
+    const subdirs: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (!relativeDir && entry.name === CHECKPOINT_DIR) continue;
+
+      const childRelative = relativeDir
+        ? `${relativeDir}/${entry.name}`
+        : entry.name;
+      if (matchesPattern(matcher, childRelative, true)) continue;
+      subdirs.push(childRelative);
+    }
+
+    // Sequential so entries come out in a stable parent-first, depth-first
+    // order: negations in deeper files must be applied after their parents.
+    for (const subdir of subdirs) {
+      await walk(subdir);
+    }
+  };
+
+  await walk("");
+
+  return { ignore: ignoreEntries, hidden: hiddenEntries };
+}
+
 // ─── Cache Construction ──────────────────────────────────────────────
+
+/**
+ * Tests a workspace-relative path against a matcher.
+ *
+ * Every path reaching a matcher goes through here, so this is where separator
+ * normalization is enforced: callers may hand over `Saved\Config` or a mixed
+ * `path\to\some/folder/file.txt`, and `ignore` would either miss the match or
+ * throw.
+ *
+ * The `ignore` package also matches purely on the string it is given, so a
+ * directory-only pattern (`Saved/`) does not match the bare path `Saved`.
+ * Callers that know they are testing a directory must therefore also probe the
+ * trailing-slash form, otherwise directory-only rules silently do nothing.
+ */
+export function matchesPattern(
+  matcher: Ignore,
+  relativePath: string,
+  isDirectory = false,
+): boolean {
+  const normalized = normalizeRelativePath(relativePath);
+  // The workspace root itself is never ignorable, and `ignore` throws on "".
+  if (!normalized) return false;
+
+  if (matcher.ignores(normalized)) return true;
+  if (!isDirectory || normalized.endsWith("/")) return false;
+  return matcher.ignores(`${normalized}/`);
+}
+
+/**
+ * Convenience wrapper: is this path excluded from pending changes entirely
+ * (either ignored or hidden)?
+ */
+export function isIgnoredOrHidden(
+  cache: IgnoreCache,
+  relativePath: string,
+  isDirectory = false,
+): boolean {
+  return (
+    matchesPattern(cache.ignore, relativePath, isDirectory) ||
+    matchesPattern(cache.hidden, relativePath, isDirectory)
+  );
+}
 
 /**
  * Flattens pre-loaded ignore file entries into a single pattern list for
@@ -147,20 +359,20 @@ export interface GetFileStatusOptions {
  * Determines the FileStatus for a given file path.
  *
  * Resolution order:
- * 1. If in pendingChanges, use that status
- * 2. If matches .chkignore patterns, return Ignored
+ * 1. If matches .chkignore patterns, return Ignored (files and directories)
+ * 2. If a directory, return Unknown (directories aren't tracked individually)
  * 3. If matches .chkhidden patterns, return HiddenChanges
- * 4. If in state.json (controlled):
+ * 4. If in pendingChanges, use that status
+ * 5. If in state.json (controlled):
  *    - Check if file is writable -> WritableControlled or ReadOnlyControlled
- * 5. If not in state.json and not ignored -> Local
- * 6. Otherwise -> Unknown
+ * 6. If not in state.json and not ignored -> Local
+ * 7. Otherwise -> Unknown
  */
 export async function getFileStatus(
   options: GetFileStatusOptions,
 ): Promise<FileStatusResult> {
   const {
     workspacePath,
-    relativePath,
     workspaceState,
     ignoreCache,
     pendingChanges,
@@ -168,12 +380,32 @@ export async function getFileStatus(
     isDirectory,
   } = options;
 
+  // Callers reach this from tRPC inputs and Windows path joins, so the key
+  // used for every lookup below is normalized once here.
+  const relativePath = normalizeRelativePath(options.relativePath);
+
+  // Ignored paths are reported as such even when they're directories, so the
+  // UI can grey out a whole excluded subtree instead of showing it as Unknown.
+  if (matchesPattern(ignoreCache.ignore, relativePath, isDirectory)) {
+    return { status: FileStatus.Ignored, fileId: null, changelist: null };
+  }
+
   // Directories get Unknown status (they're not tracked individually)
   if (isDirectory) {
     return { status: FileStatus.Unknown, fileId: null, changelist: null };
   }
 
-  // 1. Check pending changes first
+  // 3. Check if hidden changes
+  if (matchesPattern(ignoreCache.hidden, relativePath)) {
+    const stateFile = workspaceState?.files[relativePath];
+    return {
+      status: FileStatus.HiddenChanges,
+      fileId: stateFile?.fileId ?? null,
+      changelist: stateFile?.changelist ?? null,
+    };
+  }
+
+  // 4. Check pending changes
   if (pendingChanges && pendingChanges[relativePath]) {
     const pending = pendingChanges[relativePath];
     return {
@@ -183,22 +415,7 @@ export async function getFileStatus(
     };
   }
 
-  // 2. Check ignore patterns
-  if (ignoreCache.ignore.ignores(relativePath)) {
-    return { status: FileStatus.Ignored, fileId: null, changelist: null };
-  }
-
-  // 3. Check if hidden changes
-  if (ignoreCache.hidden.ignores(relativePath)) {
-    const stateFile = workspaceState?.files[relativePath];
-    return {
-      status: FileStatus.HiddenChanges,
-      fileId: stateFile?.fileId ?? null,
-      changelist: stateFile?.changelist ?? null,
-    };
-  }
-
-  // 4. Check if file is in state.json (controlled)
+  // 5. Check if file is in state.json (controlled)
   const stateFile = workspaceState?.files[relativePath];
 
   if (stateFile) {
@@ -256,90 +473,18 @@ export async function getFileStatuses(
   const results = new Map<string, FileStatusResult>();
 
   for (const file of files) {
-    const { relativePath, existsOnDisk, isDirectory } = file;
-
-    // Directories get Unknown status
-    if (isDirectory) {
-      results.set(relativePath, {
-        status: FileStatus.Unknown,
-        fileId: null,
-        changelist: null,
-      });
-      continue;
-    }
-
-    // Check if ignored
-    if (ignoreCache.ignore.ignores(relativePath)) {
-      results.set(relativePath, {
-        status: FileStatus.Ignored,
-        fileId: null,
-        changelist: null,
-      });
-      continue;
-    }
-
-    // Check if hidden changes
-    if (ignoreCache.hidden.ignores(relativePath)) {
-      const stateFile = workspaceState?.files[relativePath];
-      results.set(relativePath, {
-        status: FileStatus.HiddenChanges,
-        fileId: stateFile?.fileId ?? null,
-        changelist: stateFile?.changelist ?? null,
-      });
-      continue;
-    }
-
-    // Check pending changes first
-    if (pendingChanges && pendingChanges[relativePath]) {
-      const pending = pendingChanges[relativePath];
-      results.set(relativePath, {
-        status: pending.status,
-        fileId: pending.id,
-        changelist: pending.changelist,
-      });
-      continue;
-    }
-
-    // Check if controlled
-    const stateFile = workspaceState?.files[relativePath];
-
-    if (stateFile) {
-      if (!existsOnDisk) {
-        results.set(relativePath, {
-          status: FileStatus.Unknown,
-          fileId: stateFile.fileId,
-          changelist: stateFile.changelist,
-        });
-        continue;
-      }
-
-      const fullPath = path.join(workspacePath, relativePath);
-      const isWritable = await isFileWritable(fullPath);
-
-      results.set(relativePath, {
-        status: isWritable
-          ? FileStatus.WritableControlled
-          : FileStatus.ReadOnlyControlled,
-        fileId: stateFile.fileId,
-        changelist: stateFile.changelist,
-      });
-      continue;
-    }
-
-    // Local or Unknown
-    if (existsOnDisk) {
-      results.set(relativePath, {
-        status: FileStatus.Local,
-        fileId: null,
-        changelist: null,
-      });
-    } else {
-      results.set(relativePath, {
-        status: FileStatus.Unknown,
-        fileId: null,
-        changelist: null,
-      });
-    }
+    results.set(
+      file.relativePath,
+      await getFileStatus({
+        workspacePath,
+        relativePath: file.relativePath,
+        workspaceState,
+        ignoreCache,
+        pendingChanges,
+        existsOnDisk: file.existsOnDisk,
+        isDirectory: file.isDirectory,
+      }),
+    );
   }
 
   return results;

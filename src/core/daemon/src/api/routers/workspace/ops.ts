@@ -76,11 +76,11 @@ export const opsRouter = router({
         daemonId: newWorkspace.daemonId,
       });
 
-      const manager = ctx.manager;
-      const existingWorkspaces = manager.workspaces.get(input.daemonId) || [];
-      existingWorkspaces.push(newWorkspace);
-      manager.workspaces.set(input.daemonId, existingWorkspaces);
-      manager.watchWorkspace(newWorkspace);
+      // Registering (rather than pushing onto manager.workspaces directly)
+      // loads the baseline state and scans the working tree for .chkignore /
+      // .chkhidden, so a brand-new workspace honours its ignore rules
+      // immediately instead of only after the next daemon restart.
+      await ctx.manager.registerWorkspace(newWorkspace);
 
       return { workspace: newWorkspace };
     }),

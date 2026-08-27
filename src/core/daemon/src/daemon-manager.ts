@@ -36,13 +36,14 @@ import {
 import { runSyncPipeline } from "./util/team-sync/sync-pipeline.js";
 import { WORKSPACE_STATE_VERSION } from "./util/util.js";
 import {
-  parseIgnoreFile,
+  scanWorkspaceIgnoreFiles,
   buildIgnoreCacheFromPatterns,
   getFileStatuses as computeFileStatuses,
+  isIgnoredOrHidden,
+  normalizeRelativePath,
   IGNORE_FILE,
   HIDDEN_FILE,
   type WorkspaceIgnorePatterns,
-  type IgnoreFileEntry,
   type IgnoreCache,
   type FileStatusResult,
 } from "./file-status.js";
@@ -130,17 +131,7 @@ export class DaemonManager {
     const config = await DaemonConfig.Get();
     this.stateBackend = config.stateBackend;
     for (const workspace of config.workspaces) {
-      const existing = this.workspaces.get(workspace.daemonId) || [];
-      existing.push(workspace);
-      this.workspaces.set(workspace.daemonId, existing);
-
-      // Load state.json baseline for each workspace
-      await this.loadWorkspaceState(workspace);
-
-      // One-time scan for ignore/hidden files
-      await this.scanIgnoreFiles(workspace);
-
-      this.watchWorkspace(workspace);
+      await this.registerWorkspace(workspace);
     }
 
     await InitLogger();
@@ -266,13 +257,36 @@ export class DaemonManager {
       syncedAt: null,
     };
 
-    const existing = this.workspaces.get(workspace.daemonId) || [];
-    existing.push(workspace);
+    await this.registerWorkspace(workspace, { watch: false });
+    // Intentionally NO watchWorkspace() and NO startSyncPolling().
+  }
+
+  /**
+   * Registers a workspace with the manager: adds it to the in-memory registry,
+   * loads its baseline state, scans the working tree for ignore/hidden files,
+   * and (unless disabled) starts a filesystem watcher.
+   *
+   * Every path that makes the manager aware of a workspace must go through
+   * here. Workspaces created at runtime used to be pushed onto
+   * {@link workspaces} directly, which skipped the ignore scan and left the
+   * workspace with an empty ignore set until the daemon restarted.
+   */
+  public async registerWorkspace(
+    workspace: Workspace,
+    options?: { watch?: boolean },
+  ): Promise<void> {
+    const existing = this.workspaces.get(workspace.daemonId) ?? [];
+    if (!existing.some((w) => w.id === workspace.id)) {
+      existing.push(workspace);
+    }
     this.workspaces.set(workspace.daemonId, existing);
 
     await this.loadWorkspaceState(workspace);
     await this.scanIgnoreFiles(workspace);
-    // Intentionally NO watchWorkspace() and NO startSyncPolling().
+
+    if (options?.watch !== false) {
+      this.watchWorkspace(workspace);
+    }
   }
 
   public async shutdown(): Promise<void> {
@@ -329,56 +343,18 @@ export class DaemonManager {
   // ─── Ignore / Hidden File Management ────────────────────────────────
 
   /**
-   * Performs a one-time scan for all `.chkignore` and `.chkhidden` files in
-   * the workspace and caches the results. Only walks directories in the
-   * tracked-directory set. Subsequent updates are handled incrementally by
-   * {@link watchWorkspace}.
+   * Scans the workspace's **working tree** for `.chkignore` / `.chkhidden`
+   * files and caches the resulting patterns.
+   *
+   * Discovery intentionally ignores the submitted baseline (state.json). A repo
+   * that has never submitted anything still has a meaningful `.chkignore` on
+   * disk, and honouring only the submitted copy meant the very first
+   * `chk status` in a new workspace listed every build artifact in the tree.
    */
   public async scanIgnoreFiles(workspace: Workspace): Promise<void> {
     if (!existsSync(workspace.localPath)) return;
 
-    const trackedDirs = this.getTrackedDirSet(workspace.id);
-
-    const scanForFile = async (
-      fileName: string,
-    ): Promise<IgnoreFileEntry[]> => {
-      const entries: IgnoreFileEntry[] = [];
-
-      for (const dir of trackedDirs) {
-        const fullDir = dir
-          ? path.join(workspace.localPath, dir)
-          : workspace.localPath;
-        const ignoreFilePath = path.join(fullDir, fileName);
-        try {
-          if (existsSync(ignoreFilePath)) {
-            const relativeDir = dir;
-            const patterns = await parseIgnoreFile(
-              workspace.localPath,
-              ignoreFilePath,
-            );
-            entries.push({
-              absolutePath: ignoreFilePath.replace(/\\/g, "/"),
-              relativeDir,
-              patterns,
-            });
-          }
-        } catch {
-          // File may not be readable
-        }
-      }
-
-      return entries;
-    };
-
-    const [ignoreEntries, hiddenEntries] = await Promise.all([
-      scanForFile(IGNORE_FILE),
-      scanForFile(HIDDEN_FILE),
-    ]);
-
-    const patterns: WorkspaceIgnorePatterns = {
-      ignore: ignoreEntries,
-      hidden: hiddenEntries,
-    };
+    const patterns = await scanWorkspaceIgnoreFiles(workspace.localPath);
 
     this.ignorePatterns.set(workspace.id, patterns);
 
@@ -398,68 +374,43 @@ export class DaemonManager {
 
   /**
    * Handles a change to an ignore/hidden file detected by the watcher.
-   * Re-parses only the affected file and rebuilds the IgnoreCache.
+   *
+   * Re-scans the whole working tree rather than patching the single file's
+   * entry: editing an ignore file changes which subtrees are pruned, so ignore
+   * files that were previously invisible (nested under a formerly-ignored
+   * directory) can become relevant and vice versa. The scan prunes ignored
+   * subtrees, and ignore-file edits are rare, so the cost is acceptable.
    */
   private async handleIgnoreFileChange(
     workspace: Workspace,
     relativePath: string,
   ): Promise<void> {
     const fileName = path.basename(relativePath);
-    const isIgnore = fileName === IGNORE_FILE;
-    const isHidden = fileName === HIDDEN_FILE;
-    if (!isIgnore && !isHidden) return;
+    if (fileName !== IGNORE_FILE && fileName !== HIDDEN_FILE) return;
 
-    const patterns = this.ignorePatterns.get(workspace.id);
-    if (!patterns) return;
-
-    const list = isIgnore ? patterns.ignore : patterns.hidden;
-    const absolutePath = path
-      .join(workspace.localPath, relativePath)
-      .replace(/\\/g, "/");
-    const relativeDir = relativePath.includes("/")
-      ? relativePath.substring(0, relativePath.lastIndexOf("/"))
-      : "";
-
-    // Remove old entry for this file (if any)
-    const idx = list.findIndex((e) => e.absolutePath === absolutePath);
-    if (idx !== -1) {
-      list.splice(idx, 1);
-    }
-
-    // Re-parse if the file still exists
-    if (existsSync(path.join(workspace.localPath, relativePath))) {
-      const newPatterns = await parseIgnoreFile(
-        workspace.localPath,
-        path.join(workspace.localPath, relativePath),
-      );
-      list.push({
-        absolutePath,
-        relativeDir,
-        patterns: newPatterns,
-      });
-    }
-
-    // Rebuild the IgnoreCache from updated patterns
-    this.ignoreCaches.set(workspace.id, buildIgnoreCacheFromPatterns(patterns));
+    await this.scanIgnoreFiles(workspace);
 
     Logger.debug(
-      `[DaemonManager] Rebuilt ignore cache for workspace ${workspace.name} (${fileName} changed at ${relativeDir || "root"})`,
+      `[DaemonManager] Rebuilt ignore cache for workspace ${workspace.name} (${relativePath} changed)`,
     );
   }
 
   /**
    * Returns the cached {@link IgnoreCache} for a workspace. Always available
-   * after {@link init} has run.
+   * after the workspace has been registered.
    */
   public getIgnoreCache(workspaceId: string): IgnoreCache {
     const cached = this.ignoreCaches.get(workspaceId);
     if (cached) return cached;
 
-    // Fallback: build an empty cache (shouldn't normally happen)
+    // Fallback for a workspace that was never scanned. Deliberately NOT
+    // cached: caching an empty result here used to make a missed scan
+    // permanent for the lifetime of the daemon, so nothing was ever ignored.
+    Logger.warn(
+      `[DaemonManager] No ignore patterns scanned for workspace ${workspaceId}; falling back to an empty ignore set`,
+    );
     const empty: WorkspaceIgnorePatterns = { ignore: [], hidden: [] };
-    const cache = buildIgnoreCacheFromPatterns(empty);
-    this.ignoreCaches.set(workspaceId, cache);
-    return cache;
+    return buildIgnoreCacheFromPatterns(empty);
   }
 
   // ─── File Status Helpers ───────────────────────────────────────────
@@ -514,8 +465,7 @@ export class DaemonManager {
           ? `${relativeDir}/${entry.name}`
           : entry.name;
         if (
-          ignoreCache.ignore.ignores(childRelative) ||
-          ignoreCache.hidden.ignores(childRelative)
+          isIgnoredOrHidden(ignoreCache, childRelative, entry.isDirectory())
         ) {
           continue;
         }
@@ -571,13 +521,19 @@ export class DaemonManager {
   public async getDirectoryPending(
     workspaceId: string,
     workspace: Workspace,
-    directoryPath: string,
+    rawDirectoryPath: string,
   ): Promise<{ children: File[]; containsChanges: boolean }> {
     const ignoreCache = this.getIgnoreCache(workspaceId);
     const workspaceState = this.getWorkspaceState(workspaceId);
     const trackedDirs = this.getTrackedDirSet(workspaceId);
     const pendingChanges = this.workspacePendingChanges.get(workspaceId);
 
+    // Callers pass this straight through from a tRPC input, so it may arrive
+    // with Windows separators or a leading slash.
+    const directoryPath = normalizeRelativePath(rawDirectoryPath).replace(
+      /\/+$/,
+      "",
+    );
     const dirPrefix = directoryPath ? directoryPath + "/" : "";
     const childrenMap = new Map<string, File>();
 
@@ -597,10 +553,7 @@ export class DaemonManager {
       if (relativePath.startsWith(".checkpoint")) continue;
 
       // Skip ignored/hidden
-      if (
-        ignoreCache.ignore.ignores(relativePath) ||
-        ignoreCache.hidden.ignores(relativePath)
-      ) {
+      if (isIgnoredOrHidden(ignoreCache, relativePath, entry.isDirectory())) {
         continue;
       }
 
@@ -814,8 +767,8 @@ export class DaemonManager {
       for (const entry of entries) {
         const childRelative = dir ? `${dir}/${entry.name}` : entry.name;
         if (childRelative.startsWith(".checkpoint")) continue;
-        if (ignoreCache.ignore.ignores(childRelative)) continue;
-        if (ignoreCache.hidden.ignores(childRelative)) continue;
+        if (isIgnoredOrHidden(ignoreCache, childRelative, entry.isDirectory()))
+          continue;
 
         if (entry.isDirectory()) {
           subdirs.push(childRelative);
@@ -1104,15 +1057,15 @@ export class DaemonManager {
     // requested.  Processing them here guarantees the cache is current.
     const dirty = this.dirtyFiles.get(workspace.id);
     if (dirty) {
-      let ignoreChanged = false;
-      for (const dirtyPath of dirty) {
+      // A single rescan covers every dirty ignore file, so only look for the
+      // first one (a pull can dirty hundreds at once).
+      const changedIgnoreFile = [...dirty].find((dirtyPath) => {
         const baseName = path.basename(dirtyPath);
-        if (baseName === IGNORE_FILE || baseName === HIDDEN_FILE) {
-          await this.handleIgnoreFileChange(workspace, dirtyPath);
-          ignoreChanged = true;
-        }
-      }
-      if (ignoreChanged) {
+        return baseName === IGNORE_FILE || baseName === HIDDEN_FILE;
+      });
+
+      if (changedIgnoreFile) {
+        await this.handleIgnoreFileChange(workspace, changedIgnoreFile);
         this.workspacePendingChanges.delete(workspace.id);
       }
     }
@@ -1186,10 +1139,7 @@ export class DaemonManager {
         const fullPath = path.join(dir, entry.name);
         const relativePath = this.getRelativePath(workspace, fullPath);
 
-        if (
-          ignoreCache.ignore.ignores(relativePath) ||
-          ignoreCache.hidden.ignores(relativePath)
-        ) {
+        if (isIgnoredOrHidden(ignoreCache, relativePath, entry.isDirectory())) {
           return;
         }
 
@@ -1364,11 +1314,9 @@ export class DaemonManager {
     for (const relativePath of expandedDirty) {
       if (relativePath.startsWith(".checkpoint")) continue;
 
-      // Skip ignored / hidden files
-      if (
-        ignoreCache.ignore.ignores(relativePath) ||
-        ignoreCache.hidden.ignores(relativePath)
-      ) {
+      // Skip ignored / hidden paths. The dirty set has no type information,
+      // so probe both the file and the directory form of the path.
+      if (isIgnoredOrHidden(ignoreCache, relativePath, true)) {
         if (result.files[relativePath]) {
           delete result.files[relativePath];
           result.numChanges--;
@@ -1394,22 +1342,24 @@ export class DaemonManager {
         // Directories are handled as directory-level entries, not files
         if (stat.isDirectory()) {
           // If this directory is untracked and has non-ignored children,
-          // ensure it appears as a Local directory entry.
+          // ensure it appears as a Local directory entry. Collapse to the
+          // topmost untracked ancestor so a change deep inside an untracked
+          // subtree reports `Saved` rather than `Saved/Config/CrashReports/…`,
+          // matching what a full refresh would have produced.
           if (!trackedDirs.has(relativePath)) {
-            if (!result.files[relativePath]) {
+            const dirEntry =
+              this.findTopmostUntrackedDir(relativePath, trackedDirs) ??
+              relativePath;
+            if (!result.files[dirEntry]) {
               if (
-                await this.hasNonIgnoredFiles(
-                  workspace,
-                  relativePath,
-                  ignoreCache,
-                )
+                await this.hasNonIgnoredFiles(workspace, dirEntry, ignoreCache)
               ) {
-                result.files[relativePath] = {
-                  path: relativePath,
+                result.files[dirEntry] = {
+                  path: dirEntry,
                   type: FileType.Directory,
                   size: 0,
                   modifiedAt: 0,
-                  status: markedForAdd.has(relativePath)
+                  status: markedForAdd.has(dirEntry)
                     ? FileStatus.Added
                     : FileStatus.Local,
                   id: null,
@@ -1719,15 +1669,17 @@ export class DaemonManager {
         }
       }
 
-      // Handle any ignore/hidden file changes that arrived during the
-      // VCS operation so the ignore cache stays current.
-      for (const relativePath of buffered) {
+      // Handle any ignore/hidden file changes that arrived during the VCS
+      // operation so the ignore cache stays current. A pull can rewrite many
+      // ignore files at once and one rescan covers them all.
+      const changedIgnoreFile = [...buffered].find((relativePath) => {
         const baseName = path.basename(relativePath);
-        if (baseName === IGNORE_FILE || baseName === HIDDEN_FILE) {
-          const workspace = this.findWorkspaceById(workspaceId);
-          if (workspace) {
-            await this.handleIgnoreFileChange(workspace, relativePath);
-          }
+        return baseName === IGNORE_FILE || baseName === HIDDEN_FILE;
+      });
+      if (changedIgnoreFile) {
+        const workspace = this.findWorkspaceById(workspaceId);
+        if (workspace) {
+          await this.handleIgnoreFileChange(workspace, changedIgnoreFile);
         }
       }
 
