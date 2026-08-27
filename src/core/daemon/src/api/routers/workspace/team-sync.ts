@@ -1,8 +1,8 @@
 import { publicProcedure, router } from "../../trpc.js";
 import {
   CreateApiClientAuth,
-  type GameSyncConfigResult,
-  type GameSyncChangelistMetaResult,
+  type TeamSyncConfigResult,
+  type TeamSyncChangelistMetaResult,
 } from "@checkpointvcs/common";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
@@ -12,24 +12,24 @@ import {
   getWorkspaceState,
   saveWorkspaceConfig,
   type Workspace as UtilWorkspace,
-  type WorkspaceGameSyncSettings,
+  type WorkspaceTeamSyncSettings,
 } from "../../../util/util.js";
 import { getProjectInfo } from "../../../util/unreal/index.js";
-import { compileFilter } from "../../../util/game-sync/filter.js";
-import { previewClean, executeClean } from "../../../util/game-sync/clean.js";
+import { compileFilter } from "../../../util/team-sync/filter.js";
+import { previewClean, executeClean } from "../../../util/team-sync/clean.js";
 import {
   getBisectState,
   setBisectVerdict,
   resetBisect,
   computeBisectNext,
-} from "../../../util/game-sync/bisect.js";
+} from "../../../util/team-sync/bisect.js";
 import { runBuild } from "../../../util/build/executor.js";
 import { runGenerateProjectFiles } from "../../../util/build/generate-project-files.js";
 import { JobManager } from "../../../job-manager.js";
 import type { DaemonManager } from "../../../daemon-manager.js";
 import type { Workspace } from "../../../types/workspace.js";
 
-// Load the on-disk util Workspace (carries gameSync settings) for a resolved
+// Load the on-disk util Workspace (carries teamSync settings) for a resolved
 // manager workspace, synthesizing a minimal one when workspace.json is absent.
 async function loadUtilWorkspace(workspace: Workspace): Promise<UtilWorkspace> {
   return (
@@ -105,7 +105,9 @@ const settingsInput = z.object({
       z.object({
         id: z.string(),
         name: z.string(),
-        type: z.enum(["compile", "cook", "other"]),
+        type: z
+          .enum(["command", "unreal-compile", "unreal-cook"])
+          .default("command"),
         target: z.string().optional(),
         platform: z.string().optional(),
         configuration: z.string().optional(),
@@ -121,8 +123,8 @@ const settingsInput = z.object({
     .optional(),
 });
 
-export const gameSyncRouter = router({
-  // Resolved repo-committed Game Sync config at the workspace's current or
+export const teamSyncRouter = router({
+  // Resolved repo-committed Team Sync config at the workspace's current or
   // head changelist, proxied from the app server (parses + validates once).
   getConfig: publicProcedure
     .input(
@@ -132,7 +134,7 @@ export const gameSyncRouter = router({
         changelistNumber: z.number().optional(),
       }),
     )
-    .query(async ({ ctx, input }): Promise<GameSyncConfigResult> => {
+    .query(async ({ ctx, input }): Promise<TeamSyncConfigResult> => {
       const workspace = resolveWorkspace(
         ctx.manager,
         input.daemonId,
@@ -140,7 +142,7 @@ export const gameSyncRouter = router({
       );
 
       const client = await CreateApiClientAuth(input.daemonId);
-      return client.gameSync.getConfig.query({
+      return client.teamSync.getConfig.query({
         repoId: workspace.repoId,
         changelistNumber: input.changelistNumber,
       });
@@ -148,7 +150,7 @@ export const gameSyncRouter = router({
 
   // Per-changelist metadata (badges, review summaries, presence, artifact
   // types, code/content flags) for a page of changelists, proxied from the
-  // app server. Returns {} when the org is not licensed for Game Sync.
+  // app server. Returns {} when the org is not licensed for Team Sync.
   getChangelistMeta: publicProcedure
     .input(
       z.object({
@@ -157,7 +159,7 @@ export const gameSyncRouter = router({
         changelistNumbers: z.array(z.number()).min(1).max(250),
       }),
     )
-    .query(async ({ ctx, input }): Promise<GameSyncChangelistMetaResult> => {
+    .query(async ({ ctx, input }): Promise<TeamSyncChangelistMetaResult> => {
       const workspace = resolveWorkspace(
         ctx.manager,
         input.daemonId,
@@ -166,7 +168,7 @@ export const gameSyncRouter = router({
 
       const client = await CreateApiClientAuth(input.daemonId);
       try {
-        return await client.gameSync.getChangelistMeta.query({
+        return await client.teamSync.getChangelistMeta.query({
           repoId: workspace.repoId,
           changelistNumbers: input.changelistNumbers,
         });
@@ -319,7 +321,7 @@ export const gameSyncRouter = router({
         if (!branch) return null;
 
         // Required badges come from the repo config's artifact channels.
-        const config = await client.gameSync.getConfig
+        const config = await client.teamSync.getConfig
           .query({
             repoId: workspace.repoId,
             changelistNumber: branch.headNumber,
@@ -342,7 +344,7 @@ export const gameSyncRouter = router({
       },
     ),
 
-  // Per-workspace Game Sync settings stored in workspace.json.
+  // Per-workspace Team Sync settings stored in workspace.json.
   getSettings: publicProcedure
     .input(
       z.object({
@@ -357,7 +359,7 @@ export const gameSyncRouter = router({
         input.workspaceId,
       );
       const config = await getWorkspaceConfig(workspace.localPath);
-      return config?.gameSync ?? {};
+      return config?.teamSync ?? {};
     }),
 
   updateSettings: publicProcedure
@@ -383,8 +385,8 @@ export const gameSyncRouter = router({
         });
       }
 
-      const base: WorkspaceGameSyncSettings = persisted.gameSync ?? {};
-      const merged: WorkspaceGameSyncSettings = {
+      const base: WorkspaceTeamSyncSettings = persisted.teamSync ?? {};
+      const merged: WorkspaceTeamSyncSettings = {
         ...base,
         ...input.settings,
         afterSync: input.settings.afterSync
@@ -392,7 +394,7 @@ export const gameSyncRouter = router({
           : base.afterSync,
       };
 
-      persisted.gameSync = merged;
+      persisted.teamSync = merged;
       await saveWorkspaceConfig(persisted);
 
       return merged;
@@ -417,14 +419,14 @@ export const gameSyncRouter = router({
 
       const client = await CreateApiClientAuth(input.daemonId);
       const persisted = await getWorkspaceConfig(workspace.localPath);
-      const base: WorkspaceGameSyncSettings = persisted?.gameSync ?? {};
-      const proposed: WorkspaceGameSyncSettings = {
+      const base: WorkspaceTeamSyncSettings = persisted?.teamSync ?? {};
+      const proposed: WorkspaceTeamSyncSettings = {
         ...base,
         ...input.settings,
       };
 
       const state = await getWorkspaceState(workspace.localPath);
-      const configResult = await client.gameSync.getConfig
+      const configResult = await client.teamSync.getConfig
         .query({
           repoId: workspace.repoId,
           changelistNumber: state.changelistNumber,
@@ -455,7 +457,7 @@ export const gameSyncRouter = router({
         input.workspaceId,
       );
 
-      // Load the on-disk workspace config (carries gameSync.selectedProject);
+      // Load the on-disk workspace config (carries teamSync.selectedProject);
       // fall back to a synthesized config if it is missing.
       const config =
         (await getWorkspaceConfig(workspace.localPath)) ??
@@ -491,7 +493,7 @@ export const gameSyncRouter = router({
         input.workspaceId,
       );
 
-      // Load the on-disk workspace config (carries gameSync build settings);
+      // Load the on-disk workspace config (carries teamSync build settings);
       // synthesize a minimal config if it is missing, matching getProjectInfo.
       const utilWorkspace =
         (await getWorkspaceConfig(workspace.localPath)) ??

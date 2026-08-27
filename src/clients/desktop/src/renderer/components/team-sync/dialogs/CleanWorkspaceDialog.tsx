@@ -3,13 +3,13 @@ import { Dialog } from "primereact/dialog";
 import { useAtomValue } from "jotai";
 import { currentWorkspaceAtom } from "../../../../common/state/workspace";
 import {
-  gameSyncCleanAtom,
+  teamSyncCleanAtom,
   getWsRecord,
-  type GameSyncCleanFile,
-} from "../../../../common/state/game-sync";
+  type TeamSyncCleanFile,
+} from "../../../../common/state/team-sync";
 import { ipc } from "../../../pages/ipc";
 import { Button } from "../../ui";
-import { CheckRow, formatBytes, gameSyncDialogPt } from "./shared";
+import { CheckRow, formatBytes, teamSyncDialogPt } from "./shared";
 
 export interface CleanWorkspaceDialogProps {
   visible: boolean;
@@ -31,7 +31,7 @@ export default function CleanWorkspaceDialog({
   onHide,
 }: CleanWorkspaceDialogProps): React.ReactElement {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
-  const cleanRecord = useAtomValue(gameSyncCleanAtom);
+  const cleanRecord = useAtomValue(teamSyncCleanAtom);
   const files = getWsRecord(cleanRecord, currentWorkspace?.id);
 
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -41,7 +41,7 @@ export default function CleanWorkspaceDialog({
   useEffect(() => {
     if (!visible) return;
     setRequestedAt(Date.now());
-    ipc.sendMessage("game-sync:clean:preview", null);
+    ipc.sendMessage("team-sync:clean:preview", null);
   }, [visible]);
 
   // Default selection: intermediate files checked, untracked unchecked.
@@ -55,7 +55,7 @@ export default function CleanWorkspaceDialog({
   }, [visible, files]);
 
   const groups = useMemo(() => {
-    const byCategory = new Map<string, GameSyncCleanFile[]>();
+    const byCategory = new Map<string, TeamSyncCleanFile[]>();
     for (const file of files ?? []) {
       const list = byCategory.get(file.category) ?? [];
       list.push(file);
@@ -93,7 +93,7 @@ export default function CleanWorkspaceDialog({
 
   const handleDelete = (): void => {
     if (selectedPaths.length === 0) return;
-    ipc.sendMessage("game-sync:clean:execute", { paths: selectedPaths });
+    ipc.sendMessage("team-sync:clean:execute", { paths: selectedPaths });
     onHide();
   };
 
@@ -107,7 +107,7 @@ export default function CleanWorkspaceDialog({
       modal
       dismissableMask
       style={{ width: "40rem" }}
-      pt={gameSyncDialogPt}
+      pt={teamSyncDialogPt}
       footer={
         <div className="flex items-center justify-between gap-4">
           <span className="text-xs text-[var(--color-text-muted)]">

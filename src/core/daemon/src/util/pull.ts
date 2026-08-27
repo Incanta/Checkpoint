@@ -280,7 +280,7 @@ export async function pull(
 
   // Precompiled-binary (artifact) application no longer happens inline here.
   // It is an opt-in, per-workspace step decoupled from the source changelist
-  // (see util/game-sync/artifacts.ts applyArtifacts, invoked by the sync
+  // (see util/team-sync/artifacts.ts applyArtifacts, invoked by the sync
   // pipeline). Existing artifact files are preserved across a source pull.
   if (!errored) {
     // Handle deletions (paths come straight from the diff; no getFiles needed).

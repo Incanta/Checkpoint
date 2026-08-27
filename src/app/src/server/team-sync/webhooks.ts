@@ -1,6 +1,6 @@
 import type { BuildBadgeState, PrismaClient } from "@prisma/client";
 
-import { getGameSyncConfig } from "./config";
+import { getTeamSyncConfig } from "./config";
 
 const WEBHOOK_TIMEOUT_MS = 5000;
 
@@ -14,7 +14,7 @@ interface BadgeWebhookOptions {
 }
 
 /**
- * Fire outbound webhooks configured in the repo's gamesync.yaml on badge
+ * Fire outbound webhooks configured in the repo's teamsync.yaml on badge
  * transitions. Best-effort: each POST is time-boxed and swallowed on error so
  * it never blocks or fails the badge write.
  */
@@ -46,7 +46,7 @@ export async function dispatchBadgeWebhooks(
   });
   if (!authorCl?.userId) return;
 
-  const configResult = await getGameSyncConfig(
+  const configResult = await getTeamSyncConfig(
     db,
     authorCl.userId,
     repo,

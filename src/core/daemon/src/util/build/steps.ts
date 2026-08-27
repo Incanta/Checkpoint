@@ -1,4 +1,4 @@
-import type { GameSyncBuildStep } from "@checkpointvcs/common";
+import type { TeamSyncBuildStep } from "@checkpointvcs/common";
 
 /**
  * Fixed step ids for the default build steps. These mirror UnrealGameSync's
@@ -14,16 +14,23 @@ export const DEFAULT_BUILD_STEP_IDS = {
 } as const;
 
 /**
- * The default UGS-parity build steps for a workspace. Compiles UnrealHeaderTool
- * first, then the editor target, then the editor-support tools. `requires`
- * orders the editor after UHT and the tools after the editor.
+ * The default UGS-parity build steps for an Unreal workspace. Compiles
+ * UnrealHeaderTool first, then the editor target, then the editor-support
+ * tools. `requires` orders the editor after UHT and the tools after the editor.
+ *
+ * These are Unreal-only and opt-in: they are used solely when the repo config
+ * declares an `unreal` block with `defaultBuildSteps` left on. A repo that says
+ * nothing about Unreal starts from an empty step list and builds exactly what
+ * its own config asks for.
  */
-export function getDefaultBuildSteps(editorTarget: string): GameSyncBuildStep[] {
+export function getUnrealDefaultBuildSteps(
+  editorTarget: string,
+): TeamSyncBuildStep[] {
   return [
     {
       id: DEFAULT_BUILD_STEP_IDS.compileUHT,
       name: "Compile UnrealHeaderTool",
-      type: "compile",
+      type: "unreal-compile",
       target: "UnrealHeaderTool",
       requires: [],
       normalSync: true,
@@ -32,7 +39,7 @@ export function getDefaultBuildSteps(editorTarget: string): GameSyncBuildStep[] 
     {
       id: DEFAULT_BUILD_STEP_IDS.compileEditor,
       name: `Compile ${editorTarget}`,
-      type: "compile",
+      type: "unreal-compile",
       target: editorTarget,
       requires: [DEFAULT_BUILD_STEP_IDS.compileUHT],
       normalSync: true,
@@ -41,7 +48,7 @@ export function getDefaultBuildSteps(editorTarget: string): GameSyncBuildStep[] 
     {
       id: DEFAULT_BUILD_STEP_IDS.shaderCompileWorker,
       name: "Compile ShaderCompileWorker",
-      type: "compile",
+      type: "unreal-compile",
       target: "ShaderCompileWorker",
       requires: [DEFAULT_BUILD_STEP_IDS.compileEditor],
       normalSync: true,
@@ -50,7 +57,7 @@ export function getDefaultBuildSteps(editorTarget: string): GameSyncBuildStep[] 
     {
       id: DEFAULT_BUILD_STEP_IDS.unrealLightmass,
       name: "Compile UnrealLightmass",
-      type: "compile",
+      type: "unreal-compile",
       target: "UnrealLightmass",
       requires: [DEFAULT_BUILD_STEP_IDS.compileEditor],
       normalSync: true,
@@ -59,7 +66,7 @@ export function getDefaultBuildSteps(editorTarget: string): GameSyncBuildStep[] 
     {
       id: DEFAULT_BUILD_STEP_IDS.crashReportClient,
       name: "Compile CrashReportClient",
-      type: "compile",
+      type: "unreal-compile",
       target: "CrashReportClient",
       requires: [DEFAULT_BUILD_STEP_IDS.compileEditor],
       normalSync: true,
@@ -77,15 +84,15 @@ export function getDefaultBuildSteps(editorTarget: string): GameSyncBuildStep[] 
  * workspace override says otherwise; the default is enabled.
  */
 export function mergeBuildSteps(
-  defaults: GameSyncBuildStep[],
-  configSteps: GameSyncBuildStep[],
-  custom: GameSyncBuildStep[],
+  defaults: TeamSyncBuildStep[],
+  configSteps: TeamSyncBuildStep[],
+  custom: TeamSyncBuildStep[],
   overrides: Record<string, { enabled?: boolean }> | undefined,
-): { step: GameSyncBuildStep; enabled: boolean }[] {
-  const byId = new Map<string, GameSyncBuildStep>();
+): { step: TeamSyncBuildStep; enabled: boolean }[] {
+  const byId = new Map<string, TeamSyncBuildStep>();
   const order: string[] = [];
 
-  const upsert = (step: GameSyncBuildStep): void => {
+  const upsert = (step: TeamSyncBuildStep): void => {
     if (!byId.has(step.id)) {
       order.push(step.id);
     }
@@ -108,12 +115,12 @@ export function mergeBuildSteps(
  * first. Requirements referencing ids not present in `steps` are ignored (they
  * were filtered out or belong to another list). Throws on a dependency cycle.
  */
-export function topoSortSteps(steps: GameSyncBuildStep[]): GameSyncBuildStep[] {
+export function topoSortSteps(steps: TeamSyncBuildStep[]): TeamSyncBuildStep[] {
   const byId = new Map(steps.map((step) => [step.id, step]));
-  const result: GameSyncBuildStep[] = [];
+  const result: TeamSyncBuildStep[] = [];
   const state = new Map<string, "visiting" | "done">();
 
-  const visit = (step: GameSyncBuildStep): void => {
+  const visit = (step: TeamSyncBuildStep): void => {
     const current = state.get(step.id);
     if (current === "done") return;
     if (current === "visiting") {

@@ -334,7 +334,7 @@ model Changelist {
   children     Changelist[] @relation("ChangelistToParent")
   parentNumber Int? // NOTE: Merges are handled via forced squashing
 
-  // Code/content classification for the Game Sync changelist browser.
+  // Code/content classification for the Team Sync changelist browser.
   // Null = not yet classified (rows predating the feature; lazily backfilled).
   hasCodeChanges    Boolean?
   hasContentChanges Boolean?
@@ -572,7 +572,7 @@ model Workspace {
   orgId String
   org   Org    @relation(fields: [orgId], references: [id])
 
-  // Game Sync presence: last changelist this workspace successfully synced to.
+  // Team Sync presence: last changelist this workspace successfully synced to.
   syncedChangelistNumber Int?
   syncedAt               DateTime?
 

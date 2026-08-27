@@ -3,7 +3,8 @@ import path from "path";
 import { promises as fs } from "fs";
 import {
   CreateApiClientAuth,
-  type GameSyncConfig,
+  type TeamSyncBuildStep,
+  type TeamSyncConfig,
 } from "@checkpointvcs/common";
 
 import {
@@ -18,11 +19,13 @@ import { writeVersionFiles } from "./version-files.js";
 import {
   expandVariables,
   hostPlatformName,
+  isUnrealVariable,
   type BuildVariableContext,
+  type UnrealVariables,
 } from "./variables.js";
 import { readReceipt } from "./receipts.js";
 import {
-  getDefaultBuildSteps,
+  getUnrealDefaultBuildSteps,
   mergeBuildSteps,
   topoSortSteps,
 } from "./steps.js";
@@ -168,16 +171,24 @@ export async function spawnStreaming(
   });
 }
 
+/** Step types whose invocation is constructed from the Unreal toolchain. */
+function requiresUnreal(step: TeamSyncBuildStep): boolean {
+  return step.type === "unreal-compile" || step.type === "unreal-cook";
+}
+
 /**
- * Run the workspace's build steps after a sync (UnrealGameSync parity).
+ * Run the workspace's build steps after a sync.
  *
- * Loads workspace state, the resolved repo Game Sync config (at the synced
- * changelist), and the Unreal project/engine info; merges and orders the build
- * steps; then runs them in sequence, streaming logs to the job and a per-build
- * log file. On success, records the last-built changelist, optionally rewrites
- * version files, and casts a best-effort auto compile vote.
+ * Loads workspace state, the resolved repo Team Sync config (at the synced
+ * changelist), merges and orders the build steps, then runs them in sequence,
+ * streaming logs to the job and a per-build log file. On success, records the
+ * last-built changelist, optionally rewrites version files, and casts a
+ * best-effort auto compile vote.
  *
- * Throws when no Unreal engine/project can be resolved (nothing to build).
+ * Engine-agnostic by default: a repo whose config has no `unreal` block gets no
+ * default steps and no Unreal discovery, and builds whatever `command` steps it
+ * declared. The Unreal toolchain is resolved only when the repo opted in, and
+ * is only *required* when a step that was actually selected needs it.
  */
 export async function runBuild(
   workspace: Workspace,
@@ -194,45 +205,47 @@ export async function runBuild(
   const state = await getWorkspaceState(workspace.localPath);
   const changelistNumber = state.changelistNumber;
 
-  const projectInfo = await getProjectInfo(workspace, state);
-  if (!projectInfo || !projectInfo.engine || !projectInfo.uprojectPath) {
-    const message =
-      "Cannot build: no Unreal engine or project could be resolved for this workspace.";
-    jobManager.appendLog(jobId, "sys", message);
-    throw new Error(message);
-  }
-
-  const engine = projectInfo.engine;
-  const engineDir = engine.engineDir;
-
-  // Resolve the repo Game Sync config at the synced changelist (best effort).
-  let config: GameSyncConfig | null = null;
+  // Resolve the repo Team Sync config at the synced changelist (best effort).
+  let config: TeamSyncConfig | null = null;
   try {
     const client = await CreateApiClientAuth(workspace.daemonId);
-    const result = await client.gameSync.getConfig.query({
+    const result = await client.teamSync.getConfig.query({
       repoId: workspace.repoId,
       changelistNumber,
     });
     config = result.config;
   } catch (e) {
     Logger.warn(
-      `Build: failed to fetch Game Sync config: ${e instanceof Error ? e.message : String(e)}`,
+      `Build: failed to fetch Team Sync config: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
 
-  const editorTarget =
-    projectInfo.editorTargetName ?? config?.project?.editorTarget ?? "UnrealEditor";
   const platformName = hostPlatformName();
-  const projectFile = path.join(workspace.localPath, projectInfo.uprojectPath);
-  const projectDir = path.dirname(projectFile);
-  const branchDir = workspace.localPath;
+
+  // Unreal is opt-in: discovery only runs for a repo that declared the block.
+  const unrealConfig = config?.unreal;
+  const projectInfo = unrealConfig
+    ? await getProjectInfo(workspace, state)
+    : null;
+  const hasUnreal = Boolean(
+    projectInfo?.engine && projectInfo?.uprojectPath,
+  );
+
+  const editorTarget =
+    projectInfo?.editorTargetName ?? unrealConfig?.editorTarget ?? "UnrealEditor";
 
   // Merge default + repo-config + custom steps, apply overrides, filter, order.
+  // The UBT defaults are contributed only by an opted-in Unreal repo.
+  const defaults =
+    unrealConfig?.defaultBuildSteps
+      ? getUnrealDefaultBuildSteps(editorTarget)
+      : [];
+
   const merged = mergeBuildSteps(
-    getDefaultBuildSteps(editorTarget),
+    defaults,
     config?.buildSteps ?? [],
-    workspace.gameSync?.customBuildSteps ?? [],
-    workspace.gameSync?.buildStepOverrides,
+    workspace.teamSync?.customBuildSteps ?? [],
+    workspace.teamSync?.buildStepOverrides,
   );
 
   const selected = merged
@@ -247,37 +260,62 @@ export async function runBuild(
 
   const ordered = topoSortSteps(selected);
 
-  // Editor executable: prefer the receipt's Launch path, else the convention.
-  let editorExe: string;
-  const editorReceipt = await readReceipt(
-    engineDir,
-    projectDir,
-    editorTarget,
-    platformName,
-    "Development",
-  );
-  if (editorReceipt?.launch) {
-    editorExe = editorReceipt.launch;
-  } else {
+  // Only now is the Unreal toolchain actually required, and only if a selected
+  // step is one that cannot be built without it.
+  const unrealSteps = ordered.filter(requiresUnreal);
+  if (unrealSteps.length > 0 && !hasUnreal) {
+    const names = unrealSteps.map((step) => `"${step.name}"`).join(", ");
+    const message = unrealConfig
+      ? `Cannot build: step(s) ${names} need the Unreal toolchain, but no engine or .uproject could be resolved for this workspace.`
+      : `Cannot build: step(s) ${names} use an unreal-* type, but this repo's Team Sync config has no "unreal" block.`;
+    jobManager.appendLog(jobId, "sys", message);
+    throw new Error(message);
+  }
+
+  // Unreal variable values, resolved once for the steps that reference them.
+  let unrealVars: UnrealVariables | undefined;
+  if (hasUnreal) {
+    const engineDir = projectInfo!.engine!.engineDir;
+    const projectFile = path.join(
+      workspace.localPath,
+      projectInfo!.uprojectPath,
+    );
+    const projectDir = path.dirname(projectFile);
+
+    // Editor executable: prefer the receipt's Launch path, else the convention.
+    const editorReceipt = await readReceipt(
+      engineDir,
+      projectDir,
+      editorTarget,
+      platformName,
+      "Development",
+    );
     const exeName =
       platformName === "Win64" ? "UnrealEditor.exe" : "UnrealEditor";
-    editorExe = path.join(engineDir, "Engine", "Binaries", platformName, exeName);
+    const editorExe =
+      editorReceipt?.launch ??
+      path.join(engineDir, "Engine", "Binaries", platformName, exeName);
+
+    unrealVars = {
+      projectDir,
+      projectFile,
+      engineDir,
+      editorExe,
+      editorTarget,
+    };
   }
 
   const ctx: BuildVariableContext = {
-    branchDir,
-    projectDir,
-    projectFile,
-    engineDir,
-    editorExe,
+    workspaceDir: workspace.localPath,
     change: changelistNumber,
-    clientName: workspace.workspaceName,
+    branch: workspace.branchName,
+    workspaceName: workspace.workspaceName,
     platformName,
-    editorTarget,
+    ...(unrealVars && { unreal: unrealVars }),
   };
 
   // ForceClean: explicit option, or a config boundary crossed since last build.
-  const lastBuilt = state.gameSync?.lastBuiltChangelist ?? -1;
+  const lastBuilt = state.teamSync?.lastBuiltChangelist ?? -1;
   const cleanByBoundary = (config?.forceClean?.changelists ?? []).some(
     (boundary) => lastBuilt < boundary && boundary <= changelistNumber,
   );
@@ -356,40 +394,58 @@ export async function runBuild(
       let args: string[];
       let cwd: string;
 
-      if (step.type === "compile") {
-        const target = step.target ?? editorTarget;
-        const platform = step.platform ?? platformName;
-        const configuration = step.configuration ?? "Development";
-        cmd = quote(buildScriptPath(engineDir));
-        args = [
-          target,
-          platform,
-          configuration,
-          `-Project=${quote(projectFile)}`,
-          "-WaitMutex",
-          "-NoHotReloadFromIDE",
-        ];
-        if (step.arguments) {
-          args.push(expandVariables(step.arguments, ctx));
+      // Warn once per step about tokens that stayed literal, rather than
+      // letting a command run with "$(EditorExe)" still in it.
+      const unresolved = new Set<string>();
+      const expand = (value: string): string =>
+        expandVariables(value, ctx, (token) => unresolved.add(token));
+
+      if (step.type === "unreal-compile" || step.type === "unreal-cook") {
+        // Guarded above: a selected unreal-* step guarantees ctx.unreal.
+        const unreal = ctx.unreal!;
+
+        if (step.type === "unreal-compile") {
+          const target = step.target ?? unreal.editorTarget;
+          const platform = step.platform ?? platformName;
+          const configuration = step.configuration ?? "Development";
+          cmd = quote(buildScriptPath(unreal.engineDir));
+          args = [
+            target,
+            platform,
+            configuration,
+            `-Project=${quote(unreal.projectFile)}`,
+            "-WaitMutex",
+            "-NoHotReloadFromIDE",
+          ];
+          if (step.arguments) {
+            args.push(expand(step.arguments));
+          }
+          if (clean) {
+            args.push("-Clean");
+          }
+          compiled = true;
+        } else {
+          cmd = quote(runUatScriptPath(unreal.engineDir));
+          args = step.arguments ? [expand(step.arguments)] : [];
         }
-        if (clean) {
-          args.push("-Clean");
-        }
-        cwd = engineDir;
-        compiled = true;
-      } else if (step.type === "cook") {
-        cmd = quote(runUatScriptPath(engineDir));
-        args = step.arguments ? [expandVariables(step.arguments, ctx)] : [];
-        cwd = step.workingDir
-          ? expandVariables(step.workingDir, ctx)
-          : engineDir;
+
+        cwd = step.workingDir ? expand(step.workingDir) : unreal.engineDir;
       } else {
-        // "other": free-form command.
-        cmd = step.command ? expandVariables(step.command, ctx) : "";
-        args = step.arguments ? [expandVariables(step.arguments, ctx)] : [];
-        cwd = step.workingDir
-          ? expandVariables(step.workingDir, ctx)
-          : branchDir;
+        // "command": free-form executable. The engine-agnostic default.
+        cmd = step.command ? expand(step.command) : "";
+        args = step.arguments ? [expand(step.arguments)] : [];
+        cwd = step.workingDir ? expand(step.workingDir) : ctx.workspaceDir;
+        // A repo's own command steps are its build; a green run is the same
+        // signal an unreal-compile step gives.
+        compiled = true;
+      }
+
+      for (const token of unresolved) {
+        sysLog(
+          isUnrealVariable(token)
+            ? `Warning: ${token} is only available with Unreal support configured; leaving it as-is.`
+            : `Warning: unknown build variable ${token}; leaving it as-is.`,
+        );
       }
 
       sysLog(`Running step "${step.name}": ${[cmd, ...args].join(" ")}`);
@@ -448,8 +504,8 @@ export async function runBuild(
         const nextState: WorkspaceState = {
           ...latest,
           version: WORKSPACE_STATE_VERSION,
-          gameSync: {
-            ...latest.gameSync,
+          teamSync: {
+            ...latest.teamSync,
             lastBuiltChangelist: changelistNumber,
           },
         };
@@ -460,8 +516,9 @@ export async function runBuild(
         );
       }
 
-      // Only rewrite version files for a locally compiled build.
-      if (compiled && workspace.gameSync?.writeVersionFiles) {
+      // Version files are Unreal's (Build.version and friends), so this only
+      // applies to a locally compiled Unreal build.
+      if (compiled && hasUnreal && workspace.teamSync?.writeVersionFiles) {
         try {
           await writeVersionFiles(
             workspace,

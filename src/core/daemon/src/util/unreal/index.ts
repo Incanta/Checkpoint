@@ -45,7 +45,7 @@ export async function getProjectInfo(
   }
 
   const projects = await discoverProjects(workspace, state);
-  const selected = selectProject(projects, workspace.gameSync?.selectedProject);
+  const selected = selectProject(projects, workspace.teamSync?.selectedProject);
 
   const hasEngineInWorkspace =
     Object.prototype.hasOwnProperty.call(

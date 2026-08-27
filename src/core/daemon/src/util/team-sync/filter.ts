@@ -1,8 +1,8 @@
 import { createHash } from "crypto";
 import ignore, { type Ignore } from "ignore";
-import type { GameSyncConfig, GameSyncCategory } from "@checkpointvcs/common";
+import type { TeamSyncConfig, TeamSyncCategory } from "@checkpointvcs/common";
 
-import type { WorkspaceGameSyncSettings } from "../util.js";
+import type { WorkspaceTeamSyncSettings } from "../util.js";
 
 export interface CompiledSyncFilter {
   /** True when no categories/rules are defined: every path is in-filter. */
@@ -42,7 +42,7 @@ const NATIVE_UNSUPPORTED = /[!\[\]\\]/;
  * dependencies (`requires`) of every enabled category.
  */
 export function resolveEnabledCategories(
-  categories: GameSyncCategory[],
+  categories: TeamSyncCategory[],
   overrides: Record<string, boolean> | undefined,
 ): Set<string> {
   const byId = new Map(categories.map((cat) => [cat.id, cat]));
@@ -84,8 +84,8 @@ export function resolveEnabledCategories(
  * path is included), matching a workspace that has never narrowed its sync.
  */
 export function compileFilter(
-  config: GameSyncConfig | null,
-  settings: WorkspaceGameSyncSettings | undefined,
+  config: TeamSyncConfig | null,
+  settings: WorkspaceTeamSyncSettings | undefined,
 ): CompiledSyncFilter {
   const categories = config?.syncCategories ?? [];
   const enabledIds = resolveEnabledCategories(

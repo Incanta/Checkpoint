@@ -96,13 +96,13 @@ export default function Workspace(): React.ReactElement {
                   variant="secondary"
                   size="sm"
                   onClick={() => {
-                    ipc.sendMessage("game-sync:enter", {
+                    ipc.sendMessage("team-sync:enter", {
                       workspaceId: currentWorkspace.id,
                     });
-                    navigate("/game-sync");
+                    navigate("/team-sync");
                   }}
                 >
-                  Game Sync
+                  Team Sync
                 </Button>
               </span>
             )}

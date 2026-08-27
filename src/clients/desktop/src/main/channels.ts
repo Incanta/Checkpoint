@@ -194,58 +194,58 @@ export type Channels = {
   // Window chrome: update the native controls overlay colors on theme change.
   "window:set-titlebar-overlay": { color: string; symbolColor: string };
 
-  // ─── Game Sync (Phase 1) ─────────────────────────────────────────
-  // Enter Game Sync for a workspace: main fetches project info/config/settings/
+  // ─── Team Sync (Phase 1) ─────────────────────────────────────────
+  // Enter Team Sync for a workspace: main fetches project info/config/settings/
   // history, sets the atoms, and starts a head poll.
-  "game-sync:enter": { workspaceId: string };
-  // Leave Game Sync: stop the head poll.
-  "game-sync:exit": null;
+  "team-sync:enter": { workspaceId: string };
+  // Leave Team Sync: stop the head poll.
+  "team-sync:exit": null;
   // Re-fetch config/settings/status/history for the current workspace.
-  "game-sync:refresh": null;
+  "team-sync:refresh": null;
   // Run the sync pipeline (null = latest, or a specific changelist).
-  "game-sync:sync": { changelistNumber: number | null };
-  "game-sync:sync:error": { message: string };
+  "team-sync:sync": { changelistNumber: number | null };
+  "team-sync:sync:error": { message: string };
   // Launch the Unreal editor; `config` is an optional build configuration.
-  "game-sync:launch-editor": { config?: string };
-  "game-sync:launch-editor:error": { message: string };
-  // Request cancellation of a running Game Sync daemon job.
-  "game-sync:cancel-job": { jobId: string };
-  // Persist per-workspace Game Sync settings.
-  "game-sync:update-settings": { settings: any };
+  "team-sync:launch-editor": { config?: string };
+  "team-sync:launch-editor:error": { message: string };
+  // Request cancellation of a running Team Sync daemon job.
+  "team-sync:cancel-job": { jobId: string };
+  // Persist per-workspace Team Sync settings.
+  "team-sync:update-settings": { settings: any };
   // Sync to the newest changelist whose required badges are all green.
-  "game-sync:sync-latest-good": null;
+  "team-sync:sync-latest-good": null;
   // No changelist qualified as "latest good".
-  "game-sync:sync-latest-good:none": null;
+  "team-sync:sync-latest-good:none": null;
   // Set/clear the current user's vote on a changelist.
-  "game-sync:vote": {
+  "team-sync:vote": {
     changelistNumber: number;
     vote: "COMPILE_SUCCESS" | "COMPILE_FAILURE" | "GOOD" | "BAD" | null;
   };
   // Toggle the current user's star on a changelist.
-  "game-sync:star": { changelistNumber: number; starred: boolean };
+  "team-sync:star": { changelistNumber: number; starred: boolean };
   // Toggle the current user's "investigating" flag on a changelist.
-  "game-sync:investigate": { changelistNumber: number; investigating: boolean };
+  "team-sync:investigate": { changelistNumber: number; investigating: boolean };
   // Leave a comment on a changelist.
-  "game-sync:comment": { changelistNumber: number; body: string };
+  "team-sync:comment": { changelistNumber: number; body: string };
   // Run local build steps (compile). `forceClean` forces a clean rebuild.
-  "game-sync:build": { forceClean?: boolean };
+  "team-sync:build": { forceClean?: boolean };
   // Regenerate IDE project files.
-  "game-sync:generate-project-files": null;
+  "team-sync:generate-project-files": null;
   // Main -> renderer: append newly captured job log lines. `startLine` is the
   // seq of the first line in `lines` so the renderer can order/dedupe.
-  "game-sync:log:append": { jobId: string; startLine: number; lines: string[] };
+  "team-sync:log:append": { jobId: string; startLine: number; lines: string[] };
 
-  // ─── Game Sync (Phase 2/3) ───────────────────────────────────────
-  // Request a clean preview; main sets gameSyncCleanAtom and replies with :data.
-  "game-sync:clean:preview": null;
-  "game-sync:clean:preview:data": {
+  // ─── Team Sync (Phase 2/3) ───────────────────────────────────────
+  // Request a clean preview; main sets teamSyncCleanAtom and replies with :data.
+  "team-sync:clean:preview": null;
+  "team-sync:clean:preview:data": {
     files: { path: string; size: number; category: string }[];
   };
   // Delete the selected intermediate/untracked files.
-  "game-sync:clean:execute": { paths: string[] };
-  // Request the current bisect state; main sets gameSyncBisectAtom + replies.
-  "game-sync:bisect:refresh": null;
-  "game-sync:bisect:data": {
+  "team-sync:clean:execute": { paths: string[] };
+  // Request the current bisect state; main sets teamSyncBisectAtom + replies.
+  "team-sync:bisect:refresh": null;
+  "team-sync:bisect:data": {
     bisect: Record<string, string>;
     next: {
       nextCl: number | null;
@@ -255,16 +255,16 @@ export type Channels = {
     };
   };
   // Record a verdict for a changelist in the active bisect.
-  "game-sync:bisect:mark": {
+  "team-sync:bisect:mark": {
     changelistNumber: number;
     verdict: "pass" | "fail" | "include" | "exclude";
   };
   // Clear all bisect verdicts.
-  "game-sync:bisect:reset": null;
+  "team-sync:bisect:reset": null;
   // Preview which synced files a proposed filter change would remove on the
   // next sync (UGS's destructive-filter warning).
-  "game-sync:filter:preview": { settings: any };
-  "game-sync:filter:preview:data": { toDelete: string[] };
+  "team-sync:filter:preview": { settings: any };
+  "team-sync:filter:preview:data": { toDelete: string[] };
 };
 
 export type InvokeChannels = {

@@ -12,7 +12,7 @@ import { assertFeature } from "~/server/license-client";
 import {
   notifyChangelistComment,
   notifyChangelistMarkedBad,
-} from "~/server/game-sync/notifications";
+} from "~/server/team-sync/notifications";
 
 const voteSchema = z.enum([
   "COMPILE_SUCCESS",
@@ -59,7 +59,7 @@ export const changelistReviewRouter = createTRPCRouter({
         input.repoId,
         RepoAccess.READ,
       );
-      await assertFeature(repo.orgId, "gameSync", ctx.db);
+      await assertFeature(repo.orgId, "teamSync", ctx.db);
 
       await upsertReview(
         ctx.db,
@@ -96,7 +96,7 @@ export const changelistReviewRouter = createTRPCRouter({
         input.repoId,
         RepoAccess.READ,
       );
-      await assertFeature(repo.orgId, "gameSync", ctx.db);
+      await assertFeature(repo.orgId, "teamSync", ctx.db);
 
       await upsertReview(
         ctx.db,
@@ -122,7 +122,7 @@ export const changelistReviewRouter = createTRPCRouter({
         input.repoId,
         RepoAccess.READ,
       );
-      await assertFeature(repo.orgId, "gameSync", ctx.db);
+      await assertFeature(repo.orgId, "teamSync", ctx.db);
 
       const now = new Date();
       await upsertReview(
@@ -152,7 +152,7 @@ export const changelistReviewRouter = createTRPCRouter({
         input.repoId,
         RepoAccess.READ,
       );
-      await assertFeature(repo.orgId, "gameSync", ctx.db);
+      await assertFeature(repo.orgId, "teamSync", ctx.db);
 
       const changelist = await ctx.db.changelist.findUnique({
         where: {

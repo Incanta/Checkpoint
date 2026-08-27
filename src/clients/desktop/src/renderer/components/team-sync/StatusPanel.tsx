@@ -1,11 +1,11 @@
 import { useAtomValue } from "jotai";
 import { currentWorkspaceAtom } from "../../../common/state/workspace";
 import {
-  gameSyncJobAtom,
-  gameSyncModeAtom,
-  gameSyncStatusAtom,
+  teamSyncJobAtom,
+  teamSyncModeAtom,
+  teamSyncStatusAtom,
   getWsRecord,
-} from "../../../common/state/game-sync";
+} from "../../../common/state/team-sync";
 import { ipc } from "../../pages/ipc";
 import { Badge, Button } from "../ui";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -26,9 +26,9 @@ export default function StatusPanel({
   onToggleBisect,
 }: StatusPanelProps): React.ReactElement | null {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
-  const modeRecord = useAtomValue(gameSyncModeAtom);
-  const statusRecord = useAtomValue(gameSyncStatusAtom);
-  const jobRecord = useAtomValue(gameSyncJobAtom);
+  const modeRecord = useAtomValue(teamSyncModeAtom);
+  const statusRecord = useAtomValue(teamSyncStatusAtom);
+  const jobRecord = useAtomValue(teamSyncJobAtom);
 
   if (!currentWorkspace) return null;
 
@@ -36,28 +36,33 @@ export default function StatusPanel({
   const status = getWsRecord(statusRecord, currentWorkspace.id);
   const job = getWsRecord(jobRecord, currentWorkspace.id);
 
-  const projectName = mode?.projectName || currentWorkspace.name || "Game Sync";
+  const projectName = mode?.projectName || currentWorkspace.name || "Team Sync";
   const busy = job != null;
 
+  // Unreal-only actions are hidden, not merely disabled, for a repo that never
+  // opted into Unreal support: a greyed-out "Launch Editor" would read as a
+  // broken feature rather than one that does not apply here.
+  const showUnrealActions = Boolean(mode?.enabled && mode.detected);
+
   const handleSyncLatest = (): void => {
-    ipc.sendMessage("game-sync:sync", { changelistNumber: null });
+    ipc.sendMessage("team-sync:sync", { changelistNumber: null });
   };
 
   const handleSyncLatestGood = (): void => {
-    ipc.sendMessage("game-sync:sync-latest-good", null);
+    ipc.sendMessage("team-sync:sync-latest-good", null);
   };
 
   const handleBuild = (): void => {
-    ipc.sendMessage("game-sync:build", {});
+    ipc.sendMessage("team-sync:build", {});
   };
 
   const handleLaunchEditor = (): void => {
-    ipc.sendMessage("game-sync:launch-editor", {});
+    ipc.sendMessage("team-sync:launch-editor", {});
   };
 
   const handleCancel = (): void => {
     if (job) {
-      ipc.sendMessage("game-sync:cancel-job", { jobId: job.jobId });
+      ipc.sendMessage("team-sync:cancel-job", { jobId: job.jobId });
     }
   };
 
@@ -123,14 +128,16 @@ export default function StatusPanel({
           >
             Build
           </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleLaunchEditor}
-            disabled={busy || mode?.detected === false}
-          >
-            Launch Editor
-          </Button>
+          {showUnrealActions && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleLaunchEditor}
+              disabled={busy}
+            >
+              Launch Editor
+            </Button>
+          )}
 
           <div className="ml-1 flex items-center gap-1 border-l border-[var(--color-border-default)] pl-2">
             {onToggleBisect && (
@@ -158,7 +165,7 @@ export default function StatusPanel({
                 variant="ghost"
                 size="sm"
                 onClick={onOpenSettings}
-                title="Game Sync settings"
+                title="Team Sync settings"
               >
                 <FontAwesomeIcon icon={faGear} />
               </Button>

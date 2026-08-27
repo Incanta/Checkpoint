@@ -16,7 +16,7 @@ import {
   type AppliedArtifactInfo,
   type ArtifactStateFile,
   type Workspace,
-  type WorkspaceGameSyncSettings,
+  type WorkspaceTeamSyncSettings,
   type WorkspaceState,
 } from "../util.js";
 import {
@@ -62,7 +62,7 @@ export async function applyArtifacts(
   workspace: Workspace,
   orgId: string,
   sourceChangelistNumber: number,
-  settings: WorkspaceGameSyncSettings,
+  settings: WorkspaceTeamSyncSettings,
   onStep?: (step: string) => void,
   onProgress?: (step: string, done: number, total: number) => void,
   logLevel?: LongtailLogLevel,
@@ -94,7 +94,7 @@ export async function applyArtifacts(
   const client = await CreateApiClientAuth(workspace.daemonId);
 
   // Required badges per artifact type from the repo config at the source CL.
-  const configResult = await client.gameSync.getConfig
+  const configResult = await client.teamSync.getConfig
     .query({
       repoId: workspace.repoId,
       changelistNumber: sourceChangelistNumber,
@@ -152,7 +152,7 @@ export async function applyArtifacts(
     const oldEntriesForType = Object.entries(existingArtifacts).filter(
       ([, f]) => (f.artifactType ?? "editor") === type,
     );
-    const prevApplied = state.gameSync?.appliedArtifacts?.[type];
+    const prevApplied = state.teamSync?.appliedArtifacts?.[type];
 
     const set = await client.artifact.findLatestSet.query({
       repoId: workspace.repoId,
@@ -324,17 +324,17 @@ export async function invalidateArtifactType(
     delete artifactFiles[normalizeArtifactPath(p)];
   }
 
-  const gameSync = { ...(state.gameSync ?? {}) };
-  const appliedArtifacts = { ...(gameSync.appliedArtifacts ?? {}) };
+  const teamSync = { ...(state.teamSync ?? {}) };
+  const appliedArtifacts = { ...(teamSync.appliedArtifacts ?? {}) };
   const info = appliedArtifacts[type];
   if (info) {
     appliedArtifacts[type] = { ...info, invalidatedByLocalBuild: true };
-    gameSync.appliedArtifacts = appliedArtifacts;
+    teamSync.appliedArtifacts = appliedArtifacts;
   }
 
   await saveWorkspaceState(
     workspace,
-    { ...state, artifactFiles, gameSync },
+    { ...state, artifactFiles, teamSync },
     stateBackend,
   );
 }
@@ -361,16 +361,16 @@ async function persistArtifactState(
   appliedArtifacts: Record<string, AppliedArtifactInfo>,
   stateBackend: StateBackend,
 ): Promise<void> {
-  const gameSync = { ...(state.gameSync ?? {}) };
+  const teamSync = { ...(state.teamSync ?? {}) };
   if (Object.keys(appliedArtifacts).length > 0) {
-    gameSync.appliedArtifacts = appliedArtifacts;
+    teamSync.appliedArtifacts = appliedArtifacts;
   } else {
-    delete gameSync.appliedArtifacts;
+    delete teamSync.appliedArtifacts;
   }
 
   await saveWorkspaceState(
     workspace,
-    { ...state, artifactFiles, gameSync },
+    { ...state, artifactFiles, teamSync },
     stateBackend,
   );
 }

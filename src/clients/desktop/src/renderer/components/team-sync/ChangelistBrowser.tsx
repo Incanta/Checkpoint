@@ -4,20 +4,20 @@ import { ContextMenu } from "primereact/contextmenu";
 import { MenuItem } from "primereact/menuitem";
 import { currentWorkspaceAtom } from "../../../common/state/workspace";
 import {
-  gameSyncChangelistsAtom,
-  gameSyncMetadataAtom,
-  gameSyncStatusAtom,
+  teamSyncChangelistsAtom,
+  teamSyncMetadataAtom,
+  teamSyncStatusAtom,
   getWsRecord,
-  type GameSyncChangelistEntry,
-  type GameSyncChangelistMeta,
-} from "../../../common/state/game-sync";
+  type TeamSyncChangelistEntry,
+  type TeamSyncChangelistMeta,
+} from "../../../common/state/team-sync";
 import { ipc } from "../../pages/ipc";
 import { EmptyState } from "../ui";
 import CommentDialog from "./dialogs/CommentDialog";
 
 interface DayGroup {
   day: string;
-  entries: GameSyncChangelistEntry[];
+  entries: TeamSyncChangelistEntry[];
 }
 
 const BADGE_STATE_COLORS: Record<string, string> = {
@@ -31,7 +31,7 @@ const BADGE_STATE_COLORS: Record<string, string> = {
 function BadgeChips({
   meta,
 }: {
-  meta: GameSyncChangelistMeta | undefined;
+  meta: TeamSyncChangelistMeta | undefined;
 }): React.ReactElement | null {
   if (!meta || meta.badges.length === 0) return null;
   return (
@@ -61,13 +61,13 @@ function BadgeChips({
   );
 }
 
-function authorLabel(entry: GameSyncChangelistEntry): string {
+function authorLabel(entry: TeamSyncChangelistEntry): string {
   return (
     entry.user?.name || entry.user?.username || entry.user?.email || "Unknown"
   );
 }
 
-function groupByDay(entries: GameSyncChangelistEntry[]): DayGroup[] {
+function groupByDay(entries: TeamSyncChangelistEntry[]): DayGroup[] {
   const groups: DayGroup[] = [];
   let current: DayGroup | null = null;
 
@@ -90,9 +90,9 @@ function groupByDay(entries: GameSyncChangelistEntry[]): DayGroup[] {
 
 export default function ChangelistBrowser(): React.ReactElement | null {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
-  const changelistsRecord = useAtomValue(gameSyncChangelistsAtom);
-  const metadataRecord = useAtomValue(gameSyncMetadataAtom);
-  const statusRecord = useAtomValue(gameSyncStatusAtom);
+  const changelistsRecord = useAtomValue(teamSyncChangelistsAtom);
+  const metadataRecord = useAtomValue(teamSyncMetadataAtom);
+  const statusRecord = useAtomValue(teamSyncStatusAtom);
   const contextMenuRef = useRef<ContextMenu>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [commentCl, setCommentCl] = useState<number | null>(null);
@@ -107,7 +107,7 @@ export default function ChangelistBrowser(): React.ReactElement | null {
   );
 
   const handleContextMenu = useCallback(
-    (event: React.MouseEvent, entry: GameSyncChangelistEntry) => {
+    (event: React.MouseEvent, entry: TeamSyncChangelistEntry) => {
       event.preventDefault();
 
       const number = entry.number;
@@ -120,14 +120,14 @@ export default function ChangelistBrowser(): React.ReactElement | null {
         {
           label: "Sync to this CL",
           command: () => {
-            ipc.sendMessage("game-sync:sync", { changelistNumber: number });
+            ipc.sendMessage("team-sync:sync", { changelistNumber: number });
           },
         },
         { separator: true },
         {
           label: myVote === "GOOD" ? "Clear good" : "Mark good",
           command: () => {
-            ipc.sendMessage("game-sync:vote", {
+            ipc.sendMessage("team-sync:vote", {
               changelistNumber: number,
               vote: myVote === "GOOD" ? null : "GOOD",
             });
@@ -136,7 +136,7 @@ export default function ChangelistBrowser(): React.ReactElement | null {
         {
           label: myVote === "BAD" ? "Clear bad" : "Mark bad",
           command: () => {
-            ipc.sendMessage("game-sync:vote", {
+            ipc.sendMessage("team-sync:vote", {
               changelistNumber: number,
               vote: myVote === "BAD" ? null : "BAD",
             });
@@ -145,7 +145,7 @@ export default function ChangelistBrowser(): React.ReactElement | null {
         {
           label: starred ? "Unstar" : "Star",
           command: () => {
-            ipc.sendMessage("game-sync:star", {
+            ipc.sendMessage("team-sync:star", {
               changelistNumber: number,
               starred: !starred,
             });
@@ -154,7 +154,7 @@ export default function ChangelistBrowser(): React.ReactElement | null {
         {
           label: investigating ? "Stop investigating" : "Start investigating",
           command: () => {
-            ipc.sendMessage("game-sync:investigate", {
+            ipc.sendMessage("team-sync:investigate", {
               changelistNumber: number,
               investigating: !investigating,
             });

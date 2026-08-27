@@ -4,7 +4,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import {
   CreateApiClientAuth,
-  type GameSyncBuildStep,
+  type TeamSyncBuildStep,
   type WorkspaceStateFile,
 } from "@checkpointvcs/common";
 import { getStateStore } from "./state-store.js";
@@ -76,7 +76,7 @@ export interface AppliedArtifactInfo {
   invalidatedByLocalBuild?: boolean;
 }
 
-export interface WorkspaceGameSyncState {
+export interface WorkspaceTeamSyncState {
   /** Hash of the sync filter in effect for the files currently on disk. */
   syncFilterHash?: string;
   /** Last changelist a successful local build ran at (ForceClean boundaries). */
@@ -104,7 +104,7 @@ export interface WorkspaceState {
   artifactFiles?: Record<string, ArtifactStateFile>; // path -> artifact file info
   /** Relative paths of files explicitly marked for add */
   markedForAdd?: string[];
-  gameSync?: WorkspaceGameSyncState;
+  teamSync?: WorkspaceTeamSyncState;
 }
 
 export interface WorkspaceConfig {
@@ -125,7 +125,7 @@ export interface WorkspaceConfig {
    * head has moved since this value was recorded, resolve is rejected.
    */
   lastSyncStatusRemoteHead?: number | null;
-  gameSync?: WorkspaceGameSyncSettings;
+  teamSync?: WorkspaceTeamSyncSettings;
 }
 
 export interface WorkspaceScheduledSyncSettings {
@@ -135,7 +135,7 @@ export interface WorkspaceScheduledSyncSettings {
   target: "latest" | "latest-good" | "latest-starred";
 }
 
-export interface WorkspaceGameSyncSettings {
+export interface WorkspaceTeamSyncSettings {
   /** Category id -> enabled override vs the repo config default. */
   categoryOverrides?: Record<string, boolean>;
   /** Ordered gitignore-style rules applied after category rules. */
@@ -160,7 +160,7 @@ export interface WorkspaceGameSyncSettings {
   /** Step id -> enabled override for repo-config and default steps. */
   buildStepOverrides?: Record<string, { enabled?: boolean }>;
   /** User-defined steps, merged after repo config steps. */
-  customBuildSteps?: GameSyncBuildStep[];
+  customBuildSteps?: TeamSyncBuildStep[];
   scheduledSync?: WorkspaceScheduledSyncSettings;
   lastScheduledSyncResult?: {
     at: string;

@@ -10,7 +10,7 @@ import {
   upsertBadge,
   findLatestGoodChangelist,
   type BadgeInput,
-} from "~/server/game-sync/badges";
+} from "~/server/team-sync/badges";
 
 const badgeStateSchema = z.enum([
   "STARTING",
@@ -67,7 +67,7 @@ export const buildBadgeRouter = createTRPCRouter({
         input.repoId,
         RepoAccess.WRITE,
       );
-      await assertFeature(repo.orgId, "gameSync", ctx.db);
+      await assertFeature(repo.orgId, "teamSync", ctx.db);
       await assertChangelistExists(ctx.db, input.repoId, input.changelistNumber);
 
       const result = await upsertBadge(
@@ -112,7 +112,7 @@ export const buildBadgeRouter = createTRPCRouter({
         input.repoId,
         RepoAccess.WRITE,
       );
-      await assertFeature(repo.orgId, "gameSync", ctx.db);
+      await assertFeature(repo.orgId, "teamSync", ctx.db);
 
       let count = 0;
       for (const badge of input.badges) {

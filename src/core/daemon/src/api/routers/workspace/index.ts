@@ -2,7 +2,7 @@ import { router } from "../../trpc.js";
 import { artifactsRouter } from "./artifacts.js";
 import { branchesRouter } from "./branches.js";
 import { conflictsRouter } from "./conflicts.js";
-import { gameSyncRouter } from "./game-sync.js";
+import { teamSyncRouter } from "./team-sync.js";
 import { historyRouter } from "./history.js";
 import { labelsRouter } from "./labels.js";
 import { opsRouter } from "./ops.js";
@@ -14,7 +14,7 @@ export const workspacesRouter = router({
   artifacts: artifactsRouter,
   branches: branchesRouter,
   conflicts: conflictsRouter,
-  gameSync: gameSyncRouter,
+  teamSync: teamSyncRouter,
   history: historyRouter,
   labels: labelsRouter,
   ops: opsRouter,

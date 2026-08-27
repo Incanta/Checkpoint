@@ -16,7 +16,7 @@ import {
 } from "~/server/state-tree";
 import type { InputJsonValue } from "@prisma/client/runtime/library";
 import { walkChangelistAncestry } from "~/server/changelist-walk";
-import { classifyPaths } from "~/server/game-sync/classify";
+import { classifyPaths } from "~/server/team-sync/classify";
 
 export const changelistRouter = createTRPCRouter({
   // Path-keyed diff between two changelists' state trees. The daemon's sync

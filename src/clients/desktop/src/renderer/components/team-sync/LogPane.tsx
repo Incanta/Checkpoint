@@ -13,7 +13,7 @@ export default function LogPane(): React.ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    return ipc.on("game-sync:log:append", (data) => {
+    return ipc.on("team-sync:log:append", (data) => {
       const buffer = linesRef.current;
       for (const line of data.lines) {
         buffer.push(line);

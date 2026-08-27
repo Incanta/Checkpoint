@@ -12,7 +12,7 @@ import {
   WORKSPACE_STATE_VERSION,
   type ArtifactStateFile,
   type BisectVerdict,
-  type WorkspaceGameSyncState,
+  type WorkspaceTeamSyncState,
   type WorkspaceState,
 } from "./util.js";
 import { DaemonConfigType } from "../daemon-config.js";
@@ -72,7 +72,7 @@ class JsonStateStore implements StateStore {
   public async load(): Promise<WorkspaceState> {
     try {
       const raw = await fs.readFile(this.statePath, "utf-8");
-      // v1 files simply lack the optional v2 fields (version, gameSync,
+      // v1 files simply lack the optional v2 fields (version, teamSync,
       // artifactType); no structural migration is needed for JSON.
       return JSON.parse(raw) as WorkspaceState;
     } catch {
@@ -299,7 +299,7 @@ class SqliteStateStore implements StateStore {
       .all() as Array<{ path: string }>;
     const markedForAdd = markedRows.map((r) => r.path);
 
-    const gameSync = this.loadGameSync(db);
+    const teamSync = this.loadTeamSync(db);
 
     return {
       version: WORKSPACE_STATE_VERSION,
@@ -307,13 +307,13 @@ class SqliteStateStore implements StateStore {
       files,
       artifactFiles,
       markedForAdd,
-      ...(gameSync !== undefined && { gameSync }),
+      ...(teamSync !== undefined && { teamSync }),
     };
   }
 
-  private loadGameSync(
+  private loadTeamSync(
     db: BetterSqlite3.Database,
-  ): WorkspaceGameSyncState | undefined {
+  ): WorkspaceTeamSyncState | undefined {
     const metaRows = db
       .prepare(
         `SELECT key, value FROM workspace_meta
@@ -328,33 +328,33 @@ class SqliteStateStore implements StateStore {
       verdict: BisectVerdict;
     }>;
 
-    const gameSync: WorkspaceGameSyncState = {};
+    const teamSync: WorkspaceTeamSyncState = {};
     let hasValue = false;
 
     const syncFilterHash = meta.get("syncFilterHash");
     if (syncFilterHash !== undefined) {
-      gameSync.syncFilterHash = syncFilterHash;
+      teamSync.syncFilterHash = syncFilterHash;
       hasValue = true;
     }
 
     const lastBuiltChangelist = meta.get("lastBuiltChangelist");
     if (lastBuiltChangelist !== undefined) {
-      gameSync.lastBuiltChangelist = parseInt(lastBuiltChangelist, 10);
+      teamSync.lastBuiltChangelist = parseInt(lastBuiltChangelist, 10);
       hasValue = true;
     }
 
     const lastScheduledSyncAt = meta.get("lastScheduledSyncAt");
     if (lastScheduledSyncAt !== undefined) {
-      gameSync.lastScheduledSyncAt = lastScheduledSyncAt;
+      teamSync.lastScheduledSyncAt = lastScheduledSyncAt;
       hasValue = true;
     }
 
     const appliedArtifacts = meta.get("appliedArtifacts");
     if (appliedArtifacts !== undefined) {
       try {
-        gameSync.appliedArtifacts = JSON.parse(
+        teamSync.appliedArtifacts = JSON.parse(
           appliedArtifacts,
-        ) as WorkspaceGameSyncState["appliedArtifacts"];
+        ) as WorkspaceTeamSyncState["appliedArtifacts"];
         hasValue = true;
       } catch {
         // corrupted JSON: treat as unset
@@ -362,14 +362,14 @@ class SqliteStateStore implements StateStore {
     }
 
     if (bisectRows.length > 0) {
-      gameSync.bisect = {};
+      teamSync.bisect = {};
       for (const row of bisectRows) {
-        gameSync.bisect[row.changelist] = row.verdict;
+        teamSync.bisect[row.changelist] = row.verdict;
       }
       hasValue = true;
     }
 
-    return hasValue ? gameSync : undefined;
+    return hasValue ? teamSync : undefined;
   }
 
   // ── save ──
@@ -439,20 +439,20 @@ class SqliteStateStore implements StateStore {
         }
       }
 
-      const gameSync = state.gameSync;
+      const teamSync = state.teamSync;
       const scalars: [string, string | undefined][] = [
-        ["syncFilterHash", gameSync?.syncFilterHash],
+        ["syncFilterHash", teamSync?.syncFilterHash],
         [
           "lastBuiltChangelist",
-          gameSync?.lastBuiltChangelist !== undefined
-            ? String(gameSync.lastBuiltChangelist)
+          teamSync?.lastBuiltChangelist !== undefined
+            ? String(teamSync.lastBuiltChangelist)
             : undefined,
         ],
-        ["lastScheduledSyncAt", gameSync?.lastScheduledSyncAt],
+        ["lastScheduledSyncAt", teamSync?.lastScheduledSyncAt],
         [
           "appliedArtifacts",
-          gameSync?.appliedArtifacts !== undefined
-            ? JSON.stringify(gameSync.appliedArtifacts)
+          teamSync?.appliedArtifacts !== undefined
+            ? JSON.stringify(teamSync.appliedArtifacts)
             : undefined,
         ],
       ];
@@ -465,8 +465,8 @@ class SqliteStateStore implements StateStore {
       }
 
       clearBisect.run();
-      if (gameSync?.bisect) {
-        for (const [changelist, verdict] of Object.entries(gameSync.bisect)) {
+      if (teamSync?.bisect) {
+        for (const [changelist, verdict] of Object.entries(teamSync.bisect)) {
           insertBisect.run(parseInt(changelist, 10), verdict);
         }
       }

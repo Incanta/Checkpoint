@@ -2,11 +2,11 @@ import { useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { currentWorkspaceAtom } from "../../../../common/state/workspace";
 import {
-  gameSyncBisectAtom,
-  gameSyncJobAtom,
-  gameSyncStatusAtom,
+  teamSyncBisectAtom,
+  teamSyncJobAtom,
+  teamSyncStatusAtom,
   getWsRecord,
-} from "../../../../common/state/game-sync";
+} from "../../../../common/state/team-sync";
 import { ipc } from "../../../pages/ipc";
 import { Button } from "../../ui";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -21,7 +21,7 @@ export interface BisectPanelProps {
 }
 
 /**
- * Non-modal banner shown at the top of the Game Sync page while a bisect is in
+ * Non-modal banner shown at the top of the Team Sync page while a bisect is in
  * progress. Drives the standard "sync -> test -> mark good/bad" loop that
  * isolates the changelist that introduced a regression.
  */
@@ -30,16 +30,16 @@ export default function BisectPanel({
   onClose,
 }: BisectPanelProps): React.ReactElement | null {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
-  const bisectRecord = useAtomValue(gameSyncBisectAtom);
-  const statusRecord = useAtomValue(gameSyncStatusAtom);
-  const jobRecord = useAtomValue(gameSyncJobAtom);
+  const bisectRecord = useAtomValue(teamSyncBisectAtom);
+  const statusRecord = useAtomValue(teamSyncStatusAtom);
+  const jobRecord = useAtomValue(teamSyncJobAtom);
   const workspaceId = currentWorkspace?.id ?? null;
 
   // Pull the current bisect state on mount so a bisect started elsewhere (or in
   // a previous session) is reflected without needing a user action.
   useEffect(() => {
     if (!workspaceId) return;
-    ipc.sendMessage("game-sync:bisect:refresh", null);
+    ipc.sendMessage("team-sync:bisect:refresh", null);
   }, [workspaceId]);
 
   const bisect = getWsRecord(bisectRecord, workspaceId);
@@ -63,19 +63,19 @@ export default function BisectPanel({
 
   const handleSyncNext = (): void => {
     if (next.nextCl == null) return;
-    ipc.sendMessage("game-sync:sync", { changelistNumber: next.nextCl });
+    ipc.sendMessage("team-sync:sync", { changelistNumber: next.nextCl });
   };
 
   const handleMark = (verdict: "pass" | "fail"): void => {
     if (syncedCl == null) return;
-    ipc.sendMessage("game-sync:bisect:mark", {
+    ipc.sendMessage("team-sync:bisect:mark", {
       changelistNumber: syncedCl,
       verdict,
     });
   };
 
   const handleReset = (): void => {
-    ipc.sendMessage("game-sync:bisect:reset", null);
+    ipc.sendMessage("team-sync:bisect:reset", null);
   };
 
   return (

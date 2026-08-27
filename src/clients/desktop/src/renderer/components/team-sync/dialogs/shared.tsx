@@ -1,9 +1,9 @@
 import { type ReactNode } from "react";
 
-// Shared PrimeReact Dialog passthrough styling for the Game Sync dialogs, kept
+// Shared PrimeReact Dialog passthrough styling for the Team Sync dialogs, kept
 // consistent with SettingsDialog. Content padding is left to each dialog so
 // tabbed layouts can manage their own gutters.
-export const gameSyncDialogPt = {
+export const teamSyncDialogPt = {
   root: {
     className:
       "rounded-lg border border-[var(--color-border-default)] shadow-xl overflow-hidden",

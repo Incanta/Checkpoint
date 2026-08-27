@@ -9,7 +9,7 @@ import { DaemonConfig } from "../../daemon-config.js";
 
 /**
  * Record a bisect verdict for a single changelist and persist it into the
- * workspace state under gameSync.bisect. Other state fields are preserved and
+ * workspace state under teamSync.bisect. Other state fields are preserved and
  * the state version is bumped to the current WORKSPACE_STATE_VERSION.
  */
 export async function setBisectVerdict(
@@ -20,26 +20,26 @@ export async function setBisectVerdict(
   const backend = (await DaemonConfig.Get()).stateBackend;
   const state = await getWorkspaceState(workspace.localPath, backend);
 
-  const gameSync = state.gameSync ?? {};
-  const bisect = gameSync.bisect ?? {};
+  const teamSync = state.teamSync ?? {};
+  const bisect = teamSync.bisect ?? {};
   bisect[changelistNumber] = verdict;
-  gameSync.bisect = bisect;
-  state.gameSync = gameSync;
+  teamSync.bisect = bisect;
+  state.teamSync = teamSync;
   state.version = WORKSPACE_STATE_VERSION;
 
   await saveWorkspaceState(workspace, state, backend);
 }
 
 /**
- * Clear all recorded bisect verdicts for the workspace. Leaves other gameSync
+ * Clear all recorded bisect verdicts for the workspace. Leaves other teamSync
  * state intact.
  */
 export async function resetBisect(workspace: Workspace): Promise<void> {
   const backend = (await DaemonConfig.Get()).stateBackend;
   const state = await getWorkspaceState(workspace.localPath, backend);
 
-  if (state.gameSync?.bisect) {
-    delete state.gameSync.bisect;
+  if (state.teamSync?.bisect) {
+    delete state.teamSync.bisect;
     state.version = WORKSPACE_STATE_VERSION;
     await saveWorkspaceState(workspace, state, backend);
   }
@@ -54,7 +54,7 @@ export async function getBisectState(
 ): Promise<Record<number, BisectVerdict>> {
   const backend = (await DaemonConfig.Get()).stateBackend;
   const state = await getWorkspaceState(workspace.localPath, backend);
-  return state.gameSync?.bisect ?? {};
+  return state.teamSync?.bisect ?? {};
 }
 
 /** Result of computing the next changelist to test in a bisect session. */

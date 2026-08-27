@@ -15,7 +15,7 @@ import Loading from "./pages/Loading/Loading";
 import Login from "./pages/Login/Login";
 import Dashboard from "./pages/Dashboard/Dashboard";
 import Workspace from "./pages/Workspace/Workspace";
-import GameSync from "./pages/GameSync/GameSync";
+import TeamSync from "./pages/TeamSync/TeamSync";
 import FileHistory from "./components/FileHistory";
 import ChangelistChanges from "./components/ChangelistChanges";
 import UpdateNotification from "./components/UpdateNotification";
@@ -74,7 +74,7 @@ if (popoutType === "file-history") {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/login" element={<Login />} />
               <Route path="/workspace" element={<Workspace />} />
-              <Route path="/game-sync" element={<GameSync />} />
+              <Route path="/team-sync" element={<TeamSync />} />
             </Routes>
             <UpdateNotification />
             <VersionNotification />

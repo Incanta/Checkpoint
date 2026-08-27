@@ -44,7 +44,7 @@ export const workspaceRouter = createTRPCRouter({
       return newWorkspace;
     }),
 
-  // Game Sync presence: the daemon reports the CL a workspace synced to after
+  // Team Sync presence: the daemon reports the CL a workspace synced to after
   // each successful pull so other clients can show "N users synced here".
   updateSyncStatus: protectedProcedure
     .input(

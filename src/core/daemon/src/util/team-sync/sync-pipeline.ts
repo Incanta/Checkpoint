@@ -2,7 +2,7 @@ import { existsSync, promises as fs } from "fs";
 import path from "path";
 import {
   CreateApiClientAuth,
-  type GameSyncConfig,
+  type TeamSyncConfig,
 } from "@checkpointvcs/common";
 
 import {
@@ -37,12 +37,12 @@ export interface SyncPipelineResult {
 }
 
 /**
- * The Game Sync sync pipeline: source pull, then optional precompiled-binary
+ * The Team Sync sync pipeline: source pull, then optional precompiled-binary
  * application (decoupled from the source CL), optional version-file rewrite,
  * and presence reporting. Shared by manual pull, scheduled sync, and the CLI.
  *
  * The artifact and version-file steps read per-workspace settings from
- * workspace.json; when Game Sync is not configured this behaves like a plain
+ * workspace.json; when Team Sync is not configured this behaves like a plain
  * pull.
  */
 export async function runSyncPipeline(
@@ -69,7 +69,7 @@ export async function runSyncPipeline(
   const syncedChangelistNumber = state.changelistNumber;
 
   const config = await getWorkspaceConfig(workspace.localPath);
-  const settings = config?.gameSync;
+  const settings = config?.teamSync;
 
   // Reconcile the sync filter: remove files that the current filter excludes
   // and record the applied filter hash. Newly-included files are picked up by
@@ -94,7 +94,7 @@ export async function runSyncPipeline(
 
   const hasExistingArtifacts =
     Object.keys(state.artifactFiles ?? {}).length > 0 ||
-    Object.keys(state.gameSync?.appliedArtifacts ?? {}).length > 0;
+    Object.keys(state.teamSync?.appliedArtifacts ?? {}).length > 0;
 
   if (settings && (settings.usePrecompiledBinaries || hasExistingArtifacts)) {
     const result = await applyArtifacts(
@@ -151,11 +151,11 @@ async function resolveSyncFilter(
 ): Promise<{ filter: CompiledSyncFilter; repoConfigResolved: boolean }> {
   const config = await getWorkspaceConfig(workspace.localPath);
 
-  let repoConfig: GameSyncConfig | null = null;
+  let repoConfig: TeamSyncConfig | null = null;
   let repoConfigResolved = false;
   try {
     const client = await CreateApiClientAuth(workspace.daemonId);
-    const result = await client.gameSync.getConfig.query({
+    const result = await client.teamSync.getConfig.query({
       repoId: workspace.repoId,
       changelistNumber,
     });
@@ -166,7 +166,7 @@ async function resolveSyncFilter(
   }
 
   return {
-    filter: compileFilter(repoConfig, config?.gameSync),
+    filter: compileFilter(repoConfig, config?.teamSync),
     repoConfigResolved,
   };
 }
@@ -212,7 +212,7 @@ async function reconcileSyncFilter(
   void orgId;
   const { filter } = await resolveSyncFilter(workspace, changelistNumber);
   const state = await getWorkspaceState(workspace.localPath, backend);
-  const currentHash = state.gameSync?.syncFilterHash;
+  const currentHash = state.teamSync?.syncFilterHash;
 
   if (filter.isNoOp) {
     // Clear a previously applied filter hash so a later narrowing re-runs.
@@ -221,7 +221,7 @@ async function reconcileSyncFilter(
         workspace,
         {
           ...state,
-          gameSync: { ...(state.gameSync ?? {}), syncFilterHash: undefined },
+          teamSync: { ...(state.teamSync ?? {}), syncFilterHash: undefined },
         },
         backend,
       );
@@ -248,7 +248,7 @@ async function reconcileSyncFilter(
       {
         ...state,
         files: nextFiles,
-        gameSync: { ...(state.gameSync ?? {}), syncFilterHash: filter.hash },
+        teamSync: { ...(state.teamSync ?? {}), syncFilterHash: filter.hash },
       },
       backend,
     );
@@ -257,7 +257,7 @@ async function reconcileSyncFilter(
       workspace,
       {
         ...state,
-        gameSync: { ...(state.gameSync ?? {}), syncFilterHash: filter.hash },
+        teamSync: { ...(state.teamSync ?? {}), syncFilterHash: filter.hash },
       },
       backend,
     );

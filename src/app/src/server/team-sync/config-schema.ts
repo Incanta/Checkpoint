@@ -1,16 +1,16 @@
 import { z } from "zod";
 
-// Canonical zod schema for the repo-committed Game Sync config file
-// (`.checkpoint/gamesync.yaml`). Applies defaults so consumers always see a
+// Canonical zod schema for the repo-committed Team Sync config file
+// (`.checkpoint/teamsync.yaml`). Applies defaults so consumers always see a
 // fully-resolved config.
 //
 // MIRROR NOTE: the app workspace cannot depend on @checkpointvcs/common
 // (type-only import cycle; see src/app/src/server/api/api-version.ts). The
 // resolved output shape is mirrored as pure types in
-// src/core/common/src/types/gamesync-config.ts for the daemon and desktop.
+// src/core/common/src/types/teamsync-config.ts for the daemon and desktop.
 // Keep the two in sync.
 
-export const GAME_SYNC_CONFIG_PATH = ".checkpoint/gamesync.yaml";
+export const TEAM_SYNC_CONFIG_PATH = ".checkpoint/teamsync.yaml";
 
 const idSchema = z
   .string()
@@ -25,7 +25,9 @@ const buildStepSchema = z
   .object({
     id: idSchema,
     name: z.string().min(1).max(200),
-    type: z.enum(["compile", "cook", "other"]),
+    // Defaults to the engine-agnostic type: a repo that never mentions Unreal
+    // still gets working build steps.
+    type: z.enum(["command", "unreal-compile", "unreal-cook"]).default("command"),
     target: z.string().optional(),
     platform: z.string().optional(),
     configuration: z.string().optional(),
@@ -40,23 +42,31 @@ const buildStepSchema = z
       .object({ label: z.string().min(1), url: z.string().min(1) })
       .optional(),
   })
-  .refine((step) => step.type !== "compile" || !!step.target, {
-    message: "compile steps require a target",
+  .refine((step) => step.type !== "unreal-compile" || !!step.target, {
+    message: "unreal-compile steps require a target",
   })
-  .refine((step) => step.type !== "other" || !!step.command, {
-    message: "other steps require a command",
+  .refine((step) => step.type !== "command" || !!step.command, {
+    message: "command steps require a command",
   });
 
-export const GameSyncConfigSchema = z.object({
+export const TeamSyncConfigSchema = z.object({
   version: z.literal(1),
   project: z
     .object({
       name: z.string().optional(),
+    })
+    .optional(),
+  // Opt-in Unreal support. Omitting this block keeps Team Sync fully
+  // engine-agnostic: no Unreal discovery, no default build steps, and the
+  // unreal-* step types are rejected at build time.
+  unreal: z
+    .object({
       uproject: z.string().optional(),
       editorTarget: z.string().optional(),
       editorConfigurations: z
         .array(z.string().min(1))
         .default(["Development", "DebugGame"]),
+      defaultBuildSteps: z.boolean().default(true),
     })
     .optional(),
   codeExtensions: z.array(z.string().regex(/^\./, "extensions must start with a dot")).optional(),
@@ -155,10 +165,10 @@ export const GameSyncConfigSchema = z.object({
     .optional(),
 });
 
-export type GameSyncConfig = z.infer<typeof GameSyncConfigSchema>;
+export type TeamSyncConfig = z.infer<typeof TeamSyncConfigSchema>;
 
-export interface GameSyncConfigResult {
-  config: GameSyncConfig | null;
+export interface TeamSyncConfigResult {
+  config: TeamSyncConfig | null;
   sourceChangelistNumber: number | null;
   errors: string[] | null;
 }

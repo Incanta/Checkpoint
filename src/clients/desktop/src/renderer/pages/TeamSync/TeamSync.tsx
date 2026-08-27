@@ -5,14 +5,14 @@ import { currentWorkspaceAtom } from "../../../common/state/workspace";
 import { ipc } from "../ipc";
 import TitleBar from "../../components/TitleBar";
 import { Button } from "../../components/ui";
-import StatusPanel from "../../components/game-sync/StatusPanel";
-import ChangelistBrowser from "../../components/game-sync/ChangelistBrowser";
-import LogPane from "../../components/game-sync/LogPane";
-import GameSyncSettingsDialog from "../../components/game-sync/dialogs/GameSyncSettingsDialog";
-import CleanWorkspaceDialog from "../../components/game-sync/dialogs/CleanWorkspaceDialog";
-import BisectPanel from "../../components/game-sync/dialogs/BisectPanel";
+import StatusPanel from "../../components/team-sync/StatusPanel";
+import ChangelistBrowser from "../../components/team-sync/ChangelistBrowser";
+import LogPane from "../../components/team-sync/LogPane";
+import TeamSyncSettingsDialog from "../../components/team-sync/dialogs/TeamSyncSettingsDialog";
+import CleanWorkspaceDialog from "../../components/team-sync/dialogs/CleanWorkspaceDialog";
+import BisectPanel from "../../components/team-sync/dialogs/BisectPanel";
 
-export default function GameSync(): React.ReactElement {
+export default function TeamSync(): React.ReactElement {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const navigate = useNavigate();
   const workspaceId = currentWorkspace?.id ?? null;
@@ -21,18 +21,18 @@ export default function GameSync(): React.ReactElement {
   const [cleanOpen, setCleanOpen] = useState(false);
   const [bisectShown, setBisectShown] = useState(false);
 
-  // Enter Game Sync for this workspace on mount so main fetches project info,
+  // Enter Team Sync for this workspace on mount so main fetches project info,
   // config, settings, and history and starts its head poll. Leave on unmount.
   useEffect(() => {
     if (!workspaceId) return;
-    ipc.sendMessage("game-sync:enter", { workspaceId });
+    ipc.sendMessage("team-sync:enter", { workspaceId });
     return () => {
-      ipc.sendMessage("game-sync:exit", null);
+      ipc.sendMessage("team-sync:exit", null);
     };
   }, [workspaceId]);
 
   const handleFilesView = (): void => {
-    ipc.sendMessage("game-sync:exit", null);
+    ipc.sendMessage("team-sync:exit", null);
     navigate("/workspace");
   };
 
@@ -42,7 +42,7 @@ export default function GameSync(): React.ReactElement {
         left={
           <>
             <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
-              Game Sync
+              Team Sync
             </span>
             <span className="app-no-drag">
               <Button variant="secondary" size="sm" onClick={handleFilesView}>
@@ -69,7 +69,7 @@ export default function GameSync(): React.ReactElement {
         <LogPane />
       </div>
 
-      <GameSyncSettingsDialog
+      <TeamSyncSettingsDialog
         visible={settingsOpen}
         onHide={() => setSettingsOpen(false)}
       />

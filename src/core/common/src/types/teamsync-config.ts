@@ -1,25 +1,54 @@
-// Types for the repo-committed Game Sync config file (`.checkpoint/gamesync.yaml`).
+// Types for the repo-committed Team Sync config file (`.checkpoint/teamsync.yaml`).
 //
 // These are the RESOLVED shapes: the app server validates the YAML with the
-// canonical zod schema in `src/app/src/server/game-sync/config-schema.ts`
-// (which applies defaults) and serves the result via `gameSync.getConfig`.
+// canonical zod schema in `src/app/src/server/team-sync/config-schema.ts`
+// (which applies defaults) and serves the result via `teamSync.getConfig`.
 // The daemon and desktop only ever see validated, default-applied config, so
 // this file is type-only and keeps @checkpointvcs/common dependency-free.
 // If you change these types, update the zod schema in the app to match.
 
-export type GameSyncBuildStepType = "compile" | "cook" | "other";
+/**
+ * How a build step is run.
+ *
+ * `command` is the default and the engine-agnostic one: it runs whatever
+ * executable the step names. The `unreal-*` types are conveniences that build
+ * the invocation for you, and require the repo to have opted into Unreal
+ * support via `TeamSyncConfig.unreal`.
+ */
+export type TeamSyncBuildStepType =
+  | "command"
+  | "unreal-compile"
+  | "unreal-cook";
 
-export interface GameSyncProjectConfig {
+export interface TeamSyncProjectConfig {
+  /** Display name for the project, shown in the client. */
   name?: string;
-  /** Repo-relative path to the .uproject file. */
+}
+
+/**
+ * Opt-in Unreal Engine support. Its presence is what enables the `unreal-*`
+ * build step types, the Launch Editor action, version-file rewriting, and the
+ * Unreal additions to the code-changelist extension set.
+ *
+ * Omit this block entirely for a non-Unreal repo; nothing in Team Sync requires
+ * it, and no Unreal discovery runs without it.
+ */
+export interface TeamSyncUnrealConfig {
+  /** Repo-relative path to the .uproject file. Auto-discovered when omitted. */
   uproject?: string;
-  /** UBT editor target name, e.g. "MyGameEditor". */
+  /** UBT editor target name, e.g. "MyGameEditor". Auto-discovered when omitted. */
   editorTarget?: string;
   /** Build configurations offered by the Launch Editor dropdown. */
   editorConfigurations: string[];
+  /**
+   * Prepend the standard UBT compile steps (UnrealHeaderTool, the editor
+   * target, ShaderCompileWorker, Lightmass, CrashReportClient) to `buildSteps`.
+   * Set false to keep the Unreal integration but define every step yourself.
+   */
+  defaultBuildSteps: boolean;
 }
 
-export interface GameSyncCategory {
+export interface TeamSyncCategory {
   /** Stable slug id, referenced by `requires` and workspace overrides. */
   id: string;
   name: string;
@@ -31,7 +60,7 @@ export interface GameSyncCategory {
   hidden: boolean;
 }
 
-export interface GameSyncPreset {
+export interface TeamSyncPreset {
   name: string;
   /** Applied to new workspaces when no preset was chosen. */
   default: boolean;
@@ -43,23 +72,23 @@ export interface GameSyncPreset {
   buildSteps: Record<string, boolean>;
 }
 
-export interface GameSyncBuildStepLink {
+export interface TeamSyncBuildStepLink {
   label: string;
   url: string;
 }
 
-export interface GameSyncBuildStep {
+export interface TeamSyncBuildStep {
   /** Stable id; default steps reuse UGS's fixed GUIDs for config portability. */
   id: string;
   name: string;
-  type: GameSyncBuildStepType;
-  /** compile: UBT target name. */
+  type: TeamSyncBuildStepType;
+  /** unreal-compile: UBT target name. */
   target?: string;
   platform?: string;
   configuration?: string;
-  /** Supports $(EditorExe), $(BranchDir), $(ProjectDir), $(Change), ... */
+  /** Supports $(WorkspaceDir), $(Change), $(Branch), and the Unreal tokens. */
   arguments?: string;
-  /** other: executable to run. */
+  /** command: the executable to run. Required for `command` steps. */
   command?: string;
   workingDir?: string;
   /** Step ids that must run before this one. */
@@ -67,10 +96,10 @@ export interface GameSyncBuildStep {
   normalSync: boolean;
   scheduledSync: boolean;
   estimatedDurationSec?: number;
-  link?: GameSyncBuildStepLink;
+  link?: TeamSyncBuildStepLink;
 }
 
-export interface GameSyncArtifactChannel {
+export interface TeamSyncArtifactChannel {
   /** ArtifactSet type, e.g. "editor", "game-win64". */
   type: string;
   name?: string;
@@ -78,7 +107,7 @@ export interface GameSyncArtifactChannel {
   requiredBadges: string[];
 }
 
-export interface GameSyncBadgeColumn {
+export interface TeamSyncBadgeColumn {
   /** Matches BuildBadge.name. */
   name: string;
   group?: string;
@@ -86,12 +115,12 @@ export interface GameSyncBadgeColumn {
   link?: string;
 }
 
-export interface GameSyncContentBadge {
+export interface TeamSyncContentBadge {
   name: string;
   paths: string[];
 }
 
-export interface GameSyncTool {
+export interface TeamSyncTool {
   id: string;
   name: string;
   description?: string;
@@ -101,32 +130,38 @@ export interface GameSyncTool {
   uninstallCommand?: string;
 }
 
-export type GameSyncNotificationEvent =
+export type TeamSyncNotificationEvent =
   | "badge-failure"
   | "badge-recovered"
   | "investigation-started"
   | "investigation-resolved";
 
-export interface GameSyncNotificationChannel {
+export interface TeamSyncNotificationChannel {
   type: "slack-webhook" | "generic-webhook";
   url: string;
-  events: GameSyncNotificationEvent[];
+  events: TeamSyncNotificationEvent[];
 }
 
-export interface GameSyncConfig {
+export interface TeamSyncConfig {
   version: 1;
-  project?: GameSyncProjectConfig;
-  /** Overrides the default code-CL classification extension set. */
+  project?: TeamSyncProjectConfig;
+  /** Opt in to built-in Unreal Engine support. Absent means engine-agnostic. */
+  unreal?: TeamSyncUnrealConfig;
+  /**
+   * Replaces the default code-CL classification extension set. When omitted,
+   * the default is a general-purpose source-file list, plus the Unreal-specific
+   * extensions when `unreal` is configured.
+   */
   codeExtensions?: string[];
-  syncCategories: GameSyncCategory[];
-  presets: GameSyncPreset[];
-  buildSteps: GameSyncBuildStep[];
-  artifacts: GameSyncArtifactChannel[];
-  badges?: { columns: GameSyncBadgeColumn[] };
-  contentBadges: GameSyncContentBadge[];
-  tools: GameSyncTool[];
+  syncCategories: TeamSyncCategory[];
+  presets: TeamSyncPreset[];
+  buildSteps: TeamSyncBuildStep[];
+  artifacts: TeamSyncArtifactChannel[];
+  badges?: { columns: TeamSyncBadgeColumn[] };
+  contentBadges: TeamSyncContentBadge[];
+  tools: TeamSyncTool[];
   forceClean: { changelists: number[] };
-  notifications?: { channels: GameSyncNotificationChannel[] };
+  notifications?: { channels: TeamSyncNotificationChannel[] };
 }
 
 export type BuildBadgeStateName =
@@ -138,7 +173,7 @@ export type BuildBadgeStateName =
 
 export type ChangelistVerdict = "good" | "bad" | "mixed" | null;
 
-export interface GameSyncChangelistReviewSummary {
+export interface TeamSyncChangelistReviewSummary {
   verdict: ChangelistVerdict;
   goodVotes: number;
   badVotes: number;
@@ -163,7 +198,7 @@ export interface GameSyncChangelistReviewSummary {
   } | null;
 }
 
-export interface GameSyncChangelistMeta {
+export interface TeamSyncChangelistMeta {
   badges: {
     name: string;
     group: string | null;
@@ -171,7 +206,7 @@ export interface GameSyncChangelistMeta {
     url: string | null;
     updatedAt: Date;
   }[];
-  reviews: GameSyncChangelistReviewSummary;
+  reviews: TeamSyncChangelistReviewSummary;
   syncedUsers: {
     userId: string;
     name: string | null;
@@ -183,21 +218,21 @@ export interface GameSyncChangelistMeta {
   hasContentChanges: boolean;
 }
 
-/** Result of the app server's `gameSync.getChangelistMeta` (keyed by CL number). */
-export type GameSyncChangelistMetaResult = Record<
+/** Result of the app server's `teamSync.getChangelistMeta` (keyed by CL number). */
+export type TeamSyncChangelistMetaResult = Record<
   string,
-  GameSyncChangelistMeta
+  TeamSyncChangelistMeta
 >;
 
-/** Result shape of the app server's `gameSync.getConfig`. */
-export interface GameSyncConfigResult {
+/** Result shape of the app server's `teamSync.getConfig`. */
+export interface TeamSyncConfigResult {
   /** Parsed and validated config, or null if the file is absent or invalid. */
-  config: GameSyncConfig | null;
+  config: TeamSyncConfig | null;
   /** Changelist that last touched the config file, or null if absent. */
   sourceChangelistNumber: number | null;
   /** Validation issues when the file exists but is invalid. */
   errors: string[] | null;
 }
 
-/** Repo path of the Game Sync config file. */
-export const GAME_SYNC_CONFIG_PATH = ".checkpoint/gamesync.yaml";
+/** Repo path of the Team Sync config file. */
+export const TEAM_SYNC_CONFIG_PATH = ".checkpoint/teamsync.yaml";

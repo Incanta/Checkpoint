@@ -3,25 +3,25 @@ import { Dialog } from "primereact/dialog";
 import { useAtomValue } from "jotai";
 import { currentWorkspaceAtom } from "../../../../common/state/workspace";
 import {
-  gameSyncConfigAtom,
-  gameSyncFilterPreviewAtom,
-  gameSyncSettingsAtom,
+  teamSyncConfigAtom,
+  teamSyncFilterPreviewAtom,
+  teamSyncSettingsAtom,
   getWsRecord,
-  type GameSyncScheduledSync,
-  type GameSyncSettings,
-} from "../../../../common/state/game-sync";
+  type TeamSyncScheduledSync,
+  type TeamSyncSettings,
+} from "../../../../common/state/team-sync";
 import { ipc } from "../../../pages/ipc";
 import { Button } from "../../ui";
 import {
   CheckRow,
   FieldRow,
   Switch,
-  gameSyncDialogPt,
+  teamSyncDialogPt,
   selectClass,
   textareaClass,
 } from "./shared";
 
-export interface GameSyncSettingsDialogProps {
+export interface TeamSyncSettingsDialogProps {
   visible: boolean;
   onHide: () => void;
 }
@@ -36,13 +36,13 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 const DEFAULT_EDITOR_CONFIGS = ["Development", "DebugGame"];
-const DEFAULT_SCHEDULE: GameSyncScheduledSync = {
+const DEFAULT_SCHEDULE: TeamSyncScheduledSync = {
   enabled: false,
   timeOfDay: "03:00",
   target: "latest-good",
 };
 const SCHEDULE_TARGETS: {
-  value: GameSyncScheduledSync["target"];
+  value: TeamSyncScheduledSync["target"];
   label: string;
 }[] = [
   { value: "latest", label: "Latest changelist" },
@@ -65,14 +65,14 @@ function SectionTitle({ children }: { children: string }): React.ReactElement {
   );
 }
 
-export default function GameSyncSettingsDialog({
+export default function TeamSyncSettingsDialog({
   visible,
   onHide,
-}: GameSyncSettingsDialogProps): React.ReactElement {
+}: TeamSyncSettingsDialogProps): React.ReactElement {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
-  const configRecord = useAtomValue(gameSyncConfigAtom);
-  const settingsRecord = useAtomValue(gameSyncSettingsAtom);
-  const filterPreviewRecord = useAtomValue(gameSyncFilterPreviewAtom);
+  const configRecord = useAtomValue(teamSyncConfigAtom);
+  const settingsRecord = useAtomValue(teamSyncSettingsAtom);
+  const filterPreviewRecord = useAtomValue(teamSyncFilterPreviewAtom);
 
   const workspaceId = currentWorkspace?.id ?? null;
   const config = getWsRecord(configRecord, workspaceId) ?? null;
@@ -80,29 +80,32 @@ export default function GameSyncSettingsDialog({
   const filterPreview = getWsRecord(filterPreviewRecord, workspaceId);
 
   const [tab, setTab] = useState<TabId>("filters");
-  const [pending, setPending] = useState<GameSyncSettings>({});
+  const [pending, setPending] = useState<TeamSyncSettings>({});
   const [includeText, setIncludeText] = useState("");
   const [excludeText, setExcludeText] = useState("");
 
   // Load the current settings into local editable state each time we open.
   useEffect(() => {
     if (!visible) return;
-    const base: GameSyncSettings = savedSettings ? { ...savedSettings } : {};
+    const base: TeamSyncSettings = savedSettings ? { ...savedSettings } : {};
     setPending(base);
     setIncludeText((base.customIncludeRules ?? []).join("\n"));
     setExcludeText((base.customExcludeRules ?? []).join("\n"));
     setTab("filters");
   }, [visible, savedSettings]);
 
-  const editorConfigs =
-    config?.project?.editorConfigurations ?? DEFAULT_EDITOR_CONFIGS;
+  const editorConfigs: string[] =
+    config?.unreal?.editorConfigurations ?? DEFAULT_EDITOR_CONFIGS;
+  // Settings that only mean something for an Unreal repo. Hidden rather than
+  // disabled for everyone else, so the dialog shows only what applies.
+  const unrealEnabled = config?.unreal != null;
   const schedule = pending.scheduledSync ?? DEFAULT_SCHEDULE;
   const afterSync = pending.afterSync ?? {};
 
   // Assemble the full settings object the daemon should persist (shallow merge
   // over what is already saved).
   const buildSettings = useCallback(
-    (): GameSyncSettings => ({
+    (): TeamSyncSettings => ({
       ...pending,
       customIncludeRules: parseLines(includeText),
       customExcludeRules: parseLines(excludeText),
@@ -119,7 +122,7 @@ export default function GameSyncSettingsDialog({
   };
 
   const setAfterSync = (
-    key: keyof NonNullable<GameSyncSettings["afterSync"]>,
+    key: keyof NonNullable<TeamSyncSettings["afterSync"]>,
     value: boolean,
   ): void => {
     setPending((prev) => ({
@@ -128,7 +131,7 @@ export default function GameSyncSettingsDialog({
     }));
   };
 
-  const setSchedule = (patch: Partial<GameSyncScheduledSync>): void => {
+  const setSchedule = (patch: Partial<TeamSyncScheduledSync>): void => {
     setPending((prev) => ({
       ...prev,
       scheduledSync: { ...DEFAULT_SCHEDULE, ...prev.scheduledSync, ...patch },
@@ -146,11 +149,11 @@ export default function GameSyncSettingsDialog({
   };
 
   const handlePreview = (): void => {
-    ipc.sendMessage("game-sync:filter:preview", { settings: buildSettings() });
+    ipc.sendMessage("team-sync:filter:preview", { settings: buildSettings() });
   };
 
   const handleSave = (): void => {
-    ipc.sendMessage("game-sync:update-settings", {
+    ipc.sendMessage("team-sync:update-settings", {
       settings: buildSettings(),
     });
     onHide();
@@ -162,13 +165,13 @@ export default function GameSyncSettingsDialog({
 
   return (
     <Dialog
-      header="Game Sync Settings"
+      header="Team Sync Settings"
       visible={visible}
       onHide={onHide}
       modal
       dismissableMask
       style={{ width: "48rem" }}
-      pt={gameSyncDialogPt}
+      pt={teamSyncDialogPt}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onHide}>
@@ -201,7 +204,7 @@ export default function GameSyncSettingsDialog({
         <div className="min-w-0 flex-1 overflow-auto p-5">
           {!config && (
             <div className="text-sm text-[var(--color-text-muted)]">
-              No Game Sync config was found for this workspace.
+              No Team Sync config was found for this workspace.
             </div>
           )}
 
@@ -359,55 +362,61 @@ export default function GameSyncSettingsDialog({
                 label="Build"
                 hint="Run the configured build steps"
               />
-              <CheckRow
-                checked={afterSync.generateProjectFiles ?? false}
-                onChange={() =>
-                  setAfterSync(
-                    "generateProjectFiles",
-                    !(afterSync.generateProjectFiles ?? false),
-                  )
-                }
-                label="Generate project files"
-              />
-              <CheckRow
-                checked={afterSync.runEditor ?? false}
-                onChange={() =>
-                  setAfterSync("runEditor", !(afterSync.runEditor ?? false))
-                }
-                label="Run the editor"
-              />
-              <CheckRow
-                checked={afterSync.openSolution ?? false}
-                onChange={() =>
-                  setAfterSync(
-                    "openSolution",
-                    !(afterSync.openSolution ?? false),
-                  )
-                }
-                label="Open the solution"
-              />
+              {unrealEnabled && (
+                <>
+                  <CheckRow
+                    checked={afterSync.generateProjectFiles ?? false}
+                    onChange={() =>
+                      setAfterSync(
+                        "generateProjectFiles",
+                        !(afterSync.generateProjectFiles ?? false),
+                      )
+                    }
+                    label="Generate project files"
+                  />
+                  <CheckRow
+                    checked={afterSync.runEditor ?? false}
+                    onChange={() =>
+                      setAfterSync("runEditor", !(afterSync.runEditor ?? false))
+                    }
+                    label="Run the editor"
+                  />
+                  <CheckRow
+                    checked={afterSync.openSolution ?? false}
+                    onChange={() =>
+                      setAfterSync(
+                        "openSolution",
+                        !(afterSync.openSolution ?? false),
+                      )
+                    }
+                    label="Open the solution"
+                  />
+                </>
+              )}
 
               <div className="mt-2 border-t border-[var(--color-border-muted)] pt-4">
                 <SectionTitle>Build</SectionTitle>
                 <div className="flex flex-col gap-3">
-                  <FieldRow label="Editor configuration">
-                    <select
-                      value={pending.editorConfiguration ?? editorConfigs[0]}
-                      onChange={(e) =>
-                        setPending((prev) => ({
-                          ...prev,
-                          editorConfiguration: e.target.value,
-                        }))
-                      }
-                      className={selectClass}
-                    >
-                      {editorConfigs.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </FieldRow>
+                  {unrealEnabled && (
+                    <FieldRow label="Editor configuration">
+                      <select
+                        value={pending.editorConfiguration ?? editorConfigs[0]}
+                        onChange={(e) =>
+                          setPending((prev) => ({
+                            ...prev,
+                            editorConfiguration: e.target.value,
+                          }))
+                        }
+                        className={selectClass}
+                      >
+                        {editorConfigs.map((c: string) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </FieldRow>
+                  )}
                   <FieldRow
                     label="Use precompiled binaries"
                     hint="Download editor binaries instead of building locally"
@@ -424,20 +433,24 @@ export default function GameSyncSettingsDialog({
                       }
                     />
                   </FieldRow>
-                  <FieldRow
-                    label="Write version files"
-                    hint="Write build version metadata into the workspace"
-                  >
-                    <Switch
-                      checked={pending.writeVersionFiles ?? false}
-                      onChange={() =>
-                        setPending((prev) => ({
-                          ...prev,
-                          writeVersionFiles: !(prev.writeVersionFiles ?? false),
-                        }))
-                      }
-                    />
-                  </FieldRow>
+                  {unrealEnabled && (
+                    <FieldRow
+                      label="Write version files"
+                      hint="Write Unreal build version metadata into the workspace"
+                    >
+                      <Switch
+                        checked={pending.writeVersionFiles ?? false}
+                        onChange={() =>
+                          setPending((prev) => ({
+                            ...prev,
+                            writeVersionFiles: !(
+                              prev.writeVersionFiles ?? false
+                            ),
+                          }))
+                        }
+                      />
+                    </FieldRow>
+                  )}
                 </div>
               </div>
             </div>

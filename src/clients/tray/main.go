@@ -93,9 +93,9 @@ func onReady() {
 	)
 	mMcp.Disable()
 	systray.AddSeparator()
-	// Game Sync status + "Sync Latest". Both stay hidden until the daemon
-	// reports an Unreal workspace, so non-Unreal installs see no change.
-	initGameSyncMenu()
+	// Team Sync status + "Sync Latest". Both stay hidden until the daemon
+	// reports at least one workspace.
+	initTeamSyncMenu()
 	systray.AddSeparator()
 	mOpenDesktop := systray.AddMenuItem("Open Desktop App", "Open Checkpoint Desktop")
 	mViewLogs := systray.AddMenuItem("View Logs", "Open the Checkpoint log folder")
@@ -124,7 +124,7 @@ func onReady() {
 		}
 	}()
 
-	startGameSyncPoll()
+	startTeamSyncPoll()
 
 	go func() {
 		for {

@@ -30,10 +30,14 @@ export async function runGenerateProjectFiles(
   const jobManager = JobManager.Get();
   const state = await getWorkspaceState(workspace.localPath);
 
+  // Inherently Unreal-only. The clients hide this action for a repo without an
+  // `unreal` block in its Team Sync config, so reaching here without an engine
+  // means the repo opted in but the engine could not be found.
   const projectInfo = await getProjectInfo(workspace, state);
   if (!projectInfo || !projectInfo.engine) {
     const message =
-      "Cannot generate project files: no Unreal engine could be resolved for this workspace.";
+      "Cannot generate project files: no Unreal engine could be resolved for this workspace. " +
+      'This action requires an "unreal" block in the repo\'s Team Sync config and a resolvable engine.';
     jobManager.appendLog(jobId, "sys", message);
     throw new Error(message);
   }

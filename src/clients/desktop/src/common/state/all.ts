@@ -1,6 +1,6 @@
 import "./auth";
 import "./daemon";
-import "./game-sync";
+import "./team-sync";
 import "./settings";
 import "./update";
 import "./version";

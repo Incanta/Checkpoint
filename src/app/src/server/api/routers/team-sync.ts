@@ -5,8 +5,8 @@ import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { RepoAccess, type BuildBadgeState } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { assertFeature } from "~/server/license-client";
-import { getGameSyncConfig } from "~/server/game-sync/config";
-import { classifyPaths } from "~/server/game-sync/classify";
+import { getTeamSyncConfig } from "~/server/team-sync/config";
+import { classifyPaths } from "~/server/team-sync/classify";
 
 export type ChangelistVerdict = "good" | "bad" | "mixed" | null;
 
@@ -70,9 +70,9 @@ function emptyReviewSummary(): ChangelistReviewSummary {
   };
 }
 
-export const gameSyncRouter = createTRPCRouter({
-  // Parsed + validated repo-committed Game Sync config
-  // (`.checkpoint/gamesync.yaml`) as resolved at a changelist (default: the
+export const teamSyncRouter = createTRPCRouter({
+  // Parsed + validated repo-committed Team Sync config
+  // (`.checkpoint/teamsync.yaml`) as resolved at a changelist (default: the
   // default branch's head).
   getConfig: protectedProcedure
     .input(
@@ -104,7 +104,7 @@ export const gameSyncRouter = createTRPCRouter({
         changelistNumber = defaultBranch.headNumber;
       }
 
-      return getGameSyncConfig(
+      return getTeamSyncConfig(
         ctx.db,
         ctx.session.user.id,
         repo,
@@ -128,7 +128,7 @@ export const gameSyncRouter = createTRPCRouter({
         input.repoId,
         RepoAccess.READ,
       );
-      await assertFeature(repo.orgId, "gameSync", ctx.db);
+      await assertFeature(repo.orgId, "teamSync", ctx.db);
 
       const numbers = [...new Set(input.changelistNumbers)];
       const userId = ctx.session.user.id;
@@ -299,12 +299,12 @@ export const gameSyncRouter = createTRPCRouter({
     }),
 });
 
-type GameSyncContext = Parameters<
+type TeamSyncContext = Parameters<
   Parameters<typeof protectedProcedure.query>[0]
 >[0]["ctx"];
 
 async function classifyChangelists(
-  ctx: GameSyncContext,
+  ctx: TeamSyncContext,
   repo: { id: string; orgId: string; r2BucketName: string | null },
   repoId: string,
   numbers: number[],
@@ -317,7 +317,7 @@ async function classifyChangelists(
   // codeExtensions override: classify the whole page per-request without
   // persisting (materialized flags could disagree with the override).
   const maxNumber = Math.max(...numbers);
-  const configResult = await getGameSyncConfig(
+  const configResult = await getTeamSyncConfig(
     ctx.db,
     ctx.session.user.id,
     repo,

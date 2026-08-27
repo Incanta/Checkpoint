@@ -5,7 +5,7 @@ import fs from "fs/promises";
 import path from "path";
 
 import { checkConflicts, readFileFromChangelist } from "../../../util/index.js";
-import { runSyncPipeline } from "../../../util/game-sync/sync-pipeline.js";
+import { runSyncPipeline } from "../../../util/team-sync/sync-pipeline.js";
 import { TRPCError } from "@trpc/server";
 import { ApiTypes } from "../../../types/api-types.js";
 import { FileStatus, FileType } from "../../../types/index.js";

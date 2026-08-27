@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Dialog } from "primereact/dialog";
 import { ipc } from "../../../pages/ipc";
 import { Button } from "../../ui";
-import { gameSyncDialogPt, textareaClass } from "./shared";
+import { teamSyncDialogPt, textareaClass } from "./shared";
 
 export interface CommentDialogProps {
   changelistNumber: number;
@@ -26,7 +26,7 @@ export default function CommentDialog({
   const handleSubmit = (): void => {
     const trimmed = body.trim();
     if (trimmed.length === 0) return;
-    ipc.sendMessage("game-sync:comment", {
+    ipc.sendMessage("team-sync:comment", {
       changelistNumber,
       body: trimmed,
     });
@@ -41,7 +41,7 @@ export default function CommentDialog({
       modal
       dismissableMask
       style={{ width: "30rem" }}
-      pt={gameSyncDialogPt}
+      pt={teamSyncDialogPt}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>

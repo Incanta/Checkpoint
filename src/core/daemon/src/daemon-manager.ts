@@ -30,10 +30,10 @@ import {
   type WorkspaceState,
 } from "./util/index.js";
 import {
-  GameSyncScheduler,
+  TeamSyncScheduler,
   type ScheduledWorkspace,
-} from "./util/game-sync/scheduler.js";
-import { runSyncPipeline } from "./util/game-sync/sync-pipeline.js";
+} from "./util/team-sync/scheduler.js";
+import { runSyncPipeline } from "./util/team-sync/sync-pipeline.js";
 import { WORKSPACE_STATE_VERSION } from "./util/util.js";
 import {
   parseIgnoreFile,
@@ -86,8 +86,8 @@ export class DaemonManager {
   /** Interval handle for sync polling */
   private syncPollInterval: ReturnType<typeof setInterval> | null = null;
 
-  /** Daemon-owned scheduled-sync driver (Game Sync). */
-  private gameSyncScheduler: GameSyncScheduler | null = null;
+  /** Daemon-owned scheduled-sync driver (Team Sync). */
+  private teamSyncScheduler: TeamSyncScheduler | null = null;
 
   /**
    * Workspaces currently undergoing a VCS operation (pull/submit/merge).
@@ -148,25 +148,25 @@ export class DaemonManager {
     // Start sync polling for all workspaces
     this.startSyncPolling();
 
-    // Start the daemon-owned scheduled-sync driver (Game Sync).
-    this.startGameSyncScheduler();
+    // Start the daemon-owned scheduled-sync driver (Team Sync).
+    this.startTeamSyncScheduler();
   }
 
   /**
-   * Start the Game Sync scheduled-sync driver. It periodically runs the sync
+   * Start the Team Sync scheduled-sync driver. It periodically runs the sync
    * pipeline for workspaces that have a daily schedule configured, even while
    * the desktop app is closed.
    */
-  private startGameSyncScheduler(): void {
-    if (this.gameSyncScheduler) return;
+  private startTeamSyncScheduler(): void {
+    if (this.teamSyncScheduler) return;
 
-    this.gameSyncScheduler = new GameSyncScheduler({
+    this.teamSyncScheduler = new TeamSyncScheduler({
       listScheduled: async () => {
         const items: ScheduledWorkspace[] = [];
         for (const workspaces of this.workspaces.values()) {
           for (const workspace of workspaces) {
             const config = await getWorkspaceConfig(workspace.localPath);
-            if (config?.gameSync?.scheduledSync?.enabled) {
+            if (config?.teamSync?.scheduledSync?.enabled) {
               items.push({ workspace: config, orgId: workspace.orgId });
             }
           }
@@ -203,8 +203,8 @@ export class DaemonManager {
           {
             ...state,
             version: WORKSPACE_STATE_VERSION,
-            gameSync: {
-              ...(state.gameSync ?? {}),
+            teamSync: {
+              ...(state.teamSync ?? {}),
               lastScheduledSyncAt: new Date().toISOString(),
             },
           },
@@ -213,7 +213,7 @@ export class DaemonManager {
       },
     });
 
-    this.gameSyncScheduler.start();
+    this.teamSyncScheduler.start();
   }
 
   /**

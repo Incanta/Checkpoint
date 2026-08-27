@@ -12,30 +12,30 @@ import (
 	"fyne.io/systray"
 )
 
-// Game Sync affordances for the tray. Checkpoint has exactly one tray presence
+// Team Sync affordances for the tray. Checkpoint has exactly one tray presence
 // (this process); the desktop app deliberately does not create its own. Driving
 // these from here rather than from Electron also means they keep working while
 // the desktop app is closed, which an in-app tray never could.
 
-// maxGameSyncSlots caps the "Sync Latest" submenu. fyne.io/systray has no way to
+// maxTeamSyncSlots caps the "Sync Latest" submenu. fyne.io/systray has no way to
 // remove a menu item once it has been created, so the slots are allocated up
 // front and shown/hidden/retitled as the workspace list changes.
-const maxGameSyncSlots = 16
+const maxTeamSyncSlots = 16
 
-// gameSyncInterval is how often the status line is refreshed. Faster than the
+// teamSyncInterval is how often the status line is refreshed. Faster than the
 // daemon-status ticker because it tracks the progress of a running sync/build.
-const gameSyncInterval = 3 * time.Second
+const teamSyncInterval = 3 * time.Second
 
 var (
-	mGameSyncStatus *systray.MenuItem
+	mTeamSyncStatus *systray.MenuItem
 	mSyncLatest     *systray.MenuItem
 	syncSlots       []*systray.MenuItem
 
-	// gameSyncMu guards gameSyncBound, which maps a submenu slot index to the
+	// teamSyncMu guards teamSyncBound, which maps a submenu slot index to the
 	// workspace currently shown in it. The slot click goroutines read it; the
 	// refresh ticker writes it.
-	gameSyncMu    sync.Mutex
-	gameSyncBound []trayWorkspace
+	teamSyncMu    sync.Mutex
+	teamSyncBound []trayWorkspace
 )
 
 // trayWorkspace is the subset of the daemon's Workspace the tray needs. It is
@@ -72,13 +72,13 @@ var jobVerbs = map[string]string{
 	"artifact-upload":        "Uploading binaries from",
 }
 
-// initGameSyncMenu builds the Game Sync menu items and starts a click-watcher
+// initTeamSyncMenu builds the Team Sync menu items and starts a click-watcher
 // goroutine per submenu slot. Called once from onReady, before the items that
 // should sit below it in the menu.
-func initGameSyncMenu() {
-	mGameSyncStatus = systray.AddMenuItem("", "Active Checkpoint job")
-	mGameSyncStatus.Disable()
-	mGameSyncStatus.Hide()
+func initTeamSyncMenu() {
+	mTeamSyncStatus = systray.AddMenuItem("", "Active Checkpoint job")
+	mTeamSyncStatus.Disable()
+	mTeamSyncStatus.Hide()
 
 	mSyncLatest = systray.AddMenuItem(
 		"Sync Latest",
@@ -86,7 +86,7 @@ func initGameSyncMenu() {
 	)
 	mSyncLatest.Hide()
 
-	syncSlots = make([]*systray.MenuItem, maxGameSyncSlots)
+	syncSlots = make([]*systray.MenuItem, maxTeamSyncSlots)
 	for i := range syncSlots {
 		slot := mSyncLatest.AddSubMenuItem("", "")
 		slot.Hide()
@@ -95,13 +95,13 @@ func initGameSyncMenu() {
 		index := i
 		go func() {
 			for range slot.ClickedCh {
-				gameSyncMu.Lock()
+				teamSyncMu.Lock()
 				var ws trayWorkspace
-				bound := index < len(gameSyncBound)
+				bound := index < len(teamSyncBound)
 				if bound {
-					ws = gameSyncBound[index]
+					ws = teamSyncBound[index]
 				}
-				gameSyncMu.Unlock()
+				teamSyncMu.Unlock()
 
 				if bound {
 					go syncWorkspaceLatest(ws)
@@ -111,31 +111,31 @@ func initGameSyncMenu() {
 	}
 }
 
-// startGameSyncPoll refreshes the Game Sync menu on its own ticker, independent
+// startTeamSyncPoll refreshes the Team Sync menu on its own ticker, independent
 // of the slower daemon-status one.
-func startGameSyncPoll() {
+func startTeamSyncPoll() {
 	go func() {
-		ticker := time.NewTicker(gameSyncInterval)
+		ticker := time.NewTicker(teamSyncInterval)
 		defer ticker.Stop()
 		for range ticker.C {
-			refreshGameSyncMenu()
+			refreshTeamSyncMenu()
 		}
 	}()
 }
 
-// refreshGameSyncMenu re-resolves the Unreal workspaces, rebinds the submenu
+// refreshTeamSyncMenu re-resolves the Unreal workspaces, rebinds the submenu
 // slots, and updates the status line. Fails soft: when the daemon is not
 // answering, the whole section simply hides.
 //
-// Only ever called from the poll goroutine started by startGameSyncPoll, so it
-// needs no locking beyond gameSyncMu, which exists for the slot click handlers
-// reading gameSyncBound.
-func refreshGameSyncMenu() {
-	workspaces := gameSyncWorkspaces()
+// Only ever called from the poll goroutine started by startTeamSyncPoll, so it
+// needs no locking beyond teamSyncMu, which exists for the slot click handlers
+// reading teamSyncBound.
+func refreshTeamSyncMenu() {
+	workspaces := teamSyncWorkspaces()
 
-	gameSyncMu.Lock()
-	gameSyncBound = workspaces
-	gameSyncMu.Unlock()
+	teamSyncMu.Lock()
+	teamSyncBound = workspaces
+	teamSyncMu.Unlock()
 
 	if len(workspaces) == 0 {
 		mSyncLatest.Hide()
@@ -152,70 +152,27 @@ func refreshGameSyncMenu() {
 		}
 	}
 
-	updateGameSyncStatus(workspaces)
+	updateTeamSyncStatus(workspaces)
 }
 
-// gameSyncCache memoizes the Unreal-workspace probe. Probing costs one daemon
-// round trip per workspace, and the answer only changes when a workspace is
-// added or removed, so it is recomputed only when the daemon.json list changes.
-// A failed probe leaves the key empty so the next tick retries.
-var gameSyncCache struct {
-	key   string
-	value []trayWorkspace
-}
-
-// gameSyncWorkspaces returns the workspaces that hold an Unreal project, which
-// are the ones Game Sync applies to.
-func gameSyncWorkspaces() []trayWorkspace {
+// teamSyncWorkspaces returns the workspaces to offer in the tray.
+//
+// That is simply every workspace the daemon knows about. Team Sync is not
+// engine-specific, and "Sync Latest" is a plain pull that any workspace can
+// take, so there is nothing to probe for: reading daemon.json is the whole job.
+func teamSyncWorkspaces() []trayWorkspace {
 	all := readWorkspaces()
-	sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
+	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
 
-	key := ""
-	for _, ws := range all {
-		key += ws.DaemonID + "/" + ws.ID + ";"
-	}
-	if key != "" && key == gameSyncCache.key {
-		return gameSyncCache.value
-	}
-	if len(all) == 0 {
-		gameSyncCache.key = ""
-		gameSyncCache.value = nil
-		return nil
+	if len(all) > maxTeamSyncSlots {
+		logTray(
+			"team sync: %d workspaces exceeds the %d tray slots; the rest are not listed",
+			len(all), maxTeamSyncSlots,
+		)
+		all = all[:maxTeamSyncSlots]
 	}
 
-	port := getDaemonPort()
-	detected := make([]trayWorkspace, 0, len(all))
-	probeFailed := false
-
-	for _, ws := range all {
-		unreal, err := hasUnrealProject(port, ws)
-		if err != nil {
-			probeFailed = true
-			continue
-		}
-		if !unreal {
-			continue
-		}
-		if len(detected) == maxGameSyncSlots {
-			logTray(
-				"game sync: more than %d Unreal workspaces; the rest are not listed in the tray",
-				maxGameSyncSlots,
-			)
-			break
-		}
-		detected = append(detected, ws)
-	}
-
-	sort.Slice(detected, func(i, j int) bool { return detected[i].Name < detected[j].Name })
-
-	if probeFailed {
-		// Don't memoize a partial answer; retry on the next tick.
-		gameSyncCache.key = ""
-	} else {
-		gameSyncCache.key = key
-	}
-	gameSyncCache.value = detected
-	return detected
+	return all
 }
 
 // readWorkspaces loads the workspace list from ~/.checkpoint/daemon.json.
@@ -237,33 +194,17 @@ func readWorkspaces() []trayWorkspace {
 	return cfg.Workspaces
 }
 
-// hasUnrealProject reports whether a workspace holds a .uproject or an
-// in-workspace engine. getProjectInfo returns null when it holds neither; the
-// daemon caches the answer for five minutes, so this stays cheap.
-func hasUnrealProject(port int, ws trayWorkspace) (bool, error) {
-	input := fmt.Sprintf(
-		`{"daemonId":%q,"workspaceId":%q}`, ws.DaemonID, ws.ID,
-	)
-	var info *struct {
-		UprojectPath string `json:"uprojectPath"`
-	}
-	if err := daemonQuery(port, "workspaces.gameSync.getProjectInfo", input, &info); err != nil {
-		return false, err
-	}
-	return info != nil, nil
-}
-
-// updateGameSyncStatus surfaces the first active job for one of the Game Sync
+// updateTeamSyncStatus surfaces the first active job for one of the known
 // workspaces in the menu and the tray tooltip.
-func updateGameSyncStatus(workspaces []trayWorkspace) {
+func updateTeamSyncStatus(workspaces []trayWorkspace) {
 	if len(workspaces) == 0 {
-		clearGameSyncStatus()
+		clearTeamSyncStatus()
 		return
 	}
 
 	jobs, err := activeJobs(getDaemonPort())
 	if err != nil {
-		clearGameSyncStatus()
+		clearTeamSyncStatus()
 		return
 	}
 
@@ -273,18 +214,18 @@ func updateGameSyncStatus(workspaces []trayWorkspace) {
 				continue
 			}
 			label := describeJob(job, ws)
-			mGameSyncStatus.SetTitle(label)
-			mGameSyncStatus.Show()
+			mTeamSyncStatus.SetTitle(label)
+			mTeamSyncStatus.Show()
 			setTooltip("Checkpoint VCS - " + label)
 			return
 		}
 	}
 
-	clearGameSyncStatus()
+	clearTeamSyncStatus()
 }
 
-func clearGameSyncStatus() {
-	mGameSyncStatus.Hide()
+func clearTeamSyncStatus() {
+	mTeamSyncStatus.Hide()
 	setTooltip("Checkpoint VCS")
 }
 
@@ -332,7 +273,7 @@ func activeJobs(port int) ([]daemonJob, error) {
 // the job and returns its id immediately, so there is nothing to wait on: the
 // next poll tick picks the job up and shows it on the status line.
 //
-// Deliberately does not refresh the menu itself. Menu state and gameSyncCache
+// Deliberately does not refresh the menu itself. Menu state and teamSyncCache
 // are only ever touched by the poll goroutine, which is what keeps them free of
 // locking; a click handler reaching in here would race with it.
 func syncWorkspaceLatest(ws trayWorkspace) {

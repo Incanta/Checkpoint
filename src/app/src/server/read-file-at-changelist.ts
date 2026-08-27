@@ -21,7 +21,7 @@ export interface FileAtChangelist {
  * FileChange at or before it), without a workspace. Returns null when the
  * file does not exist at that changelist (never changed, or deleted).
  *
- * Extracted from file.readFileContent so config readers (Game Sync) share
+ * Extracted from file.readFileContent so config readers (Team Sync) share
  * the same resolve-then-longtail-read path.
  */
 export async function readFileAtChangelist(

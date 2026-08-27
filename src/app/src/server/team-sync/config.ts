@@ -2,9 +2,9 @@ import yaml from "js-yaml";
 import type { PrismaClient } from "@prisma/client";
 
 import {
-  GameSyncConfigSchema,
-  GAME_SYNC_CONFIG_PATH,
-  type GameSyncConfigResult,
+  TeamSyncConfigSchema,
+  TEAM_SYNC_CONFIG_PATH,
+  type TeamSyncConfigResult,
 } from "./config-schema";
 import {
   findFileSourceChangelist,
@@ -13,32 +13,32 @@ import {
 
 interface CacheEntry {
   sourceChangelistNumber: number;
-  result: GameSyncConfigResult;
+  result: TeamSyncConfigResult;
 }
 
 // Process-global cache keyed by repoId; an entry is valid while the config
 // file's source changelist is unchanged (same pattern as the state-tree
 // caches, survives Next dev hot reload via globalThis).
-const CACHE_KEY = Symbol.for("checkpoint.gameSyncConfigCache");
+const CACHE_KEY = Symbol.for("checkpoint.teamSyncConfigCache");
 const globalForCache = globalThis as unknown as {
   [CACHE_KEY]?: Map<string, CacheEntry>;
 };
 const cache = (globalForCache[CACHE_KEY] ??= new Map<string, CacheEntry>());
 
 /**
- * Reads, validates, and caches the repo-committed Game Sync config
- * (`.checkpoint/gamesync.yaml`) as resolved at `changelistNumber`.
+ * Reads, validates, and caches the repo-committed Team Sync config
+ * (`.checkpoint/teamsync.yaml`) as resolved at `changelistNumber`.
  */
-export async function getGameSyncConfig(
+export async function getTeamSyncConfig(
   db: PrismaClient,
   userId: string,
   repo: { id: string; orgId: string; r2BucketName: string | null },
   changelistNumber: number,
-): Promise<GameSyncConfigResult> {
+): Promise<TeamSyncConfigResult> {
   const sourceChangelistNumber = await findFileSourceChangelist(
     db,
     repo.id,
-    GAME_SYNC_CONFIG_PATH,
+    TEAM_SYNC_CONFIG_PATH,
     changelistNumber,
   );
 
@@ -55,16 +55,16 @@ export async function getGameSyncConfig(
     db,
     userId,
     repo,
-    GAME_SYNC_CONFIG_PATH,
+    TEAM_SYNC_CONFIG_PATH,
     sourceChangelistNumber,
   );
 
-  let result: GameSyncConfigResult;
+  let result: TeamSyncConfigResult;
 
   if (file === null) {
     result = { config: null, sourceChangelistNumber: null, errors: null };
   } else {
-    result = parseGameSyncConfig(
+    result = parseTeamSyncConfig(
       file.content.toString("utf-8"),
       sourceChangelistNumber,
     );
@@ -74,10 +74,10 @@ export async function getGameSyncConfig(
   return result;
 }
 
-export function parseGameSyncConfig(
+export function parseTeamSyncConfig(
   content: string,
   sourceChangelistNumber: number,
-): GameSyncConfigResult {
+): TeamSyncConfigResult {
   let raw: unknown;
   try {
     raw = yaml.load(content);
@@ -91,7 +91,7 @@ export function parseGameSyncConfig(
     };
   }
 
-  const parsed = GameSyncConfigSchema.safeParse(raw);
+  const parsed = TeamSyncConfigSchema.safeParse(raw);
   if (!parsed.success) {
     return {
       config: null,

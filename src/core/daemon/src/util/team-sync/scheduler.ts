@@ -23,7 +23,7 @@ const TICK_INTERVAL_MS = 60_000;
  */
 const CATCH_UP_WINDOW_MS = 6 * 60 * 60 * 1000;
 
-export interface GameSyncSchedulerDeps {
+export interface TeamSyncSchedulerDeps {
   /** Workspaces the daemon currently manages that may have a schedule. */
   listScheduled: () => Promise<ScheduledWorkspace[]>;
   /** True when a sync/build is already in flight for the workspace id. */
@@ -39,7 +39,7 @@ export interface GameSyncSchedulerDeps {
 }
 
 /**
- * Drives per-workspace scheduled Game Sync (UnrealGameSync "Schedule" parity).
+ * Drives per-workspace scheduled Team Sync (UnrealGameSync "Schedule" parity).
  *
  * Rather than arm a precise timer per workspace, it re-arms a single ~60s tick
  * and, on each tick, evaluates every scheduled workspace against the current
@@ -51,13 +51,13 @@ export interface GameSyncSchedulerDeps {
  * Date.now()/new Date() are used directly; this runs in the normal Node daemon
  * runtime, not a deterministic workflow sandbox.
  */
-export class GameSyncScheduler {
+export class TeamSyncScheduler {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   /** workspace id -> slot timestamp we last fired, to dedupe within a slot. */
   private readonly firedSlots = new Map<string, number>();
 
-  constructor(private readonly deps: GameSyncSchedulerDeps) {}
+  constructor(private readonly deps: TeamSyncSchedulerDeps) {}
 
   /** Begin ticking. Idempotent: a second call while armed is a no-op. */
   start(): void {
@@ -127,7 +127,7 @@ export class GameSyncScheduler {
 
     // Re-read settings from disk so config edits take effect without restart.
     const config = await getWorkspaceConfig(workspace.localPath);
-    const scheduled = config?.gameSync?.scheduledSync;
+    const scheduled = config?.teamSync?.scheduledSync;
     if (!scheduled || !scheduled.enabled) {
       return;
     }
@@ -155,7 +155,7 @@ export class GameSyncScheduler {
 
     const backend = (await DaemonConfig.Get()).stateBackend;
     const state = await getWorkspaceState(workspace.localPath, backend);
-    const lastRunIso = state.gameSync?.lastScheduledSyncAt;
+    const lastRunIso = state.teamSync?.lastScheduledSyncAt;
     if (lastRunIso) {
       const lastRun = Date.parse(lastRunIso);
       // Persisted run already covers this slot.
@@ -215,7 +215,7 @@ export class GameSyncScheduler {
         return null;
       }
 
-      const config = await client.gameSync.getConfig
+      const config = await client.teamSync.getConfig
         .query({
           repoId: workspace.repoId,
           changelistNumber: branch.headNumber,

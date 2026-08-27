@@ -13,8 +13,8 @@ namespace Checkpoint {
  * Used by the pull to skip assets the caller does not want materialized, so
  * excluded files are never downloaded rather than downloaded and then deleted.
  * The rules come from the daemon's compiled sync filter (see
- * src/core/daemon/src/util/game-sync/filter.ts), which builds them from the
- * repo's Game Sync sync categories plus the workspace's custom include rules.
+ * src/core/daemon/src/util/team-sync/filter.ts), which builds them from the
+ * repo's Team Sync sync categories plus the workspace's custom include rules.
  *
  * Supported syntax, chosen to agree with the `ignore` npm package the daemon
  * matches with:
