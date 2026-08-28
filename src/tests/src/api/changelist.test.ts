@@ -225,7 +225,7 @@ describe("changelist router", () => {
       ).rejects.toMatchObject({ code: "FORBIDDEN" });
     });
 
-    it("rejects count outside the [1, 100] range", async () => {
+    it("rejects count outside the [1, 250] range", async () => {
       const owner = await makeUser(testDb.client);
       const org = await makeOrg(testDb.client, {
         ownerId: owner.id,
@@ -248,7 +248,7 @@ describe("changelist router", () => {
           repoId: repo.id,
           branchName: "main",
           start: { number: null, timestamp: null },
-          count: 101,
+          count: 251,
         }),
       ).rejects.toThrow();
     });
