@@ -544,7 +544,7 @@ export class CheckpointRepository implements vscode.Disposable {
       syncTooltip = "The Checkpoint daemon is not reachable";
     } else if (this.syncStatus) {
       if (this.syncStatus.upToDate) {
-        syncTitle = `$(check) CL ${this.syncStatus.localChangelistNumber}`;
+        syncTitle = `CL ${this.syncStatus.localChangelistNumber}`;
         syncTooltip = "Checkpoint: workspace is up to date";
       } else {
         syncTitle = `$(cloud-download) ${this.syncStatus.changelistsBehind} behind`;
