@@ -1,7 +1,7 @@
 import * as path from "path";
 import { promises as fs } from "fs";
 import * as vscode from "vscode";
-import { FileStatus } from "@checkpointvcs/daemon";
+import { FileStatus, FileType } from "@checkpointvcs/daemon";
 import type { File } from "@checkpointvcs/daemon";
 import { pollJob, type DaemonClient, type JobResult } from "./daemon";
 import type { CheckpointModel } from "./model";
@@ -135,6 +135,19 @@ export class CheckpointResource implements vscode.SourceControlResourceState {
       strikeThrough: this.file.status === FileStatus.Deleted,
       faded: false,
       tooltip: info?.label,
+      // The daemon reports pending directories (an untracked or marked-for-add
+      // folder with no pending files of its own) as single rows. The SCM view
+      // can't render them as collapsible folders, but without an explicit icon
+      // the file icon theme resolves them as extension-less files and draws the
+      // generic "unknown file" glyph. Force a folder codicon, tinted to match
+      // the row's status color, so they at least read as directories.
+      iconPath:
+        this.file.type === FileType.Directory
+          ? new vscode.ThemeIcon(
+              "folder",
+              info ? new vscode.ThemeColor(info.colorId) : undefined,
+            )
+          : undefined,
     };
   }
 }
