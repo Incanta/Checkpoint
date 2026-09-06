@@ -1130,6 +1130,13 @@ model InstanceSettings {
   telemetryEnabled Boolean   @default(true)
   lastTelemetryAt  DateTime?
 
+  // Server-update notifications (src/app/src/server/updates/). The version is
+  // what keeps the operator from being emailed about the same build twice; it
+  // records the newest version we have already sent mail about, not the one
+  // installed.
+  lastUpdateCheckAt         DateTime?
+  lastUpdateNotifiedVersion String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

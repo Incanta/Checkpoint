@@ -2,6 +2,7 @@ import express from "express";
 import config from "@incanta/config";
 import { routes } from "./routes/index.js";
 import { Logger } from "./logging.js";
+import { startBundleWatcher } from "./bundle-watcher.js";
 import { SERVER_VERSION } from "@checkpointvcs/common";
 
 // beforeExit does NOT fire when process.exit() is called explicitly.
@@ -57,6 +58,10 @@ app.listen(port, () => {
     Logger.fatal(`Unknown storage.mode: ${mode}`);
     process.exit(1);
   }
+
+  // Watch for an admin activating a different deployment bundle. No-op unless
+  // this process was started by the runtime image's bootstrap.
+  startBundleWatcher();
 
   Logger.log("[healthy] Server is ready");
 });

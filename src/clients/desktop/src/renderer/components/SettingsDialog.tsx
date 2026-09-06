@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Dialog } from "primereact/dialog";
+import { useAtomValue } from "jotai";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faMinus } from "@fortawesome/free-solid-svg-icons/faMinus";
 import { faPlus } from "@fortawesome/free-solid-svg-icons/faPlus";
 import { ipc } from "../pages/ipc";
 import { useTheme, type Theme } from "../theme";
 import { Button } from "./ui";
+import { updateAtom, type UpdateChannel } from "../../common/state/update";
 
 const DOCS_URL = "https://checkpointvcs.com/docs";
 const ISSUES_URL = "https://github.com/Incanta/Checkpoint/issues";
@@ -25,7 +27,8 @@ const dialogPt = {
       "flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-5 py-3.5 text-base font-semibold text-[var(--color-text-primary)]",
   },
   content: {
-    className: "bg-[var(--color-bg-secondary)] p-0 text-[var(--color-text-secondary)]",
+    className:
+      "bg-[var(--color-bg-secondary)] p-0 text-[var(--color-text-secondary)]",
   },
   footer: {
     className:
@@ -78,6 +81,37 @@ function Row({
   );
 }
 
+function ChannelSegmented({
+  value,
+  onChange,
+}: {
+  value: UpdateChannel;
+  onChange: (channel: UpdateChannel) => void;
+}): React.ReactElement {
+  const options: { value: UpdateChannel; label: string }[] = [
+    { value: "release", label: "Stable" },
+    { value: "nightly", label: "Nightly" },
+  ];
+  return (
+    <div className="inline-flex rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          className={`rounded border-0 px-3 py-1 text-xs font-medium transition-colors ${
+            value === o.value
+              ? "bg-[var(--color-accent)] text-white"
+              : "bg-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ThemeSegmented({
   value,
   onChange,
@@ -126,9 +160,7 @@ function Switch({
       disabled={disabled}
       onClick={onChange}
       className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-0 p-0 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        checked
-          ? "bg-[var(--color-accent)]"
-          : "bg-[var(--color-bg-overlay)]"
+        checked ? "bg-[var(--color-accent)]" : "bg-[var(--color-bg-overlay)]"
       }`}
     >
       <span
@@ -191,6 +223,9 @@ export default function SettingsDialog({
   onHide,
 }: SettingsDialogProps): React.ReactElement {
   const { theme, setTheme } = useTheme();
+  // Owned by the daemon; the main process keeps this in sync from its status
+  // polling, so no dialog-open fetch is needed.
+  const updateState = useAtomValue(updateAtom);
   const [mcp, setMcp] = useState<{
     enabled: boolean;
     available: boolean;
@@ -282,6 +317,24 @@ export default function SettingsDialog({
               checked={!!mcp?.enabled}
               disabled={!mcp?.available || mcpBusy}
               onChange={toggleMcp}
+            />
+          </Row>
+        </Section>
+
+        <Section title="Updates">
+          <Row
+            label="Channel"
+            hint={
+              updateState.channel === "nightly"
+                ? "Automated builds off main. Expect rough edges."
+                : "Published releases only"
+            }
+          >
+            <ChannelSegmented
+              value={updateState.channel}
+              onChange={(channel) =>
+                ipc.sendMessage("update:set-channel", { channel })
+              }
             />
           </Row>
         </Section>

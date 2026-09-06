@@ -1,0 +1,103 @@
+name: Publish Runtime Image
+run-name: Publish Runtime Image ${{ inputs.abi || 'node24' }}
+
+# The runtime image carries no application code, so it is NOT rebuilt per
+# release. It changes only when its own definition, the bootstrap, or the Node
+# major changes, and its tag is the ABI it provides. Bundles declare the ABI
+# they were built against and the bootstrap refuses a mismatch, so a new ABI is
+# a coordinated change: publish the image first, then build bundles against it.
+#
+# Triggered on pushes that touch the runtime, and dispatchable.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docker/runtime/**"
+      - "scripts/bundle/signing.js"
+      # Holds the other half of the ABI contract (RUNTIME_ABI). Without it here,
+      # changing the ABI there would ship bundles the published image refuses,
+      # and the drift check below would never run to say so.
+      - "scripts/bundle/build-bundle.js"
+      # This is now the only image built from the repo, so its build context is
+      # shaped entirely by the root ignore file.
+      - ".dockerignore"
+      - ".github/workflows/publish-runtime-image.yaml"
+  workflow_dispatch:
+    inputs:
+      abi:
+        description: "ABI tag to publish (must match build-bundle.js RUNTIME_ABI)"
+        required: false
+        type: string
+        default: "node24"
+  workflow_call:
+    inputs:
+      abi:
+        required: false
+        type: string
+        default: "node24"
+      ref:
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set image name
+        id: vars
+        run: |
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "image=${OWNER}/checkpoint-runtime" >> "$GITHUB_OUTPUT"
+
+      - name: Check the image ABI matches the bundle builder
+        # These two strings are the compatibility contract between image and
+        # bundle. If they drift, every bundle is refused at boot with a
+        # confusing message, so catch it here.
+        run: |
+          IMAGE_ABI="$(grep -oP 'CHECKPOINT_RUNTIME_ABI=\K\S+' docker/runtime/Dockerfile)"
+          BUILDER_ABI="$(grep -oP 'const RUNTIME_ABI = "\K[^"]+' scripts/bundle/build-bundle.js)"
+          echo "Dockerfile:    $IMAGE_ABI"
+          echo "build-bundle:  $BUILDER_ABI"
+          if [ "$IMAGE_ABI" != "$BUILDER_ABI" ]; then
+            echo "runtime ABI mismatch: bundles would be refused by this image"
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the runtime image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/runtime/Dockerfile
+          push: true
+          # The ABI is the only tag. A floating `:latest` would move across ABIs
+          # and hand anyone who followed it an image that refuses every bundle
+          # built for the previous one, which is the exact failure the ABI tag
+          # exists to prevent.
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.vars.outputs.image }}:${{ inputs.abi || 'node24' }}
+          platforms: linux/amd64
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,mode=max,scope=runtime

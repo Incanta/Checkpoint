@@ -42,6 +42,11 @@ export async function register() {
       await import("~/server/telemetry/scheduler");
     initTelemetryScheduler();
 
+    // Watch the configured release channel and email the operator when a newer
+    // server build is published. Self-gates on updates.enabled; never installs.
+    const { initUpdateScheduler } = await import("~/server/updates/scheduler");
+    initUpdateScheduler();
+
     const { default: config } = await import("@incanta/config");
 
     const { SERVER_API, MIN_SERVER_API, SERVER_VERSION } =
@@ -56,6 +61,9 @@ export async function register() {
     Logger.log(`  Storage:      ${config.get<string>("storage.mode")}`);
     Logger.log(`  Database:     ${config.get<string>("db.provider")}`);
     Logger.log(`  SMTP:         ${config.get<boolean>("email.enabled")}`);
+    Logger.log(
+      `  Updates:      ${config.get<boolean>("updates.enabled")} (${config.get<string>("updates.channel")})`,
+    );
     if (isLicenseManager()) {
       Logger.log(`  Stripe:      ${config.get<boolean>("stripe.enabled")}`);
       Logger.log(

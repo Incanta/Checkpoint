@@ -1,0 +1,332 @@
+name: CD
+run-name: CD ${{ inputs.stream || 'nightly' }}${{ inputs.dry_run && ' (dry run)' || '' }}
+
+# Single entry point for both delivery streams.
+#
+#   nightly  Runs on a schedule. Diffs each component against the commit it was
+#            last built from (the cd-marker/* tags) and builds only what moved.
+#            Publishes prerelease versions onto a rolling `nightly` GitHub
+#            prerelease, under an npm `nightly` dist-tag.
+#
+#   release  Manual. Builds from the versions already committed in versions.json
+#            and src/longtail/addon/package.json, publishes the npm `latest`
+#            dist-tag, and leaves the GitHub release as a draft to be published
+#            by hand.
+#
+# Component definitions, path filters and the cascade rules live in
+# .github/release-config.json.
+
+on:
+  schedule:
+    # 08:00 UTC: after North American evenings, before European mornings.
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+    inputs:
+      stream:
+        description: "Delivery stream"
+        required: true
+        type: choice
+        options: [nightly, release]
+        default: nightly
+      components:
+        description: >-
+          Which components to build: "auto" for change detection, "all", or a
+          comma-separated subset of longtail-addon,server,client
+        required: false
+        type: string
+        default: auto
+      dry_run:
+        description: "Report what would build, then stop"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  # One CD run at a time: the jobs move shared tags (cd-marker/*, nightly) and
+  # rewrite moving registry tags, none of which interleave safely.
+  group: cd-${{ inputs.stream || 'nightly' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  # ============================================================
+  # Decide what to build and what to call it
+  # ============================================================
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      longtail_addon: ${{ steps.detect.outputs.longtail_addon }}
+      server: ${{ steps.detect.outputs.server }}
+      client: ${{ steps.detect.outputs.client }}
+      head: ${{ steps.detect.outputs.head }}
+      stream: ${{ steps.stream.outputs.stream }}
+      channel: ${{ steps.version.outputs.channel }}
+      server_version: ${{ steps.version.outputs.server_version }}
+      client_version: ${{ steps.version.outputs.client_version }}
+      addon_version: ${{ steps.version.outputs.addon_version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Change detection diffs against marker tags that may be many commits
+          # back, so the full history and all tags are required.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve stream
+        id: stream
+        run: echo "stream=${{ inputs.stream || 'nightly' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Detect changed components
+        id: detect
+        env:
+          # Via the environment rather than an expression interpolated into the
+          # script, so a dispatch input can never become shell.
+          COMPONENTS: ${{ inputs.components || 'auto' }}
+        run: |
+          if [ "$COMPONENTS" = "auto" ]; then
+            node scripts/detect-changed-components.js
+          else
+            node scripts/detect-changed-components.js --only "$COMPONENTS"
+          fi
+
+      - name: Compute versions
+        id: version
+        run: |
+          node scripts/compute-release-version.js \
+            --stream "${{ steps.stream.outputs.stream }}" \
+            --sha "${{ steps.detect.outputs.head }}"
+
+      - name: Summarize
+        run: |
+          {
+            echo "### CD plan"
+            echo
+            echo "- stream: \`${{ steps.stream.outputs.stream }}\`"
+            echo "- commit: \`${{ steps.detect.outputs.head }}\`"
+            echo "- client/server version: \`${{ steps.version.outputs.client_version }}\`"
+            echo "- addon version: \`${{ steps.version.outputs.addon_version }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================================
+  # longtail addon: must land first, both other streams bundle it
+  # ============================================================
+  addon:
+    needs: plan
+    if: >-
+      needs.plan.outputs.longtail_addon == 'true'
+      && inputs.dry_run != true
+    uses: ./.github/workflows/publish-longtail-addon.yaml
+    with:
+      version: ${{ needs.plan.outputs.addon_version }}
+      npm_tag: ${{ needs.plan.outputs.channel }}
+      # Only the release stream writes the bump back to the branch. Nightlies
+      # hand the pinned manifests to downstream jobs as an artifact instead, so
+      # main does not collect a commit every night.
+      commit: ${{ needs.plan.outputs.stream == 'release' }}
+      ref: ${{ needs.plan.outputs.head }}
+    secrets: inherit
+
+  # ============================================================
+  # Server bundles
+  #
+  # Server builds ship as signed bundles, not container images: the runtime
+  # image is version-independent and downloads the bundle it should run. See
+  # docker/runtime/bootstrap.js.
+  # ============================================================
+  server:
+    needs: [plan, addon]
+    if: >-
+      !cancelled()
+      && needs.plan.outputs.server == 'true'
+      && inputs.dry_run != true
+      && (needs.addon.result == 'success' || needs.addon.result == 'skipped')
+    uses: ./.github/workflows/publish-server-bundles.yaml
+    with:
+      version: ${{ needs.plan.outputs.server_version }}
+      stream: ${{ needs.plan.outputs.stream }}
+      ref: ${{ needs.addon.outputs.head_sha || needs.plan.outputs.head }}
+      addon_pin: ${{ needs.addon.result == 'success' && needs.plan.outputs.stream != 'release' }}
+    secrets: inherit
+
+  # ============================================================
+  # Client installers
+  # ============================================================
+  client:
+    needs: [plan, addon]
+    if: >-
+      !cancelled()
+      && needs.plan.outputs.client == 'true'
+      && inputs.dry_run != true
+      && (needs.addon.result == 'success' || needs.addon.result == 'skipped')
+    uses: ./.github/workflows/build-installers.yaml
+    with:
+      version: ${{ needs.plan.outputs.client_version }}
+      stream: ${{ needs.plan.outputs.stream }}
+      ref: ${{ needs.addon.outputs.head_sha || needs.plan.outputs.head }}
+      addon_pin: ${{ needs.addon.result == 'success' && needs.plan.outputs.stream != 'release' }}
+    secrets: inherit
+
+  # ============================================================
+  # Channel manifest: the pointer everything downstream polls
+  # ============================================================
+  manifest:
+    needs: [plan, addon, server, client]
+    if: >-
+      !cancelled()
+      && inputs.dry_run != true
+      && (needs.addon.result == 'success'
+          || needs.server.result == 'success'
+          || needs.client.result == 'success')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CHANNEL: ${{ needs.plan.outputs.stream == 'release' && 'release' || 'nightly' }}
+      BUILT_SHA: ${{ needs.addon.outputs.head_sha || needs.plan.outputs.head }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.addon.outputs.head_sha || needs.plan.outputs.head }}
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [ "$CHANNEL" = "nightly" ]; then
+            echo "tag=$(jq -r '.nightlyTag' .github/release-config.json)" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v${{ needs.plan.outputs.client_version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ensure the release exists
+        # A server-only run has no installers and therefore no release yet, but
+        # the manifest still needs somewhere to live.
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+          if [ "$CHANNEL" = "nightly" ]; then
+            gh release create "$TAG" \
+              --target "$BUILT_SHA" \
+              --title "Checkpoint nightly ${{ needs.plan.outputs.client_version }}" \
+              --notes "Automated nightly build of \`$BUILT_SHA\`." \
+              --prerelease \
+              --latest=false
+          else
+            gh release create "$TAG" \
+              --target "$BUILT_SHA" \
+              --title "Checkpoint v${{ needs.plan.outputs.client_version }}" \
+              --generate-notes \
+              --draft
+          fi
+
+      - name: Fetch the current manifest
+        # Components that did not build this run are carried over from the
+        # manifest already published on this channel, so where that manifest
+        # lives differs by stream. Nightly rebuilds one rolling tag, so the
+        # previous manifest is on the tag we are about to write. Release gives
+        # every version a fresh tag that by definition holds nothing yet, so it
+        # has to read the release that is currently `latest` instead; seeding
+        # from the new tag would silently drop every component this run skipped.
+        run: |
+          mkdir -p existing
+          if [ "$CHANNEL" = "nightly" ]; then
+            gh release download "${{ steps.tag.outputs.tag }}" \
+              -p "checkpoint-nightly.json" -D existing \
+              || echo "No previous manifest on ${{ steps.tag.outputs.tag }}"
+          else
+            gh release download -p "checkpoint-release.json" -D existing \
+              || echo "No manifest on the currently published release"
+          fi
+
+      - name: Build the manifest
+        run: |
+          # The ABI the bundles were built against. The runtime refuses a
+          # bundle whose ABI does not match the image, and recording it here
+          # lets an operator see the mismatch before they try to boot it.
+          RUNTIME_ABI="$(grep -oP 'const RUNTIME_ABI = "\K[^"]+' scripts/bundle/build-bundle.js)"
+          node scripts/build-channel-manifest.js \
+            --channel "$CHANNEL" \
+            --commit "$BUILT_SHA" \
+            --existing "existing/checkpoint-$CHANNEL.json" \
+            --out "checkpoint-$CHANNEL.json" \
+            --server-version "${{ needs.server.result == 'success' && needs.plan.outputs.server_version || '' }}" \
+            --runtime-abi "$RUNTIME_ABI" \
+            --client-version "${{ needs.client.result == 'success' && needs.plan.outputs.client_version || '' }}" \
+            --release-tag "${{ steps.tag.outputs.tag }}" \
+            --addon-version "${{ needs.addon.result == 'success' && needs.plan.outputs.addon_version || '' }}" \
+            --npm-tag "${{ needs.plan.outputs.channel }}"
+
+      - name: Publish the manifest
+        run: |
+          gh release upload "${{ steps.tag.outputs.tag }}" \
+            "checkpoint-$CHANNEL.json" --clobber
+
+  # ============================================================
+  # Record what shipped, so the next run diffs from here
+  # ============================================================
+  finalize:
+    needs: [plan, addon, server, client, manifest]
+    if: >-
+      !cancelled()
+      && inputs.dry_run != true
+      && (needs.addon.result == 'success'
+          || needs.server.result == 'success'
+          || needs.client.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.addon.outputs.head_sha || needs.plan.outputs.head }}
+
+      - name: Move marker tags for the components that shipped
+        # Only successful components move. A failed client leaves its marker
+        # where it was, so tomorrow's run retries it while the server, which
+        # did ship, stays quiet.
+        env:
+          ADDON_RESULT: ${{ needs.addon.result }}
+          SERVER_RESULT: ${{ needs.server.result }}
+          CLIENT_RESULT: ${{ needs.client.result }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          SHA="$(git rev-parse HEAD)"
+
+          move() {
+            local component="$1"
+            local result="$2"
+            if [ "$result" != "success" ]; then
+              echo "Leaving marker for $component alone (result: ${result:-skipped})"
+              return
+            fi
+            local marker
+            marker="$(jq -r --arg c "$component" '.components[$c].marker' .github/release-config.json)"
+            echo "Marking $component built at $SHA ($marker)"
+            git tag -f "$marker" "$SHA"
+            git push -f origin "refs/tags/$marker"
+          }
+
+          move longtail-addon "$ADDON_RESULT"
+          move server "$SERVER_RESULT"
+          move client "$CLIENT_RESULT"
+
+      - name: Summarize
+        env:
+          ADDON_RESULT: ${{ needs.addon.result }}
+          SERVER_RESULT: ${{ needs.server.result }}
+          CLIENT_RESULT: ${{ needs.client.result }}
+        run: |
+          {
+            echo "### CD result (${{ needs.plan.outputs.stream }})"
+            echo
+            echo "| Component | Result |"
+            echo "| --- | --- |"
+            echo "| longtail-addon | ${ADDON_RESULT:-skipped} |"
+            echo "| server | ${SERVER_RESULT:-skipped} |"
+            echo "| client | ${CLIENT_RESULT:-skipped} |"
+          } >> "$GITHUB_STEP_SUMMARY"

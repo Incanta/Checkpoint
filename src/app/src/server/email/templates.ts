@@ -215,3 +215,77 @@ export function genericEmail(
   const text = `${title}\n\n${bodyLines.join("\n")}\n${ctaUrl ? `\n${ctaLabel}: ${ctaUrl}\n` : ""}`;
   return { subject, html, text };
 }
+
+export interface ServerUpdateEmailInput {
+  currentVersion: string;
+  latestVersion: string;
+  channel: "release" | "nightly";
+  commit: string | null;
+  /** Link to the admin update panel, when an external URL is configured. */
+  adminUrl: string | null;
+  /**
+   * Whether this deployment can install the update from the panel. False for a
+   * pinned or air-gapped deployment, whose version lives in its configuration.
+   */
+  selfUpdatable: boolean;
+}
+
+/**
+ * Sent by src/server/updates/check.ts when the watched channel carries a newer
+ * server build. Nothing ever installs itself, so the mail's job is to say what
+ * changed and where to go: the admin panel for a self-updating deployment, or
+ * the deployment's own configuration for a pinned one.
+ */
+export function serverUpdateAvailableEmail(
+  input: ServerUpdateEmailInput,
+): EmailTemplate {
+  const { currentVersion, latestVersion, channel, commit, adminUrl } = input;
+
+  const subject =
+    channel === "nightly"
+      ? `Checkpoint nightly ${latestVersion} is available`
+      : `Checkpoint ${latestVersion} is available`;
+
+  const action = input.selfUpdatable
+    ? "Download and install it from the admin panel when you are ready. Downloading does not interrupt anything; only installing restarts the services."
+    : "This deployment is pinned to a fixed version, so update the version in its configuration and redeploy.";
+
+  const ctaHtml =
+    input.selfUpdatable && adminUrl ? button("Open the update panel", adminUrl) : "";
+
+  const commitHtml = commit
+    ? `<p class="muted">Built from commit <span class="code">${esc(commit)}</span>.</p>`
+    : "";
+
+  const html = layout(
+    subject,
+    `
+    ${heading("A server update is available")}
+    <p>This Checkpoint instance is running <span class="code">${esc(currentVersion)}</span>.
+    The <strong>${esc(channel)}</strong> channel is now at <span class="code">${esc(latestVersion)}</span>.</p>
+    <p>${esc(action)}</p>
+    ${ctaHtml}
+    ${commitHtml}
+    <hr />
+    <p class="muted">Nothing has been installed. You are receiving this because
+    update notifications are enabled for this instance
+    (<span class="code">updates.enabled</span>).</p>
+  `,
+  );
+
+  const text = [
+    subject,
+    "",
+    `This Checkpoint instance is running ${currentVersion}.`,
+    `The ${channel} channel is now at ${latestVersion}.`,
+    "",
+    action,
+    ...(adminUrl && input.selfUpdatable ? ["", adminUrl] : []),
+    ...(commit ? ["", `Built from commit ${commit}.`] : []),
+    "",
+    "Nothing has been installed. You are receiving this because update notifications are enabled for this instance (updates.enabled).",
+    "",
+  ].join("\n");
+
+  return { subject, html, text };
+}

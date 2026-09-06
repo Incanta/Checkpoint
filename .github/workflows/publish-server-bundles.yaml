@@ -1,0 +1,302 @@
+name: Publish Server Bundles
+run-name: Publish Server Bundles ${{ inputs.version || github.ref_name }}
+
+# Replaces the per-release container image builds. The runtime image
+# (publish-runtime-image.yaml) is rebuilt only when its own definition or the
+# Node major changes; what ships per release is a signed bundle per component,
+# which the runtime downloads and verifies at boot.
+#
+# Three assets, plus a signature sidecar each:
+#   checkpoint-bundle-app-<version>-sqlite.tar.zst
+#   checkpoint-bundle-app-<version>-postgres.tar.zst
+#   checkpoint-bundle-server-<version>.tar.zst
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (defaults to versions.json server_version)"
+        required: false
+        type: string
+        default: ""
+      release_tag:
+        description: "Release tag to attach the bundles to (defaults to v<version>)"
+        required: false
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      version:
+        required: false
+        type: string
+        default: ""
+      release_tag:
+        required: false
+        type: string
+        default: ""
+      stream:
+        required: false
+        type: string
+        default: release
+      ref:
+        description: "Commit-ish to build from (defaults to the triggering ref)"
+        required: false
+        type: string
+        default: ""
+      addon_pin:
+        description: >-
+          Replay the `addon-pin` artifact (package.json files + yarn.lock)
+          published by publish-longtail-addon.yaml earlier in this run.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      BUNDLE_SIGNING_KEY:
+        description: >-
+          Base64 PKCS8 DER Ed25519 private key whose public half is published at
+          key.checkpointvcs.com. The runtime refuses unsigned bundles.
+        required: true
+    outputs:
+      version:
+        value: ${{ jobs.prepare.outputs.version }}
+      release_tag:
+        value: ${{ jobs.prepare.outputs.release_tag }}
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Determine version and tag
+        id: version
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(jq -r '.server_version' versions.json)"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          TAG="${{ inputs.release_tag }}"
+          if [ -z "$TAG" ]; then
+            if [ "${{ inputs.stream }}" = "nightly" ]; then
+              TAG="$(jq -r '.nightlyTag' .github/release-config.json)"
+            else
+              TAG="v${VERSION}"
+            fi
+          fi
+          echo "release_tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    # Built inside the runtime image's own base rather than on the bare runner.
+    # A bundle carries native code (the longtail addon, Prisma query engines)
+    # that the manifest declares an ABI for, and the runtime refuses a mismatch
+    # at boot. Building on ubuntu-latest made that declaration a claim about a
+    # machine nothing checked: the runner's glibc runs ahead of Debian 12's, so
+    # anything compiled during install would load fine in CI and fail in the
+    # container. Building here makes the ABI true by construction.
+    #
+    # Keep this in step with FROM in docker/runtime/Dockerfile.
+    container: node:24-bookworm-slim
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: app
+            provider: sqlite
+          - component: app
+            provider: postgresql
+          - component: server
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+
+    steps:
+      # No sudo and no preinstalled toolchain in the container; git is what
+      # actions/checkout needs to clone rather than fall back to a tarball,
+      # which would leave `git rev-parse HEAD` below with no repository.
+      - name: Install build prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git libssl3 zstd
+          # The container runs as root over a workspace the runner owns, which
+          # git can read as dubious ownership and refuse. Set before checkout,
+          # which is itself the first thing to touch the repository.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Apply addon pin
+        if: inputs.addon_pin
+        uses: actions/download-artifact@v8
+        with:
+          name: addon-pin
+          path: .
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Check the bundle ABI matches the image it is built in
+        # RUNTIME_ABI is stamped into every bundle manifest and the runtime
+        # refuses a bundle that disagrees with it. The Dockerfile is the other
+        # half of that contract, and this job's base image is now the third, so
+        # verify all three agree before producing anything.
+        run: |
+          BUILDER_ABI="$(grep -oP 'const RUNTIME_ABI = "\K[^"]+' scripts/bundle/build-bundle.js)"
+          IMAGE_ABI="$(grep -oP 'CHECKPOINT_RUNTIME_ABI=\K\S+' docker/runtime/Dockerfile)"
+          echo "build-bundle:  $BUILDER_ABI"
+          echo "Dockerfile:    $IMAGE_ABI"
+          if [ "$BUILDER_ABI" != "$IMAGE_ABI" ]; then
+            echo "runtime ABI mismatch: these bundles would be refused at boot"
+            exit 1
+          fi
+          echo "container:     $(. /etc/os-release && echo "$ID$VERSION_ID") node $(node -v) openssl $(openssl version 2>/dev/null | awk '{print $2}')"
+
+      - name: Stamp version
+        run: node scripts/set-version.js --server "$VERSION" --no-build
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      # ---- app ----
+
+      - name: Build the app
+        if: matrix.component == 'app'
+        env:
+          DB_PROVIDER: ${{ matrix.provider }}
+          SKIP_ENV_VALIDATION: "1"
+        run: |
+          cd src/app
+          node scripts/set-db-provider.mjs
+          npx prisma generate
+          yarn build
+
+      # ---- server ----
+
+      - name: Build the core server
+        if: matrix.component == 'server'
+        run: |
+          yarn build
+          cd src/core/server && yarn build
+
+      - name: Prune to production dependencies
+        if: matrix.component == 'server'
+        # The old server image copied the whole ~1.8 GB dev dependency tree.
+        # The bundle ships only what the server actually needs at runtime.
+        run: yarn workspaces focus --production @checkpointvcs/server
+
+      # ---- package ----
+
+      - name: Build and sign the bundle
+        env:
+          CHECKPOINT_BUNDLE_SIGNING_KEY: ${{ secrets.BUNDLE_SIGNING_KEY }}
+        run: |
+          node scripts/bundle/build-bundle.js \
+            --component "${{ matrix.component }}" \
+            --version "$VERSION" \
+            ${{ matrix.provider && format('--provider {0}', matrix.provider) || '' }} \
+            --commit "$(git rev-parse HEAD)" \
+            --out dist-bundles \
+            --sign
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: bundle-${{ matrix.component }}${{ matrix.provider && format('-{0}', matrix.provider) || '' }}
+          path: |
+            dist-bundles/*.tar.zst
+            dist-bundles/*.sig.json
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Download all bundles
+        uses: actions/download-artifact@v8
+        with:
+          pattern: bundle-*
+          path: dist-bundles/
+          merge-multiple: true
+
+      - name: Package the docker-compose quickstart
+        # Ships with the server stream because it describes a server
+        # deployment: its contents track the bundle env vars, channels and
+        # volumes defined here. It used to ride along with the desktop
+        # installers, which meant editing the compose file rebuilt the whole
+        # installer matrix and left the server untouched.
+        #
+        # Stable, version-independent name so the tutorial can use a permanent
+        # URL: .../releases/latest/download/checkpoint-docker-compose.tar.gz
+        # Extracting yields a `docker-compose/` directory.
+        run: tar -czf dist-bundles/checkpoint-docker-compose.tar.gz docker-compose
+
+      - name: List bundles
+        run: ls -lh dist-bundles/
+
+      - name: Verify every bundle carries a signature
+        # A publish that quietly drops a signature would leave the runtime
+        # unable to boot the release at all, so fail here instead.
+        run: |
+          for archive in dist-bundles/*.tar.zst; do
+            sidecar="${archive}.sig.json"
+            if [ ! -f "$sidecar" ]; then
+              echo "missing signature for $(basename "$archive")"
+              exit 1
+            fi
+            if [ "$(jq -r '.signature // empty' "$sidecar")" = "" ]; then
+              echo "$(basename "$sidecar") has no signature"
+              exit 1
+            fi
+          done
+          echo "all bundles are signed"
+
+      - name: Ensure the release exists
+        # build-installers.yaml publishes to this same tag and the two run in
+        # parallel, so treat a failed create as "someone else got there first"
+        # rather than an error.
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+          if [ "${{ inputs.stream }}" = "nightly" ]; then
+            gh release create "$TAG" \
+              --target "$(git rev-parse HEAD)" \
+              --title "Checkpoint nightly $VERSION" \
+              --notes "Automated nightly build." \
+              --prerelease --latest=false \
+              || gh release view "$TAG" >/dev/null
+          else
+            gh release create "$TAG" \
+              --target "$(git rev-parse HEAD)" \
+              --title "Checkpoint v$VERSION" \
+              --generate-notes --draft \
+              || gh release view "$TAG" >/dev/null
+          fi
+
+      - name: Upload bundles to the release
+        run: |
+          gh release upload "$TAG" dist-bundles/* --clobber

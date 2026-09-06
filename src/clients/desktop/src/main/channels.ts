@@ -187,6 +187,7 @@ export type Channels = {
   "update:download": null;
   "update:apply": null;
   "update:dismiss": null;
+  "update:set-channel": { channel: "release" | "nightly" };
 
   // API version check
   "version:dismiss": null;

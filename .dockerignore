@@ -1,5 +1,9 @@
-# Keep the Docker build context lean. The image reinstalls dependencies with
-# `yarn install --immutable`, so nothing here is needed from the host.
+# Keep the Docker build context lean.
+#
+# The only image built from this repo is docker/runtime/Dockerfile, which copies
+# just the bootstrap and its signing helper. Everything below would otherwise be
+# tarred up and shipped to the daemon for nothing, and node_modules alone is
+# ~1.8 GB.
 
 # --- Dependencies: reinstalled in-image (~1.7 GB) ---
 node_modules

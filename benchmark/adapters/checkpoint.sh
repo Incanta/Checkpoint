@@ -2,9 +2,10 @@
 # Checkpoint VCS adapter.
 #
 # Server: the repo's docker-compose bundle (app :13000, server :13001,
-#   postgres). With no pinned version (the HEAD path) the app + server images
-#   are BUILT from the shipped HEAD source so they match the HEAD client; with
-#   a pinned CHECKPOINT_VERSION the released GHCR images are pulled instead.
+#   postgres). Both services run the version-independent runtime image and load
+#   a deployment bundle. With no pinned version (the HEAD path) the bundles are
+#   BUILT from the shipped HEAD source so they match the HEAD client; with a
+#   pinned CHECKPOINT_VERSION the released bundles are downloaded instead.
 #   Storage stays in the default "local" mode (the core server stores blocks on
 #   its own disk and serves them through the gateway; no external store).
 # Client: built from source on the droplet (CLI via CMake + daemon via Node),
@@ -29,14 +30,17 @@ SRC_DIR="/opt/checkpoint-src"
 CHK="${SRC_DIR}/src/clients/cli/build/chk"
 DAEMON_DIR="${SRC_DIR}/src/core/daemon"
 
-# Server-side source checkout (used only when building images from HEAD).
+# Server-side source checkout (used only when building bundles from HEAD).
 SERVER_SRC_DIR="/opt/checkpoint-src"
 
-# Image tags the docker-compose bundle references for the default (unpinned)
-# run. When CHECKPOINT_VERSION is empty we build these tags locally from HEAD;
-# when it is set we rewrite the compose file to the pinned tags and pull.
-APP_IMAGE="ghcr.io/incanta/checkpoint-app:latest-sqlite"
-SERVER_IMAGE="ghcr.io/incanta/checkpoint-server:latest"
+# Where HEAD-built bundles are written on the server and mounted into both
+# containers. Unused on the pinned path, which downloads released bundles.
+SERVER_BUNDLE_DIR="/opt/checkpoint-bundles"
+
+# Semver stamped into HEAD-built bundles. The prerelease suffix keeps it below
+# any real release, and the value only has to be internally consistent: nothing
+# resolves it against a registry.
+HEAD_BUNDLE_VERSION="0.0.0-bench"
 
 # Server-side backend storage lives under Docker's data-root (relocated to the
 # server volume); used to measure the small-update storage delta.
@@ -130,28 +134,89 @@ dev:
   allow-dev-login: true
 AUTH
 
-# Pin image tags when a version is requested; otherwise keep compose defaults
-# (the latter are built from HEAD source by the caller, not pulled).
-if [ -n "$VERSION" ]; then
-  sed -i "s#checkpoint-app:latest-sqlite#checkpoint-app:${VERSION}-sqlite#" docker-compose.yaml
-  sed -i "s#checkpoint-server:latest#checkpoint-server:${VERSION}#" docker-compose.yaml
-fi
 EOF
 
+  # Both services run one version-independent runtime image; which Checkpoint
+  # version they run is chosen per deployment. A compose override sets that,
+  # rather than rewriting image tags in the shipped compose file.
   if [ -n "${CHECKPOINT_VERSION:-}" ]; then
-    log "pinned version ${CHECKPOINT_VERSION}: pulling released images from GHCR"
+    log "pinned version ${CHECKPOINT_VERSION}: runtime will download the released bundles"
+    on_server "cd /opt/checkpoint-compose && VERSION='${CHECKPOINT_VERSION}' bash -seuo pipefail" <<'EOF'
+cat > docker-compose.override.yaml <<OVERRIDE
+services:
+  app:
+    environment:
+      CHECKPOINT_BUNDLE_VERSION: "${VERSION}"
+  server:
+    environment:
+      CHECKPOINT_BUNDLE_VERSION: "${VERSION}"
+OVERRIDE
+EOF
     on_server "cd /opt/checkpoint-compose && docker compose pull"
   else
-    log "no version pinned: building app + server images from HEAD source on the server"
-    on_server "rm -rf ${SERVER_SRC_DIR} && mkdir -p ${SERVER_SRC_DIR}"
+    log "no version pinned: building bundles from HEAD source on the server"
+    on_server "rm -rf ${SERVER_SRC_DIR} ${SERVER_BUNDLE_DIR} && mkdir -p ${SERVER_SRC_DIR} ${SERVER_BUNDLE_DIR}"
     git -C "${REPO_ROOT}" archive --format=tar HEAD | on_server "tar x -C ${SERVER_SRC_DIR}"
-    # Build the exact image tags the (unpinned) compose file references, so the
-    # subsequent `docker compose up` uses these local builds instead of pulling.
-    # The app is built sqlite-flavored to match the compose default and the
-    # benchmark's file:// database_url.
-    on_server "cd ${SERVER_SRC_DIR} && APP_IMAGE='${APP_IMAGE}' SERVER_IMAGE='${SERVER_IMAGE}' bash -seuo pipefail" <<'EOF'
-docker build -f src/app/Dockerfile --build-arg DB_PROVIDER=sqlite -t "$APP_IMAGE" .
-docker build -f src/core/server/Dockerfile -t "$SERVER_IMAGE" .
+
+    # Built inside node:24-bookworm-slim so the server droplet needs no Node
+    # toolchain, and so the bundles are produced on the same base the runtime
+    # image uses (they carry native code built against its Node ABI, glibc and
+    # OpenSSL). Keep this image in step with FROM in docker/runtime/Dockerfile.
+    #
+    # Order matters: the app build needs dev dependencies, and pruning to
+    # production for the server bundle removes them. App first, then prune.
+    log "building HEAD bundles (this takes several minutes)"
+    # -i keeps stdin attached so the build script below reaches `bash -s`
+    # through ssh; without it the container gets an empty stdin and no-ops.
+    on_server "docker run --rm -i \
+      -v ${SERVER_SRC_DIR}:/src -v ${SERVER_BUNDLE_DIR}:/out -w /src \
+      -e BUNDLE_VERSION='${HEAD_BUNDLE_VERSION}' \
+      node:24-bookworm-slim bash -seuo pipefail" <<'EOF'
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y --no-install-recommends libssl3 ca-certificates zstd git
+corepack enable
+
+yarn install --immutable
+
+# --- app bundle (sqlite, matching the compose default and the file:// db url)
+cd src/app
+DB_PROVIDER=sqlite node scripts/set-db-provider.mjs
+npx prisma generate
+SKIP_ENV_VALIDATION=1 yarn build
+cd /src
+node scripts/bundle/build-bundle.js \
+  --component app --version "$BUNDLE_VERSION" --provider sqlite --out /out
+
+# --- server bundle
+yarn build
+cd src/core/server && yarn build && cd /src
+yarn workspaces focus --production @checkpointvcs/server
+node scripts/bundle/build-bundle.js \
+  --component server --version "$BUNDLE_VERSION" --out /out
+
+ls -lh /out
+EOF
+
+    # Locally built bundles are unsigned, so the runtime needs to be told
+    # explicitly to accept them. This is exactly the case that escape hatch
+    # exists for: a bundle this harness built itself, moments ago, on this host.
+    on_server "cd /opt/checkpoint-compose && VERSION='${HEAD_BUNDLE_VERSION}' BUNDLES='${SERVER_BUNDLE_DIR}' bash -seuo pipefail" <<'EOF'
+cat > docker-compose.override.yaml <<OVERRIDE
+services:
+  app:
+    environment:
+      CHECKPOINT_BUNDLE_PATH: "/bundles/checkpoint-bundle-app-${VERSION}-sqlite.tar.zst"
+      CHECKPOINT_BUNDLE_ALLOW_UNSIGNED: "1"
+    volumes:
+      - ${BUNDLES}:/bundles:ro
+  server:
+    environment:
+      CHECKPOINT_BUNDLE_PATH: "/bundles/checkpoint-bundle-server-${VERSION}.tar.zst"
+      CHECKPOINT_BUNDLE_ALLOW_UNSIGNED: "1"
+    volumes:
+      - ${BUNDLES}:/bundles:ro
+OVERRIDE
 EOF
   fi
 

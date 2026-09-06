@@ -9,7 +9,19 @@ import { homedir, platform, arch } from "os";
 import https from "https";
 import http from "http";
 import { Logger } from "./logging.js";
+import { DaemonConfig } from "./daemon-config.js";
 import { CLIENT_VERSION } from "@checkpointvcs/common";
+
+/**
+ * Delivery stream this client follows.
+ *
+ *   release  Stable builds. Reads the repository's "latest" GitHub release,
+ *            which nightlies are explicitly excluded from (make_latest: false).
+ *   nightly  Automated builds off main, published by .github/workflows/release.yaml
+ *            as a rolling prerelease on a fixed tag. Versions carry a
+ *            `-nightly.<timestamp>.g<sha>` prerelease suffix.
+ */
+export type UpdateChannel = "release" | "nightly";
 
 export interface UpdateStatus {
   currentVersion: string;
@@ -21,6 +33,7 @@ export interface UpdateStatus {
   downloadedInstallerPath: string | null;
   lastCheckTime: number | null;
   lastError: string | null;
+  channel: UpdateChannel;
 }
 
 export interface UpdaterConfig {
@@ -30,12 +43,21 @@ export interface UpdaterConfig {
   checkIntervalMs: number;
   /** Whether auto-check is enabled */
   enabled: boolean;
+  /** Delivery stream to follow */
+  channel: UpdateChannel;
+  /**
+   * Tag holding the rolling nightly prerelease. Must match `nightlyTag` in
+   * .github/release-config.json.
+   */
+  nightlyTag: string;
 }
 
 const DEFAULT_CONFIG: UpdaterConfig = {
   repository: "Incanta/Checkpoint",
   checkIntervalMs: 6 * 60 * 60 * 1000, // 6 hours
   enabled: true,
+  channel: "release",
+  nightlyTag: "nightly",
 };
 
 interface GitHubRelease {
@@ -99,23 +121,102 @@ function getInstallerAssetPattern(): string {
  * Pull the semver embedded in a downloaded installer's filename, e.g.
  * "0.4.11" from "Checkpoint-Windows-x64-0.4.11-Setup.exe" (also matches the
  * .deb/.rpm/.pkg names). Returns null when no version can be found.
+ *
+ * Anchored on the whole filename because nightly versions contain dashes of
+ * their own ("0.5.0-nightly.202609030800.g1a2b3c4d"), so a loose search would
+ * either stop at the numeric core or swallow the "-Setup" suffix.
  */
-function extractVersionFromFilename(name: string): string | null {
-  const match = name.match(/(\d+\.\d+\.\d+)/);
-  return match ? match[1] : null;
+const INSTALLER_NAME_RE =
+  /^Checkpoint-(?:Windows-x64|Linux-amd64|macOS-(?:x64|arm64))-(.+)\.(?:exe|deb|rpm|pkg|dmg)$/;
+const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
+export function extractVersionFromFilename(name: string): string | null {
+  const match = name.match(INSTALLER_NAME_RE);
+  if (!match) return null;
+
+  // The NSIS artifact name appends "-Setup" after the version.
+  const version = match[1].replace(/-Setup$/, "");
+  return SEMVER_RE.test(version) ? version : null;
 }
 
-function compareVersions(a: string, b: string): number {
-  // Strip leading 'v' if present
-  const va = a.replace(/^v/, "").split(".").map(Number);
-  const vb = b.replace(/^v/, "").split(".").map(Number);
+/**
+ * Version a release actually ships.
+ *
+ * The release stream tags each build `v<semver>`, so the tag is authoritative.
+ * The nightly stream reuses one rolling tag ("nightly") whose name says nothing
+ * about the version, so fall back to reading it out of the installer filenames
+ * attached to the release.
+ */
+function resolveReleaseVersion(release: GitHubRelease): string | null {
+  if (/^v?\d+\.\d+\.\d+/.test(release.tag_name)) {
+    return release.tag_name.replace(/^v/, "");
+  }
 
-  for (let i = 0; i < Math.max(va.length, vb.length); i++) {
-    const na = va[i] ?? 0;
-    const nb = vb[i] ?? 0;
+  for (const asset of release.assets) {
+    const version = extractVersionFromFilename(asset.name);
+    if (version) return version;
+  }
+
+  return null;
+}
+
+/**
+ * Semver precedence, including prereleases. Needed for the nightly channel:
+ * every nightly version is a prerelease, so a numeric-only comparison reads
+ * "0.5.0-nightly.202609030800" as NaN and never sees a newer build.
+ *
+ * Follows semver.org rule 11: compare the numeric core, then treat a version
+ * with a prerelease as lower than the same core without one, then compare
+ * prerelease identifiers left to right (numeric identifiers compare
+ * numerically and rank below alphanumeric ones).
+ */
+export function compareVersions(a: string, b: string): number {
+  const parse = (v: string): { core: number[]; pre: string[] } => {
+    // Build metadata (+...) is ignored for precedence.
+    const cleaned = v.replace(/^v/, "").split("+")[0];
+    const dash = cleaned.indexOf("-");
+    const core = (dash === -1 ? cleaned : cleaned.slice(0, dash))
+      .split(".")
+      .map((n) => parseInt(n, 10) || 0);
+    const pre = dash === -1 ? [] : cleaned.slice(dash + 1).split(".");
+    return { core, pre };
+  };
+
+  const va = parse(a);
+  const vb = parse(b);
+
+  for (let i = 0; i < Math.max(va.core.length, vb.core.length); i++) {
+    const na = va.core[i] ?? 0;
+    const nb = vb.core[i] ?? 0;
     if (na > nb) return 1;
     if (na < nb) return -1;
   }
+
+  // A release outranks any prerelease of the same core version.
+  if (va.pre.length === 0 && vb.pre.length === 0) return 0;
+  if (va.pre.length === 0) return 1;
+  if (vb.pre.length === 0) return -1;
+
+  for (let i = 0; i < Math.max(va.pre.length, vb.pre.length); i++) {
+    const ia = va.pre[i];
+    const ib = vb.pre[i];
+    // A shorter identifier set is lower, all preceding identifiers being equal.
+    if (ia === undefined) return -1;
+    if (ib === undefined) return 1;
+    if (ia === ib) continue;
+
+    const numA = /^\d+$/.test(ia);
+    const numB = /^\d+$/.test(ib);
+    if (numA && numB) {
+      const diff = parseInt(ia, 10) - parseInt(ib, 10);
+      if (diff !== 0) return diff > 0 ? 1 : -1;
+      continue;
+    }
+    if (numA) return -1;
+    if (numB) return 1;
+    return ia > ib ? 1 : -1;
+  }
+
   return 0;
 }
 
@@ -259,7 +360,66 @@ export class Updater {
       downloadedInstallerPath: null,
       lastCheckTime: null,
       lastError: null,
+      channel: this.config.channel,
     };
+  }
+
+  /**
+   * GitHub API endpoint for the newest build on the configured channel.
+   *
+   * The release stream can use /releases/latest because the nightly release is
+   * published with make_latest:false and therefore never occupies that slot.
+   * The nightly stream reads its fixed rolling tag instead, which is rebuilt in
+   * place on every client-affecting change.
+   */
+  private releaseUrl(): string {
+    const base = `https://api.github.com/repos/${this.config.repository}/releases`;
+    return this.config.channel === "nightly"
+      ? `${base}/tags/${this.config.nightlyTag}`
+      : `${base}/latest`;
+  }
+
+  public getChannel(): UpdateChannel {
+    return this.config.channel;
+  }
+
+  /**
+   * Switch delivery streams and re-check immediately.
+   *
+   * Note that moving from nightly back to release does not downgrade: a machine
+   * running 0.5.0-nightly.* sits above the released 0.4.x until 0.5.0 ships, so
+   * it simply reports "up to date" until the stable stream catches up.
+   */
+  public async setChannel(channel: UpdateChannel): Promise<UpdateStatus> {
+    if (this.config.channel === channel) {
+      return this.getStatus();
+    }
+
+    Logger.info(
+      `Switching update channel: ${this.config.channel} -> ${channel}`,
+    );
+    this.config.channel = channel;
+    this.status.channel = channel;
+    this.status.latestVersion = null;
+    this.status.updateAvailable = false;
+    this.status.downloadedInstallerPath = null;
+    this.status.lastError = null;
+
+    try {
+      const vars = await DaemonConfig.Get();
+      vars.updates = { ...vars.updates, channel };
+      await DaemonConfig.Save();
+    } catch (err) {
+      // A failed write only costs the choice its persistence across restarts,
+      // so keep the switch active for this session rather than rolling back.
+      Logger.warn(
+        `Could not persist the update channel to daemon.json: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    return await this.checkForUpdates();
   }
 
   public start(): void {
@@ -306,10 +466,22 @@ export class Updater {
     this.status.lastError = null;
 
     try {
-      const url = `https://api.github.com/repos/${this.config.repository}/releases/latest`;
-      Logger.info(`Checking for updates: ${url}`);
+      const url = this.releaseUrl();
+      Logger.info(
+        `Checking for updates on the ${this.config.channel} channel: ${url}`,
+      );
 
       const response = await httpsGet(url);
+
+      if (response.statusCode === 404 && this.config.channel === "nightly") {
+        // No nightly has been published yet (or the tag was removed).
+        Logger.info(
+          `No release found on tag "${this.config.nightlyTag}"; nothing to update to`,
+        );
+        this.status.lastCheckTime = Date.now();
+        this.status.updateAvailable = false;
+        return this.getStatus();
+      }
 
       if (response.statusCode !== 200) {
         throw new Error(
@@ -319,15 +491,31 @@ export class Updater {
 
       const release = JSON.parse(response.body) as GitHubRelease;
 
-      if (release.draft || release.prerelease) {
-        Logger.info("Latest release is draft/prerelease, skipping");
+      // Drafts are never installable. Prereleases are the whole point of the
+      // nightly channel, but must stay out of the release channel.
+      if (release.draft) {
+        Logger.info("Latest release is a draft, skipping");
+        this.status.lastCheckTime = Date.now();
+        return this.getStatus();
+      }
+      if (release.prerelease && this.config.channel === "release") {
+        Logger.info("Latest release is a prerelease, skipping");
         this.status.lastCheckTime = Date.now();
         return this.getStatus();
       }
 
-      const latestVersion = release.tag_name.replace(/^v/, "");
-      this.status.latestVersion = latestVersion;
+      const latestVersion = resolveReleaseVersion(release);
       this.status.lastCheckTime = Date.now();
+
+      if (!latestVersion) {
+        Logger.warn(
+          `Could not determine a version for release "${release.tag_name}" (${release.assets.length} assets)`,
+        );
+        this.status.updateAvailable = false;
+        return this.getStatus();
+      }
+
+      this.status.latestVersion = latestVersion;
 
       if (compareVersions(latestVersion, this.status.currentVersion) > 0) {
         this.status.updateAvailable = true;
@@ -368,7 +556,7 @@ export class Updater {
 
     try {
       // Fetch release info again to get asset URLs
-      const url = `https://api.github.com/repos/${this.config.repository}/releases/latest`;
+      const url = this.releaseUrl();
       const response = await httpsGet(url);
 
       if (response.statusCode !== 200) {

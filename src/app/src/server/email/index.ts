@@ -9,4 +9,6 @@ export {
   memberAddedEmail,
   passwordResetEmail,
   genericEmail,
+  serverUpdateAvailableEmail,
 } from "./templates";
+export type { ServerUpdateEmailInput } from "./templates";

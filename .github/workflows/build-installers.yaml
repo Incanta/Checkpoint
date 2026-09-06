@@ -1,12 +1,66 @@
 name: Build Installers
+run-name: Build Installers ${{ inputs.version || 'from versions.json' }}
+
+# Called by .github/workflows/release.yaml and still runnable on its own.
+#
+# Two delivery shapes, chosen by `stream`:
+#   release  Draft GitHub release tagged v<version>, published by hand.
+#   nightly  Rolling prerelease on the `nightly` tag. The tag is moved to the
+#            built commit and stale installers are pruned, so the tag always
+#            holds exactly one build and the daemon updater can point at a
+#            stable URL.
 
 on:
   workflow_dispatch:
     inputs:
-      node_version:
-        description: "Portable Node.js version slug bundled with the daemon (e.g. v24.17.0). See https://nodejs.org/en/download/archive/"
+      version:
+        description: "Version to build (defaults to versions.json client_version)"
         required: false
-        default: "v24.17.0"
+        type: string
+        default: ""
+      stream:
+        description: "Delivery stream"
+        required: false
+        type: choice
+        options: [release, nightly]
+        default: release
+      node_version:
+        description: "Portable Node.js version slug bundled with the daemon (e.g. v24.20.0). See https://nodejs.org/en/download/archive/"
+        required: false
+        default: "v24.20.0"
+  workflow_call:
+    inputs:
+      version:
+        required: false
+        type: string
+        default: ""
+      stream:
+        required: false
+        type: string
+        default: release
+      node_version:
+        required: false
+        type: string
+        default: "v24.20.0"
+      ref:
+        description: "Commit-ish to build from (defaults to the triggering ref)"
+        required: false
+        type: string
+        default: ""
+      addon_pin:
+        description: >-
+          Replay the `addon-pin` artifact (package.json files + yarn.lock)
+          published by publish-longtail-addon.yaml earlier in this run.
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      version:
+        description: "Version that was built"
+        value: ${{ jobs.prepare.outputs.version }}
+      tag:
+        description: "GitHub release tag the installers were attached to"
+        value: ${{ jobs.prepare.outputs.tag }}
 
 permissions:
   contents: write
@@ -22,15 +76,34 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      nightly: ${{ steps.version.outputs.nightly }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Determine version
         id: version
-        run: echo "version=$(jq -r '.client_version' versions.json)" >> "$GITHUB_OUTPUT"
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(jq -r '.client_version' versions.json)"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.stream }}" = "nightly" ]; then
+            echo "tag=$(jq -r '.nightlyTag' .github/release-config.json)" >> "$GITHUB_OUTPUT"
+            echo "nightly=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "nightly=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Print version
-        run: echo "Building version ${{ steps.version.outputs.version }}"
+        run: |
+          echo "Building version ${{ steps.version.outputs.version }}"
+          echo "Stream: ${{ inputs.stream }} (tag ${{ steps.version.outputs.tag }})"
 
   # ============================================================
   # Phase 2: Build CLI (C++ binaries) for each platform
@@ -63,7 +136,15 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      # Stamps src/clients/cli/version.hpp, which the CLI reports as its
+      # version and compares against the daemon at connect time.
+      - name: Stamp version
+        shell: bash
+        run: node scripts/set-version.js --client "${{ needs.prepare.outputs.version }}" --no-build
 
       - name: Install Windows build dependencies
         if: runner.os == 'Windows'
@@ -136,13 +217,22 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Apply addon pin
+        if: inputs.addon_pin
+        uses: actions/download-artifact@v8
+        with:
+          name: addon-pin
+          path: .
 
       - name: Enable Corepack
         shell: bash
         run: |
           # On Windows the runner ships Yarn 1 at a PATH location that
-          # outranks corepack's default install dir, so setup-node@v5's
+          # outranks corepack's default install dir, so setup-node's
           # cache probe falls back to Yarn 1 and fails on
           # packageManager: yarn@4. Install the corepack shim alongside
           # any pre-existing yarn so it overrides directly.
@@ -154,9 +244,15 @@ jobs:
           fi
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      # Stamps CLIENT_VERSION into @checkpointvcs/common, which the daemon
+      # bundles and reports to the updater as its current version.
+      - name: Stamp version
+        shell: bash
+        run: node scripts/set-version.js --client "${{ needs.prepare.outputs.version }}" --no-build
 
       - name: Install dependencies
         run: yarn install --immutable
@@ -219,12 +315,19 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      # Stamps src/clients/tray/version.go.
+      - name: Stamp version
+        shell: bash
+        run: node scripts/set-version.js --client "${{ needs.prepare.outputs.version }}" --no-build
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
-          go-version: "1.22"
+          go-version: "1.27"
 
       - name: Install Linux GTK dependencies
         if: runner.os == 'Linux'
@@ -274,23 +377,25 @@ jobs:
             linux_packages: true
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install packaging tools
         run: |
           sudo apt-get update
           sudo apt-get install -y zip gettext-base
-          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.43.0/nfpm_2.43.0_Linux_x86_64.tar.gz \
+          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz \
             | sudo tar -xz -C /usr/local/bin nfpm
 
       - name: Download CLI binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: cli-${{ matrix.platform }}
           path: artifacts/cli
 
       - name: Download Daemon dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: daemon-${{ matrix.platform }}
           path: artifacts/daemon
@@ -354,13 +459,22 @@ jobs:
       HAS_MAC_CERT: ${{ secrets.MACOS_CERT_BASE64 != '' }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Apply addon pin
+        if: inputs.addon_pin
+        uses: actions/download-artifact@v8
+        with:
+          name: addon-pin
+          path: .
 
       - name: Enable Corepack
         shell: bash
         run: |
           # On Windows the runner ships Yarn 1 at a PATH location that
-          # outranks corepack's default install dir, so setup-node@v5's
+          # outranks corepack's default install dir, so setup-node's
           # cache probe falls back to Yarn 1 and fails on
           # packageManager: yarn@4. Install the corepack shim alongside
           # any pre-existing yarn so it overrides directly.
@@ -372,9 +486,15 @@ jobs:
           fi
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      # Stamps every generated version constant, including the desktop
+      # package.json version electron-builder reads for artifact names.
+      - name: Stamp version
+        shell: bash
+        run: node scripts/set-version.js --client "${{ env.VERSION }}" --no-build
 
       - name: Install dependencies
         run: yarn install --immutable
@@ -383,19 +503,19 @@ jobs:
         run: yarn build
 
       - name: Download CLI artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: cli-${{ matrix.platform }}
           path: src/clients/desktop/build-resources/cli/
 
       - name: Download Daemon artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: daemon-${{ matrix.platform }}
           path: src/clients/desktop/build-resources/daemon/
 
       - name: Download Tray artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: tray-${{ matrix.platform }}
           path: src/clients/desktop/build-resources/tray/
@@ -406,17 +526,6 @@ jobs:
           chmod +x src/clients/desktop/build-resources/cli/* || true
           chmod +x src/clients/desktop/build-resources/daemon/* || true
           chmod +x src/clients/desktop/build-resources/tray/* || true
-
-      - name: Set version in package.json
-        shell: bash
-        run: |
-          cd src/clients/desktop
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
-            pkg.version = '${{ env.VERSION }}';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
-          "
 
       # ---- Code Signing Setup ----
 
@@ -461,7 +570,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           cd src/clients/desktop
-          yarn add --dev @electron/notarize
+          yarn add --dev @electron/notarize@3.1.1
 
       # ---- Build TypeScript + Vite + Electron ----
 
@@ -677,46 +786,127 @@ jobs:
           if-no-files-found: error
 
   # ============================================================
-  # Phase 5: Create GitHub Release with all installers
+  # Phase 5: Publish the GitHub Release with all installers
   # ============================================================
   create-release:
     needs: [prepare, build-installers, package-cli]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Record built commit
+        id: commit
+        # `github.sha` is the commit that triggered the run, which is not the
+        # commit being built when an addon bump landed first.
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Download all installer artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: installer-*
           path: release-assets/
           merge-multiple: true
 
       - name: Download headless CLI package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: cli-package-*
           path: release-assets/
           merge-multiple: true
 
-      - name: Package docker-compose quickstart
-        run: |
-          mkdir -p release-assets
-          # Stable, version-independent name so the tutorial can use a
-          # permanent URL: .../releases/latest/download/checkpoint-docker-compose.tar.gz
-          # Extracting yields a `docker-compose/` directory.
-          tar -czf release-assets/checkpoint-docker-compose.tar.gz docker-compose
-
       - name: List release assets
         run: find release-assets/ -type f | sort
 
-      - name: Create GitHub Release (draft)
-        uses: softprops/action-gh-release@v2
+      # --- Nightly: move the rolling tag and clear the previous build ---
+
+      - name: Move the nightly tag
+        if: needs.prepare.outputs.nightly == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "$TAG"
+          git push -f origin "refs/tags/$TAG"
+
+      - name: Prune the previous nightly's installers
+        if: needs.prepare.outputs.nightly == 'true'
+        # The rolling tag holds exactly one client build. Old installers carry
+        # the previous nightly's version in their filename, so without this they
+        # pile up forever and the updater could match a stale one.
+        #
+        # Scoped to the installer extensions THIS job publishes, and then to the
+        # ones not carrying this version. Anything wider is unsafe:
+        #
+        #   - The server stream uploads its bundles to this same tag and the two
+        #     jobs run in parallel, so a blanket delete races them.
+        #   - Server and client versions move independently
+        #     (scripts/set-version.js --server / --client), so filtering only by
+        #     "does not contain $VERSION" would delete this run's server bundles
+        #     whenever the two differ.
+        #   - On a client-only night the server does not rebuild at all, but the
+        #     channel manifest still points at the bundles from a previous run.
+        #     Deleting those leaves the nightly channel unbootable: a fresh
+        #     container resolves that version and 404s with nothing to fall
+        #     back to.
+        #
+        # The version-independent assets need no pruning: the headless CLI
+        # archives have stable names and are overwritten on upload, and the
+        # compose quickstart belongs to the server stream, which would not put
+        # it back on a client-only night.
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "No existing $TAG release; nothing to prune"
+            exit 0
+          fi
+          gh release view "$TAG" --json assets --jq '.assets[].name' \
+            | grep -E '\.(exe|deb|rpm|pkg|dmg)$' \
+            | grep -Fv -- "$VERSION" \
+            | while read -r asset; do
+                echo "Deleting stale installer: $asset"
+                gh release delete-asset "$TAG" "$asset" --yes
+              done
+
+      - name: Publish nightly prerelease
+        if: needs.prepare.outputs.nightly == 'true'
+        uses: softprops/action-gh-release@v3
         with:
-          tag_name: v${{ env.VERSION }}
+          tag_name: ${{ env.TAG }}
+          name: Checkpoint nightly ${{ env.VERSION }}
+          target_commitish: ${{ steps.commit.outputs.sha }}
+          draft: false
+          prerelease: true
+          # Nightlies must never become the repo's "latest" release; the
+          # release stream and the website both depend on that pointer.
+          make_latest: false
+          body: |
+            Automated nightly build of `${{ steps.commit.outputs.sha }}`.
+
+            Version `${{ env.VERSION }}`. This tag is rebuilt in place whenever
+            client code changes, so its assets are replaced without notice.
+            Clients on the `nightly` update channel pick these up automatically.
+          files: |
+            release-assets/**/*.exe
+            release-assets/**/*.deb
+            release-assets/**/*.rpm
+            release-assets/**/*.pkg
+            release-assets/**/*.dmg
+            release-assets/**/checkpoint-cli-*.tar.gz
+            release-assets/**/checkpoint-cli-*.zip
+
+      # --- Release: draft, published by hand ---
+
+      - name: Create GitHub Release (draft)
+        if: needs.prepare.outputs.nightly != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.TAG }}
           name: Checkpoint v${{ env.VERSION }}
           draft: true
           generate_release_notes: true
@@ -728,6 +918,3 @@ jobs:
             release-assets/**/*.dmg
             release-assets/**/checkpoint-cli-*.tar.gz
             release-assets/**/checkpoint-cli-*.zip
-            release-assets/checkpoint-docker-compose.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

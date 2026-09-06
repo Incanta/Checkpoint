@@ -27,6 +27,7 @@ import { billingRouter } from "./routers/billing";
 import { billingDevRouter } from "./routers/billing-dev";
 import { adminRouter } from "./routers/admin";
 import { inviteRouter } from "./routers/invite";
+import { updatesRouter } from "./routers/updates";
 
 /**
  * This is the primary router for your server.
@@ -62,6 +63,7 @@ export const appRouter = createTRPCRouter({
   billingDev: billingDevRouter,
   admin: adminRouter,
   invite: inviteRouter,
+  updates: updatesRouter,
 });
 
 // export type definition of API

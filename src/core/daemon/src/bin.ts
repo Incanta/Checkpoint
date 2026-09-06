@@ -113,8 +113,17 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
-  // Start the auto-update checker after the API is ready
-  const updater = getUpdater();
+  // Start the auto-update checker after the API is ready. The channel is a
+  // persisted user choice (daemon.json), overridable per-process with
+  // CHECKPOINT_UPDATE_CHANNEL for testing a stream without rewriting config.
+  const configuredChannel =
+    process.env["CHECKPOINT_UPDATE_CHANNEL"] ??
+    (await DaemonConfig.Get()).updates?.channel;
+  const updater = getUpdater(
+    configuredChannel === "nightly" || configuredChannel === "release"
+      ? { channel: configuredChannel }
+      : undefined,
+  );
   updater.start();
 
   // Start the API version compatibility checker

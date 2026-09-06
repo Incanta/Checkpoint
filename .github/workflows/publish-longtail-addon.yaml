@@ -1,6 +1,11 @@
 name: Publish Longtail Addon
 run-name: Publish Longtail Addon ${{ inputs.version }}
 
+# Called by .github/workflows/release.yaml (both streams) and still runnable on
+# its own. The nightly stream publishes under the `nightly` dist-tag and does
+# NOT commit; the release stream publishes `latest` and commits the version
+# bump (package.json files + yarn.lock) back to the branch.
+
 on:
   workflow_dispatch:
     inputs:
@@ -8,6 +13,43 @@ on:
         description: "Version to publish (e.g., 1.2.3)"
         required: true
         type: string
+      npm_tag:
+        description: "npm dist-tag to publish under"
+        required: false
+        type: string
+        default: "latest"
+      commit:
+        description: "Commit the version bump back to the branch"
+        required: false
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      npm_tag:
+        required: false
+        type: string
+        default: "latest"
+      commit:
+        required: false
+        type: boolean
+        default: true
+      ref:
+        description: "Commit-ish to build from (defaults to the triggering ref)"
+        required: false
+        type: string
+        default: ""
+    outputs:
+      version:
+        description: "The addon version that was published"
+        value: ${{ jobs.publish.outputs.version }}
+      head_sha:
+        description: >-
+          Commit downstream builds should use. Equals the input ref unless the
+          version bump was committed, in which case it is the new commit.
+        value: ${{ jobs.publish.outputs.head_sha }}
 
 jobs:
   build-native:
@@ -30,13 +72,15 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Enable Corepack
         shell: bash
         run: |
           # On Windows the runner ships Yarn 1 at a PATH location that
-          # outranks corepack's default install dir, so setup-node@v5's
+          # outranks corepack's default install dir, so setup-node's
           # cache probe falls back to Yarn 1 and fails on
           # packageManager: yarn@4. Install the corepack shim alongside
           # any pre-existing yarn so it overrides directly.
@@ -47,7 +91,7 @@ jobs:
             corepack enable
           fi
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
@@ -62,7 +106,8 @@ jobs:
       # ----------------------------------------------------------------
       # Build native addon (.node)
       # The addon CMakeLists.txt builds the longtail C library from
-      # source (add_subdirectory) and fetches libcurl (FetchContent).
+      # source (add_subdirectory), compiles the C++ wrapper sources from
+      # src/longtail/wrapper, and fetches libcurl (FetchContent).
       # ----------------------------------------------------------------
 
       - name: Install addon dependencies
@@ -108,15 +153,23 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    outputs:
+      version: ${{ inputs.version }}
+      head_sha: ${{ steps.head.outputs.sha }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          # The commit step below rebases onto the target branch before pushing,
+          # which a shallow clone has no merge base for.
+          fetch-depth: 0
 
       - name: Enable Corepack
         shell: bash
         run: |
           # On Windows the runner ships Yarn 1 at a PATH location that
-          # outranks corepack's default install dir, so setup-node@v5's
+          # outranks corepack's default install dir, so setup-node's
           # cache probe falls back to Yarn 1 and fails on
           # packageManager: yarn@4. Install the corepack shim alongside
           # any pre-existing yarn so it overrides directly.
@@ -127,7 +180,7 @@ jobs:
             corepack enable
           fi
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           registry-url: "https://registry.npmjs.org"
           node-version: "24"
@@ -137,7 +190,7 @@ jobs:
       # ----------------------------------------------------------------
 
       - name: Download all prebuild artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -155,48 +208,12 @@ jobs:
           cp "$GITHUB_WORKSPACE/artifacts/prebuild-darwin-arm64/longtail_addon.node" prebuilds/darwin-arm64/
 
       # ----------------------------------------------------------------
-      # Update version numbers
+      # Update version numbers (addon + the three workspaces that depend
+      # on it: src/app, src/core/server, src/core/daemon)
       # ----------------------------------------------------------------
 
-      - name: Update version in package.json files
-        run: |
-          VERSION="${{ inputs.version }}"
-
-          # Update addon version
-          cd src/longtail/addon
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.version = '${VERSION}';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-
-          # Update server dependency
-          cd ../../core/server
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.dependencies['@checkpointvcs/longtail-addon'] = '^${VERSION}';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-
-          # Update daemon dependency
-          cd ../daemon
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.dependencies['@checkpointvcs/longtail-addon'] = '^${VERSION}';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-
-          # Update app dependency
-          cd ../../app
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.dependencies['@checkpointvcs/longtail-addon'] = '^${VERSION}';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
+      - name: Set addon version
+        run: node scripts/set-addon-version.js "${{ inputs.version }}"
 
       # ----------------------------------------------------------------
       # Build TypeScript
@@ -211,21 +228,96 @@ jobs:
         run: yarn build:ts
 
       # ----------------------------------------------------------------
-      # Commit, push, and publish
+      # Publish, then refresh the lockfile, then commit
+      #
+      # The lockfile has to be refreshed AFTER publishing (yarn resolves the
+      # new version against the registry) and the commit has to come last so a
+      # failed publish never leaves a bump behind on the branch.
       # ----------------------------------------------------------------
-
-      - name: Commit and push
-        continue-on-error: true # Don't fail if there are no changes to commit
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/longtail/addon/package.json src/core/server/package.json src/core/daemon/package.json src/app/package.json
-          git commit -m "chore: release @checkpointvcs/longtail-addon v${{ inputs.version }}"
-          git push
 
       - name: Publish to npm
         working-directory: src/longtail/addon
         env:
           NODE_AUTH_TOKEN: ""
         run: |
-          npx npm@latest publish --access public
+          # Pinned to a major rather than @latest: this step is the repository's
+          # npm publish credential path, and resolving it at run time means a
+          # bad npm release, or a compromised one, lands here first.
+          npx npm@12 publish --access public --tag "${{ inputs.npm_tag }}"
+
+      - name: Wait for the registry to serve the new version
+        run: |
+          for attempt in $(seq 1 30); do
+            if npm view "@checkpointvcs/longtail-addon@${{ inputs.version }}" version >/dev/null 2>&1; then
+              echo "Version ${{ inputs.version }} is live on the registry"
+              exit 0
+            fi
+            echo "Attempt ${attempt}: not visible yet, retrying in 10s..."
+            sleep 10
+          done
+          echo "Timed out waiting for @checkpointvcs/longtail-addon@${{ inputs.version }}"
+          exit 1
+
+      - name: Refresh the root lockfile
+        # Every consumer builds with `yarn install --immutable`, so the bumped
+        # dependency ranges are useless (and actively breaking) until yarn.lock
+        # agrees with them.
+        run: yarn install --mode=update-lockfile
+
+      - name: Commit and push
+        if: inputs.commit
+        env:
+          # release.yaml calls this with a SHA, and checking out a SHA leaves
+          # HEAD detached, where a bare `git push` fails outright ("You are not
+          # currently on a branch"). Name the branch explicitly instead.
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/longtail/addon/package.json src/core/server/package.json \
+                  src/core/daemon/package.json src/app/package.json yarn.lock
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore: release @checkpointvcs/longtail-addon v${{ inputs.version }}"
+
+          # The native matrix takes long enough that the branch can move
+          # underneath us, and the package is already published by this point,
+          # so a lost race must not fail the release. Rebase and retry.
+          pushed=false
+          for attempt in 1 2 3; do
+            git fetch origin "$TARGET_BRANCH"
+            if git rebase "origin/$TARGET_BRANCH" \
+              && git push origin "HEAD:refs/heads/$TARGET_BRANCH"; then
+              pushed=true
+              break
+            fi
+            git rebase --abort || true
+            echo "Push attempt ${attempt} to $TARGET_BRANCH failed; retrying in 5s"
+            sleep 5
+          done
+          if [ "$pushed" != "true" ]; then
+            echo "Could not push the addon bump to $TARGET_BRANCH."
+            echo "v${{ inputs.version }} IS published to npm; the bump needs applying by hand."
+            exit 1
+          fi
+
+      - name: Record head commit
+        id: head
+        # Downstream builds must use the post-bump commit, otherwise they
+        # install the previous addon.
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload pinned manifests
+        # Consumers that build without a commit (the nightly stream) replay
+        # these over their own checkout instead of re-resolving.
+        uses: actions/upload-artifact@v7
+        with:
+          name: addon-pin
+          retention-days: 1
+          path: |
+            src/app/package.json
+            src/core/server/package.json
+            src/core/daemon/package.json
+            yarn.lock

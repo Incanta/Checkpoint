@@ -1,0 +1,77 @@
+{
+  "$comment": [
+    "Source of truth for CD change-detection. Consumed by",
+    "scripts/detect-changed-components.js, which is driven by",
+    ".github/workflows/release.yaml.",
+    "",
+    "Each component names the paths whose changes require it to be rebuilt, and",
+    "the git marker tag recording the commit it was last built from. A nightly",
+    "run diffs marker..HEAD; an empty diff means the component is skipped.",
+    "",
+    "'cascades' lists components that must also rebuild when this one does.",
+    "The addon is compiled into the server images and the daemon bundle (all of",
+    "src/app, src/core/server and src/core/daemon depend on",
+    "@checkpointvcs/longtail-addon), so publishing a new addon forces both."
+  ],
+  "repository": "Incanta/Checkpoint",
+  "nightlyTag": "nightly",
+  "components": {
+    "longtail-addon": {
+      "description": "@checkpointvcs/longtail-addon npm package (native prebuilds + TS)",
+      "marker": "cd-marker/longtail-addon",
+      "cascades": ["server", "client"],
+      "paths": [
+        "src/longtail/addon/**",
+        "src/longtail/wrapper/**",
+        "src/longtail/library/**",
+        ".github/workflows/publish-longtail-addon.yaml"
+      ]
+    },
+    "server": {
+      "description": "Signed app + core-server deployment bundles",
+      "marker": "cd-marker/server",
+      "cascades": [],
+      "paths": [
+        "src/app/**",
+        "src/core/server/**",
+        "src/core/common/**",
+        "src/core/types/**",
+        "src/core/package.json",
+        "src/core/tsconfig.json",
+        "package.json",
+        "yarn.lock",
+        "scripts/set-version.js",
+        "scripts/check-workspace-deps.js",
+        "scripts/bundle/**",
+        "docker-compose/**",
+        ".github/workflows/publish-server-bundles.yaml"
+      ]
+    },
+    "client": {
+      "description": "Desktop installers, headless CLI packages, daemon, tray",
+      "marker": "cd-marker/client",
+      "cascades": [],
+      "paths": [
+        "src/clients/cli/**",
+        "src/clients/desktop/**",
+        "src/clients/tray/**",
+        "src/core/daemon/**",
+        "src/core/common/**",
+        "src/core/types/**",
+        "src/core/package.json",
+        "src/core/tsconfig.json",
+        "installer/**",
+        "package.json",
+        "yarn.lock",
+        "scripts/build-daemon.sh",
+        "scripts/build-daemon.ps1",
+        "scripts/assemble-cli-package.sh",
+        "scripts/package-cli-headless.sh",
+        "scripts/copy-daemon-node-modules.mjs",
+        "scripts/set-version.js",
+        "scripts/check-workspace-deps.js",
+        ".github/workflows/build-installers.yaml"
+      ]
+    }
+  }
+}

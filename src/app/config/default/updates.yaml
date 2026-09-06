@@ -1,0 +1,45 @@
+# Update awareness for this instance.
+#
+# The CD pipeline publishes a small channel manifest alongside each build
+# (scripts/build-channel-manifest.js) naming the newest version on a channel.
+# This poller reads it, emails the addresses below when that version is newer
+# than the one running, and feeds the Admin -> Updates panel.
+#
+# The manifest is read rather than the release's own assets because a version
+# is only meaningful once every component of it has shipped; the manifest is
+# written after that, so it never points at a half-published release.
+#
+# Nothing is ever installed automatically. An update is applied only when an
+# admin clicks through Download and then Install in that panel.
+#
+# On by default, opt out by setting this to false. Knowing an update exists
+# should not be something an operator has to discover a config key to switch
+# on, and no email is sent unless email.enabled is also configured, so the
+# default costs a manifest fetch every few hours and nothing else.
+#
+# `enabled` is the master switch for all of the above, not just the email: with
+# it false the poller never starts, the panel reports nothing available, and
+# even its "Check now" button is a no-op, so no update can be installed from
+# the UI either.
+enabled: true
+
+# Which delivery stream to watch: "release" or "nightly".
+channel: release
+
+# Where the manifest lives. Leave `manifest-url` empty to derive it from
+# `repository` and `channel`, which is what you want unless you mirror releases
+# somewhere else.
+repository: "Incanta/Checkpoint"
+manifest-url: ""
+
+# Tag holding the rolling nightly prerelease. Must match `nightlyTag` in
+# .github/release-config.json.
+nightly-tag: "nightly"
+
+# How often to poll. Each version is only ever emailed once, so a short
+# interval costs nothing but a request.
+check-interval-hours: 6
+
+# Who to notify. When empty, falls back to the admin who completed the initial
+# instance setup. Requires email.enabled.
+notify-emails: []

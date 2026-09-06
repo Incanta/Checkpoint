@@ -5,6 +5,9 @@ services:
   # Recommended database for Checkpoint. The credentials below are
   # development defaults: change POSTGRES_PASSWORD before any real use, and
   # keep it in sync with `database_url` in ./config/.secrets.
+  #
+  # Switching to Postgres also means setting CHECKPOINT_DB_PROVIDER=postgresql
+  # on the app service below, which selects the matching bundle.
   # postgres:
   #   container_name: checkpoint-postgres
   #   image: postgres:17-alpine
@@ -26,14 +29,32 @@ services:
   # ----------------------------------------------------------------
   # App: Next.js application (UI + API)
   # ----------------------------------------------------------------
+  # Both services run the same version-independent runtime image. It downloads
+  # the signed bundle for the channel below, verifies it, and runs it. Updates
+  # are applied from Admin -> Updates in the web UI; nothing installs itself.
   app:
     container_name: checkpoint-app
-    image: ghcr.io/incanta/checkpoint-app:latest-sqlite
+    image: ghcr.io/incanta/checkpoint-runtime:node24
+    # REQUIRED. Installing an update works by exiting so the container comes
+    # back on the new bundle. Without a restart policy, "install" stops the
+    # service instead of upgrading it.
     restart: unless-stopped
     networks:
       - checkpoint
     ports:
       - "13000:13000"
+    environment:
+      CHECKPOINT_COMPONENT: app
+      # release = published versions, nightly = automated builds off main.
+      CHECKPOINT_BUNDLE_CHANNEL: release
+      CHECKPOINT_DB_PROVIDER: sqlite
+      # To pin instead of following the channel, set CHECKPOINT_BUNDLE_VERSION
+      # and the in-app update button turns itself off:
+      # CHECKPOINT_BUNDLE_VERSION: 0.5.0
+      #
+      # Air-gapped: mount a bundle plus its .sig.json and point at it. Nothing
+      # is fetched over the network.
+      # CHECKPOINT_BUNDLE_PATH: /bundles/checkpoint-bundle-app-0.5.0-sqlite.tar.zst
     # depends_on:
     #   postgres:
     #     condition: service_healthy
@@ -41,29 +62,38 @@ services:
       - app-data:/app/data
       - ./config/app:/app/config
       - ./config/.secrets:/app/.secrets:ro
+      # Downloaded bundles plus the record of which one should be running.
+      # Shared with the server so activating an update restarts both.
+      - bundles:/var/lib/checkpoint
 
   # ----------------------------------------------------------------
   # Server: Core storage server
   # ----------------------------------------------------------------
   server:
     container_name: checkpoint-server
-    image: ghcr.io/incanta/checkpoint-server:latest
+    image: ghcr.io/incanta/checkpoint-runtime:node24
     restart: unless-stopped
     networks:
       - checkpoint
     ports:
       - "13001:13001"
+    environment:
+      CHECKPOINT_COMPONENT: server
+      CHECKPOINT_BUNDLE_CHANNEL: release
+      # CHECKPOINT_BUNDLE_VERSION: 0.5.0
     volumes:
       # `storage-data` volume is only used by the SeaweedFS "stub" storage mode (the default).
       # Harmless for the R2 and full-SeaweedFS modes.
       - storage-data:/app/data
       - ./config/server:/app/config
       - ./config/.secrets:/app/.secrets:ro
+      - bundles:/var/lib/checkpoint
 
 volumes:
   # postgres-data:
   app-data:
   storage-data:
+  bundles:
 
 networks:
   checkpoint:

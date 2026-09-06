@@ -2544,6 +2544,7 @@ export default class DaemonHandler {
           downloadProgress: status.downloadProgress,
           errorMessage: status.lastError,
           dismissed: current.dismissed,
+          channel: status.channel,
         });
       } catch {
         // Daemon might not be running yet
@@ -2567,6 +2568,7 @@ export default class DaemonHandler {
           downloadProgress: 0,
           errorMessage: status.lastError,
           dismissed: false,
+          channel: status.channel,
         });
       } catch (err: any) {
         const current = store.get(updateAtom);
@@ -2574,6 +2576,34 @@ export default class DaemonHandler {
           ...current,
           status: "error",
           errorMessage: err?.message ?? "Update check failed",
+        });
+      }
+    });
+
+    ipcOn(this.ipcMain, "update:set-channel", async (_event, { channel }) => {
+      try {
+        const client = await CreateDaemonClient();
+        // The daemon persists the choice and re-checks against the new stream
+        // before returning, so this status is already for the new channel.
+        const status = await client.updater.setChannel.mutate({ channel });
+        store.set(updateAtom, {
+          available: status.updateAvailable,
+          currentVersion: status.currentVersion,
+          latestVersion: status.latestVersion,
+          status: status.updateAvailable ? "available" : "idle",
+          downloadProgress: 0,
+          errorMessage: status.lastError,
+          // A different stream is a different offer, so an earlier dismissal
+          // should not hide it.
+          dismissed: false,
+          channel: status.channel,
+        });
+      } catch (err: any) {
+        const current = store.get(updateAtom);
+        store.set(updateAtom, {
+          ...current,
+          status: "error",
+          errorMessage: err?.message ?? "Failed to change update channel",
         });
       }
     });

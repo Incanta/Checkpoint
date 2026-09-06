@@ -88,8 +88,35 @@ docker compose logs -f app  # watch startup + DB migrations
 
 The app applies database migrations automatically on boot. Once healthy, open `http://IP_ADDRESS:13000`.
 
+The first boot downloads the deployment bundle before starting, so it takes noticeably longer than later ones. `docker compose logs -f app` shows the download and signature check.
+
+## 5. Keeping it up to date
+
+Both services run the same version-independent runtime image and download the Checkpoint version they should run. Updates are applied from the web UI, under **Admin, Updates**:
+
+1. **Download** fetches and verifies the new version while the current one keeps serving. Nothing is interrupted, and a failed download costs no downtime.
+2. **Install** restarts both services onto it. The bundle is already on disk by then, so this is a process restart rather than a download.
+
+**Roll back** returns to the previous version, which is kept on disk. Database migrations are not reversed, so rolling back across one is not safe.
+
+The panel tells you when an update appears without any configuration. To also be emailed about it, add `config/app/updates.yaml` (email itself needs `config/app/email.yaml` configured; with no recipients listed it mails whoever completed setup):
+
+```yaml
+channel: release # or nightly, for automated builds off main
+notify-emails:
+  - ops@example.com
+```
+
+To opt out of update checks altogether, set `enabled: false` there. That also disables the update panel, so nothing can be installed from the UI.
+
+To follow nightly builds instead, set `CHECKPOINT_BUNDLE_CHANNEL: nightly` on **both** services.
+
+To hold a fixed version, set `CHECKPOINT_BUNDLE_VERSION` on both services. The in-app update button turns itself off, because the version then belongs to this file rather than to the UI.
+
 ## Notes
 
 - **Database:** Postgres is recommended and is the only documented setup here.
 - **Email** is disabled by default (`config/app/email.yaml`). Enable it and set `email_smtp_password` in `config/.secrets` to send invites/notifications.
-- **Images** are pulled from `ghcr.io/incanta/checkpoint-*`. The app uses the `latest-postgres` tag.
+- **`restart: unless-stopped` is required.** Installing an update works by exiting so the container comes back on the new version; without a restart policy, Install stops the service instead of upgrading it.
+- **The `bundles` volume** holds downloaded versions and the record of which one should be running. Both services mount it, and deleting it forces a fresh download on next boot.
+- **Air-gapped installs** can mount a bundle and its `.sig.json` sidecar and set `CHECKPOINT_BUNDLE_PATH` instead, which never reaches the network. See `.github/RELEASING.md`.

@@ -13,6 +13,14 @@ export interface DaemonConfigType {
   workspaces: Workspace[];
   /** "json" (default) keeps state.json; "sqlite" uses a WAL-mode SQLite DB */
   stateBackend: "json" | "sqlite";
+  updates: {
+    /**
+     * Delivery stream the auto-updater follows. "release" tracks published
+     * releases; "nightly" tracks the rolling prerelease built off main. See
+     * src/core/daemon/src/updater.ts.
+     */
+    channel: "release" | "nightly";
+  };
   logging: {
     level: string;
     prettify: {
@@ -71,6 +79,9 @@ export class DaemonConfig {
       },
       workspaces: [],
       stateBackend: "sqlite",
+      updates: {
+        channel: "release",
+      },
       logging: {
         level: "info",
         prettify: {
@@ -145,6 +156,11 @@ export class DaemonConfig {
             enabled: false,
             port: 13011,
           };
+          shouldSave = true;
+        }
+
+        if (!DaemonConfig.Ensure().vars.updates) {
+          DaemonConfig.Ensure().vars.updates = { channel: "release" };
           shouldSave = true;
         }
       } catch (e) {
