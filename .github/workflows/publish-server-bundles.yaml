@@ -128,16 +128,20 @@ jobs:
       #                      back to a tarball, which would leave the
       #                      `git rev-parse HEAD` below with no repository
       #   zstd, libssl3      bundle archives, and what the addon/Prisma link to
-      #   build-essential,   node-gyp. better-sqlite3 declares no prebuilds
-      #   python3            (node-addon-api + node-gyp only), so a root install
-      #                      always compiles it from source. It is a daemon
-      #                      dependency and ships in neither bundle, but the
-      #                      workspace install still has to get through it.
+      #   g++, make,         node-gyp. Yarn implicitly runs `node-gyp rebuild`
+      #   python3            for any package carrying a binding.gyp, and
+      #                      better-sqlite3 does. It almost never compiles:
+      #                      its binding.gyp resolves to a no-op target when the
+      #                      package ships a prebuild for the host, which it
+      #                      does for linux-x64. But node-gyp still needs python
+      #                      to evaluate the gyp file and make to run the empty
+      #                      target, and without them it fails during configure,
+      #                      before it can discover it had nothing to do.
       - name: Install build prerequisites
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential ca-certificates git libssl3 python3 zstd
+            ca-certificates g++ git libssl3 make python3 zstd
           # The container runs as root over a workspace the runner owns, which
           # git can read as dubious ownership and refuse. Set before checkout,
           # which is itself the first thing to touch the repository.
