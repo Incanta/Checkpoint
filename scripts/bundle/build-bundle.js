@@ -49,6 +49,12 @@ for (let i = 0; i < args.length; i++) {
     opt.sign = true;
     continue;
   }
+  // Leaves the staged tree next to the archive so its contents can be
+  // inspected, or the bundled CLI run, without unpacking anything.
+  if (flag === "keep-stage") {
+    opt.keepStage = true;
+    continue;
+  }
   opt[flag] = eq === -1 ? args[++i] : a.slice(eq + 1);
 }
 
@@ -84,6 +90,91 @@ function copy(from, to, { optional = false } = {}) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.cpSync(src, dest, { recursive: true, dereference: true });
   return true;
+}
+
+/**
+ * Locate an installed package by walking node_modules upward from `fromDir`,
+ * the way Node itself resolves. require.resolve is not usable here: many
+ * packages have an "exports" map that hides package.json.
+ */
+function findPackage(name, fromDir) {
+  let dir = fromDir;
+  for (;;) {
+    const pkgPath = path.join(dir, "node_modules", name, "package.json");
+    if (fs.existsSync(pkgPath)) return pkgPath;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Copy a package and everything it needs at runtime.
+ *
+ * Copying just node_modules/prisma is not enough. The Prisma CLI's own
+ * dependencies (@prisma/config, and through it `effect`) live hoisted at the
+ * repo root, so they are present in the dev tree and absent from the bundle:
+ * the app bundle's node_modules is Next's traced output, and Next only traces
+ * what the app imports, which is the Prisma client, never the CLI.
+ *
+ * Anything already staged wins. Next's traced copy is the version the app was
+ * built against, so a hoisted copy of the same package must not clobber it.
+ */
+function copyPackageClosure(roots) {
+  const copied = [];
+  const skipped = [];
+  const missing = [];
+  const seen = new Set();
+
+  const visit = (name, fromDir, optional) => {
+    if (seen.has(name)) return;
+
+    const pkgPath = findPackage(name, fromDir);
+    if (!pkgPath) {
+      // Optional dependencies are routinely absent (platform-specific builds).
+      if (!optional) missing.push(name);
+      return;
+    }
+    seen.add(name);
+
+    const pkgDir = path.dirname(pkgPath);
+    const relative = path.join("node_modules", ...name.split("/"));
+
+    if (fs.existsSync(path.join(stageDir, relative))) {
+      skipped.push(name);
+    } else {
+      fs.mkdirSync(path.dirname(path.join(stageDir, relative)), {
+        recursive: true,
+      });
+      fs.cpSync(pkgDir, path.join(stageDir, relative), {
+        recursive: true,
+        dereference: true,
+      });
+      copied.push(name);
+    }
+
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    for (const dep of Object.keys(pkg.dependencies ?? {})) {
+      visit(dep, pkgDir, false);
+    }
+    for (const dep of Object.keys(pkg.optionalDependencies ?? {})) {
+      visit(dep, pkgDir, true);
+    }
+  };
+
+  for (const root of roots) visit(root, repoRoot, false);
+
+  if (missing.length) {
+    throw new Error(
+      `cannot resolve ${missing.join(", ")} from the installed tree; ` +
+        `the bundle would fail at runtime (did yarn install run?)`,
+    );
+  }
+
+  console.log(
+    `  ${roots.join(", ")}: copied ${copied.length} packages` +
+      (skipped.length ? `, kept ${skipped.length} already staged` : ""),
+  );
 }
 
 function dirSize(dir) {
@@ -134,8 +225,13 @@ if (component === "app") {
     `src/app/prisma/migrations-${provider}`,
     "src/app/prisma/migrations",
   );
-  copy("node_modules/prisma", "node_modules/prisma");
-  copy("node_modules/@prisma", "node_modules/@prisma");
+  // The whole CLI, not just node_modules/prisma: its dependencies are hoisted
+  // to the repo root and Next traced none of them, because the app imports the
+  // Prisma client and never the CLI.
+  copyPackageClosure(["prisma"]);
+  // The generated client and its query engine, overwriting whatever Next
+  // traced. This checkout's copy is the one `db:set-provider` + `prisma
+  // generate` just produced for THIS provider, so it is the authoritative one.
   copy("node_modules/.prisma", "node_modules/.prisma", { optional: true });
 
   // Next's file tracing does not reliably pick up the native addon's prebuilt
@@ -187,7 +283,11 @@ console.log(`Archiving to ${archiveName}...`);
 // Windows-style path for a host:path spec during local testing.
 run("tar", ["--zstd", "-cf", archiveName, "-C", stageDir, "."], outDir);
 
-fs.rmSync(stageRoot, { recursive: true, force: true });
+if (opt.keepStage) {
+  console.log(`  staged tree kept at ${stageDir}`);
+} else {
+  fs.rmSync(stageRoot, { recursive: true, force: true });
+}
 
 const archiveBytes = fs.statSync(archivePath).size;
 console.log(`  ${(archiveBytes / 1024 / 1024).toFixed(1)} MiB compressed`);
