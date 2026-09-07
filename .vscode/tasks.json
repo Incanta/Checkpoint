@@ -8,7 +8,7 @@
       "type": "shell",
       "command": "build-and-copy.bat",
       "options": {
-        "cwd": "${workspaceFolder}/shared_lib"
+        "cwd": "${workspaceFolder}/src/longtail/library/shared_lib"
       },
       "problemMatcher": [],
       "group": {
@@ -23,6 +23,16 @@
         "showReuseMessage": true,
         "clear": true
       }
+    },
+    {
+      "label": "Build VS Code Extension",
+      "type": "shell",
+      "command": "yarn build",
+      "options": {
+        "cwd": "${workspaceFolder}/src/clients/vscode"
+      },
+      "group": "build",
+      "problemMatcher": ["$tsc"]
     }
   ]
 }
