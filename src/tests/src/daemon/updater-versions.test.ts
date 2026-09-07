@@ -1,8 +1,8 @@
 /**
  * Version handling in the daemon auto-updater.
  *
- * These two helpers decide whether a machine ever sees a new build, and they
- * fail silently when wrong: a bad comparison just reports "up to date" forever.
+ * These helpers decide whether a machine ever sees a new build, and they fail
+ * silently when wrong: a bad comparison just reports "up to date" forever.
  * The nightly channel makes that sharper, because every nightly version is a
  * semver prerelease ("0.5.0-nightly.202609030800.g1a2b3c4d") and the previous
  * numeric-only comparison parsed those as NaN.
@@ -12,7 +12,10 @@ import { describe, expect, it } from "vitest";
 import {
   compareVersions,
   extractVersionFromFilename,
+  pickPendingInstaller,
 } from "../../../core/daemon/src/updater.js";
+
+const WINDOWS_PATTERN = "Checkpoint-Windows-x64-.*-Setup\\.exe$";
 
 describe("compareVersions", () => {
   it("orders release versions by numeric core", () => {
@@ -65,15 +68,15 @@ describe("extractVersionFromFilename", () => {
     expect(
       extractVersionFromFilename("Checkpoint-Windows-x64-0.4.11-Setup.exe"),
     ).toBe("0.4.11");
-    expect(extractVersionFromFilename("Checkpoint-Linux-amd64-0.4.11.deb")).toBe(
-      "0.4.11",
-    );
-    expect(extractVersionFromFilename("Checkpoint-Linux-amd64-0.4.11.rpm")).toBe(
-      "0.4.11",
-    );
-    expect(extractVersionFromFilename("Checkpoint-macOS-arm64-0.4.11.pkg")).toBe(
-      "0.4.11",
-    );
+    expect(
+      extractVersionFromFilename("Checkpoint-Linux-amd64-0.4.11.deb"),
+    ).toBe("0.4.11");
+    expect(
+      extractVersionFromFilename("Checkpoint-Linux-amd64-0.4.11.rpm"),
+    ).toBe("0.4.11");
+    expect(
+      extractVersionFromFilename("Checkpoint-macOS-arm64-0.4.11.pkg"),
+    ).toBe("0.4.11");
     expect(extractVersionFromFilename("Checkpoint-macOS-x64-0.4.11.pkg")).toBe(
       "0.4.11",
     );
@@ -100,5 +103,80 @@ describe("extractVersionFromFilename", () => {
       extractVersionFromFilename("checkpoint-cli-linux-x64.tar.gz"),
     ).toBeNull();
     expect(extractVersionFromFilename("notes-0.4.11.txt")).toBeNull();
+  });
+});
+
+/**
+ * The daemon exits as part of applying an update, taking its in-memory
+ * "installer is downloaded" state with it. Re-adopting the file on startup is
+ * what turns a failed install into a one-click retry instead of another 180 MB
+ * download, so this has to pick exactly the right file out of the directory.
+ */
+describe("pickPendingInstaller", () => {
+  it("adopts an installer newer than the running version", () => {
+    expect(
+      pickPendingInstaller(
+        ["Checkpoint-Windows-x64-0.4.16-Setup.exe"],
+        "0.4.15",
+        WINDOWS_PATTERN,
+      ),
+    ).toEqual({
+      name: "Checkpoint-Windows-x64-0.4.16-Setup.exe",
+      version: "0.4.16",
+    });
+  });
+
+  it("ignores installers at or below the running version", () => {
+    expect(
+      pickPendingInstaller(
+        [
+          "Checkpoint-Windows-x64-0.4.15-Setup.exe",
+          "Checkpoint-Windows-x64-0.4.14-Setup.exe",
+        ],
+        "0.4.15",
+        WINDOWS_PATTERN,
+      ),
+    ).toBeNull();
+  });
+
+  it("picks the newest when several are left behind", () => {
+    expect(
+      pickPendingInstaller(
+        [
+          "Checkpoint-Windows-x64-0.4.16-Setup.exe",
+          "Checkpoint-Windows-x64-0.5.0-Setup.exe",
+          "Checkpoint-Windows-x64-0.4.17-Setup.exe",
+        ],
+        "0.4.15",
+        WINDOWS_PATTERN,
+      )?.version,
+    ).toBe("0.5.0");
+  });
+
+  it("orders nightlies by their prerelease suffix", () => {
+    expect(
+      pickPendingInstaller(
+        [
+          "Checkpoint-Windows-x64-0.4.16-nightly.202609070605.g1cc8504e-Setup.exe",
+          "Checkpoint-Windows-x64-0.4.16-nightly.202609072126.gcba0da20-Setup.exe",
+        ],
+        "0.4.16-nightly.202609070605.g1cc8504e",
+        WINDOWS_PATTERN,
+      )?.version,
+    ).toBe("0.4.16-nightly.202609072126.gcba0da20");
+  });
+
+  it("skips other platforms' assets and the install marker", () => {
+    expect(
+      pickPendingInstaller(
+        [
+          ".installing",
+          "Checkpoint-Linux-amd64-0.9.0.deb",
+          "Checkpoint-macOS-arm64-0.9.0.pkg",
+        ],
+        "0.4.15",
+        WINDOWS_PATTERN,
+      ),
+    ).toBeNull();
   });
 });

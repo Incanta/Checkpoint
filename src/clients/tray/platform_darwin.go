@@ -50,3 +50,8 @@ func openPath(p string) {
 func openDesktopApp() {
 	_ = exec.Command("open", "-a", "Checkpoint").Start()
 }
+
+// updateInstallInProgress only matters on Windows, where the tray supervises
+// the daemon directly and can race the installer for its files. Here launchd
+// owns the daemon and the .pkg install is a single atomic step.
+func updateInstallInProgress() bool { return false }

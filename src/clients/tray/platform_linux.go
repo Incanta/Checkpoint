@@ -59,3 +59,8 @@ func openDesktopApp() {
 	}
 	_ = exec.Command("xdg-open", "checkpoint").Start()
 }
+
+// updateInstallInProgress only matters on Windows, where the tray supervises
+// the daemon directly and can race the installer for its files. Here systemd
+// owns the daemon and dpkg/rpm restart it themselves.
+func updateInstallInProgress() bool { return false }

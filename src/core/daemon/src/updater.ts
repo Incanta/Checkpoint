@@ -8,6 +8,7 @@ import path from "path";
 import { homedir, platform, arch } from "os";
 import https from "https";
 import http from "http";
+import { spawn } from "child_process";
 import { Logger } from "./logging.js";
 import { DaemonConfig } from "./daemon-config.js";
 import { CLIENT_VERSION } from "@checkpointvcs/common";
@@ -74,6 +75,43 @@ interface GitHubAsset {
   browser_download_url: string;
   size: number;
   content_type: string;
+}
+
+/** Directory downloaded installers live in. */
+function updatesDir(): string {
+  return path.join(homedir(), ".checkpoint", "updates");
+}
+
+/**
+ * Marker written just before an installer is launched and removed once the
+ * daemon comes back up. See {@link InstallMarker}.
+ */
+function installMarkerPath(): string {
+  return path.join(updatesDir(), ".installing");
+}
+
+/**
+ * Hand-off note from applyUpdate() to the tray.
+ *
+ * On Windows the tray supervises the daemon: when the daemon disappears the
+ * tray starts it again. That is exactly wrong during an update, because the
+ * installer is in the middle of extracting over
+ * `<INSTDIR>\daemon\checkpoint-daemon.exe`, and a daemon that comes back up
+ * first holds that file open and the extraction fails - silently, since the
+ * installer runs with /S. The tray reads this file and holds off starting the
+ * daemon until either the daemon's VERSION file no longer matches
+ * `fromVersion` (the new files landed) or the marker ages out (the install
+ * never happened).
+ */
+interface InstallMarker {
+  /** Epoch ms the installer was launched. */
+  startedAt: number;
+  /** Version being replaced; the tray watches for this to change on disk. */
+  fromVersion: string;
+  /** Version the installer carries, when it could be read off the filename. */
+  toVersion: string | null;
+  /** Installer that was launched, for log correlation. */
+  installer: string;
 }
 
 function getCurrentVersion(): string {
@@ -343,6 +381,185 @@ function downloadFile(
   });
 }
 
+/**
+ * Newest installer in `entries` worth installing over `currentVersion`, or null.
+ *
+ * Only names matching this platform's asset pattern are considered, so a
+ * leftover .deb on a Windows box (or the .installing marker) can't be picked up,
+ * and only versions strictly newer than what's running qualify.
+ */
+export function pickPendingInstaller(
+  entries: string[],
+  currentVersion: string,
+  assetPattern: string,
+): { name: string; version: string } | null {
+  const regex = new RegExp(assetPattern);
+
+  let best: { name: string; version: string } | null = null;
+  for (const name of entries) {
+    if (!regex.test(name)) continue;
+
+    const version = extractVersionFromFilename(name);
+    if (!version) continue;
+    if (compareVersions(version, currentVersion) <= 0) continue;
+    if (best && compareVersions(version, best.version) <= 0) continue;
+
+    best = { name, version };
+  }
+
+  return best;
+}
+
+/**
+ * Run an installer-launching command and resolve only once it has exited 0.
+ *
+ * The launcher is deliberately *not* detached and its output is deliberately
+ * *not* discarded. Every one of these commands asks the OS to elevate, and
+ * every way that can go wrong - a UAC prompt the user dismisses, a polkit agent
+ * that isn't running, `sudo` with no tty - reports itself through an exit code
+ * and a line on stderr. Spawning detached with stdio "ignore" threw all of that
+ * away, so a refused elevation looked exactly like a successful launch: the
+ * daemon logged "installer launched", exited, and came back on the old version
+ * with nothing anywhere to say why.
+ *
+ * The installer itself is not this process's child. Windows starts it through
+ * ShellExecute (the AppInfo service owns it), macOS through osascript's
+ * privileged shell, Linux through pkexec - so it keeps running after the
+ * launcher returns and after this daemon exits.
+ */
+function runLauncher(
+  command: string,
+  args: string[],
+  timeoutMs = 5 * 60 * 1000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const finish = (err: Error | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+
+      if (stdout.trim()) Logger.info(`Installer launcher: ${stdout.trim()}`);
+      if (stderr.trim()) {
+        Logger.warn(`Installer launcher stderr: ${stderr.trim()}`);
+      }
+
+      if (err) reject(err);
+      else resolve();
+    };
+
+    // An elevation prompt blocks the launcher until the user answers it, so
+    // this timeout is generous: it exists only so a prompt that never appears
+    // (or appears on a session nobody is looking at) can't wedge the daemon.
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(
+        new Error(
+          `${command} did not return within ${Math.round(
+            timeoutMs / 1000,
+          )}s (elevation prompt left unanswered?)`,
+        ),
+      );
+    }, timeoutMs);
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (err) => finish(err));
+    child.on("close", (code) => {
+      if (code === 0) {
+        finish(null);
+        return;
+      }
+      finish(new Error(stderr.trim() || `${command} exited with code ${code}`));
+    });
+  });
+}
+
+/**
+ * Start the platform's installer with elevation, resolving once it is running.
+ * Throws when the elevation was refused or the launcher could not be run.
+ */
+async function launchInstaller(installerPath: string): Promise<void> {
+  const p = platform();
+
+  switch (p) {
+    case "win32": {
+      // The NSIS installer is perMachine + assisted (oneClick:false), so its
+      // manifest requires administrator elevation. The daemon runs as a
+      // non-elevated per-user process (the tray launches it), so spawning the
+      // installer directly via CreateProcess fails: Windows returns
+      // ERROR_ELEVATION_REQUIRED, which libuv surfaces as EACCES. Launch it
+      // through ShellExecute's "runas" verb via PowerShell's Start-Process so
+      // the UAC elevation flow runs. /S keeps the installer silent.
+      //
+      // Start-Process reports a dismissed UAC prompt as a non-terminating
+      // error, which would leave powershell exiting 0, so the call is wrapped
+      // in a try/catch that forces a non-zero exit for runLauncher to see.
+      const psInstallerPath = installerPath.replace(/'/g, "''");
+      return await runLauncher("powershell.exe", [
+        "-NoProfile",
+        "-Command",
+        [
+          "$ErrorActionPreference = 'Stop';",
+          "try {",
+          `  $p = Start-Process -FilePath '${psInstallerPath}' -ArgumentList '/S' -Verb RunAs -PassThru;`,
+          "  Write-Output ('installer started, pid ' + $p.Id)",
+          "} catch {",
+          "  Write-Error $_.Exception.Message;",
+          "  exit 1",
+          "}",
+        ].join(" "),
+      ]);
+    }
+
+    case "darwin": {
+      // `sudo` has no tty here and no way to prompt, so it fails outright.
+      // osascript's "with administrator privileges" shows the standard
+      // authorization dialog, which is the macOS analogue of the UAC flow.
+      const escaped = installerPath.replace(/(["\\])/g, "\\$1");
+      return await runLauncher("osascript", [
+        "-e",
+        `do shell script "/usr/sbin/installer -pkg \\"${escaped}\\" -target /" with administrator privileges`,
+      ]);
+    }
+
+    case "linux": {
+      const pkg = installerPath.endsWith(".deb")
+        ? ["dpkg", "-i", installerPath]
+        : installerPath.endsWith(".rpm")
+          ? ["rpm", "-U", installerPath]
+          : null;
+
+      if (!pkg) {
+        throw new Error(`Unsupported installer format: ${installerPath}`);
+      }
+
+      // A daemon running under the system unit is already root and needs no
+      // helper; a per-user daemon goes through pkexec, which prompts via the
+      // desktop's polkit agent (`sudo` would have nothing to prompt with).
+      if (process.getuid?.() === 0) {
+        return await runLauncher(pkg[0], pkg.slice(1));
+      }
+      return await runLauncher("pkexec", pkg);
+    }
+
+    default:
+      throw new Error(`Unsupported platform for updates: ${p}`);
+  }
+}
+
 export class Updater {
   private config: UpdaterConfig;
   private status: UpdateStatus;
@@ -423,6 +640,20 @@ export class Updater {
   }
 
   public start(): void {
+    // Reconcile with what's on disk before the first check, so the very first
+    // status the tray polls already reflects an installer left behind by a
+    // previous run. This runs even with auto-checking disabled: the daemon
+    // reaching this point means no install is in flight any more, and the
+    // marker must not outlive one attempt.
+    void (async (): Promise<void> => {
+      await this.clearInstallMarker();
+      await this.cleanupOldInstallers();
+      await this.restorePendingInstaller();
+      if (this.config.enabled) {
+        await this.checkForUpdates();
+      }
+    })();
+
     if (!this.config.enabled) {
       Logger.info("Auto-update checking is disabled");
       return;
@@ -431,9 +662,6 @@ export class Updater {
     Logger.info(
       `Starting update checker (interval: ${this.config.checkIntervalMs / 1000 / 60}min, repo: ${this.config.repository})`,
     );
-
-    // Check immediately on start, then on interval
-    void this.checkForUpdates();
 
     this.checkInterval = setInterval(() => {
       void this.checkForUpdates();
@@ -455,6 +683,78 @@ export class Updater {
 
   public getStatus(): UpdateStatus {
     return { ...this.status };
+  }
+
+  /**
+   * Re-adopt an installer a previous run already downloaded.
+   *
+   * `downloadedInstallerPath` only ever lived in memory, and applyUpdate()
+   * exits the process by design, so an install that didn't take came back as
+   * "update available" rather than "ready to install": the tray offered
+   * "Download update" again and the 180 MB asset was re-fetched from scratch
+   * before the user could retry. Adopting the file on the way up makes a retry
+   * one click and skips the download.
+   */
+  private async restorePendingInstaller(): Promise<void> {
+    const pattern = getInstallerAssetPattern();
+    if (!pattern) return;
+
+    let entries: string[];
+    try {
+      entries = await fs.readdir(updatesDir());
+    } catch {
+      return;
+    }
+
+    const best = pickPendingInstaller(
+      entries,
+      this.status.currentVersion,
+      pattern,
+    );
+    if (!best) return;
+
+    this.status.downloadedInstallerPath = path.join(updatesDir(), best.name);
+    this.status.latestVersion = best.version;
+    this.status.updateAvailable = true;
+    this.status.downloadProgress = 100;
+    Logger.info(
+      `Found an already-downloaded installer for ${best.version}; ready to install`,
+    );
+  }
+
+  /** Tell the tray an installer is running; see {@link InstallMarker}. */
+  private async writeInstallMarker(installerPath: string): Promise<void> {
+    const marker: InstallMarker = {
+      startedAt: Date.now(),
+      fromVersion: this.status.currentVersion,
+      toVersion: extractVersionFromFilename(path.basename(installerPath)),
+      installer: installerPath,
+    };
+
+    try {
+      await fs.mkdir(updatesDir(), { recursive: true });
+      await fs.writeFile(
+        installMarkerPath(),
+        JSON.stringify(marker, null, 2),
+        "utf-8",
+      );
+    } catch (err) {
+      // Worth continuing without: the tray also ages the marker out, and the
+      // worst case is the pre-existing behaviour.
+      Logger.warn(
+        `Could not write the install marker: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  private async clearInstallMarker(): Promise<void> {
+    try {
+      await fs.rm(installMarkerPath(), { force: true });
+    } catch {
+      // Nothing to do; the tray expires stale markers on its own.
+    }
   }
 
   public async checkForUpdates(): Promise<UpdateStatus> {
@@ -579,12 +879,26 @@ export class Updater {
         );
       }
 
-      Logger.info(`Downloading update: ${asset.name} (${asset.size} bytes)`);
-
-      const downloadDir = path.join(homedir(), ".checkpoint", "updates");
+      const downloadDir = updatesDir();
       await fs.mkdir(downloadDir, { recursive: true });
 
       const destPath = path.join(downloadDir, asset.name);
+
+      // A complete copy of this exact asset may already be sitting there from
+      // an install that didn't take. Re-fetching 180 MB to reach the same bytes
+      // only adds a few minutes to the retry.
+      const existingSize = await fs
+        .stat(destPath)
+        .then((s) => s.size)
+        .catch(() => -1);
+      if (existingSize === asset.size) {
+        Logger.info(`Reusing already-downloaded installer: ${destPath}`);
+        this.status.downloadedInstallerPath = destPath;
+        this.status.downloadProgress = 100;
+        return destPath;
+      }
+
+      Logger.info(`Downloading update: ${asset.name} (${asset.size} bytes)`);
 
       await downloadFile(
         asset.browser_download_url,
@@ -618,64 +932,33 @@ export class Updater {
     }
 
     Logger.info(`Applying update from: ${installerPath}`);
+    // Drop whatever a previous attempt left behind, so the tray isn't still
+    // showing the last failure while this one is in flight.
+    this.status.lastError = null;
 
-    const p = platform();
+    // Written before the launch so the tray sees it no matter how quickly the
+    // installer kills us. Without it the tray notices the daemon is gone,
+    // starts it again, and the fresh daemon holds checkpoint-daemon.exe open
+    // while the installer is extracting over it - which is what made these
+    // updates fail while reporting nothing at all.
+    await this.writeInstallMarker(installerPath);
 
-    // Launch the installer as a detached process and exit the daemon.
-    // The installer will stop the old service, install the new version,
-    // and start the new service.
-    const { spawn } = await import("child_process");
-
-    switch (p) {
-      case "win32": {
-        // The NSIS installer is perMachine + assisted (oneClick:false), so its
-        // manifest requires administrator elevation. The daemon runs as a
-        // non-elevated per-user process (the tray launches it), so spawning the
-        // installer directly via CreateProcess fails: Windows returns
-        // ERROR_ELEVATION_REQUIRED, which libuv surfaces as EACCES. Launch it
-        // through ShellExecute's "runas" verb via PowerShell's Start-Process so
-        // the UAC elevation flow runs. /S keeps the installer silent.
-        const psInstallerPath = installerPath.replace(/'/g, "''");
-        spawn(
-          "powershell.exe",
-          [
-            "-NoProfile",
-            "-Command",
-            `Start-Process -FilePath '${psInstallerPath}' -ArgumentList '/S' -Verb RunAs`,
-          ],
-          {
-            detached: true,
-            stdio: "ignore",
-            windowsHide: true,
-          },
-        ).unref();
-        break;
-      }
-
-      case "darwin":
-        // macOS .pkg can be installed with the `installer` command
-        spawn("sudo", ["installer", "-pkg", installerPath, "-target", "/"], {
-          detached: true,
-          stdio: "ignore",
-        }).unref();
-        break;
-
-      case "linux":
-        if (installerPath.endsWith(".deb")) {
-          spawn("sudo", ["dpkg", "-i", installerPath], {
-            detached: true,
-            stdio: "ignore",
-          }).unref();
-        } else if (installerPath.endsWith(".rpm")) {
-          spawn("sudo", ["rpm", "-U", installerPath], {
-            detached: true,
-            stdio: "ignore",
-          }).unref();
-        }
-        break;
+    try {
+      await launchInstaller(installerPath);
+    } catch (err) {
+      await this.clearInstallMarker();
+      const message = `Installer failed to launch: ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+      this.status.lastError = message;
+      Logger.error(message);
+      // Thrown rather than swallowed so the tray and desktop app can say what
+      // happened instead of showing "installer launched" and nothing else.
+      throw new Error(message);
     }
 
-    // Give the installer a moment to start, then exit
+    // Give the installer a moment to start, then get out of the way so it can
+    // replace our own files.
     Logger.info("Installer launched, daemon will exit for update...");
     setTimeout(() => {
       process.exit(0);
@@ -690,11 +973,11 @@ export class Updater {
    * bin/trash, so this satisfies the "skip recycle bin" requirement.
    */
   public async cleanupOldInstallers(): Promise<void> {
-    const updatesDir = path.join(homedir(), ".checkpoint", "updates");
+    const dir = updatesDir();
 
     let entries: string[];
     try {
-      entries = await fs.readdir(updatesDir);
+      entries = await fs.readdir(dir);
     } catch (err) {
       // Nothing downloaded yet: the directory simply doesn't exist.
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
@@ -716,7 +999,7 @@ export class Updater {
       // Keep installers strictly newer than the running version.
       if (compareVersions(version, current) > 0) continue;
 
-      const filePath = path.join(updatesDir, name);
+      const filePath = path.join(dir, name);
       try {
         await fs.rm(filePath, { force: true });
         Logger.info(

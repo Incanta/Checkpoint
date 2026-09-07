@@ -18,20 +18,76 @@
 ; customUnInstall during uninstall.
 
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"
 
 ; URL for the Microsoft Visual C++ x64 Redistributable. This "aka.ms" permalink
 ; always resolves to the latest 14.x (VS 2015-2022) redist, whose runtime is
 ; backward compatible.
 !define VCREDIST_URL "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
-!macro customInstall
-    ; Kill any running Checkpoint processes first. Without this, in-place
-    ; upgrades fail with "file in use" because the running binaries hold locks
-    ; on the files we're replacing.
+; Append a timestamped line to $INSTDIR\install.log.
+;
+; In-place updates run this installer with /S, where DetailPrint goes nowhere
+; and a failed step leaves no trace at all: an upgrade that silently did not
+; happen looked identical to one that did. This gives every install a record on
+; disk regardless of how it was started, timestamped so it lines up with
+; ~/.checkpoint/logs/daemon.log and tray.log.
+;
+; $3-$9 hold the GetTime output and $R9 the file handle, none of which the
+; callers below use ($0-$2 and $R0-$R2).
+!macro cpLog TEXT
+    ${GetTime} "" "L" $3 $4 $5 $6 $7 $8 $9
+    ClearErrors
+    FileOpen $R9 "$INSTDIR\install.log" a
+    ${IfNot} ${Errors}
+        FileSeek $R9 0 END
+        FileWrite $R9 "$5-$4-$3 $7:$8:$9  ${TEXT}$\r$\n"
+        FileClose $R9
+    ${EndIf}
+!macroend
+
+; Stop every Checkpoint process and wait until the daemon is really gone.
+;
+; Without this, in-place upgrades fail with "file in use" because the running
+; binaries hold locks on the files we are replacing. The tray goes first and the
+; daemon kill is retried, because the tray supervises the daemon and starts it
+; again when it disappears: a single pass loses that race, and a daemon that
+; comes back before the File commands run holds checkpoint-daemon.exe open,
+; which fails the extraction with no visible error under /S.
+;
+; taskkill answers 0 when it killed something and 128 when there was nothing
+; left to kill, so "nothing to kill" is the exit condition. UID makes the labels
+; unique so the macro can be used from both install and uninstall.
+!macro cpStopCheckpoint UID
     nsExec::ExecToLog 'taskkill /f /im Checkpoint.exe'
+    Pop $R2
     nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
-    nsExec::ExecToLog 'taskkill /f /im checkpoint-daemon.exe'
+    Pop $R2
+    !insertmacro cpLog "stopped Checkpoint.exe / checkpoint-tray.exe"
+
+    StrCpy $R0 0
+    cp_kill_loop_${UID}:
+        nsExec::ExecToLog 'taskkill /f /im checkpoint-daemon.exe'
+        Pop $R1
+        ${If} $R1 != 0
+            !insertmacro cpLog "checkpoint-daemon.exe gone after $R0 kill pass(es)"
+            Goto cp_kill_done_${UID}
+        ${EndIf}
+        IntOp $R0 $R0 + 1
+        Sleep 1000
+        ${If} $R0 < 10
+            Goto cp_kill_loop_${UID}
+        ${EndIf}
+        !insertmacro cpLog "WARNING: checkpoint-daemon.exe still running after $R0 kill passes; file operations may fail"
+    cp_kill_done_${UID}:
     Sleep 1000
+!macroend
+
+!macro customInstall
+    CreateDirectory "$INSTDIR"
+    !insertmacro cpLog "--- customInstall ${VERSION} ---"
+
+    !insertmacro cpStopCheckpoint "install"
 
     ; ---- Ensure the Visual C++ x64 runtime is present ----
     ; The longtail addon (longtail_addon.node) and better-sqlite3 are MSVC-built
@@ -54,11 +110,17 @@
 
     ${If} $0 == 1
         DetailPrint "Visual C++ x64 Redistributable already installed."
+        !insertmacro cpLog "vcredist: already installed"
         Goto vcredist_done
     ${EndIf}
 
+    ; /SD matters here: an in-place update runs this installer with /S, and a
+    ; MessageBox without a silent default is still displayed, so these prompts
+    ; would hang an unattended upgrade behind a modal nobody is watching. The
+    ; silent answers pick the same path an attentive user would.
     MessageBox MB_YESNO|MB_ICONQUESTION \
         "Checkpoint requires the Microsoft Visual C++ x64 Redistributable, which is not installed.$\n$\nDownload and install it now? Checkpoint will not run without it." \
+        /SD IDYES \
         IDYES vcredist_download IDNO vcredist_skip
 
     vcredist_download:
@@ -69,8 +131,10 @@
         nsExec::ExecToLog 'curl.exe -L --fail --silent --show-error -o "$PLUGINSDIR\vc_redist.x64.exe" "${VCREDIST_URL}"'
         Pop $1
         ${If} $1 != 0
+            !insertmacro cpLog "WARNING: vcredist download failed (curl exit $1)"
             MessageBox MB_OK|MB_ICONEXCLAMATION \
-                "Could not download the Visual C++ Redistributable (curl exit $1).$\n$\nInstall it manually from:$\n${VCREDIST_URL}$\n$\nCheckpoint will not start until it is installed."
+                "Could not download the Visual C++ Redistributable (curl exit $1).$\n$\nInstall it manually from:$\n${VCREDIST_URL}$\n$\nCheckpoint will not start until it is installed." \
+                /SD IDOK
             Goto vcredist_done
         ${EndIf}
         DetailPrint "Installing Microsoft Visual C++ Redistributable..."
@@ -79,22 +143,28 @@
         ${If} $2 != 0
         ${AndIf} $2 != 3010
         ${AndIf} $2 != 1638
+            !insertmacro cpLog "WARNING: vcredist installer exited $2"
             MessageBox MB_OK|MB_ICONEXCLAMATION \
-                "The Visual C++ Redistributable installer exited with code $2.$\n$\nIf Checkpoint fails to start, install it manually from:$\n${VCREDIST_URL}"
+                "The Visual C++ Redistributable installer exited with code $2.$\n$\nIf Checkpoint fails to start, install it manually from:$\n${VCREDIST_URL}" \
+                /SD IDOK
         ${EndIf}
         Goto vcredist_done
 
     vcredist_skip:
+        !insertmacro cpLog "vcredist: declined by the user"
         MessageBox MB_OK|MB_ICONEXCLAMATION \
-            "Skipped. Checkpoint requires the Visual C++ x64 Redistributable and will not start until it is installed.$\n$\nGet it from:$\n${VCREDIST_URL}"
+            "Skipped. Checkpoint requires the Visual C++ x64 Redistributable and will not start until it is installed.$\n$\nGet it from:$\n${VCREDIST_URL}" \
+            /SD IDOK
 
     vcredist_done:
 
     ; ---- Daemon binaries (launched by the tray, not a service) ----
+    !insertmacro cpLog "extracting daemon"
     SetOutPath "$INSTDIR\daemon"
     File /r "${BUILD_RESOURCES_DIR}\daemon\*.*"
 
     ; ---- Tray application ----
+    !insertmacro cpLog "extracting tray"
     SetOutPath "$INSTDIR\tray"
     File "${BUILD_RESOURCES_DIR}\tray\checkpoint-tray.exe"
 
@@ -102,10 +172,8 @@
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" \
         "CheckpointTray" '"$INSTDIR\tray\checkpoint-tray.exe"'
 
-    ; Launch the tray now (it will start the daemon).
-    Exec '"$INSTDIR\tray\checkpoint-tray.exe"'
-
     ; ---- CLI tools ----
+    !insertmacro cpLog "extracting cli"
     SetOutPath "$INSTDIR\cli"
     File "${BUILD_RESOURCES_DIR}\cli\checkpoint.exe"
     File "${BUILD_RESOURCES_DIR}\cli\chk.exe"
@@ -115,14 +183,24 @@
     Pop $0
     ${If} $0 != 0
         DetailPrint "Warning: Could not add CLI to PATH (error: $0)"
+        !insertmacro cpLog "WARNING: could not add the CLI to PATH (error $0)"
     ${EndIf}
+
+    ; Launch the tray last: it starts the daemon straight away, and the daemon
+    ; must not be holding files we are still extracting.
+    !insertmacro cpLog "launching tray"
+    Exec '"$INSTDIR\tray\checkpoint-tray.exe"'
+
+    !insertmacro cpLog "customInstall finished"
 !macroend
 
 !macro customUnInstall
-    ; Stop the tray and daemon processes.
-    nsExec::ExecToLog 'taskkill /f /im checkpoint-tray.exe'
-    nsExec::ExecToLog 'taskkill /f /im checkpoint-daemon.exe'
-    Sleep 500
+    !insertmacro cpLog "--- customUnInstall ---"
+
+    ; Stop the tray and daemon. An in-place upgrade runs the old uninstaller
+    ; before laying down the new files, so the same tray-restarts-the-daemon
+    ; race that breaks extraction also breaks the RMDir below.
+    !insertmacro cpStopCheckpoint "uninstall"
 
     ; Remove tray auto-start.
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "CheckpointTray"

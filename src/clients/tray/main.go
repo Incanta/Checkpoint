@@ -3,16 +3,28 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"fyne.io/systray"
 )
+
+// errUpdateInstalling is returned by startDaemonService when an update
+// installer is mid-flight. It is a deliberate no-op rather than a failure: the
+// daemon must stay down until the installer has finished replacing its files.
+var errUpdateInstalling = errors.New("an update installer is running; the daemon will start once it finishes")
+
+// errDaemonUnreachable wraps transport-level failures talking to the daemon, so
+// callers can tell "the daemon never answered" (expected while it is
+// restarting) from "the daemon answered with an error".
+var errDaemonUnreachable = errors.New("daemon unreachable")
 
 var (
 	mStatus         *systray.MenuItem
@@ -108,7 +120,7 @@ func onReady() {
 	// there.
 	go func() {
 		if !isDaemonRunning() {
-			if err := startDaemonService(); err != nil {
+			if err := startDaemonService(); err != nil && !errors.Is(err, errUpdateInstalling) {
 				logTray("auto-start daemon failed: %v", err)
 			}
 			time.Sleep(2 * time.Second)
@@ -159,6 +171,13 @@ func handleStart() {
 	mStatus.SetTitle("Daemon: Starting...")
 	logTray("start: requested")
 	if err := startDaemonService(); err != nil {
+		if errors.Is(err, errUpdateInstalling) {
+			// Not an error: starting now is exactly what breaks the install.
+			logTray("start: deferred, %v", err)
+			mStatus.SetTitle("Daemon: Installing update...")
+			mStart.Enable()
+			return
+		}
 		logTray("start daemon failed: %v", err)
 		mStatus.SetTitle("Daemon: Error")
 		mStart.Enable()
@@ -272,6 +291,19 @@ func updateDaemonStatus() {
 		checkDaemonVersion()
 		pollUpdateStatus()
 		pollMcpStatus()
+	} else if updateInstallInProgress() {
+		// The daemon is deliberately down while the installer replaces it, so
+		// don't present that as a stopped service the user should restart.
+		mStatus.SetTitle("Daemon: Installing update...")
+		mStart.Disable()
+		mStop.Disable()
+		mRestart.Disable()
+		mMcp.Disable()
+		mVersionMsg.Hide()
+		mUpdateStatus.SetTitle("Update: installing, this can take a minute")
+		mUpdateStatus.Show()
+		mUpdateDownload.Hide()
+		mUpdateInstall.Hide()
 	} else {
 		mStatus.SetTitle("Daemon: Stopped")
 		mStart.Enable()
@@ -441,9 +473,17 @@ func pollUpdateStatus() {
 		mUpdateDownload.Hide()
 		mUpdateInstall.Hide()
 	case status.DownloadedInstallerPath != "":
-		mUpdateStatus.SetTitle(fmt.Sprintf(
-			"Update: %s ready to install", status.LatestVersion,
-		))
+		// A launch that was refused (a dismissed UAC prompt, most often) leaves
+		// the installer downloaded and an explanation in lastError. Say so
+		// rather than looping the user back through an identical "ready to
+		// install" that already didn't work once.
+		if status.LastError != "" {
+			mUpdateStatus.SetTitle("Update: " + firstLine(status.LastError))
+		} else {
+			mUpdateStatus.SetTitle(fmt.Sprintf(
+				"Update: %s ready to install", status.LatestVersion,
+			))
+		}
 		mUpdateStatus.Show()
 		mUpdateDownload.Hide()
 		mUpdateInstall.Show()
@@ -467,16 +507,28 @@ func getUpdateStatus(port int) (updateStatus, error) {
 	return status, nil
 }
 
-// daemonMutate POSTs a tRPC mutation with an empty input object. Used by the
-// updater download/apply click handlers.
-func daemonMutate(port int, procedure string) error {
-	return daemonMutateInput(port, procedure, "{}")
+// daemonMutateTimeout is how long a tRPC mutation is given to answer before we
+// call it a failure. The updater's two long mutations get their own budget:
+// downloadUpdate streams a ~180 MB installer to disk before replying, and
+// applyUpdate blocks on the OS elevation prompt, which is only answered
+// whenever the user gets to it.
+const (
+	daemonMutateTimeout  = 30 * time.Second
+	updaterMutateTimeout = 10 * time.Minute
+)
+
+// daemonMutateInput POSTs a tRPC mutation with the given JSON input.
+func daemonMutateInput(port int, procedure string, inputJSON string) error {
+	return daemonMutateInputTimeout(port, procedure, inputJSON, daemonMutateTimeout)
 }
 
-// daemonMutateInput POSTs a tRPC mutation with the given JSON input. A
-// procedure that throws answers 200 with an "error" member rather than an HTTP
-// error status, so the body is decoded to surface the message to the caller.
-func daemonMutateInput(port int, procedure string, inputJSON string) error {
+// daemonMutateInputTimeout POSTs a tRPC mutation with an explicit client
+// timeout. A procedure that throws answers 200 with an "error" member rather
+// than an HTTP error status, so the body is decoded to surface the message to
+// the caller.
+func daemonMutateInputTimeout(
+	port int, procedure string, inputJSON string, timeout time.Duration,
+) error {
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d/%s?batch=1", port, procedure)
 	body := bytes.NewReader([]byte(`{"0":{"json":` + inputJSON + `}}`))
 	req, err := http.NewRequest("POST", endpoint, body)
@@ -484,10 +536,10 @@ func daemonMutateInput(port int, procedure string, inputJSON string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", errDaemonUnreachable, err)
 	}
 	defer resp.Body.Close()
 
@@ -516,7 +568,10 @@ func daemonMutateInput(port int, procedure string, inputJSON string) error {
 
 func handleUpdateDownload() {
 	mUpdateDownload.Disable()
-	if err := daemonMutate(getDaemonPort(), "updater.downloadUpdate"); err != nil {
+	err := daemonMutateInputTimeout(
+		getDaemonPort(), "updater.downloadUpdate", "{}", updaterMutateTimeout,
+	)
+	if err != nil {
 		logTray("failed to start update download: %v", err)
 		mUpdateStatus.SetTitle("Update: download failed")
 		mUpdateDownload.Enable()
@@ -529,10 +584,36 @@ func handleUpdateDownload() {
 
 func handleUpdateInstall() {
 	mUpdateInstall.Disable()
-	// applyUpdate spawns the installer detached and exits the daemon, so the
-	// HTTP request may not return cleanly; treat connection-reset as success.
-	_ = daemonMutate(getDaemonPort(), "updater.applyUpdate")
+	mUpdateStatus.SetTitle("Update: waiting for elevation...")
+
+	// applyUpdate waits for the elevation prompt to be answered before it
+	// replies, and only exits the daemon once the installer is actually
+	// running, so a returned error is a real one worth showing. The daemon can
+	// still drop the connection while shutting down, which is expected.
+	err := daemonMutateInputTimeout(
+		getDaemonPort(), "updater.applyUpdate", "{}", updaterMutateTimeout,
+	)
+	if err != nil && !errors.Is(err, errDaemonUnreachable) {
+		logTray("update install failed: %v", err)
+		mUpdateStatus.SetTitle("Update: " + firstLine(err.Error()))
+		mUpdateInstall.Enable()
+		return
+	}
+
 	mUpdateStatus.SetTitle("Update: installer launched, restarting...")
+}
+
+// firstLine trims a message to something that fits a tray menu item.
+func firstLine(msg string) string {
+	if i := strings.IndexAny(msg, "\r\n"); i >= 0 {
+		msg = msg[:i]
+	}
+	msg = strings.TrimSpace(msg)
+	const max = 70
+	if len(msg) > max {
+		return msg[:max-1] + "…"
+	}
+	return msg
 }
 
 // The tray icon is embedded per-platform (ICO on Windows, PNG elsewhere) in
