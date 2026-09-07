@@ -99,6 +99,7 @@
     "js-yaml": "^4.3.1",
     "picomatch@^4.0.2": "4.0.4",
     "picomatch@^4.0.3": "4.0.4",
+    "plist": "^3.1.1",
     "postcss": "^8.5.15",
     "protobufjs": "^7.6.6",
     "rimraf@^5.0.1": "^6.1.3",

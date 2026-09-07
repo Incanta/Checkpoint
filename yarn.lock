@@ -11724,18 +11724,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"plist@npm:3.1.0, plist@npm:^3.0.5":
-  version: 3.1.0
-  resolution: "plist@npm:3.1.0"
-  dependencies:
-    "@xmldom/xmldom": "npm:^0.8.8"
-    base64-js: "npm:^1.5.1"
-    xmlbuilder: "npm:^15.1.1"
-  checksum: 10c0/db19ba50faafc4103df8e79bcd6b08004a56db2a9dd30b3e5c8b0ef30398ef44344a674e594d012c8fc39e539a2b72cb58c60a76b4b4401cbbc7c8f6b028d93d
-  languageName: node
-  linkType: hard
-
-"plist@npm:^3.1.0":
+"plist@npm:^3.1.1":
   version: 3.1.1
   resolution: "plist@npm:3.1.1"
   dependencies:
