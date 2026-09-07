@@ -121,14 +121,23 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
 
     steps:
-      # No sudo and no preinstalled toolchain in the container; git is what
-      # actions/checkout needs to clone rather than fall back to a tarball,
-      # which would leave `git rev-parse HEAD` below with no repository.
+      # The container is a bare node image: no sudo, and none of what
+      # ubuntu-latest preinstalls.
+      #
+      #   git                actions/checkout clones with it rather than falling
+      #                      back to a tarball, which would leave the
+      #                      `git rev-parse HEAD` below with no repository
+      #   zstd, libssl3      bundle archives, and what the addon/Prisma link to
+      #   build-essential,   node-gyp. better-sqlite3 declares no prebuilds
+      #   python3            (node-addon-api + node-gyp only), so a root install
+      #                      always compiles it from source. It is a daemon
+      #                      dependency and ships in neither bundle, but the
+      #                      workspace install still has to get through it.
       - name: Install build prerequisites
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates git libssl3 zstd
+            build-essential ca-certificates git libssl3 python3 zstd
           # The container runs as root over a workspace the runner owns, which
           # git can read as dubious ownership and refuse. Set before checkout,
           # which is itself the first thing to touch the repository.

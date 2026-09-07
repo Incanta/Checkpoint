@@ -174,7 +174,11 @@ EOF
       node:24-bookworm-slim bash -seuo pipefail" <<'EOF'
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y --no-install-recommends libssl3 ca-certificates zstd git
+# build-essential + python3 are for node-gyp: better-sqlite3 ships no prebuilds,
+# so the root workspace install always compiles it. It belongs to the daemon and
+# ends up in neither bundle, but the install still has to get past it.
+apt-get install -y --no-install-recommends \
+  build-essential ca-certificates git libssl3 python3 zstd
 corepack enable
 
 yarn install --immutable
