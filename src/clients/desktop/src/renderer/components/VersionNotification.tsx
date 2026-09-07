@@ -19,7 +19,17 @@ export default function VersionNotification(): React.ReactElement | null {
   }
 
   return (
-    <div className="fixed inset-x-0 top-10 z-50 border-b border-[var(--color-danger)]/30 bg-[var(--color-danger)]/15 px-6 py-2.5 shadow-sm backdrop-blur-sm">
+    <div
+      className="fixed inset-x-0 top-10 z-50 border-b px-6 py-2.5 shadow-sm"
+      style={{
+        // Opaque: the danger tint is mixed into the panel color rather than
+        // laid over it with alpha, so page content never shows through.
+        backgroundColor:
+          "color-mix(in srgb, var(--color-danger) 15%, var(--color-bg-secondary))",
+        borderBottomColor:
+          "color-mix(in srgb, var(--color-danger) 30%, var(--color-bg-secondary))",
+      }}
+    >
       <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-center">
         <span className="text-sm font-semibold text-[var(--color-danger)]">
           Upgrade Required

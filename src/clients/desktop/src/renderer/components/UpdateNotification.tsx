@@ -34,8 +34,16 @@ export default function UpdateNotification(): React.ReactElement | null {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 max-w-sm rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/15 p-4 shadow-lg"
-      style={{ minWidth: "300px" }}
+      className="fixed bottom-4 right-4 z-50 max-w-sm rounded-lg border p-4 shadow-lg"
+      style={{
+        minWidth: "300px",
+        // Opaque: the accent tint is mixed into the panel color rather than
+        // laid over it with alpha, so page content never shows through.
+        backgroundColor:
+          "color-mix(in srgb, var(--color-accent) 15%, var(--color-bg-secondary))",
+        borderColor:
+          "color-mix(in srgb, var(--color-accent) 30%, var(--color-bg-secondary))",
+      }}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1">

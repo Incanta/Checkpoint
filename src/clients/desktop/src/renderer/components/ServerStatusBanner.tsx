@@ -28,8 +28,16 @@ export default function ServerStatusBanner(): React.ReactElement | null {
 
   return (
     <div
-      className="fixed top-14 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/15 px-4 py-2 shadow-lg"
-      style={{ minWidth: "320px" }}
+      className="fixed top-14 left-1/2 z-50 -translate-x-1/2 rounded-lg border px-4 py-2 shadow-lg"
+      style={{
+        minWidth: "320px",
+        // Opaque: the warning tint is mixed into the panel color rather than
+        // laid over it with alpha, so page content never shows through.
+        backgroundColor:
+          "color-mix(in srgb, var(--color-warning) 15%, var(--color-bg-secondary))",
+        borderColor:
+          "color-mix(in srgb, var(--color-warning) 30%, var(--color-bg-secondary))",
+      }}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex-1">
@@ -45,7 +53,11 @@ export default function ServerStatusBanner(): React.ReactElement | null {
           type="button"
           onClick={handleRetry}
           disabled={retrying}
-          className="shrink-0 rounded border border-[var(--color-warning)]/40 px-2 py-1 text-xs text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10 disabled:opacity-50"
+          className="shrink-0 rounded border px-2 py-1 text-xs text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10 disabled:opacity-50"
+          style={{
+            borderColor:
+              "color-mix(in srgb, var(--color-warning) 40%, var(--color-bg-secondary))",
+          }}
         >
           {retrying ? "Retrying..." : "Retry"}
         </button>
