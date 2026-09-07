@@ -47,6 +47,34 @@
         ".github/workflows/publish-server-bundles.yaml"
       ]
     },
+    "vscode": {
+      "description": "checkpoint-vscode extension (.vsix, VS Code Marketplace + Open VSX)",
+      "marker": "cd-marker/vscode",
+      "cascades": [],
+      "$comment": [
+        "Separate from 'client' so a VS Code-only change does not rebuild the",
+        "four-OS installer matrix, and a CLI-only change does not republish the",
+        "extension. It still shares client_version: set-version.js stamps",
+        "src/clients/vscode/package.json alongside the other clients.",
+        "",
+        "The longtail addon deliberately does NOT cascade here. The extension",
+        "imports FileStatus/FileType and the AppRouter type from the daemon and",
+        "esbuild bundles them, but nothing in that graph reaches the native",
+        "addon, so a new addon changes nothing about the .vsix."
+      ],
+      "paths": [
+        "src/clients/vscode/**",
+        "src/core/daemon/**",
+        "src/core/common/**",
+        "src/core/types/**",
+        "src/core/package.json",
+        "src/core/tsconfig.json",
+        "package.json",
+        "yarn.lock",
+        "scripts/set-version.js",
+        ".github/workflows/publish-vscode-extension.yaml"
+      ]
+    },
     "client": {
       "description": "Desktop installers, headless CLI packages, daemon, tray",
       "marker": "cd-marker/client",

@@ -61,6 +61,7 @@ jobs:
     outputs:
       longtail_addon: ${{ steps.detect.outputs.longtail_addon }}
       server: ${{ steps.detect.outputs.server }}
+      vscode: ${{ steps.detect.outputs.vscode }}
       client: ${{ steps.detect.outputs.client }}
       head: ${{ steps.detect.outputs.head }}
       stream: ${{ steps.stream.outputs.stream }}
@@ -171,10 +172,32 @@ jobs:
     secrets: inherit
 
   # ============================================================
+  # VS Code extension
+  #
+  # Its own component rather than part of `client`: it shares client_version
+  # but nothing else, and pairing them would mean every CLI change republished
+  # the extension and every extension change rebuilt four OS installer legs.
+  # ============================================================
+  vscode:
+    needs: [plan, addon]
+    if: >-
+      !cancelled()
+      && needs.plan.outputs.vscode == 'true'
+      && inputs.dry_run != true
+      && (needs.addon.result == 'success' || needs.addon.result == 'skipped')
+    uses: ./.github/workflows/publish-vscode-extension.yaml
+    with:
+      version: ${{ needs.plan.outputs.client_version }}
+      stream: ${{ needs.plan.outputs.stream }}
+      ref: ${{ needs.addon.outputs.head_sha || needs.plan.outputs.head }}
+      addon_pin: ${{ needs.addon.result == 'success' && needs.plan.outputs.stream != 'release' }}
+    secrets: inherit
+
+  # ============================================================
   # Channel manifest: the pointer everything downstream polls
   # ============================================================
   manifest:
-    needs: [plan, addon, server, client]
+    needs: [plan, addon, server, client, vscode]
     if: >-
       !cancelled()
       && inputs.dry_run != true
@@ -270,13 +293,14 @@ jobs:
   # Record what shipped, so the next run diffs from here
   # ============================================================
   finalize:
-    needs: [plan, addon, server, client, manifest]
+    needs: [plan, addon, server, client, vscode, manifest]
     if: >-
       !cancelled()
       && inputs.dry_run != true
       && (needs.addon.result == 'success'
           || needs.server.result == 'success'
-          || needs.client.result == 'success')
+          || needs.client.result == 'success'
+          || needs.vscode.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -291,6 +315,7 @@ jobs:
           ADDON_RESULT: ${{ needs.addon.result }}
           SERVER_RESULT: ${{ needs.server.result }}
           CLIENT_RESULT: ${{ needs.client.result }}
+          VSCODE_RESULT: ${{ needs.vscode.result }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -314,12 +339,14 @@ jobs:
           move longtail-addon "$ADDON_RESULT"
           move server "$SERVER_RESULT"
           move client "$CLIENT_RESULT"
+          move vscode "$VSCODE_RESULT"
 
       - name: Summarize
         env:
           ADDON_RESULT: ${{ needs.addon.result }}
           SERVER_RESULT: ${{ needs.server.result }}
           CLIENT_RESULT: ${{ needs.client.result }}
+          VSCODE_RESULT: ${{ needs.vscode.result }}
         run: |
           {
             echo "### CD result (${{ needs.plan.outputs.stream }})"
@@ -329,4 +356,5 @@ jobs:
             echo "| longtail-addon | ${ADDON_RESULT:-skipped} |"
             echo "| server | ${SERVER_RESULT:-skipped} |"
             echo "| client | ${CLIENT_RESULT:-skipped} |"
+            echo "| vscode | ${VSCODE_RESULT:-skipped} |"
           } >> "$GITHUB_STEP_SUMMARY"

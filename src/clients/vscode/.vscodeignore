@@ -5,3 +5,4 @@ esbuild.config.mjs
 tsconfig.json
 dist/*.map
 **/*.vsix
+.gitignore

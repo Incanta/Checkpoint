@@ -4,32 +4,36 @@ Everything ships through one workflow: **`.github/workflows/release.yaml`** (sho
 
 There are two delivery streams. Clients and servers subscribe to one of them.
 
-|                   | `nightly`                                         | `release`                                     |
-| ----------------- | ------------------------------------------------- | --------------------------------------------- |
-| Trigger           | Schedule (08:00 UTC) or manual                    | Manual only                                   |
-| Version           | `<next patch>-nightly.<YYYYMMDDHHmm>.g<sha>`      | Whatever `versions.json` says                 |
-| Server bundles    | Signed assets on the rolling `nightly` prerelease | Signed assets on `v<version>`                 |
-| Installers        | Rolling `nightly` GitHub prerelease               | Draft release `v<version>`, published by hand |
-| npm addon         | `nightly` dist-tag                                | `latest` dist-tag                             |
-| Commits to `main` | None                                              | Addon version bump only                       |
+|                   | `nightly`                                         | `release`                                      |
+| ----------------- | ------------------------------------------------- | ---------------------------------------------- |
+| Trigger           | Schedule (08:00 UTC) or manual                    | Manual only                                    |
+| Version           | `<next patch>-nightly.<YYYYMMDDHHmm>.g<sha>`      | Whatever `versions.json` says                  |
+| Server bundles    | Signed assets on the rolling `nightly` prerelease | Signed assets on `v<version>`                  |
+| Installers        | Rolling `nightly` GitHub prerelease               | Draft release `v<version>`, published by hand  |
+| npm addon         | `nightly` dist-tag                                | `latest` dist-tag                              |
+| VS Code extension | `.vsix` on the prerelease, no marketplace publish | Marketplace + Open VSX, `.vsix` on the release |
+| Commits to `main` | None                                              | Addon version bump only                        |
 
 Server builds ship as **signed deployment bundles**, not container images. See [Server deployment](#server-deployment) below.
 
 ## What gets built
 
-Three components, defined in **`.github/release-config.json`**:
+Four components, defined in **`.github/release-config.json`**:
 
 | Component        | Covers                                                          | Triggered by                                                                                |
 | ---------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `longtail-addon` | `@checkpointvcs/longtail-addon` (native prebuilds + TS)         | `src/longtail/{addon,wrapper,library}`                                                      |
 | `server`         | App + core-server deployment bundles, docker-compose quickstart | `src/app`, `src/core/{server,common}`, `scripts/bundle/`, `docker-compose/`, root manifests |
 | `client`         | Desktop installers, headless CLI packages, daemon, tray         | `src/clients/{cli,desktop,tray}`, `src/core/{daemon,common}`, `installer/`                  |
+| `vscode`         | `checkpoint-vscode` extension (`.vsix`)                         | `src/clients/vscode`, `src/core/{daemon,common}`, root manifests                            |
 
 The runtime image is **not** a CD component. `publish-runtime-image.yaml` rebuilds it on pushes that touch `docker/runtime/`, independently of any release.
 
-The addon **cascades** into the other two: `src/app`, `src/core/server`, and `src/core/daemon` all depend on it, so a new addon forces both to rebuild. Server and client are independent of each other.
+The addon **cascades** into `server` and `client`: `src/app`, `src/core/server`, and `src/core/daemon` all depend on it, so a new addon forces both to rebuild. It deliberately does **not** cascade into `vscode`: the extension imports `FileStatus`/`FileType` and the `AppRouter` type from the daemon and esbuild bundles them, but nothing in that graph reaches the native addon, so a new addon changes nothing about the `.vsix`. The other three are independent of each other.
 
-`src/tests`, `website/`, `benchmark/`, and the `vscode` / `unreal` / `horde` clients are deliberately outside every filter, because nothing in these workflows builds them.
+`vscode` is separate from `client` rather than folded into it so that a VS Code-only change does not rebuild the four-OS installer matrix, and a CLI-only change does not republish the extension. They still share a version: `scripts/set-version.js` stamps `src/clients/vscode/package.json` from `client_version` along with the other clients.
+
+`src/tests`, `website/`, `benchmark/`, and the `unreal` / `horde` clients are deliberately outside every filter, because nothing in these workflows builds them.
 
 ## How "did anything change?" is answered
 
@@ -210,6 +214,28 @@ node scripts/bundle/build-bundle.js --component app --version 0.0.0-dev --provid
 
 Without `--sign` the sidecar carries no signature, so the runtime refuses it unless you also set `CHECKPOINT_BUNDLE_ALLOW_UNSIGNED=1`. Only do that against a bundle you built yourself.
 
+## VS Code extension
+
+`publish-vscode-extension.yaml` builds `src/clients/vscode` with esbuild, packages it with `@vscode/vsce`, and attaches `checkpoint-vscode-<version>.vsix` to the release for the stream. The extension has no version of its own: it is stamped from `client_version` like every other client.
+
+**Nightly does not publish to a marketplace, and cannot.** Nightly versions carry a semver prerelease suffix and `vsce` refuses them outright ("The VS Marketplace doesn't support prerelease versions"). The Marketplace's own pre-release channel wants a plain `major.minor.patch` with an odd minor, which would mean maintaining a second version scheme for this one component. So a nightly gets the `.vsix` on the rolling prerelease and nothing more:
+
+```bash
+gh release download nightly -p 'checkpoint-vscode-*.vsix'
+code --install-extension checkpoint-vscode-<version>.vsix
+```
+
+Two secrets, both optional, each gating its own step:
+
+| Secret     | Registry            | Get one from                                                                   |
+| ---------- | ------------------- | ------------------------------------------------------------------------------ |
+| `VSCE_PAT` | VS Code Marketplace | An Azure DevOps PAT for the `incanta` publisher, scoped to Marketplace, Manage |
+| `OVSX_PAT` | Open VSX            | An access token from open-vsx.org, for the `incanta` namespace                 |
+
+With neither set, a release still builds and attaches the `.vsix`, and the job summary says which publishes were skipped and why. This is what makes the workflow usable in a fork without it trying to push to someone else's publisher. Open VSX is worth having: it is what Cursor, VSCodium and Windsurf install extensions from. Both registries are handed the same already-packaged `.vsix`, so they cannot serve differing artifacts.
+
+Both publishes pass `--skip-duplicate`, so re-running a release that already went out is a no-op rather than a failure.
+
 ## Running one workflow on its own
 
 All the publish workflows still accept `workflow_dispatch`, so a single component can be rebuilt without the orchestrator:
@@ -217,6 +243,7 @@ All the publish workflows still accept `workflow_dispatch`, so a single componen
 - `Publish Longtail Addon` needs an explicit `version`, and defaults to committing the bump.
 - `Publish Server Bundles` defaults to `versions.json` and the `release` stream.
 - `Build Installers` defaults to `versions.json` and the `release` stream.
+- `Publish VS Code Extension` defaults to `versions.json` and the `release` stream. Untick `publish` to build and attach the `.vsix` without touching either marketplace.
 - `Publish Runtime Image` is independent of releases entirely.
 
 These do not move marker tags, so the next nightly may rebuild what you just published.

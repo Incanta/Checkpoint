@@ -3,10 +3,15 @@
   "displayName": "Checkpoint",
   "description": "Checkpoint version control for Visual Studio Code",
   "publisher": "incanta",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Incanta/Checkpoint.git",
+    "directory": "src/clients/vscode"
+  },
+  "homepage": "https://checkpointvcs.com",
   "private": true,
   "version": "0.4.15",
   "license": "(Elastic-2.0 OR AGPL-3.0)",
-  "homepage": "https://checkpointvcs.com",
   "author": {
     "name": "Incanta LLC",
     "email": "support@incanta.dev",

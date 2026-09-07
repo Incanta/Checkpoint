@@ -1,0 +1,279 @@
+name: Publish VS Code Extension
+run-name: Publish VS Code Extension ${{ inputs.version || 'from versions.json' }}
+
+# Called by .github/workflows/release.yaml and still runnable on its own.
+#
+# The extension shares CLIENT_VERSION with the desktop app and the daemon
+# (scripts/set-version.js stamps src/clients/vscode/package.json), so it has no
+# version of its own to compute.
+#
+# Two delivery shapes, and unlike every other component they are NOT symmetric:
+#
+#   release  Publishes to the VS Code Marketplace, and to Open VSX when that
+#            token is configured. The .vsix is also attached to the draft
+#            release so the exact artifact that shipped is downloadable.
+#
+#   nightly  Attaches the .vsix to the rolling `nightly` prerelease and stops
+#            there. It cannot publish to a marketplace: nightly versions carry
+#            a semver prerelease suffix and @vscode/vsce refuses those outright
+#            ("The VS Marketplace doesn't support prerelease versions"). The
+#            Marketplace's own pre-release channel wants a plain major.minor.patch
+#            with an odd minor, which would mean a second version scheme just for
+#            this one component. Install a nightly with:
+#              code --install-extension checkpoint-vscode-<version>.vsix
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (defaults to versions.json client_version)"
+        required: false
+        type: string
+        default: ""
+      stream:
+        description: "Delivery stream"
+        required: false
+        type: choice
+        options: [release, nightly]
+        default: release
+      publish:
+        description: "Publish to the marketplaces (release stream only)"
+        required: false
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      version:
+        required: false
+        type: string
+        default: ""
+      stream:
+        required: false
+        type: string
+        default: release
+      ref:
+        description: "Commit-ish to build from (defaults to the triggering ref)"
+        required: false
+        type: string
+        default: ""
+      addon_pin:
+        description: >-
+          Replay the `addon-pin` artifact (package.json files + yarn.lock)
+          published by publish-longtail-addon.yaml earlier in this run.
+        required: false
+        type: boolean
+        default: false
+      publish:
+        required: false
+        type: boolean
+        default: true
+    outputs:
+      version:
+        description: "Version that was built"
+        value: ${{ jobs.build.outputs.version }}
+      vsix:
+        description: "Filename of the packaged extension"
+        value: ${{ jobs.build.outputs.vsix }}
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "24"
+  # Pinned rather than @latest: this is the step that holds the marketplace
+  # tokens, so its version should change when someone decides it does.
+  VSCE_VERSION: "3.9.2"
+  OVSX_VERSION: "1.1.1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      vsix: ${{ steps.package.outputs.vsix }}
+    env:
+      # Publishing is gated on the token existing, matching how the installer
+      # workflow gates code signing. A fork with neither still gets a .vsix on
+      # its release; it just does not push to anyone else's marketplace.
+      HAS_VSCE_PAT: ${{ secrets.VSCE_PAT != '' }}
+      HAS_OVSX_PAT: ${{ secrets.OVSX_PAT != '' }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Apply addon pin
+        if: inputs.addon_pin
+        uses: actions/download-artifact@v8
+        with:
+          name: addon-pin
+          path: .
+
+      - name: Enable Corepack
+        shell: bash
+        run: |
+          # Matches the other client jobs: install the corepack shim alongside
+          # any pre-existing yarn so it overrides directly.
+          yarn_path=$(command -v yarn || true)
+          if [ -n "$yarn_path" ]; then
+            corepack enable --install-directory "$(dirname "$yarn_path")"
+          else
+            corepack enable
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Determine version and tag
+        id: version
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(jq -r '.client_version' versions.json)"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.stream }}" = "nightly" ]; then
+            echo "tag=$(jq -r '.nightlyTag' .github/release-config.json)" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Stamps src/clients/vscode/package.json, which is both the extension's
+      # displayed version and what esbuild bakes in as CHECKPOINT_VERSION.
+      - name: Stamp version
+        run: node scripts/set-version.js --client "${{ steps.version.outputs.version }}" --no-build
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      # The extension imports FileStatus/FileType as values and AppRouter as a
+      # type from @checkpointvcs/daemon, so the daemon's TypeScript output has
+      # to exist before the extension can typecheck or bundle.
+      - name: Build workspace TypeScript
+        run: yarn build
+
+      - name: Build the extension
+        run: yarn workspace checkpoint-vscode build
+
+      - name: Package the extension
+        id: package
+        # vsce reads the manifest from the working directory; its one positional
+        # argument is a version to bump to, not a path, so this cannot be done
+        # with an argument.
+        working-directory: src/clients/vscode
+        run: |
+          VSIX="checkpoint-vscode-${{ steps.version.outputs.version }}.vsix"
+          # --no-dependencies because esbuild has already bundled everything the
+          # extension needs into dist/extension.js; the workspace node_modules
+          # would otherwise be walked and shipped.
+          npx --yes @vscode/vsce@"$VSCE_VERSION" package \
+            --no-dependencies \
+            --out "$GITHUB_WORKSPACE/$VSIX"
+          echo "vsix=${VSIX}" >> "$GITHUB_OUTPUT"
+          ls -lh "$GITHUB_WORKSPACE/$VSIX"
+
+      - name: Upload the extension artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: vscode-extension
+          path: ${{ steps.package.outputs.vsix }}
+          if-no-files-found: error
+
+      # ---- Marketplaces: release stream only ----
+
+      - name: Publish to the VS Code Marketplace
+        if: >-
+          inputs.stream != 'nightly'
+          && inputs.publish
+          && env.HAS_VSCE_PAT == 'true'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        # --skip-duplicate so re-running a release that already published is a
+        # no-op rather than a failure. vsce reads the token from VSCE_PAT.
+        run: |
+          npx --yes @vscode/vsce@"$VSCE_VERSION" publish \
+            --packagePath "${{ steps.package.outputs.vsix }}" \
+            --skip-duplicate
+
+      - name: Publish to Open VSX
+        if: >-
+          inputs.stream != 'nightly'
+          && inputs.publish
+          && env.HAS_OVSX_PAT == 'true'
+        env:
+          # ovsx has no --pat flag; it reads this variable.
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        # Open VSX is what Cursor, VSCodium and Windsurf install from. Publishing
+        # the already-packaged .vsix rather than rebuilding guarantees both
+        # registries serve the identical artifact.
+        run: |
+          npx --yes ovsx@"$OVSX_VERSION" publish \
+            --packagePath "${{ steps.package.outputs.vsix }}" \
+            --skip-duplicate
+
+      - name: Note skipped publishes
+        if: inputs.stream != 'nightly' && inputs.publish
+        run: |
+          {
+            echo "### VS Code extension ${{ steps.version.outputs.version }}"
+            echo
+            if [ "$HAS_VSCE_PAT" = "true" ]; then
+              echo "- VS Code Marketplace: published"
+            else
+              echo "- VS Code Marketplace: **skipped**, no \`VSCE_PAT\` secret"
+            fi
+            if [ "$HAS_OVSX_PAT" = "true" ]; then
+              echo "- Open VSX: published"
+            else
+              echo "- Open VSX: **skipped**, no \`OVSX_PAT\` secret"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- Attach the .vsix to the release either way ----
+
+      - name: Attach the extension to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VSIX: ${{ steps.package.outputs.vsix }}
+        # build-installers.yaml and publish-server-bundles.yaml publish to this
+        # same tag in parallel, so a failed create means someone else won the
+        # race, not an error.
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "${{ inputs.stream }}" = "nightly" ]; then
+              gh release create "$TAG" \
+                --target "$(git rev-parse HEAD)" \
+                --title "Checkpoint nightly ${{ steps.version.outputs.version }}" \
+                --notes "Automated nightly build." \
+                --prerelease --latest=false \
+                || gh release view "$TAG" >/dev/null
+            else
+              gh release create "$TAG" \
+                --target "$(git rev-parse HEAD)" \
+                --title "Checkpoint v${{ steps.version.outputs.version }}" \
+                --generate-notes --draft \
+                || gh release view "$TAG" >/dev/null
+            fi
+          fi
+
+          # The rolling nightly tag holds exactly one build, and build-installers
+          # only prunes installer extensions, so nothing else would ever clear a
+          # superseded .vsix. Each component prunes what it publishes: scoped to
+          # .vsix so this can never touch a bundle or an installer, and it runs
+          # on a vscode-only night when build-installers does not run at all.
+          if [ "${{ inputs.stream }}" = "nightly" ]; then
+            gh release view "$TAG" --json assets --jq '.assets[].name' \
+              | grep -E '\.vsix$' \
+              | grep -Fxv -- "$VSIX" \
+              | while read -r asset; do
+                  echo "Deleting stale extension: $asset"
+                  gh release delete-asset "$TAG" "$asset" --yes
+                done
+          fi
+
+          gh release upload "$TAG" "$VSIX" --clobber
