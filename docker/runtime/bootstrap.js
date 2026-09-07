@@ -490,13 +490,13 @@ function pruneOldBundles(keepVersions) {
  * hand to @incanta/config as NODE_CONFIG_DIR.
  */
 function linkMounts(manifest, dir) {
-  const link = (relative, target) => {
+  const link = (relative, target, type = "dir") => {
     if (!relative || !existsSyncSafe(target)) return;
     const linkPath = path.join(dir, relative);
     try {
       fs.rmSync(linkPath, { recursive: true, force: true });
       fs.mkdirSync(path.dirname(linkPath), { recursive: true });
-      fs.symlinkSync(target, linkPath, "dir");
+      fs.symlinkSync(target, linkPath, type);
       log(`Linked ${relative} -> ${target}`);
     } catch (err) {
       warn(`could not link ${relative} to ${target}: ${err.message}`);
@@ -516,6 +516,19 @@ function linkMounts(manifest, dir) {
 
   link(manifest.exec?.dataDir, process.env["CHECKPOINT_DATA_DIR"] || "/app/data");
 
+  // @incanta/config's local secrets provider resolves `secrets.local.file-path`
+  // (".secrets" by default) against process.cwd(), and the compose file mounts
+  // the file at /app/.secrets. Under the old images every process ran from
+  // /app, so that lined up by accident; a bundle runs from its own versioned
+  // directory instead, so the file has to be linked into each working directory
+  // the bundle will actually use.
+  const secrets = process.env["CHECKPOINT_SECRETS_FILE"] || "/app/.secrets";
+  const cwds = new Set([manifest.exec?.cwd || "."]);
+  if (manifest.exec?.migrate) cwds.add(manifest.exec.migrateCwd || ".");
+  for (const cwd of cwds) {
+    link(path.join(cwd, path.basename(secrets)), secrets, "file");
+  }
+
   return configDir;
 }
 
@@ -527,24 +540,121 @@ function existsSyncSafe(p) {
   }
 }
 
-function runMigrations(manifest, dir) {
+/**
+ * Turn a manifest command into something spawnable.
+ *
+ * `node` means this interpreter, not whatever a PATH lookup finds. Anything
+ * else is looked for in the bundle's own node_modules first, because the
+ * runtime image installs no CLIs of its own: the bundle ships them so their
+ * versions can never drift from the code they act on.
+ *
+ * The package's declared `bin` entry is preferred over node_modules/.bin.
+ * Bundles are staged with fs.cpSync, which materialises the .bin symlink farm
+ * as regular files at best and skips it at worst, so that directory cannot be
+ * relied on. Running the entry point through this interpreter also sidesteps
+ * shebang and exec-bit differences between the build host and the container.
+ */
+function resolveCommand(dir, command) {
+  const [bin, ...rest] = command;
+
+  if (bin === "node") return { file: process.execPath, args: rest };
+
+  const pkgPath = path.join(dir, "node_modules", bin, "package.json");
+  if (existsSyncSafe(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+      const entry = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[bin];
+      if (entry) {
+        const entryPath = path.join(dir, "node_modules", bin, entry);
+        if (existsSyncSafe(entryPath)) {
+          return { file: process.execPath, args: [entryPath, ...rest] };
+        }
+      }
+    } catch (err) {
+      warn(`could not read ${bin}'s package.json: ${err.message}`);
+    }
+  }
+
+  const shim = path.join(dir, "node_modules", ".bin", bin);
+  if (existsSyncSafe(shim)) return { file: shim, args: rest };
+
+  // Last resort: let PATH decide, and fail loudly if it cannot.
+  return { file: bin, args: rest };
+}
+
+/**
+ * Values Checkpoint keeps in config but its processes read from the
+ * environment: DATABASE_URL above all, plus PORT and NEXT_PUBLIC_EXTERNAL_URL.
+ * `config/environment.yaml` maps env var name -> config key, and the previous
+ * images bridged the two by launching every process through @incanta/config's
+ * `config-env` shim. Doing it here instead keeps the manifest's commands plain
+ * and keeps a shell out of the boot path.
+ *
+ * Resolving secrets matters as much as reading the keys: the shipped compose
+ * config sets `db.url` to `secret|database_url`, so skipping processSecrets
+ * would hand Prisma that literal string.
+ *
+ * A component with no environment.yaml (the core server today) gets an empty
+ * map, and a bundle with no @incanta/config is a warning rather than a failure,
+ * since not every component needs the bridge.
+ */
+async function configuredEnv(dir, configDir) {
+  if (!configDir) return {};
+
+  // The class, not the package's default export. That export is a singleton
+  // built at require time against `<process.cwd()>/config`, and it throws if
+  // that directory does not exist, which would tie the bootstrap's own working
+  // directory to the bundle's layout for no reason.
+  const entry = path.join(
+    dir,
+    "node_modules",
+    "@incanta",
+    "config",
+    "lib",
+    "config.js",
+  );
+  if (!existsSyncSafe(entry)) {
+    warn(`bundle has no @incanta/config; skipping config-derived environment`);
+    return {};
+  }
+
+  try {
+    const Config = require(entry).default;
+    const config = new Config({
+      configDir,
+      configEnv: process.env["NODE_CONFIG_ENV"] || "local",
+      // The directory holding `config/`, matching the cwd the old start script
+      // ran config-env from.
+      cwd: path.dirname(configDir),
+    });
+
+    const env = await config.processSecrets(config.getConfiguredEnv());
+    const names = Object.keys(env);
+    if (names.length) log(`Config environment: ${names.join(", ")}`);
+    return env;
+  } catch (err) {
+    // Loud, because the app cannot reach its database without this.
+    fatal(`could not resolve the config environment: ${err.message}`);
+  }
+}
+
+function runMigrations(manifest, dir, injected = {}) {
   if (!manifest.exec?.migrate) return;
 
   const cwd = path.join(dir, manifest.exec.migrateCwd || ".");
-  const [bin, ...rest] = manifest.exec.migrate;
   // The bundle ships its own Prisma CLI so its version always matches the
   // schema it is migrating.
-  const cli = path.join(dir, "node_modules", ".bin", bin);
-  const resolved = fs.existsSync(cli) ? cli : bin;
+  const { file, args } = resolveCommand(dir, manifest.exec.migrate);
 
   log("Running database migrations...");
-  execFileSync(resolved, rest, {
+  execFileSync(file, args, {
     cwd,
     stdio: "inherit",
     env: {
       ...process.env,
       NODE_PATH: path.join(dir, "node_modules"),
       ...componentEnv(manifest, dir),
+      ...injected,
     },
   });
   log("Migrations complete.");
@@ -572,16 +682,20 @@ function componentEnv(manifest, dir, configDir) {
   return env;
 }
 
-function execComponent(manifest, dir, configDir) {
-  const [bin, ...rest] = manifest.exec.command;
+function execComponent(manifest, dir, configDir, injected = {}) {
   const cwd = path.join(dir, manifest.exec.cwd || ".");
+  const { file, args } = resolveCommand(dir, manifest.exec.command);
 
   log(`Starting ${COMPONENT} ${manifest.version}`);
 
-  const child = spawn(bin, rest, {
+  const child = spawn(file, args, {
     cwd,
     stdio: "inherit",
-    env: { ...process.env, ...componentEnv(manifest, dir, configDir) },
+    env: {
+      ...process.env,
+      ...componentEnv(manifest, dir, configDir),
+      ...injected,
+    },
   });
 
   // Forward signals so `docker stop` still stops the app promptly instead of
@@ -713,9 +827,10 @@ async function main() {
   );
 
   const configDir = linkMounts(manifest, dir);
+  const injected = await configuredEnv(dir, configDir);
 
-  runMigrations(manifest, dir);
-  execComponent(manifest, dir, configDir);
+  runMigrations(manifest, dir, injected);
+  execComponent(manifest, dir, configDir, injected);
 }
 
 // Only boot when this file is the process entry point, so tests can import the
@@ -724,4 +839,11 @@ if (require.main === module) {
   main().catch((err) => fatal(err.stack || err.message));
 }
 
-module.exports = { checkBundle, assetName, manifestUrl, releaseAssetUrl };
+module.exports = {
+  checkBundle,
+  assetName,
+  manifestUrl,
+  releaseAssetUrl,
+  resolveCommand,
+  configuredEnv,
+};

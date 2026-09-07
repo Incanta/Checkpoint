@@ -15,21 +15,38 @@
 import { describe, expect, it } from "vitest";
 import { createRequire } from "node:module";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 
-const { checkBundle, assetName, manifestUrl, releaseAssetUrl } = require(
-  "../../../../docker/runtime/bootstrap.js",
-) as {
-  checkBundle: (
-    manifest: Record<string, unknown>,
-    archiveSha256: string,
-    context: { component: string; runtimeAbi: string; dbProvider: string },
-  ) => Promise<unknown>;
-  assetName: (version: string) => string;
-  manifestUrl: () => string;
-  releaseAssetUrl: (tag: string, asset: string) => string;
-};
+const {
+  checkBundle,
+  assetName,
+  manifestUrl,
+  releaseAssetUrl,
+  resolveCommand,
+  configuredEnv,
+} = require("../../../../docker/runtime/bootstrap.js") as {
+    checkBundle: (
+      manifest: Record<string, unknown>,
+      archiveSha256: string,
+      context: { component: string; runtimeAbi: string; dbProvider: string },
+    ) => Promise<unknown>;
+    assetName: (version: string) => string;
+    manifestUrl: () => string;
+    releaseAssetUrl: (tag: string, asset: string) => string;
+    resolveCommand: (
+      dir: string,
+      command: string[],
+    ) => { file: string; args: string[] };
+    configuredEnv: (
+      dir: string,
+      configDir: string | null,
+    ) => Promise<Record<string, string>>;
+  };
 
 const { signManifest, verifySidecar } = require(
   "../../../../scripts/bundle/signing.js",
@@ -169,6 +186,113 @@ describe("asset and URL naming", () => {
     expect(manifestUrl()).toContain("releases/latest/download");
     expect(releaseAssetUrl("v0.5.0", "x.tar.zst")).toBe(
       "https://github.com/Incanta/Checkpoint/releases/download/v0.5.0/x.tar.zst",
+    );
+  });
+});
+
+/**
+ * The bundle's start and migrate commands are looked up inside the bundle, not
+ * on PATH: the runtime image deliberately ships no CLIs of its own, and a
+ * bundle staged with fs.cpSync does not reliably carry node_modules/.bin. A
+ * regression here is a container that boots and then dies on `spawnSync prisma
+ * ENOENT`, which is exactly what these pin.
+ */
+describe("resolveCommand", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cp-bundle-"));
+
+  const writePackage = (name: string, bin: unknown, entry: string): void => {
+    const pkgDir = path.join(root, "node_modules", name);
+    fs.mkdirSync(path.join(pkgDir, path.dirname(entry)), { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, entry), "// entry\n");
+    fs.writeFileSync(
+      path.join(pkgDir, "package.json"),
+      JSON.stringify({ name, bin }),
+    );
+  };
+
+  it("runs node commands with this interpreter, not a PATH lookup", () => {
+    expect(resolveCommand(root, ["node", "src/app/server.js"])).toEqual({
+      file: process.execPath,
+      args: ["src/app/server.js"],
+    });
+  });
+
+  it("resolves a bundled CLI through its package.json bin map", () => {
+    writePackage("prisma", { prisma: "build/index.js" }, "build/index.js");
+    expect(resolveCommand(root, ["prisma", "migrate", "deploy"])).toEqual({
+      file: process.execPath,
+      args: [
+        path.join(root, "node_modules", "prisma", "build", "index.js"),
+        "migrate",
+        "deploy",
+      ],
+    });
+  });
+
+  it("resolves a bundled CLI whose bin is a bare string", () => {
+    writePackage("solo", "cli.js", "cli.js");
+    expect(resolveCommand(root, ["solo", "--go"])).toEqual({
+      file: process.execPath,
+      args: [path.join(root, "node_modules", "solo", "cli.js"), "--go"],
+    });
+  });
+
+  it("falls back to PATH when the bundle carries no such package", () => {
+    expect(resolveCommand(root, ["absent", "--x"])).toEqual({
+      file: "absent",
+      args: ["--x"],
+    });
+  });
+});
+
+/**
+ * Checkpoint keeps DATABASE_URL (and PORT, and the external URL) in config, but
+ * Prisma and Next read them from the environment. The old images bridged the
+ * two by launching everything through @incanta/config's `config-env`; the
+ * bootstrap now does it in-process. If this bridge breaks, the app boots and
+ * then cannot reach its database.
+ *
+ * The repo root stands in for an extracted bundle here: both have
+ * node_modules/@incanta/config alongside the component's config directory,
+ * which is the only structure the function cares about.
+ */
+describe("configuredEnv", () => {
+  const repoRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../..",
+  );
+
+  it("maps config keys onto the env vars the app actually reads", async () => {
+    const previous = process.env.NODE_CONFIG_ENV;
+    process.env.NODE_CONFIG_ENV = "default";
+    try {
+      const env = await configuredEnv(
+        repoRoot,
+        path.join(repoRoot, "src/app/config"),
+      );
+      // The names are the contract; the values come from whatever the operator
+      // mounted, so only their presence is asserted.
+      expect(Object.keys(env).sort()).toEqual([
+        "DATABASE_URL",
+        "DB_PROVIDER",
+        "NEXT_PUBLIC_EXTERNAL_URL",
+        "PORT",
+      ]);
+      expect(env.DATABASE_URL).toBeTruthy();
+    } finally {
+      if (previous === undefined) delete process.env.NODE_CONFIG_ENV;
+      else process.env.NODE_CONFIG_ENV = previous;
+    }
+  });
+
+  it("returns nothing for a component with no config directory", async () => {
+    await expect(configuredEnv(repoRoot, null)).resolves.toEqual({});
+  });
+
+  it("degrades to an empty map when the bundle carries no @incanta/config", async () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), "cp-noconfig-"));
+    await expect(configuredEnv(empty, path.join(empty, "config"))).resolves.toEqual(
+      {},
     );
   });
 });
