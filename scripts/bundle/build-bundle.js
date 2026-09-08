@@ -23,7 +23,11 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 
 const { signManifest, sha256File } = require("./signing");
-const { copyPackageClosure, resolveStagedSymlinks } = require("./stage");
+const {
+  copyPackageClosure,
+  resolveStagedSymlinks,
+  verifyBundleResolves,
+} = require("./stage");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 
@@ -206,6 +210,19 @@ const linkParts = Object.entries(links)
   .map(([what, n]) => `${n} ${what}`);
 console.log(`  symlinks: ${linkParts.length ? linkParts.join(", ") : "none"}`);
 
+// Server only. Its node_modules is pruned to declared production dependencies,
+// which is where undeclared-but-hoisted imports turn into a container that
+// boots and dies. The app's tree comes from Next's file tracing, which follows
+// the actual imports, and its output is minified past the point where scanning
+// for import statements means anything.
+if (component === "server") {
+  const resolved = verifyBundleResolves({
+    stageDir,
+    scanDirs: ["src/core/server/lib", "src/core/common/lib"],
+  });
+  console.log(`  imports: ${resolved.scanned} package references resolve`);
+}
+
 const payloadBytes = dirSize(stageDir);
 console.log(`  staged ${(payloadBytes / 1024 / 1024).toFixed(1)} MiB`);
 
@@ -261,7 +278,8 @@ const manifest = {
           dataDir: null,
         }
       : {
-          command: ["node", "src/core/server/lib/index.js"],
+          // Relative to `cwd` below, not to the bundle root.
+          command: ["node", "lib/index.js"],
           cwd: "src/core/server",
           configDir: "src/core/server/config",
           dataDir: "src/core/server/data",

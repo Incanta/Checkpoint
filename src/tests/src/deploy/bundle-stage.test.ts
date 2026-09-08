@@ -22,20 +22,23 @@ import path from "node:path";
 
 const require = createRequire(import.meta.url);
 
-const { copyPackageClosure, resolveStagedSymlinks } = require(
-  "../../../../scripts/bundle/stage.js",
-) as {
-  copyPackageClosure: (opts: {
-    roots: string[];
-    repoRoot: string;
-    stageDir: string;
-  }) => { copied: string[]; kept: string[] };
-  resolveStagedSymlinks: (opts: {
-    repoRoot: string;
-    stageDir: string;
-    log?: (line: string) => void;
-  }) => { relinked: number; materialised: number; dropped: number };
-};
+const { copyPackageClosure, resolveStagedSymlinks, verifyBundleResolves } =
+  require("../../../../scripts/bundle/stage.js") as {
+    copyPackageClosure: (opts: {
+      roots: string[];
+      repoRoot: string;
+      stageDir: string;
+    }) => { copied: string[]; kept: string[] };
+    resolveStagedSymlinks: (opts: {
+      repoRoot: string;
+      stageDir: string;
+      log?: (line: string) => void;
+    }) => { relinked: number; materialised: number; dropped: number };
+    verifyBundleResolves: (opts: {
+      stageDir: string;
+      scanDirs: string[];
+    }) => { scanned: number };
+  };
 
 const temporary: string[] = [];
 
@@ -261,5 +264,61 @@ describe("resolveStagedSymlinks", () => {
     expect(fs.realpathSync(path.join(stageDir, "sub/link"))).toBe(
       fs.realpathSync(path.join(stageDir, "real")),
     );
+  });
+});
+
+describe("verifyBundleResolves", () => {
+  const stageWithCode = (source: string): string => {
+    const stageDir = scratch("cp-stage-");
+    writeFile(path.join(stageDir, "src/core/server/lib/index.js"), source);
+    fs.mkdirSync(path.join(stageDir, "node_modules"), { recursive: true });
+    return stageDir;
+  };
+
+  const check = (stageDir: string) =>
+    verifyBundleResolves({ stageDir, scanDirs: ["src/core/server/lib"] });
+
+  it("names a package the code imports but the bundle does not carry", () => {
+    // The exact shape that shipped: nine files importing @incanta/config,
+    // declared in no workspace, pruned away by `yarn workspaces focus`.
+    const stageDir = stageWithCode(`import config from "@incanta/config";\n`);
+    expect(() => check(stageDir)).toThrow(/@incanta\/config/);
+  });
+
+  it("passes when the package is present", () => {
+    const stageDir = stageWithCode(`import config from "@incanta/config";\n`);
+    writePackage(stageDir, "@incanta/config");
+    expect(check(stageDir).scanned).toBe(1);
+  });
+
+  it("accepts a subpath import of a package that is present", () => {
+    // Presence, not full resolution: an "exports" map makes require.resolve
+    // throw for packages that load perfectly well.
+    const stageDir = stageWithCode(`import { x } from "pkg/deep/thing.js";\n`);
+    writePackage(stageDir, "pkg");
+    expect(() => check(stageDir)).not.toThrow();
+  });
+
+  it("ignores relative imports and node builtins", () => {
+    const stageDir = stageWithCode(
+      `import "./local.js";\nimport fs from "node:fs";\nimport path from "path";\n`,
+    );
+    expect(check(stageDir).scanned).toBe(0);
+  });
+
+  it("does not mistake quoted prose for an import", () => {
+    // Compiled output is full of strings. An unanchored /from ["']/ pattern
+    // matched SQL fragments, and matching require() matched prose, both of
+    // which turned a working bundle into a failed build.
+    const stageDir = stageWithCode(
+      `const sql = "select a from \\"users\\" order by b";\n` +
+        `const note = 'require("not-a-real-package") in a string';\n`,
+    );
+    expect(check(stageDir).scanned).toBe(0);
+  });
+
+  it("catches a dynamic import too", () => {
+    const stageDir = stageWithCode(`await import("lazy-dep");\n`);
+    expect(() => check(stageDir)).toThrow(/lazy-dep/);
   });
 });

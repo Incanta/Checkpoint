@@ -199,4 +199,119 @@ function resolveStagedSymlinks({ repoRoot, stageDir, log = () => {} }) {
   return summary;
 }
 
-module.exports = { findPackage, copyPackageClosure, resolveStagedSymlinks };
+// Line-anchored on purpose. This runs over compiled-but-not-minified output,
+// where imports sit at the start of a line; a looser pattern matches the word
+// "from" inside SQL strings and every other quoted fragment in the file.
+//
+// Dynamic `import(...)` is matched anywhere, but `require(...)` deliberately is
+// not: these workspaces are "type": "module", so a require call in the output
+// is a string rather than a call, and matching it turns prose into a build
+// failure.
+const IMPORT_PATTERNS = [
+  /^\s*(?:import|export)\s[^\n]*?\bfrom\s*["']([^"']+)["']/gm,
+  /^\s*import\s*["']([^"']+)["']/gm,
+  /(?<![\w$.])import\(\s*["']([^"']+)["']\s*\)/g,
+];
+
+/**
+ * Check that every package the staged code imports is actually in the bundle.
+ *
+ * Yarn hoists, so a workspace can import a package it never declared and work
+ * fine in the dev tree. `yarn workspaces focus --production` then prunes to
+ * what IS declared, and the bundle boots without it. That is how the core
+ * server shipped importing @incanta/config, date-fns, njwt, pino, pino-pretty
+ * and yup while declaring none of them.
+ *
+ * Presence of the package directory is the question, not full specifier
+ * resolution: subpath "exports" maps make require.resolve throw for packages
+ * that are present and perfectly loadable, and a missing package is the failure
+ * mode that actually takes the container down.
+ */
+function verifyBundleResolves({ stageDir, scanDirs }) {
+  const builtins = new Set(require("module").builtinModules);
+  const missing = new Map();
+  // Directory -> package names already looked up from it. Nested rather than
+  // keyed by a joined string: the lookup below walks node_modules upward from
+  // the importing file, so the answer depends on the directory as well as the
+  // name, and nesting says that without inventing a separator.
+  const checked = new Map();
+  let lookups = 0;
+
+  const packageName = (specifier) => {
+    const parts = specifier.split("/");
+    return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+  };
+
+  const findWithin = (name, fromDir) => {
+    let dir = fromDir;
+    for (;;) {
+      if (fs.existsSync(path.join(dir, "node_modules", name, "package.json"))) {
+        return true;
+      }
+      if (path.resolve(dir) === path.resolve(stageDir)) return false;
+      const parent = path.dirname(dir);
+      if (parent === dir) return false;
+      dir = parent;
+    }
+  };
+
+  const scanFile = (file) => {
+    const source = fs.readFileSync(file, "utf8");
+    const specifiers = new Set();
+    for (const pattern of IMPORT_PATTERNS) {
+      for (const m of source.matchAll(pattern)) specifiers.add(m[1]);
+    }
+
+    const from = path.dirname(file);
+    let seen = checked.get(from);
+    if (!seen) checked.set(from, (seen = new Set()));
+
+    for (const specifier of specifiers) {
+      if (specifier.startsWith(".") || specifier.startsWith("/")) continue;
+      if (specifier.startsWith("node:")) continue;
+      const name = packageName(specifier);
+      if (builtins.has(name)) continue;
+      if (seen.has(name)) continue;
+
+      seen.add(name);
+      lookups++;
+
+      if (!findWithin(name, from) && !missing.has(name)) {
+        missing.set(name, path.relative(stageDir, file));
+      }
+    }
+  };
+
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(?:js|mjs|cjs)$/.test(entry.name)) scanFile(full);
+    }
+  };
+
+  for (const relative of scanDirs) {
+    const dir = path.join(stageDir, relative);
+    if (fs.existsSync(dir)) walk(dir);
+  }
+
+  if (missing.size) {
+    const lines = [...missing]
+      .map(([name, file]) => `  ${name} (imported by ${file})`)
+      .join("\n");
+    throw new Error(
+      `the bundle is missing packages its own code imports:\n${lines}\n` +
+        `Declare them in the importing workspace's package.json; hoisting hides ` +
+        `this until the tree is pruned for production.`,
+    );
+  }
+
+  return { scanned: lookups };
+}
+
+module.exports = {
+  findPackage,
+  copyPackageClosure,
+  resolveStagedSymlinks,
+  verifyBundleResolves,
+};

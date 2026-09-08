@@ -9,6 +9,10 @@
   "scripts": {
     "build": "tsgo -p ."
   },
+  "dependencies": {
+    "@trpc/client": "^11.11.0",
+    "superjson": "^2.2.6"
+  },
   "devDependencies": {
     "@typescript/native-preview": "^7.0.0-dev.20260304.1"
   }
