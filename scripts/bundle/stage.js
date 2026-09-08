@@ -226,34 +226,46 @@ const IMPORT_PATTERNS = [
  * resolution: subpath "exports" maps make require.resolve throw for packages
  * that are present and perfectly loadable, and a missing package is the failure
  * mode that actually takes the container down.
+ *
+ * The direct imports are only the starting point. From there this follows the
+ * dependency graph through the staged tree, because a package can be present
+ * while something it needs is not: Yarn never installs peer dependencies, so
+ * @trpc/client arrived without @trpc/server, which it imports from splitLink.
+ * That took the server down one boot after the undeclared imports above were
+ * fixed, and scanning our own output could not have seen it.
+ *
+ * Following reachability rather than auditing every package in node_modules
+ * matters for accuracy: plenty of packages declare peers they do not really
+ * require (app-builder-lib asks for electron-builder-squirrel-windows without
+ * marking it optional), and flagging those would fail builds over packages the
+ * bundle never loads.
  */
 function verifyBundleResolves({ stageDir, scanDirs }) {
   const builtins = new Set(require("module").builtinModules);
   const missing = new Map();
-  // Directory -> package names already looked up from it. Nested rather than
-  // keyed by a joined string: the lookup below walks node_modules upward from
-  // the importing file, so the answer depends on the directory as well as the
-  // name, and nesting says that without inventing a separator.
-  const checked = new Map();
-  let lookups = 0;
 
   const packageName = (specifier) => {
     const parts = specifier.split("/");
     return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
   };
 
+  // Node's own resolution: walk node_modules upward, stopping at the bundle
+  // root so nothing resolves against the build machine's tree.
   const findWithin = (name, fromDir) => {
     let dir = fromDir;
     for (;;) {
-      if (fs.existsSync(path.join(dir, "node_modules", name, "package.json"))) {
-        return true;
-      }
-      if (path.resolve(dir) === path.resolve(stageDir)) return false;
+      const candidate = path.join(dir, "node_modules", name);
+      if (fs.existsSync(path.join(candidate, "package.json"))) return candidate;
+      if (path.resolve(dir) === path.resolve(stageDir)) return null;
       const parent = path.dirname(dir);
-      if (parent === dir) return false;
+      if (parent === dir) return null;
       dir = parent;
     }
   };
+
+  // Work list of packages to account for, seeded by the direct imports below.
+  const pending = [];
+  const request = (name, from, reason) => pending.push({ name, from, reason });
 
   const scanFile = (file) => {
     const source = fs.readFileSync(file, "utf8");
@@ -263,22 +275,14 @@ function verifyBundleResolves({ stageDir, scanDirs }) {
     }
 
     const from = path.dirname(file);
-    let seen = checked.get(from);
-    if (!seen) checked.set(from, (seen = new Set()));
 
     for (const specifier of specifiers) {
       if (specifier.startsWith(".") || specifier.startsWith("/")) continue;
       if (specifier.startsWith("node:")) continue;
       const name = packageName(specifier);
       if (builtins.has(name)) continue;
-      if (seen.has(name)) continue;
 
-      seen.add(name);
-      lookups++;
-
-      if (!findWithin(name, from) && !missing.has(name)) {
-        missing.set(name, path.relative(stageDir, file));
-      }
+      request(name, from, `imported by ${path.relative(stageDir, file)}`);
     }
   };
 
@@ -295,18 +299,62 @@ function verifyBundleResolves({ stageDir, scanDirs }) {
     if (fs.existsSync(dir)) walk(dir);
   }
 
+  // Walk out from those imports through the dependency graph as it exists in
+  // the bundle. Each package is expanded once; a package reached from two
+  // places resolves to the same directory and is only opened once.
+  const expanded = new Set();
+  let checked = 0;
+
+  while (pending.length) {
+    const { name, from, reason } = pending.shift();
+    checked++;
+
+    const dir = findWithin(name, from);
+    if (!dir) {
+      if (!missing.has(name)) missing.set(name, reason);
+      continue;
+    }
+    if (expanded.has(dir)) continue;
+    expanded.add(dir);
+
+    let pkg;
+    try {
+      pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    } catch {
+      continue;
+    }
+    const label = pkg.name ?? name;
+
+    for (const dep of Object.keys(pkg.dependencies ?? {})) {
+      request(dep, dir, `dependency of ${label}`);
+    }
+
+    // Optional dependencies are absent by design when they do not apply, so
+    // they are followed if present and never reported.
+    for (const dep of Object.keys(pkg.optionalDependencies ?? {})) {
+      if (findWithin(dep, dir)) request(dep, dir, `optional dependency of ${label}`);
+    }
+
+    for (const peer of Object.keys(pkg.peerDependencies ?? {})) {
+      if (pkg.peerDependenciesMeta?.[peer]?.optional) continue;
+      if (builtins.has(peer)) continue;
+      request(peer, dir, `peer dependency of ${label}`);
+    }
+  }
+
   if (missing.size) {
     const lines = [...missing]
-      .map(([name, file]) => `  ${name} (imported by ${file})`)
+      .map(([name, reason]) => `  ${name}: ${reason}`)
       .join("\n");
     throw new Error(
-      `the bundle is missing packages its own code imports:\n${lines}\n` +
-        `Declare them in the importing workspace's package.json; hoisting hides ` +
-        `this until the tree is pruned for production.`,
+      `the bundle is missing packages it needs at runtime:\n${lines}\n` +
+        `Declare them in the importing workspace's package.json. Hoisting hides ` +
+        `a missing dependency, and Yarn never installs peers, until the tree is ` +
+        `pruned for production.`,
     );
   }
 
-  return { scanned: lookups };
+  return { scanned: checked, packages: expanded.size };
 }
 
 module.exports = {

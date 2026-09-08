@@ -37,7 +37,7 @@ const { copyPackageClosure, resolveStagedSymlinks, verifyBundleResolves } =
     verifyBundleResolves: (opts: {
       stageDir: string;
       scanDirs: string[];
-    }) => { scanned: number };
+    }) => { scanned: number; packages: number };
   };
 
 const temporary: string[] = [];
@@ -320,5 +320,77 @@ describe("verifyBundleResolves", () => {
   it("catches a dynamic import too", () => {
     const stageDir = stageWithCode(`await import("lazy-dep");\n`);
     expect(() => check(stageDir)).toThrow(/lazy-dep/);
+  });
+});
+
+describe("verifyBundleResolves, following the dependency graph", () => {
+  const stageWithCode = (source: string): string => {
+    const stageDir = scratch("cp-stage-");
+    writeFile(path.join(stageDir, "src/core/server/lib/index.js"), source);
+    fs.mkdirSync(path.join(stageDir, "node_modules"), { recursive: true });
+    return stageDir;
+  };
+
+  const check = (stageDir: string) =>
+    verifyBundleResolves({ stageDir, scanDirs: ["src/core/server/lib"] });
+
+  it("catches a peer dependency nothing provides", () => {
+    // The exact shape that shipped: common declared @trpc/client, Yarn does not
+    // install peers, and @trpc/client imports @trpc/server from splitLink.
+    const stageDir = stageWithCode(`import { c } from "@trpc/client";\n`);
+    writePackage(stageDir, "@trpc/client", {
+      peerDependencies: { "@trpc/server": "11.11.0" },
+    });
+
+    expect(() => check(stageDir)).toThrow(
+      /@trpc\/server: peer dependency of @trpc\/client/,
+    );
+  });
+
+  it("passes once the peer is in the bundle", () => {
+    const stageDir = stageWithCode(`import { c } from "@trpc/client";\n`);
+    writePackage(stageDir, "@trpc/client", {
+      peerDependencies: { "@trpc/server": "11.11.0" },
+    });
+    writePackage(stageDir, "@trpc/server");
+
+    expect(() => check(stageDir)).not.toThrow();
+  });
+
+  it("ignores a peer the package marks optional", () => {
+    const stageDir = stageWithCode(`import x from "pkg";\n`);
+    writePackage(stageDir, "pkg", {
+      peerDependencies: { "nice-to-have": "^1" },
+      peerDependenciesMeta: { "nice-to-have": { optional: true } },
+    });
+
+    expect(() => check(stageDir)).not.toThrow();
+  });
+
+  it("catches a dependency of a dependency", () => {
+    const stageDir = stageWithCode(`import a from "a";\n`);
+    writePackage(stageDir, "a", { dependencies: { b: "^1" } });
+
+    expect(() => check(stageDir)).toThrow(/b: dependency of a/);
+  });
+
+  it("does not report an optional dependency that is absent", () => {
+    const stageDir = stageWithCode(`import a from "a";\n`);
+    writePackage(stageDir, "a", { optionalDependencies: { "linux-only": "^1" } });
+
+    expect(() => check(stageDir)).not.toThrow();
+  });
+
+  it("only follows what the code actually reaches", () => {
+    // A package sitting in node_modules with a bogus peer must not fail the
+    // build when nothing imports it: app-builder-lib asks for
+    // electron-builder-squirrel-windows without marking it optional.
+    const stageDir = stageWithCode(`import a from "a";\n`);
+    writePackage(stageDir, "a");
+    writePackage(stageDir, "unreachable", {
+      peerDependencies: { "never-installed": "^1" },
+    });
+
+    expect(() => check(stageDir)).not.toThrow();
   });
 });

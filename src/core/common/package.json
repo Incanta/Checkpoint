@@ -11,9 +11,11 @@
   },
   "dependencies": {
     "@trpc/client": "^11.11.0",
+    "@trpc/server": "^11.11.0",
     "superjson": "^2.2.6"
   },
   "devDependencies": {
-    "@typescript/native-preview": "^7.0.0-dev.20260304.1"
+    "@typescript/native-preview": "^7.0.0-dev.20260304.1",
+    "typescript": "^5.9.3"
   }
 }

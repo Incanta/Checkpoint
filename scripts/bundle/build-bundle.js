@@ -220,7 +220,9 @@ if (component === "server") {
     stageDir,
     scanDirs: ["src/core/server/lib", "src/core/common/lib"],
   });
-  console.log(`  imports: ${resolved.scanned} package references resolve`);
+  console.log(
+    `  imports: ${resolved.scanned} references across ${resolved.packages} packages resolve`,
+  );
 }
 
 const payloadBytes = dirSize(stageDir);

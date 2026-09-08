@@ -1538,8 +1538,10 @@ __metadata:
   resolution: "@checkpointvcs/common@workspace:src/core/common"
   dependencies:
     "@trpc/client": "npm:^11.11.0"
+    "@trpc/server": "npm:^11.11.0"
     "@typescript/native-preview": "npm:^7.0.0-dev.20260304.1"
     superjson: "npm:^2.2.6"
+    typescript: "npm:^5.9.3"
   languageName: unknown
   linkType: soft
 
