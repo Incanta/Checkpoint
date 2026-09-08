@@ -1,8 +1,10 @@
 import { z } from "zod";
 import {
   createTRPCRouter,
+  adminProcedure,
   licenseManagerAdminProcedure,
 } from "~/server/api/trpc";
+import { isLicenseManager } from "~/server/license-utils";
 import { snapshotStoragePeak } from "~/server/billing/storage-usage";
 import {
   addCredits,
@@ -12,23 +14,43 @@ import {
 import { Logger } from "~/server/logging";
 
 export const adminRouter = createTRPCRouter({
-  getStats: licenseManagerAdminProcedure.query(async ({ ctx }) => {
-    const [totalUsers, totalOrgs, totalRepos, tierCounts, statusCounts] =
-      await Promise.all([
-        ctx.db.user.count(),
-        ctx.db.org.count({ where: { deletedAt: null } }),
-        ctx.db.repo.count({ where: { deletedAt: null } }),
-        ctx.db.org.groupBy({
-          by: ["subscriptionTier"],
-          where: { deletedAt: null },
-          _count: true,
-        }),
-        ctx.db.org.groupBy({
-          by: ["subscriptionStatus"],
-          where: { deletedAt: null },
-          _count: true,
-        }),
-      ]);
+  /**
+   * Instance-wide counts for the admin dashboard.
+   *
+   * Gated on adminProcedure so every checkpoint admin can see their own
+   * instance. The subscription tier/status breakdowns are billing data and
+   * only mean anything on the license manager, so off it they come back null
+   * rather than as a wall of misleading defaults.
+   */
+  getStats: adminProcedure.query(async ({ ctx }) => {
+    const [totalUsers, totalOrgs, totalRepos] = await Promise.all([
+      ctx.db.user.count(),
+      ctx.db.org.count({ where: { deletedAt: null } }),
+      ctx.db.repo.count({ where: { deletedAt: null } }),
+    ]);
+
+    if (!isLicenseManager()) {
+      return {
+        totalUsers,
+        totalOrgs,
+        totalRepos,
+        tierCounts: null,
+        statusCounts: null,
+      };
+    }
+
+    const [tierCounts, statusCounts] = await Promise.all([
+      ctx.db.org.groupBy({
+        by: ["subscriptionTier"],
+        where: { deletedAt: null },
+        _count: true,
+      }),
+      ctx.db.org.groupBy({
+        by: ["subscriptionStatus"],
+        where: { deletedAt: null },
+        _count: true,
+      }),
+    ]);
 
     return {
       totalUsers,

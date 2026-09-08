@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { notFound } from "next/navigation";
 import { api } from "~/trpc/react";
 import { Badge, Button, Card, PageHeader } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
@@ -50,12 +51,19 @@ export default function AdminUpdatesPage(): React.ReactElement {
   >(null);
   const [error, setError] = useState<string | null>(null);
 
+  const { data: user, isLoading: userLoading } = api.user.me.useQuery();
+
   const status = api.updates.getStatus.useQuery(undefined, {
+    enabled: !!user?.checkpointAdmin,
     // While a download is running the panel needs to move; otherwise this is
     // just keeping the restart state honest.
     refetchInterval: (query) =>
       query.state.data?.stage.state === "staging" ? 2000 : 30_000,
   });
+
+  if (!userLoading && !user?.checkpointAdmin) {
+    notFound();
+  }
 
   const fail = (err: unknown): void => {
     setError(err instanceof Error ? err.message : String(err));

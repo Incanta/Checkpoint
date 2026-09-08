@@ -246,7 +246,7 @@ export function AppHeader() {
           <DropdownItem href="/settings">Profile & Settings</DropdownItem>
           <DropdownItem href="/settings/notifications">Notifications</DropdownItem>
           <DropdownItem href="/settings/devices">Devices & Tokens</DropdownItem>
-          {user?.checkpointAdmin && user?.isLicenseManager && (
+          {user?.checkpointAdmin && (
             <>
               <DropdownDivider />
               <DropdownItem href="/admin">Admin</DropdownItem>

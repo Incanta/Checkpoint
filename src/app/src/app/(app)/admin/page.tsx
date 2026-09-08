@@ -32,10 +32,10 @@ export default function AdminDashboardPage() {
   useDocumentTitle("Admin · Dashboard");
   const { data: user, isLoading: userLoading } = api.user.me.useQuery();
   const { data: stats, isLoading } = api.admin.getStats.useQuery(undefined, {
-    enabled: !!user?.checkpointAdmin && !!user?.isLicenseManager,
+    enabled: !!user?.checkpointAdmin,
   });
 
-  if (!userLoading && !(user?.checkpointAdmin && user?.isLicenseManager)) {
+  if (!userLoading && !user?.checkpointAdmin) {
     notFound();
   }
 
@@ -86,47 +86,51 @@ export default function AdminDashboardPage() {
             </Card>
           </div>
 
-          {/* Subscription tiers */}
-          <div>
-            <h2 className="mb-4 text-lg font-semibold text-[var(--color-text-primary)]">
-              Subscriptions by Tier
-            </h2>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              {stats.tierCounts.map((t) => (
-                <Card key={t.tier}>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={TIER_COLORS[t.tier] ?? "default"}>
-                      {t.tier}
-                    </Badge>
-                  </div>
-                  <div className="mt-2 text-2xl font-bold text-[var(--color-text-primary)]">
-                    {t.count}
-                  </div>
-                </Card>
-              ))}
+          {/* Subscription tiers (license manager only) */}
+          {stats.tierCounts && (
+            <div>
+              <h2 className="mb-4 text-lg font-semibold text-[var(--color-text-primary)]">
+                Subscriptions by Tier
+              </h2>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                {stats.tierCounts.map((t) => (
+                  <Card key={t.tier}>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={TIER_COLORS[t.tier] ?? "default"}>
+                        {t.tier}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 text-2xl font-bold text-[var(--color-text-primary)]">
+                      {t.count}
+                    </div>
+                  </Card>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Subscription statuses */}
-          <div>
-            <h2 className="mb-4 text-lg font-semibold text-[var(--color-text-primary)]">
-              Subscriptions by Status
-            </h2>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-              {stats.statusCounts.map((s) => (
-                <Card key={s.status}>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={STATUS_COLORS[s.status] ?? "default"}>
-                      {s.status}
-                    </Badge>
-                  </div>
-                  <div className="mt-2 text-2xl font-bold text-[var(--color-text-primary)]">
-                    {s.count}
-                  </div>
-                </Card>
-              ))}
+          {/* Subscription statuses (license manager only) */}
+          {stats.statusCounts && (
+            <div>
+              <h2 className="mb-4 text-lg font-semibold text-[var(--color-text-primary)]">
+                Subscriptions by Status
+              </h2>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                {stats.statusCounts.map((s) => (
+                  <Card key={s.status}>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={STATUS_COLORS[s.status] ?? "default"}>
+                        {s.status}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 text-2xl font-bold text-[var(--color-text-primary)]">
+                      {s.count}
+                    </div>
+                  </Card>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       ) : null}
     </div>
