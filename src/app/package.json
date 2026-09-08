@@ -13,8 +13,8 @@
   },
   "scripts": {
     "build": "config-env --env=default next build",
-    "build:lib": "tsgo --project tsconfig.lib.json && node scripts/resolve-prisma-enums.mjs",
-    "check": "eslint . && tsgo --noEmit",
+    "build:lib": "tsc --project tsconfig.lib.json && node scripts/resolve-prisma-enums.mjs",
+    "check": "eslint . && tsc --noEmit",
     "db:set-provider": "yarn db:set-provider:sqlite",
     "db:set-provider:sqlite": "cross-env DB_PROVIDER=sqlite node scripts/set-db-provider.mjs",
     "db:set-provider:postgresql": "cross-env DB_PROVIDER=postgresql node scripts/set-db-provider.mjs",
@@ -33,7 +33,7 @@
     "lint:fix": "eslint . --fix",
     "preview": "next build && next start",
     "start": "config-env --env=default next start",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "@incanta/config": "^2.1.18",
@@ -72,13 +72,13 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.3.3",
     "@types/nodemailer": "^7.0.11",
-    "@typescript/native-preview": "^7.0.0-dev.20260304.1",
     "eslint": "^9.39.5",
     "postcss": "^8.5.26",
     "prettier": "^3.6.2",
     "prettier-plugin-tailwindcss": "^0.6.11",
     "prisma": "^6.5.0",
-    "tailwindcss": "^4.1.18"
+    "tailwindcss": "^4.1.18",
+    "typescript": "^7.0.2"
   },
   "ct3aMetadata": {
     "initVersion": "7.39.3"

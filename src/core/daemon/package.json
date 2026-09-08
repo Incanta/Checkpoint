@@ -17,7 +17,7 @@
     }
   },
   "scripts": {
-    "build": "tsgo --project tsconfig.json",
+    "build": "tsc --project tsconfig.json",
     "build:bundle": "node esbuild.config.mjs",
     "build:daemon": "yarn build && yarn build:bundle",
     "start": "yarn build && node --inspect=0.0.0.0:9231 lib/bin.js"
@@ -41,6 +41,6 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
-    "@typescript/native-preview": "^7.0.0-dev.20260304.1"
+    "typescript": "^7.0.2"
   }
 }

@@ -7,7 +7,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "cd ../common && yarn build && cd ../server && tsgo -p .",
+    "build": "cd ../common && yarn build && cd ../server && tsc -p .",
     "start": "yarn build && NODE_CONFIG_ENV=default node --inspect=0.0.0.0:9230 lib/index.js"
   },
   "dependencies": {
@@ -26,6 +26,6 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/multer": "^2.0.0",
-    "@typescript/native-preview": "^7.0.0-dev.20260304.1"
+    "typescript": "^7.0.2"
   }
 }

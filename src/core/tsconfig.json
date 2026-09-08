@@ -6,6 +6,13 @@
     // ],
     "target": "ESNext",
     "module": "esnext",
+    // TypeScript 7 no longer pulls every node_modules/@types package into the
+    // global scope on its own, so the ones these projects rely on have to be
+    // named. Only global type packages belong here; types that arrive through
+    // an import (@types/express and the like) still resolve on their own.
+    "types": [
+      "node"
+    ],
     "jsx": "react-jsx",
     "allowJs": true,
     "composite": true,

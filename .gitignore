@@ -7,3 +7,4 @@ artifacts
 override.json
 dev-shadow.db
 .env
+*.tsbuildinfo
