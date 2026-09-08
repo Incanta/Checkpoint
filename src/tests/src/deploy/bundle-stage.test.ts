@@ -394,3 +394,47 @@ describe("verifyBundleResolves, following the dependency graph", () => {
     expect(() => check(stageDir)).not.toThrow();
   });
 });
+
+describe("verifyBundleResolves, type-only peers", () => {
+  const stageWithCode = (source: string): string => {
+    const stageDir = scratch("cp-stage-");
+    writeFile(path.join(stageDir, "src/core/server/lib/index.js"), source);
+    fs.mkdirSync(path.join(stageDir, "node_modules"), { recursive: true });
+    return stageDir;
+  };
+
+  const check = (stageDir: string) =>
+    verifyBundleResolves({ stageDir, scanDirs: ["src/core/server/lib"] });
+
+  it("ignores a typescript peer, which no production install carries", () => {
+    // @trpc/client peer-depends on both @trpc/server and typescript. The first
+    // is loaded at runtime and must be in the bundle; the second is a
+    // devDependency everywhere and failed the build for no reason.
+    const stageDir = stageWithCode(`import { c } from "@trpc/client";\n`);
+    writePackage(stageDir, "@trpc/client", {
+      peerDependencies: { "@trpc/server": "11.11.0", typescript: ">=5.7.2" },
+    });
+    writePackage(stageDir, "@trpc/server");
+
+    expect(() => check(stageDir)).not.toThrow();
+  });
+
+  it("ignores an @types peer, which holds only declaration files", () => {
+    const stageDir = stageWithCode(`import x from "pkg";\n`);
+    writePackage(stageDir, "pkg", {
+      peerDependencies: { "@types/node": "*" },
+    });
+
+    expect(() => check(stageDir)).not.toThrow();
+  });
+
+  it("still reports a runtime peer alongside the type-only ones", () => {
+    const stageDir = stageWithCode(`import { c } from "@trpc/client";\n`);
+    writePackage(stageDir, "@trpc/client", {
+      peerDependencies: { "@trpc/server": "11.11.0", typescript: ">=5.7.2" },
+    });
+
+    expect(() => check(stageDir)).toThrow(/@trpc\/server/);
+    expect(() => check(stageDir)).not.toThrow(/typescript/);
+  });
+});

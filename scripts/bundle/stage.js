@@ -207,6 +207,18 @@ function resolveStagedSymlinks({ repoRoot, stageDir, log = () => {} }) {
 // not: these workspaces are "type": "module", so a require call in the output
 // is a string rather than a call, and matching it turns prose into a build
 // failure.
+/**
+ * Peers that exist for typing and are never loaded at runtime.
+ *
+ * A production install drops them by design: typescript is a devDependency
+ * everywhere, and @types/* packages contain only declaration files. Reporting
+ * them as missing would fail every server bundle over @trpc/client's
+ * `typescript` peer, which no running server has ever needed.
+ */
+function isTypeOnly(name) {
+  return name === "typescript" || name.startsWith("@types/");
+}
+
 const IMPORT_PATTERNS = [
   /^\s*(?:import|export)\s[^\n]*?\bfrom\s*["']([^"']+)["']/gm,
   /^\s*import\s*["']([^"']+)["']/gm,
@@ -337,7 +349,7 @@ function verifyBundleResolves({ stageDir, scanDirs }) {
 
     for (const peer of Object.keys(pkg.peerDependencies ?? {})) {
       if (pkg.peerDependenciesMeta?.[peer]?.optional) continue;
-      if (builtins.has(peer)) continue;
+      if (builtins.has(peer) || isTypeOnly(peer)) continue;
       request(peer, dir, `peer dependency of ${label}`);
     }
   }
