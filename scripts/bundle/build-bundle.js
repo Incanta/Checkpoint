@@ -23,6 +23,7 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 
 const { signManifest, sha256File } = require("./signing");
+const { copyPackageClosure, resolveStagedSymlinks } = require("./stage");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 
@@ -92,91 +93,6 @@ function copy(from, to, { optional = false } = {}) {
   return true;
 }
 
-/**
- * Locate an installed package by walking node_modules upward from `fromDir`,
- * the way Node itself resolves. require.resolve is not usable here: many
- * packages have an "exports" map that hides package.json.
- */
-function findPackage(name, fromDir) {
-  let dir = fromDir;
-  for (;;) {
-    const pkgPath = path.join(dir, "node_modules", name, "package.json");
-    if (fs.existsSync(pkgPath)) return pkgPath;
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
-/**
- * Copy a package and everything it needs at runtime.
- *
- * Copying just node_modules/prisma is not enough. The Prisma CLI's own
- * dependencies (@prisma/config, and through it `effect`) live hoisted at the
- * repo root, so they are present in the dev tree and absent from the bundle:
- * the app bundle's node_modules is Next's traced output, and Next only traces
- * what the app imports, which is the Prisma client, never the CLI.
- *
- * Anything already staged wins. Next's traced copy is the version the app was
- * built against, so a hoisted copy of the same package must not clobber it.
- */
-function copyPackageClosure(roots) {
-  const copied = [];
-  const skipped = [];
-  const missing = [];
-  const seen = new Set();
-
-  const visit = (name, fromDir, optional) => {
-    if (seen.has(name)) return;
-
-    const pkgPath = findPackage(name, fromDir);
-    if (!pkgPath) {
-      // Optional dependencies are routinely absent (platform-specific builds).
-      if (!optional) missing.push(name);
-      return;
-    }
-    seen.add(name);
-
-    const pkgDir = path.dirname(pkgPath);
-    const relative = path.join("node_modules", ...name.split("/"));
-
-    if (fs.existsSync(path.join(stageDir, relative))) {
-      skipped.push(name);
-    } else {
-      fs.mkdirSync(path.dirname(path.join(stageDir, relative)), {
-        recursive: true,
-      });
-      fs.cpSync(pkgDir, path.join(stageDir, relative), {
-        recursive: true,
-        dereference: true,
-      });
-      copied.push(name);
-    }
-
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-    for (const dep of Object.keys(pkg.dependencies ?? {})) {
-      visit(dep, pkgDir, false);
-    }
-    for (const dep of Object.keys(pkg.optionalDependencies ?? {})) {
-      visit(dep, pkgDir, true);
-    }
-  };
-
-  for (const root of roots) visit(root, repoRoot, false);
-
-  if (missing.length) {
-    throw new Error(
-      `cannot resolve ${missing.join(", ")} from the installed tree; ` +
-        `the bundle would fail at runtime (did yarn install run?)`,
-    );
-  }
-
-  console.log(
-    `  ${roots.join(", ")}: copied ${copied.length} packages` +
-      (skipped.length ? `, kept ${skipped.length} already staged` : ""),
-  );
-}
-
 function dirSize(dir) {
   let total = 0;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -228,7 +144,17 @@ if (component === "app") {
   // The whole CLI, not just node_modules/prisma: its dependencies are hoisted
   // to the repo root and Next traced none of them, because the app imports the
   // Prisma client and never the CLI.
-  copyPackageClosure(["prisma"]);
+  const closure = copyPackageClosure({
+    roots: ["prisma"],
+    repoRoot,
+    stageDir,
+  });
+  console.log(
+    `  prisma CLI: copied ${closure.copied.length} packages` +
+      (closure.kept.length
+        ? `, kept ${closure.kept.length} already staged`
+        : ""),
+  );
   // The generated client and its query engine, overwriting whatever Next
   // traced. This checkout's copy is the one `db:set-provider` + `prisma
   // generate` just produced for THIS provider, so it is the authoritative one.
@@ -269,6 +195,16 @@ if (component === "app") {
   // script runs. Without that prune this copies the full ~1.8 GB dev tree.
   copy("node_modules", "node_modules");
 }
+
+const links = resolveStagedSymlinks({
+  repoRoot,
+  stageDir,
+  log: console.log,
+});
+const linkParts = Object.entries(links)
+  .filter(([, n]) => n)
+  .map(([what, n]) => `${n} ${what}`);
+console.log(`  symlinks: ${linkParts.length ? linkParts.join(", ") : "none"}`);
 
 const payloadBytes = dirSize(stageDir);
 console.log(`  staged ${(payloadBytes / 1024 / 1024).toFixed(1)} MiB`);

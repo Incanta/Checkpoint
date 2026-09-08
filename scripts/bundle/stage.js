@@ -1,0 +1,202 @@
+// Staging helpers for deployment bundles.
+//
+// Split out of build-bundle.js because both of these encode non-obvious facts
+// about how the build toolchains lay out node_modules, and both have already
+// shipped bundles that booted and then died. They are covered by
+// src/tests/src/deploy/bundle-stage.test.ts.
+
+const fs = require("fs");
+const path = require("path");
+
+/**
+ * Locate an installed package by walking node_modules upward from `fromDir`,
+ * the way Node itself resolves. require.resolve is not usable here: many
+ * packages have an "exports" map that hides package.json.
+ */
+function findPackage(name, fromDir) {
+  let dir = fromDir;
+  for (;;) {
+    const pkgPath = path.join(dir, "node_modules", name, "package.json");
+    if (fs.existsSync(pkgPath)) return pkgPath;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Copy a package and everything it needs at runtime.
+ *
+ * Copying just node_modules/prisma is not enough. The Prisma CLI's own
+ * dependencies (@prisma/config, and through it `effect`) live hoisted at the
+ * repo root, so they are present in the dev tree and absent from the bundle:
+ * the app bundle's node_modules is Next's traced output, and Next only traces
+ * what the app imports, which is the Prisma client, never the CLI.
+ *
+ * Anything already staged wins. Next's traced copy is the version the app was
+ * built against, so a hoisted copy of the same package must not clobber it.
+ */
+function copyPackageClosure({ roots, repoRoot, stageDir }) {
+  const copied = [];
+  const kept = [];
+  const missing = [];
+  const seen = new Set();
+
+  const visit = (name, fromDir, optional) => {
+    if (seen.has(name)) return;
+
+    const pkgPath = findPackage(name, fromDir);
+    if (!pkgPath) {
+      // Optional dependencies are routinely absent (platform-specific builds).
+      if (!optional) missing.push(name);
+      return;
+    }
+    seen.add(name);
+
+    const pkgDir = path.dirname(pkgPath);
+    const staged = path.join(stageDir, "node_modules", ...name.split("/"));
+
+    if (fs.existsSync(staged)) {
+      kept.push(name);
+    } else {
+      fs.mkdirSync(path.dirname(staged), { recursive: true });
+      fs.cpSync(pkgDir, staged, { recursive: true, dereference: true });
+      copied.push(name);
+    }
+
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    for (const dep of Object.keys(pkg.dependencies ?? {})) {
+      visit(dep, pkgDir, false);
+    }
+    for (const dep of Object.keys(pkg.optionalDependencies ?? {})) {
+      visit(dep, pkgDir, true);
+    }
+  };
+
+  for (const root of roots) visit(root, repoRoot, false);
+
+  if (missing.length) {
+    throw new Error(
+      `cannot resolve ${missing.join(", ")} from the installed tree; ` +
+        `the bundle would fail at runtime (did yarn install run?)`,
+    );
+  }
+
+  return { copied, kept };
+}
+
+/**
+ * Rewrite or materialise every symlink in the staged tree.
+ *
+ * fs.cpSync's `dereference` applies only to the path handed to it; symlinks
+ * found while walking are recreated as symlinks. Two toolchains put absolute
+ * links into what gets staged:
+ *
+ *   - Turbopack aliases server externals as
+ *     .next/node_modules/<pkg>-<hash> -> <workspace>/node_modules/<pkg>
+ *   - Yarn's node-modules linker symlinks every workspace into node_modules
+ *
+ * Both point at the build workspace, so both dangle once a bundle is extracted
+ * to /var/lib/checkpoint. The previous images never hit this because they built
+ * and ran at the same path, /app; a versioned bundle directory cannot.
+ *
+ * A link whose target is also staged becomes a relative link to that copy,
+ * which costs nothing and survives extraction anywhere. A link to a package
+ * that is not staged is materialised. A link to a repo directory that is not
+ * staged (another workspace, e.g. the desktop client inside a server bundle) is
+ * dropped: materialising it would smuggle an entire source tree into the
+ * bundle, and nothing here should have needed it.
+ */
+function resolveStagedSymlinks({ repoRoot, stageDir, log = () => {} }) {
+  const summary = { relinked: 0, materialised: 0, dropped: 0 };
+
+  const contains = (parent, child) => {
+    const rel = path.relative(parent, child);
+    return Boolean(rel) && !rel.startsWith("..") && !path.isAbsolute(rel);
+  };
+
+  const relativeLink = (from, to) =>
+    path.relative(path.dirname(from), to).split(path.sep).join("/") || ".";
+
+  // Returns true if it created new content that may itself contain symlinks.
+  const handle = (linkPath) => {
+    let target;
+    try {
+      target = fs.realpathSync(linkPath);
+    } catch {
+      log(`  dropping broken link ${path.relative(stageDir, linkPath)}`);
+      fs.rmSync(linkPath, { recursive: true, force: true });
+      summary.dropped++;
+      return false;
+    }
+
+    // Already pointing inside the bundle: either a link the source tree meant
+    // to be internal, or one an earlier pass rewrote.
+    if (contains(stageDir, target)) return false;
+
+    const isInsideRepo = contains(repoRoot, target);
+    const inRepo = isInsideRepo ? path.relative(repoRoot, target) : null;
+    const staged = inRepo ? path.join(stageDir, inRepo) : null;
+
+    if (staged && fs.existsSync(staged)) {
+      // node_modules/.bin entries link to files, not directories. The type is
+      // ignored on POSIX but wrong enough to matter if anyone builds on Windows.
+      const type = fs.statSync(staged).isDirectory() ? "dir" : "file";
+      fs.rmSync(linkPath, { recursive: true, force: true });
+      try {
+        // "dir", not "junction": a junction must be an absolute path, which is
+        // the whole problem being fixed here.
+        fs.symlinkSync(relativeLink(linkPath, staged), linkPath, type);
+        summary.relinked++;
+        return false;
+      } catch (err) {
+        // Windows refuses symlinks without Developer Mode or elevation. Local
+        // bundle builds still need to produce something that runs.
+        if (err.code !== "EPERM" && err.code !== "EACCES") throw err;
+        fs.cpSync(staged, linkPath, { recursive: true, dereference: true });
+        summary.materialised++;
+        return true;
+      }
+    }
+
+    if (inRepo && !inRepo.split(path.sep).includes("node_modules")) {
+      log(
+        `  dropping ${path.relative(stageDir, linkPath)} -> ${inRepo} (not in this bundle)`,
+      );
+      fs.rmSync(linkPath, { recursive: true, force: true });
+      summary.dropped++;
+      return false;
+    }
+
+    fs.rmSync(linkPath, { recursive: true, force: true });
+    fs.cpSync(target, linkPath, { recursive: true, dereference: true });
+    summary.materialised++;
+    return true;
+  };
+
+  // Materialising can bring in further symlinks, so walk until a pass is clean.
+  for (let pass = 0; ; pass++) {
+    let rescan = false;
+
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isSymbolicLink()) {
+          if (handle(full)) rescan = true;
+        } else if (entry.isDirectory()) {
+          walk(full);
+        }
+      }
+    };
+
+    walk(stageDir);
+    if (!rescan) break;
+    if (pass === 4) {
+      throw new Error("symlink resolution did not settle after 5 passes");
+    }
+  }
+
+  return summary;
+}
+
+module.exports = { findPackage, copyPackageClosure, resolveStagedSymlinks };
