@@ -38,7 +38,6 @@ model User {
   prComments       PullRequestComment[]
   prReviews        PullRequestReview[]
   mergePermissions MergePermission[]
-  shelves          Shelf[]
 
   issues           Issue[]
   issueComments    IssueComment[]
@@ -250,7 +249,6 @@ model Repo {
   fileClaims       FileClaim[]
   pullRequests     PullRequest[]
   mergePermissions MergePermission[]
-  shelves          Shelf[]
   issues           Issue[]
   issueLabels      IssueLabel[]
   inviteRoles      InviteRepoRole[]
@@ -558,7 +556,6 @@ model File {
 
   changes       FileChange[]
   claims        FileClaim[]
-  shelfChanges  ShelfFileChange[]
   artifactFiles ArtifactFile[]
 
   @@index([repoId])
@@ -862,62 +859,6 @@ model MergePermission {
   userId String
 
   @@unique([repoId, userId, type])
-}
-
-// Shelves: mutable dangling changelists (Pro+)
-
-enum ShelfStatus {
-  ACTIVE
-  SUBMITTED
-  DELETED
-}
-
-model Shelf {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  name        String
-  description String @default("")
-
-  repo   Repo   @relation(fields: [repoId], references: [id])
-  repoId String
-
-  author   User   @relation(fields: [authorId], references: [id])
-  authorId String
-
-  // Current longtail version index (all-inclusive of shelf files)
-  versionIndex String
-
-  // Dangling changelist number (from repo sequence, not on any branch). The
-  // shelf's state tree lives on this changelist (stateRootHash); its file list
-  // is in fileChanges below.
-  changelistNumber Int
-
-  status ShelfStatus @default(ACTIVE)
-
-  // Submitted metadata
-  submittedToBranch String?
-  submittedAt       DateTime?
-
-  fileChanges ShelfFileChange[]
-
-  @@unique([repoId, name])
-  @@index([repoId, status])
-}
-
-model ShelfFileChange {
-  id String @id @default(cuid())
-
-  shelf   Shelf  @relation(fields: [shelfId], references: [id], onDelete: Cascade)
-  shelfId String
-
-  file   File   @relation(fields: [fileId], references: [id])
-  fileId String
-
-  type String // ADD, MODIFY
-
-  @@unique([shelfId, fileId])
 }
 
 // ── Issues ──────────────────────────────────────────────────────

@@ -80,7 +80,6 @@ interface JWTClaims {
 const RequestSchema = object({
   apiToken: string().required(),
   branchName: string().required(),
-  shelfName: string().optional(),
   artifactForChangelistNum: number().optional(),
   message: string().required(),
   versionIndex: string().defined(),
@@ -236,26 +235,7 @@ export function routeSubmit(): Router {
     try {
       let responseMessage: RequestResponse;
 
-      if (payload.shelfName) {
-        Logger.debug(
-          `[Submit] Routing to shelf creation with name ${payload.shelfName}`,
-        );
-
-        // Route to shelf creation instead of branch changelist
-        const shelfResponse = await client.shelf.createFromSubmit.mutate({
-          repoId: claims.repoId,
-          shelfName: payload.shelfName,
-          description: "",
-          versionIndex: payload.versionIndex,
-          message: payload.message,
-          modifications: payload.modifications,
-        });
-
-        responseMessage = {
-          id: shelfResponse.shelfName,
-          number: shelfResponse.changelistNumber,
-        };
-      } else if (
+      if (
         payload.artifactForChangelistNum != null &&
         payload.artifactForChangelistNum >= 0
       ) {

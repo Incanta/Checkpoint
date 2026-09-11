@@ -32,7 +32,6 @@ export default function RepoLayout({
 
   const { hasFeature } = useLicenseTier(org?.id);
   const showPullRequests = hasFeature("pullRequests");
-  const showShelves = hasFeature("shelves");
   const showIssues =
     hasFeature("issues") && repoData?.issuesPlatform !== "DISABLED";
 
@@ -97,7 +96,6 @@ export default function RepoLayout({
             </span>
           </Tab>
         )}
-        {showShelves && <Tab href={`${basePath}/shelves`}>Shelves</Tab>}
         <Tab href={`${basePath}/branches`}>Branches</Tab>
         <Tab href={`${basePath}/labels`}>Labels</Tab>
         {access?.isMember && (

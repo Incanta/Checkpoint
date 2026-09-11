@@ -55,7 +55,6 @@ const tableOrder = [
   "PullRequestReview",
   "PullRequestComment",
   "PullRequest",
-  "Shelf",
   "MergePermission",
   "ApiToken",
   "OrgUserActivity",

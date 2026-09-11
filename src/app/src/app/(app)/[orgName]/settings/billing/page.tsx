@@ -61,7 +61,7 @@ const TIER_LABELS: Record<
 
 const TIER_FEATURES: Record<string, string[]> = {
   BASIC: ["Checkouts & locking", "Branching", "All clients"],
-  PRO: ["Pull requests & reviews", "Shelves", "Horde integration", "Artifacts"],
+  PRO: ["Pull requests & reviews", "Horde integration", "Artifacts"],
   STUDIO: ["Data replicas", "Enterprise SAML"],
 };
 

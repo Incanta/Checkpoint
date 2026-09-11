@@ -7,7 +7,6 @@ import { historyRouter } from "./history.js";
 import { labelsRouter } from "./labels.js";
 import { opsRouter } from "./ops.js";
 import { pendingRouter } from "./pending.js";
-import { shelvesRouter } from "./shelves.js";
 import { syncRouter } from "./sync.js";
 
 export const workspacesRouter = router({
@@ -19,6 +18,5 @@ export const workspacesRouter = router({
   labels: labelsRouter,
   ops: opsRouter,
   pending: pendingRouter,
-  shelves: shelvesRouter,
   sync: syncRouter,
 });

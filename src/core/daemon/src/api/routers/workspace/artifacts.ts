@@ -86,7 +86,6 @@ export const artifactsRouter = router({
             (step) => jobManager.updateStep(job.id, step),
             (step, done, total) =>
               jobManager.updateProgress(job.id, done, total),
-            undefined, // shelfName
             input.changelistNumber, // artifactForChangelistNum
           );
 

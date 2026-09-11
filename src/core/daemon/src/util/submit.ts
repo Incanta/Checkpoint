@@ -35,7 +35,6 @@ export async function submit(
   logLevel?: LongtailLogLevel,
   onStep?: (step: string) => void,
   onProgress?: (step: string, done: number, total: number) => void,
-  shelfName?: string,
   artifactForChangelistNum?: number,
 ): Promise<void> {
   const daemonConfig = await DaemonConfig.Get();
@@ -72,9 +71,6 @@ export async function submit(
 
   console.log(`[submit] Calling SubmitAsync:`);
   console.log(`[submit]   branchName: ${workspace.domainBranchName}`);
-  if (shelfName) {
-    console.log(`[submit]   shelfName: ${shelfName}`);
-  }
   console.log(`[submit]   message: ${message}`);
   console.log(`[submit]   localPath: ${workspace.localPath}`);
   console.log(`[submit]   remoteRoot: /${orgId}/${workspace.repoId}`);
@@ -104,10 +100,6 @@ export async function submit(
     modifications,
     logLevel: GetLogLevel(resolvedLogLevel),
   };
-
-  if (shelfName) {
-    submitOptions.shelfName = shelfName;
-  }
 
   if (artifactForChangelistNum != null && artifactForChangelistNum >= 0) {
     submitOptions.artifactForChangelistNum = artifactForChangelistNum;
@@ -168,7 +160,8 @@ export async function submit(
     },
   };
   if (onProgress) {
-    pollOptions.onProgress = (step, done, total) => onProgress(step, done, total);
+    pollOptions.onProgress = (step, done, total) =>
+      onProgress(step, done, total);
   }
   if (!wantProgress) {
     pollOptions.intervalMs = 250;
@@ -180,7 +173,8 @@ export async function submit(
   // tooling (e.g. the benchmark harness) can attribute where a large submit
   // spends its time. Values are milliseconds.
   if (lastStage) {
-    stagesMs[lastStage] = (stagesMs[lastStage] ?? 0) + (Date.now() - stageStart);
+    stagesMs[lastStage] =
+      (stagesMs[lastStage] ?? 0) + (Date.now() - stageStart);
   }
   console.log(
     `[submit-timing] ${JSON.stringify({

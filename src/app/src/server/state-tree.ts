@@ -53,8 +53,8 @@ export async function materializeStateTreeBlocks(
 }
 
 // Cache materialized path maps by repoId:rootHash. Root hashes are immutable
-// content addresses, so entries never go stale and need no invalidation (a
-// mutated shelf CL gets a new root hash, hence a new key).
+// content addresses, so entries never go stale and need no invalidation:
+// different content produces a different hash, hence a different key.
 const PATH_CACHE_MAX = 256;
 const pathTreeCache = new Map<string, StateMap>();
 function pathKey(repoId: string, rootHash: string): string {

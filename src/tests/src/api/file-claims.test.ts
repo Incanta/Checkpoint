@@ -672,6 +672,99 @@ describe("file claims", () => {
     });
   });
 
+  describe("cross-domain workspace switch", () => {
+    async function claimOn(
+      repoId: string,
+      fileId: string,
+      branchName: string,
+      userId: string,
+      workspaceId: string,
+    ) {
+      return acquireClaim(testDb.client, {
+        repoId,
+        fileId,
+        filePath: UASSET,
+        branchName,
+        orgBinaryExtensions: NO_OVERRIDES,
+        actor: { userId, workspaceId },
+      });
+    }
+
+    it("blocks a domain switch while files are still checked out", async () => {
+      const { owner, org, repo } = await scaffold();
+      await makeBranch(testDb.client, repo.id, owner.id, {
+        name: "release/1.0",
+        type: "RELEASE",
+        parentName: "main",
+      });
+      const ws = await makeWorkspace(testDb.client, repo.id, org.id, owner.id);
+      const file = await makeFile(testDb.client, repo.id, UASSET);
+      await claimOn(repo.id, file.id, "main", owner.id, ws.id);
+
+      const caller = await makeAppCaller({ asUser: owner });
+
+      // An OPEN claim is work still sitting in this working tree, which the
+      // switch is about to replace.
+      await expect(
+        caller.workspace.setBranchState({
+          workspaceId: ws.id,
+          domainBranchName: "release/1.0",
+        }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+    });
+
+    it("allows the switch once the work is submitted to a branch", async () => {
+      const { owner, org, repo } = await scaffold();
+      await makeBranch(testDb.client, repo.id, owner.id, {
+        name: "feature/a",
+        type: "FEATURE",
+        parentName: "main",
+      });
+      await makeBranch(testDb.client, repo.id, owner.id, {
+        name: "release/1.0",
+        type: "RELEASE",
+        parentName: "main",
+      });
+      const ws = await makeWorkspace(testDb.client, repo.id, org.id, owner.id);
+      const file = await makeFile(testDb.client, repo.id, UASSET);
+      const { claim } = await claimOn(
+        repo.id,
+        file.id,
+        "main",
+        owner.id,
+        ws.id,
+      );
+
+      await settleClaimAfterLanding(testDb.client, claim, {
+        targetBranchName: "feature/a",
+        targetIsDomainRoot: false,
+        changelistNumber: 5,
+        actor: { userId: owner.id, workspaceId: ws.id },
+      });
+
+      const caller = await makeAppCaller({ asUser: owner });
+
+      // A SUBMITTED claim has already reached the server and left the tree. It
+      // stays anchored in the "main" domain and resolves when feature/a merges,
+      // regardless of where this workspace points next. Counting it would make
+      // submitting fail to clear the way, which is what the error tells people
+      // to do, and would have left no escape once shelves were removed.
+      await expect(
+        caller.workspace.setBranchState({
+          workspaceId: ws.id,
+          domainBranchName: "release/1.0",
+        }),
+      ).resolves.toEqual({ ok: true });
+
+      // The claim is untouched by the switch: still active, still anchored.
+      const after = await testDb.client.fileClaim.findUniqueOrThrow({
+        where: { id: claim.id },
+      });
+      expect(after.releasedAt).toBeNull();
+      expect(after.domainBranchName).toBe("main");
+    });
+  });
+
   describe("audit trail", () => {
     it("records every transition, so a forced release has a record", async () => {
       const { owner, org, repo } = await scaffold();

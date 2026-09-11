@@ -356,7 +356,6 @@ export const pendingRouter = router({
             oldPath: z.string().optional(),
           }),
         ),
-        shelfName: z.string().optional(),
         keepCheckedOut: z.boolean().optional(),
         // When true, skip progress/step callbacks entirely (no per-tick
         // callback overhead). Used by the CLI's --no-progress flag.
@@ -471,7 +470,6 @@ export const pendingRouter = router({
               ? (step, done, total) =>
                   jobManager.updateProgress(job.id, done, total)
               : undefined,
-            input.shelfName ? input.shelfName : undefined,
           );
 
           jobManager.updateStep(job.id, "Reloading workspace state");

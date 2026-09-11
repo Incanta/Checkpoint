@@ -9,7 +9,6 @@ export type LicenseTier = (typeof LICENSE_TIERS)[number];
 export const LicenseFeatures = [
   "pullRequests",
   "reviews",
-  "shelves",
   "hordeIntegration",
   "artifacts",
   "teamSync",
@@ -25,7 +24,6 @@ export type LicenseFeature = (typeof LicenseFeatures)[number];
 const FEATURE_MIN_TIER: Record<LicenseFeature, LicenseTier> = {
   pullRequests: "PRO",
   reviews: "PRO",
-  shelves: "PRO",
   hordeIntegration: "PRO",
   artifacts: "PRO",
   teamSync: "PRO",
