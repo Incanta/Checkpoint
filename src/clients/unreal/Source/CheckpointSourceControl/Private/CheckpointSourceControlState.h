@@ -27,6 +27,12 @@ namespace ECheckpointFileStatus {
     NotChangedCheckedOut = 12,
     Conflicted = 13,
     Artifact = 14,
+    /**
+     * Auto-merged during a pull but still carrying conflict markers. Mirrors
+     * the daemon's FileStatus; the values are cast straight from the wire, so
+     * a missing member here is an out-of-range enum, not a compile error.
+     */
+    MergeConflict = 15,
   };
 }
 
@@ -145,6 +151,15 @@ public:
 
   /** Who else has this file checked out */
   FString OtherUserCheckedOut;
+
+  /**
+   * The branch a blocking claim is held on, when one is.
+   *
+   * This is what the ISourceControlState cross-branch hooks below have always
+   * wanted and never had. They were stubbed out because the old repo-wide
+   * checkout model had no branch to report; claims do.
+   */
+  FString ClaimBranch;
 
   /** Whether the file is exclusively locked */
   bool bIsLocked = false;

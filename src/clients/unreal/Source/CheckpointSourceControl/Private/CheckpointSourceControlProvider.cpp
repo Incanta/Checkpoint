@@ -172,19 +172,25 @@ bool FCheckpointSourceControlProvider::QueryStateBranchConfig(
 void FCheckpointSourceControlProvider::RegisterStateBranches(
   const TArray<FString> &BranchNames, const FString &ContentRoot
 ) {
-  // Branches not supported yet
+  // The editor hands us the branches it wants cross-branch status for, in
+  // priority order. Keep them so GetStateBranchIndex can answer.
+  StateBranchNames = BranchNames;
 }
 
 int32 FCheckpointSourceControlProvider::GetStateBranchIndex(
   const FString &BranchName
 ) const {
-  return INDEX_NONE;
+  return StateBranchNames.IndexOfByKey(BranchName);
 }
 
 bool FCheckpointSourceControlProvider::GetStateBranchAtIndex(
   int32 BranchIndex, FString &OutBranchName
 ) const {
-  return false;
+  if (!StateBranchNames.IsValidIndex(BranchIndex)) {
+    return false;
+  }
+  OutBranchName = StateBranchNames[BranchIndex];
+  return true;
 }
 
 ECommandResult::Type FCheckpointSourceControlProvider::GetState(

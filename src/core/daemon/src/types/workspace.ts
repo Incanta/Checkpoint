@@ -98,6 +98,10 @@ export enum FileStatus {
  */
 export interface FileClaimInfo {
   id: string;
+  /** The claimed file's server id. How refresh matches claims to baseline files. */
+  fileId: string;
+  /** Repo-relative, forward-slashed. */
+  filePath: string;
   strength: "ADVISORY" | "EXCLUSIVE";
   state: "OPEN" | "SUBMITTED";
   /** The branch the work currently lives on. */
@@ -126,6 +130,15 @@ export interface File {
   changelist: number | null;
 
   claims: FileClaimInfo[];
+
+  /**
+   * Whether this file is staged for the next submit.
+   *
+   * Separate from the claim: the claim says WHICH branch the work is destined
+   * for, this says whether it is READY to go. A checked-out binary has a claim
+   * but starts unstaged.
+   */
+  staged: boolean;
 }
 
 export interface Directory {

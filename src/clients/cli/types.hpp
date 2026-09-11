@@ -113,6 +113,12 @@ struct FileInfo {
   int status = 0;
   std::string id;
   int changelist = 0;
+  /** Ready for the next submit. Separate from which branch it goes to. */
+  bool staged = false;
+  /** Branch this file's work is destined for; empty means the domain root. */
+  std::string claimBranch;
+  /** True when someone else's exclusive claim blocks this file. */
+  bool blocked = false;
 };
 
 inline void from_json(const nlohmann::json& j, FileInfo& f) {
@@ -121,6 +127,12 @@ inline void from_json(const nlohmann::json& j, FileInfo& f) {
   f.size = j.value("size", (int64_t)0);
   f.modifiedAt = j.value("modifiedAt", 0.0);
   f.status = j.value("status", 0);
+  f.staged = j.value("staged", false);
+  if (j.contains("claims") && j["claims"].is_array() && !j["claims"].empty()) {
+    const auto& claim = j["claims"][0];
+    f.claimBranch = claim.value("branchName", "");
+    f.blocked = claim.value("blocking", false);
+  }
   if (j.contains("id") && !j["id"].is_null()) {
     f.id = j["id"].get<std::string>();
   }
@@ -152,7 +164,10 @@ inline void from_json(const nlohmann::json& j, PendingChanges& pc) {
 struct WorkspaceConfig {
   std::string id;
   std::string repoId;
-  std::string branchName;
+  /** Domain-root branch the tree is materialized from. */
+  std::string domainBranchName;
+  /** Feature branches overlaid on the tree; empty is the ordinary case. */
+  std::vector<std::string> activeBranches;
   std::string workspaceName;
   std::string localPath;
   std::string daemonId;
@@ -161,7 +176,16 @@ struct WorkspaceConfig {
 inline void from_json(const nlohmann::json& j, WorkspaceConfig& ws) {
   ws.id = j.value("id", "");
   ws.repoId = j.value("repoId", "");
-  ws.branchName = j.value("branchName", "");
+  // `branchName` is the pre-multi-branch key. The daemon deletes it on load,
+  // but read it as a fallback so a config written by an older daemon still
+  // names a branch instead of rendering empty.
+  ws.domainBranchName = j.value("domainBranchName", j.value("branchName", ""));
+  ws.activeBranches.clear();
+  if (j.contains("activeBranches") && j["activeBranches"].is_array()) {
+    for (const auto& b : j["activeBranches"]) {
+      if (b.is_string()) ws.activeBranches.push_back(b.get<std::string>());
+    }
+  }
   ws.workspaceName = j.value("workspaceName", "");
   ws.localPath = j.value("localPath", "");
   ws.daemonId = j.value("daemonId", "");

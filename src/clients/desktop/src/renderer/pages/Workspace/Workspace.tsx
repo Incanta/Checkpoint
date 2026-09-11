@@ -87,7 +87,12 @@ export default function Workspace(): React.ReactElement {
                   icon={faCodeBranch}
                   style={{ color: "var(--color-branches)" }}
                 />
-                {currentWorkspace.branchName}
+                {currentWorkspace.domainBranchName}
+                {currentWorkspace.activeBranches.length > 0 && (
+                  <span className="opacity-70">
+                    {` +${currentWorkspace.activeBranches.length}`}
+                  </span>
+                )}
               </Badge>
             )}
             {currentWorkspace && (

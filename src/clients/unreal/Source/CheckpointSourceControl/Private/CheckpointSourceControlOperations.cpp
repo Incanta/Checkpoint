@@ -92,11 +92,16 @@ bool FCheckpointCheckOutWorker::Execute(
       continue;
     }
 
+    // Branch is left empty so the claim lands on the workspace's domain
+    // root, and exclusivity is decided by the repo's binary-extension set
+    // rather than forced here: a .uasset is unmergeable and gets an exclusive
+    // claim automatically.
     if (!Client.Checkout(
           Settings.GetDaemonId(),
           Settings.GetWorkspaceId(),
           RelPath,
-          false, // not locked
+          FString(),
+          false,
           Error
         )) {
       UE_LOG(
@@ -142,7 +147,7 @@ bool FCheckpointCheckInWorker::Execute(
   auto &Settings = SccProvider.AccessSettings();
 
   // Build the modifications array from the files
-  TArray<TSharedPtr<FJsonValue>> Modifications;
+  TArray<FString> SubmitPaths;
 
   for (const FString &File : InCommand.Files) {
     FString RelPath = SccProvider.ToRelativePath(File);
@@ -168,22 +173,9 @@ bool FCheckpointCheckInWorker::Execute(
 
     auto State = SccProvider.GetStateInternal(File);
 
-    TSharedPtr<FJsonObject> ModObj = MakeShareable(new FJsonObject());
-    ModObj->SetStringField(TEXT("path"), RelPath);
-
-    if (State->GetFileStatus() == ECheckpointFileStatus::Deleted) {
-      ModObj->SetBoolField(TEXT("delete"), true);
-    } else {
-      ModObj->SetBoolField(TEXT("delete"), false);
-    }
-
-    if (State->GetFileStatus() == ECheckpointFileStatus::Renamed) {
-      // For renamed files, we'd need the old path
-      // For now, treat as modify
-      ModObj->SetBoolField(TEXT("delete"), false);
-    }
-
-    Modifications.Add(MakeShareable(new FJsonValueObject(ModObj)));
+    // The daemon derives delete/modify from the file's own status, so only
+    // the path is needed now.
+    SubmitPaths.Add(RelPath);
     SubmittedFiles.Add(File);
   }
 
@@ -200,7 +192,8 @@ bool FCheckpointCheckInWorker::Execute(
         Settings.GetDaemonId(),
         Settings.GetWorkspaceId(),
         Description,
-        Modifications,
+        SubmitPaths,
+        FString(),
         bKeepCheckedOut,
         Error
       )) {
@@ -671,30 +664,45 @@ bool FCheckpointUpdateStatusWorker::Execute(
           AbsFile, static_cast<ECheckpointFileStatus::Type>(Status)
         );
 
-        // Check for other user checkouts
-        const TArray<TSharedPtr<FJsonValue>> *Checkouts;
-        if ((*Found)->TryGetArrayField(TEXT("checkouts"), Checkouts)) {
-          for (const auto &CheckoutVal : *Checkouts) {
-            auto CheckoutObj = CheckoutVal->AsObject();
-            if (!CheckoutObj.IsValid()) continue;
+        // Claims held on this file. The daemon used to send `checkouts` with
+        // a `locked` boolean; it now sends `claims`, and reading the old
+        // shape silently left every file looking free, which let two artists
+        // edit the same .uasset with no warning.
+        const TArray<TSharedPtr<FJsonValue>> *Claims;
+        if ((*Found)->TryGetArrayField(TEXT("claims"), Claims)) {
+          for (const auto &ClaimVal : *Claims) {
+            auto ClaimObj = ClaimVal->AsObject();
+            if (!ClaimObj.IsValid()) continue;
 
-            // Check if this is another user's checkout
+            // `blocking` is the server's own answer to "does this stop me".
+            // It already accounts for advisory-vs-exclusive and for claims
+            // anchored in a sibling domain, which the editor cannot work out
+            // for itself.
+            bool bBlocking = false;
+            ClaimObj->TryGetBoolField(TEXT("blocking"), bBlocking);
+
             const TSharedPtr<FJsonObject> *UserObj;
-            if (CheckoutObj->TryGetObjectField(TEXT("user"), UserObj)) {
+            if (ClaimObj->TryGetObjectField(TEXT("user"), UserObj)) {
               FString Email;
               (*UserObj)->TryGetStringField(TEXT("email"), Email);
               if (!Email.IsEmpty() && Email != SccProvider.GetUserEmail()) {
                 FString UserName;
                 (*UserObj)->TryGetStringField(TEXT("username"), UserName);
-                OtherCheckouts.Add(
-                  AbsFile, UserName.IsEmpty() ? Email : UserName
-                );
+                FString Branch;
+                ClaimObj->TryGetStringField(TEXT("branchName"), Branch);
+
+                FString Display = UserName.IsEmpty() ? Email : UserName;
+                if (!Branch.IsEmpty()) {
+                  Display += FString::Printf(TEXT(" (on %s)"), *Branch);
+                  ClaimBranches.Add(AbsFile, Branch);
+                }
+                OtherCheckouts.Add(AbsFile, Display);
               }
             }
 
-            bool bLocked = false;
-            CheckoutObj->TryGetBoolField(TEXT("locked"), bLocked);
-            if (bLocked) {
+            FString Strength;
+            ClaimObj->TryGetStringField(TEXT("strength"), Strength);
+            if (bBlocking && Strength == TEXT("EXCLUSIVE")) {
               LockedFiles.Add(AbsFile);
             }
           }
@@ -810,6 +818,9 @@ bool FCheckpointUpdateStatusWorker::UpdateStates() {
     State->TimeStamp = FDateTime::Now();
 
     // Set other checkout info
+    if (FString *ClaimBranch = ClaimBranches.Find(Pair.Key)) {
+      State->ClaimBranch = *ClaimBranch;
+    }
     if (FString *Other = OtherCheckouts.Find(Pair.Key)) {
       State->OtherUserCheckedOut = *Other;
     } else {
@@ -955,6 +966,9 @@ bool FCheckpointUpdateChangelistsStatusWorker::UpdateStates() {
     FileState->TimeStamp = FDateTime::Now();
 
     // Set other checkout info
+    if (FString *ClaimBranch = ClaimBranches.Find(Pair.Key)) {
+      FileState->ClaimBranch = *ClaimBranch;
+    }
     if (FString *Other = OtherCheckouts.Find(Pair.Key)) {
       FileState->OtherUserCheckedOut = *Other;
     }

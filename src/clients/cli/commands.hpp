@@ -384,8 +384,18 @@ inline int cmdStatus() {
   }
 
   // Print header
-  std::cout << color::bold() << "On branch " << color::cyan()
-            << ws.branchName << color::reset() << std::endl;
+  std::cout << color::bold() << "On " << color::cyan() << ws.domainBranchName
+            << color::reset();
+  if (!ws.activeBranches.empty()) {
+    std::cout << color::dim() << " with ";
+    for (size_t i = 0; i < ws.activeBranches.size(); ++i) {
+      if (i > 0) std::cout << ", ";
+      std::cout << color::reset() << color::cyan() << ws.activeBranches[i]
+                << color::reset() << color::dim();
+    }
+    std::cout << " overlaid" << color::reset();
+  }
+  std::cout << std::endl;
   std::cout << color::dim() << "Workspace: " << ws.workspaceName
             << " (" << ws.id << ")" << color::reset() << std::endl;
 
@@ -404,32 +414,40 @@ inline int cmdStatus() {
     return 0;
   }
 
-  // Read CLI staging state
-  auto stagedSet = readStagedFiles(ctx.root);
-
-  // Categorize files
-  std::vector<std::pair<std::string, FileStatus>> staged;
+  // Staged-ness and branch attribution both come from the daemon now, so a
+  // single refresh is enough. Staged files group by the bucket they will be
+  // submitted to.
+  std::map<std::string, std::vector<std::pair<std::string, FileStatus>>> buckets;
   std::vector<std::pair<std::string, FileStatus>> unstaged;
+  size_t stagedCount = 0;
 
   for (auto& [path, file] : pending.files) {
     auto status = static_cast<FileStatus>(file.status);
-    if (stagedSet.count(path)) {
-      staged.push_back({path, status});
+    if (file.staged) {
+      const std::string& bucket =
+          file.claimBranch.empty() ? ws.domainBranchName : file.claimBranch;
+      buckets[bucket].push_back({path, status});
+      stagedCount++;
     } else {
       unstaged.push_back({path, status});
     }
   }
 
-  // Print staged changes
-  if (!staged.empty()) {
-    std::cout << color::bold() << "Changes to be submitted:" << color::reset() << std::endl;
-    std::cout << color::dim() << "  (use \"chk restore --staged <file>\" to unstage)"
+  // Print staged changes, one section per bucket
+  if (stagedCount > 0) {
+    std::cout << color::dim() << "  (use \"chk restore --staged <file>\" to unstage,"
+              << " \"chk move <file> -b <branch>\" to restage elsewhere)"
               << color::reset() << std::endl;
-    std::cout << std::endl;
-    for (auto& [path, status] : staged) {
-      std::cout << "  " << color::statusColor(status)
-                << fileStatusSymbol(status) << " " << path
-                << color::reset() << std::endl;
+    for (auto& [bucket, entries] : buckets) {
+      std::cout << std::endl;
+      std::cout << color::bold() << "Changes to be submitted to "
+                << color::cyan() << bucket << color::reset()
+                << color::bold() << ":" << color::reset() << std::endl;
+      for (auto& [path, status] : entries) {
+        std::cout << "  " << color::statusColor(status)
+                  << fileStatusSymbol(status) << " " << path
+                  << color::reset() << std::endl;
+      }
     }
     std::cout << std::endl;
   }
@@ -460,7 +478,8 @@ inline int cmdStatus() {
 //  COMMAND: add (stage files)
 // ═════════════════════════════════════════════════════════════════
 
-inline int cmdAdd(const std::vector<std::string>& files) {
+inline int cmdAdd(const std::vector<std::string>& files,
+                  const std::string& branchName = "") {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
@@ -561,13 +580,163 @@ inline int cmdAdd(const std::vector<std::string>& files) {
     expandedPaths = resolvedPaths;
   }
 
-  // Add expanded paths to CLI staged.json
-  addStagedFiles(ctx.root, expandedPaths);
+  // Stage via the daemon. This also points each file's claim at the target
+  // branch, so staged-ness and destination cannot drift apart.
+  if (!expandedPaths.empty()) {
+    nlohmann::json stageInput = {
+        {"daemonId", ws.daemonId},
+        {"workspaceId", ws.id},
+        {"paths", expandedPaths},
+    };
+    if (!branchName.empty()) {
+      stageInput["branchName"] = branchName;
+    }
+    client.mutate("workspaces.pending.stage", stageInput);
+  }
 
   for (auto& path : expandedPaths) {
     std::cout << color::green() << "  + " << path << color::reset() << std::endl;
   }
-  std::cout << expandedPaths.size() << " file(s) staged." << std::endl;
+  std::cout << expandedPaths.size() << " file(s) staged";
+  if (!branchName.empty()) {
+    std::cout << " to " << color::cyan() << branchName << color::reset();
+  }
+  std::cout << "." << std::endl;
+
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: add --patch (stage individual hunks)
+// ═════════════════════════════════════════════════════════════════
+
+/**
+ * Interactive per-hunk staging, in the `git add -p` idiom.
+ *
+ * Only meaningful for mergeable text: a binary has no hunks, which is exactly
+ * where claims are exclusive rather than advisory.
+ */
+inline int cmdAddPatch(const std::string& file, const std::string& branchName) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  std::string resolved = resolveWorkspacePath(ctx.root, file);
+
+  nlohmann::json hunksInput = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"path", resolved},
+  };
+  auto result = client.query("workspaces.pending.getHunks", hunksInput);
+
+  if (result.value("isBinary", false)) {
+    std::cerr << color::yellow()
+              << "Cannot stage hunks of a binary file; stage it whole with "
+              << "\"chk add\"." << color::reset() << std::endl;
+    return 1;
+  }
+
+  auto hunks = result.value("hunks", nlohmann::json::array());
+  if (hunks.empty()) {
+    std::cout << "No changes to stage in " << resolved << "." << std::endl;
+    return 0;
+  }
+
+  std::vector<int> selected;
+  for (auto& hunk : hunks) {
+    int index = hunk.value("index", -1);
+    if (index < 0) continue;
+
+    std::cout << std::endl
+              << color::bold() << "@@ hunk " << (index + 1) << " of "
+              << hunks.size() << " @@" << color::reset() << std::endl;
+
+    for (auto& line : hunk.value("lines", nlohmann::json::array())) {
+      std::string text = line.get<std::string>();
+      if (!text.empty() && text[0] == '+') {
+        std::cout << color::green() << text << color::reset() << std::endl;
+      } else if (!text.empty() && text[0] == '-') {
+        std::cout << color::red() << text << color::reset() << std::endl;
+      } else {
+        std::cout << color::dim() << text << color::reset() << std::endl;
+      }
+    }
+
+    std::cout << "Stage this hunk [y,n,q,a]? " << std::flush;
+    std::string answer;
+    if (!std::getline(std::cin, answer)) break;
+
+    if (answer == "q") {
+      break;
+    } else if (answer == "a") {
+      for (auto& rest : hunks) {
+        int restIndex = rest.value("index", -1);
+        if (restIndex >= index) selected.push_back(restIndex);
+      }
+      break;
+    } else if (answer == "y") {
+      selected.push_back(index);
+    }
+  }
+
+  nlohmann::json stageInput = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"path", resolved},
+      {"hunkIndices", selected},
+  };
+  if (!branchName.empty()) {
+    stageInput["branchName"] = branchName;
+  }
+
+  auto stageResult = client.mutate("workspaces.pending.stageHunks", stageInput);
+
+  if (selected.empty()) {
+    std::cout << std::endl << "Nothing staged; " << resolved << " unstaged."
+              << std::endl;
+  } else {
+    std::cout << std::endl
+              << color::green() << "Staged " << selected.size() << " of "
+              << hunks.size() << " hunk(s) in " << resolved << color::reset();
+    if (stageResult.value("partial", false)) {
+      std::cout << color::dim() << " (partial)" << color::reset();
+    }
+    std::cout << std::endl;
+  }
+
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: move (restage files into a different branch bucket)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdMove(const std::vector<std::string>& files,
+                   const std::string& branchName) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  std::vector<std::string> resolvedPaths;
+  for (auto& file : files) {
+    resolvedPaths.push_back(resolveWorkspacePath(ctx.root, file));
+  }
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"paths", resolvedPaths},
+      {"branchName", branchName},
+  };
+
+  client.mutate("workspaces.pending.moveToBranch", input);
+
+  for (auto& path : resolvedPaths) {
+    std::cout << color::green() << "  > " << path << color::reset() << std::endl;
+  }
+  std::cout << resolvedPaths.size() << " file(s) moved to " << color::cyan()
+            << branchName << color::reset() << "." << std::endl;
 
   return 0;
 }
@@ -620,8 +789,12 @@ inline int cmdRestore(const std::vector<std::string>& files, bool staged) {
       }
     }
 
-    // Remove from CLI staged.json
-    removeStagedFiles(ctx.root, resolvedPaths);
+    nlohmann::json unstageInput = {
+        {"daemonId", ws.daemonId},
+        {"workspaceId", ws.id},
+        {"paths", resolvedPaths},
+    };
+    client.mutate("workspaces.pending.unstage", unstageInput);
 
     for (auto& path : resolvedPaths) {
       std::cout << color::yellow() << "  - " << path << color::reset() << std::endl;
@@ -650,61 +823,24 @@ inline int cmdRestore(const std::vector<std::string>& files, bool staged) {
 //  COMMAND: submit (push a version)
 // ═════════════════════════════════════════════════════════════════
 
-inline int cmdSubmit(const std::string& message, bool noProgress = false) {
+inline int cmdSubmit(const std::string& message, bool noProgress = false,
+                     const std::string& branchName = "") {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
 
-  // First refresh to get current pending changes
-  nlohmann::json refreshInput = {
-      {"daemonId", ws.daemonId},
-      {"workspaceId", ws.id},
-  };
-
-  auto refreshResult = client.query("workspaces.pending.refresh", refreshInput);
-
-  if (refreshResult.is_null()) {
-    std::cerr << "No pending changes to submit." << std::endl;
-    return 1;
-  }
-
-  PendingChanges pending;
-  from_json(refreshResult, pending);
-
-  // Read CLI staging state
-  auto stagedSet = readStagedFiles(ctx.root);
-
-  // Build modifications list from staged files
-  nlohmann::json modifications = nlohmann::json::array();
-  int stagedCount = 0;
-
-  for (auto& [path, file] : pending.files) {
-    if (!stagedSet.count(path)) continue;
-
-    auto status = static_cast<FileStatus>(file.status);
-    bool isDelete = (status == FileStatus::Deleted);
-    modifications.push_back({
-        {"path", path},
-        {"delete", isDelete},
-    });
-    stagedCount++;
-  }
-
-  if (stagedCount == 0) {
-    std::cerr << "No staged changes to submit." << std::endl;
-    std::cerr << color::dim() << "  (use \"chk add <file>\" to stage files)"
-              << color::reset() << std::endl;
-    return 1;
-  }
-
-  // Submit
+  // The daemon owns the staged set and derives the file list from it, so
+  // there is nothing to compute here. An empty bucket is rejected server-side
+  // with a message naming the branch.
   nlohmann::json submitInput = {
       {"daemonId", ws.daemonId},
       {"workspaceId", ws.id},
       {"message", message},
-      {"modifications", modifications},
       {"noProgress", noProgress},
   };
+  if (!branchName.empty()) {
+    submitInput["branchName"] = branchName;
+  }
 
   // Note: submit is a mutation in the daemon API (sends input as POST body)
   auto submitResult = client.mutate("workspaces.pending.submit", submitInput);
@@ -715,7 +851,10 @@ inline int cmdSubmit(const std::string& message, bool noProgress = false) {
     return 1;
   }
 
-  std::cout << "Submitting " << stagedCount << " file(s)..." << std::endl;
+  std::cout << "Submitting staged changes to "
+            << color::cyan()
+            << (branchName.empty() ? ws.domainBranchName : branchName)
+            << color::reset() << "..." << std::endl;
 
   auto jobResult = pollJob(client, jobId, !noProgress);
 
@@ -725,12 +864,8 @@ inline int cmdSubmit(const std::string& message, bool noProgress = false) {
     return 1;
   }
 
-  // Clear staged.json after successful submit
-  writeStagedFiles(ctx.root, {});
-
   std::cout << color::green() << color::bold()
-            << "Successfully submitted " << stagedCount << " file(s)."
-            << color::reset() << std::endl;
+            << "Successfully submitted." << color::reset() << std::endl;
   std::cout << color::dim() << "Message: " << message << color::reset() << std::endl;
 
   return 0;
@@ -925,7 +1060,7 @@ inline int cmdMerge(const std::string& incomingBranch) {
   auto& ws = ctx.workspace;
 
   std::cout << "Merging " << color::cyan() << incomingBranch
-            << color::reset() << " into " << color::cyan() << ws.branchName
+            << color::reset() << " into " << color::cyan() << ws.domainBranchName
             << color::reset() << "..." << std::endl;
 
   nlohmann::json input = {
@@ -1169,7 +1304,7 @@ inline int cmdSwitch(const std::string& branchName) {
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
 
-  if (branchName == ws.branchName) {
+  if (branchName == ws.domainBranchName) {
     std::cout << "Already on branch '" << branchName << "'." << std::endl;
     return 0;
   }
@@ -1210,7 +1345,7 @@ inline int cmdSwitch(const std::string& branchName) {
 //  COMMAND: checkout (check out a controlled file)
 // ═════════════════════════════════════════════════════════════════
 
-inline int cmdCheckout(const std::string& file, bool locked) {
+inline int cmdCheckout(const std::string& file, bool exclusive) {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
@@ -1221,14 +1356,14 @@ inline int cmdCheckout(const std::string& file, bool locked) {
       {"daemonId", ws.daemonId},
       {"workspaceId", ws.id},
       {"path", resolved},
-      {"locked", locked},
+      {"forceExclusive", exclusive},
   };
 
   client.mutate("workspaces.pending.checkout", input);
 
   std::cout << color::green() << "Checked out: " << resolved << color::reset();
-  if (locked) {
-    std::cout << " (locked)";
+  if (exclusive) {
+    std::cout << " (exclusive)";
   }
   std::cout << std::endl;
 
@@ -1802,207 +1937,6 @@ inline int cmdLogout() {
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  COMMAND: shelve (shelve staged files)
-// ═════════════════════════════════════════════════════════════════
-
-inline int cmdShelve(const std::string& name, const std::string& message) {
-  auto ctx = getWorkspaceContext();
-  auto& client = ctx.client;
-  auto& ws = ctx.workspace;
-
-  // Refresh to get current pending changes
-  nlohmann::json refreshInput = {
-      {"daemonId", ws.daemonId},
-      {"workspaceId", ws.id},
-  };
-
-  auto refreshResult = client.query("workspaces.pending.refresh", refreshInput);
-
-  if (refreshResult.is_null()) {
-    std::cerr << "No pending changes to shelve." << std::endl;
-    return 1;
-  }
-
-  PendingChanges pending;
-  from_json(refreshResult, pending);
-
-  auto stagedSet = readStagedFiles(ctx.root);
-
-  nlohmann::json modifications = nlohmann::json::array();
-  int stagedCount = 0;
-
-  for (auto& [path, file] : pending.files) {
-    if (!stagedSet.count(path)) continue;
-
-    auto status = static_cast<FileStatus>(file.status);
-    bool isDelete = (status == FileStatus::Deleted);
-    modifications.push_back({
-        {"path", path},
-        {"delete", isDelete},
-    });
-    stagedCount++;
-  }
-
-  if (stagedCount == 0) {
-    std::cerr << "No staged changes to shelve." << std::endl;
-    std::cerr << color::dim() << "  (use \"chk add <file>\" to stage files)"
-              << color::reset() << std::endl;
-    return 1;
-  }
-
-  std::string submitMessage = message.empty() ? ("Shelf: " + name) : message;
-
-  nlohmann::json submitInput = {
-      {"daemonId", ws.daemonId},
-      {"workspaceId", ws.id},
-      {"message", submitMessage},
-      {"modifications", modifications},
-      {"shelfName", name},
-  };
-
-  auto submitResult = client.mutate("workspaces.pending.submit", submitInput);
-
-  std::string jobId = submitResult.value("jobId", "");
-  if (jobId.empty()) {
-    std::cerr << "error: No job ID returned from shelve." << std::endl;
-    return 1;
-  }
-
-  std::cout << "Shelving " << stagedCount << " file(s) to '" << name << "'..." << std::endl;
-
-  auto jobResult = pollJob(client, jobId);
-
-  if (jobResult.status == "failed") {
-    std::cerr << color::red() << "error: " << jobResult.error
-              << color::reset() << std::endl;
-    return 1;
-  }
-
-  // Clear staged.json after successful shelve
-  writeStagedFiles(ctx.root, {});
-
-  std::cout << color::green() << color::bold()
-            << "Successfully shelved " << stagedCount << " file(s) to '" << name << "'."
-            << color::reset() << std::endl;
-
-  return 0;
-}
-
-// ═════════════════════════════════════════════════════════════════
-//  COMMAND: shelf list
-// ═════════════════════════════════════════════════════════════════
-
-inline int cmdShelfList() {
-  auto ctx = getWorkspaceContext();
-  auto& client = ctx.client;
-  auto& ws = ctx.workspace;
-
-  nlohmann::json input = {
-      {"daemonId", ws.daemonId},
-      {"workspaceId", ws.id},
-      {"status", "ACTIVE"},
-  };
-
-  auto result = client.query("workspaces.shelves.list", input);
-
-  if (result.is_null() || !result.is_array() || result.empty()) {
-    std::cout << "No active shelves." << std::endl;
-    return 0;
-  }
-
-  for (auto& shelf : result) {
-    std::string name = shelf.value("name", "");
-    std::string status = shelf.value("status", "");
-    int clNum = shelf.value("changelistNumber", 0);
-    std::string desc = shelf.value("description", "");
-
-    // Get file count from _count
-    int fileCount = 0;
-    if (shelf.contains("_count") && shelf["_count"].contains("fileChanges")) {
-      fileCount = shelf["_count"]["fileChanges"].get<int>();
-    }
-
-    // Get author name
-    std::string authorName;
-    if (shelf.contains("author")) {
-      authorName = shelf["author"].value("name", shelf["author"].value("email", "unknown"));
-    }
-
-    std::cout << color::green() << "  " << name << color::reset();
-    std::cout << color::dim() << " (CL #" << clNum
-              << ", " << fileCount << " file" << (fileCount != 1 ? "s" : "")
-              << ", by " << authorName << ")";
-    if (!desc.empty()) {
-      std::cout << " - " << desc;
-    }
-    std::cout << color::reset() << std::endl;
-  }
-
-  return 0;
-}
-
-// ═════════════════════════════════════════════════════════════════
-//  COMMAND: shelf delete
-// ═════════════════════════════════════════════════════════════════
-
-inline int cmdShelfDelete(const std::string& name) {
-  auto ctx = getWorkspaceContext();
-  auto& client = ctx.client;
-  auto& ws = ctx.workspace;
-
-  nlohmann::json input = {
-      {"daemonId", ws.daemonId},
-      {"workspaceId", ws.id},
-      {"name", name},
-  };
-
-  client.mutate("workspaces.shelves.delete", input);
-
-  std::cout << color::green() << "Deleted shelf '" << name << "'."
-            << color::reset() << std::endl;
-
-  return 0;
-}
-
-// ═════════════════════════════════════════════════════════════════
-//  COMMAND: unshelve (apply shelf to workspace)
-// ═════════════════════════════════════════════════════════════════
-
-inline int cmdUnshelve(const std::string& name, const std::string& branchName) {
-  auto ctx = getWorkspaceContext();
-  auto& client = ctx.client;
-  auto& ws = ctx.workspace;
-
-  std::string targetBranch = branchName.empty() ? ws.branchName : branchName;
-
-  nlohmann::json input = {
-      {"daemonId", ws.daemonId},
-      {"workspaceId", ws.id},
-      {"shelfName", name},
-      {"branchName", targetBranch},
-  };
-
-  auto result = client.mutate("workspaces.shelves.submitToBranch", input);
-
-  int clNum = 0;
-  if (!result.is_null() && result.contains("changelistNumber")) {
-    clNum = result["changelistNumber"].get<int>();
-  }
-
-  std::cout << color::green() << color::bold()
-            << "Shelf '" << name << "' submitted to branch '" << targetBranch << "'";
-  if (clNum > 0) {
-    std::cout << " as CL #" << clNum;
-  }
-  std::cout << "." << color::reset() << std::endl;
-
-  std::cout << color::dim() << "Run 'chk pull' to sync the changes to your workspace."
-            << color::reset() << std::endl;
-
-  return 0;
-}
-
-// ═════════════════════════════════════════════════════════════════
 //  COMMAND: artifact upload
 // ═════════════════════════════════════════════════════════════════
 
@@ -2144,7 +2078,7 @@ inline int cmdUnlink() {
     std::string id;
     std::string name;
     std::string localPath;
-    std::string branchName;
+    std::string domainBranchName;
   };
 
   std::vector<WorkspaceEntry> workspaces;
@@ -2153,7 +2087,8 @@ inline int cmdUnlink() {
     ws.id = entry.value("id", "");
     ws.name = entry.value("name", "");
     ws.localPath = entry.value("localPath", "");
-    ws.branchName = entry.value("branchName", "");
+    ws.domainBranchName = entry.value(
+        "domainBranchName", entry.value("branchName", ""));
     workspaces.push_back(ws);
   }
 
@@ -2161,8 +2096,8 @@ inline int cmdUnlink() {
   std::vector<std::string> labels;
   for (auto& ws : workspaces) {
     std::string label = ws.localPath;
-    if (!ws.branchName.empty()) {
-      label += " (" + ws.branchName + ")";
+    if (!ws.domainBranchName.empty()) {
+      label += " (" + ws.domainBranchName + ")";
     }
     labels.push_back(label);
   }

@@ -224,6 +224,14 @@ export default class DaemonHandler {
       this.workspaceSubmit(data);
     });
 
+    ipcOn(this.ipcMain, "workspace:stage", async (_event, data) => {
+      await this.workspaceStage(data);
+    });
+
+    ipcOn(this.ipcMain, "workspace:unstage", async (_event, data) => {
+      await this.workspaceUnstage(data);
+    });
+
     ipcOn(this.ipcMain, "workspace:create-label", async (event, data) => {
       this.workspaceCreateLabel(data);
     });
@@ -1108,6 +1116,61 @@ export default class DaemonHandler {
     }
   }
 
+  /**
+   * Stage files, optionally into a feature branch's bucket.
+   *
+   * The daemon also moves each file's claim onto that branch, so staged-ness
+   * and destination stay one fact rather than two that can disagree.
+   */
+  private async workspaceStage(
+    data: Channels["workspace:stage"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    const currentUser = store.get(currentUserAtom);
+    if (!currentWorkspace || !currentUser || this.isMocked) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      await client.workspaces.pending.stage.mutate({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        paths: data.paths,
+        ...(data.branchName ? { branchName: data.branchName } : {}),
+      });
+      this.workspaceRefresh();
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:submit:error", {
+          message: error?.message || "Failed to stage files",
+        });
+      }
+    }
+  }
+
+  private async workspaceUnstage(
+    data: Channels["workspace:unstage"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    const currentUser = store.get(currentUserAtom);
+    if (!currentWorkspace || !currentUser || this.isMocked) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      await client.workspaces.pending.unstage.mutate({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        paths: data.paths,
+      });
+      this.workspaceRefresh();
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:submit:error", {
+          message: error?.message || "Failed to unstage files",
+        });
+      }
+    }
+  }
+
   private async workspaceSubmit(
     data: Channels["workspace:submit"],
   ): Promise<void> {
@@ -1483,10 +1546,12 @@ export default class DaemonHandler {
         branchName: data.name,
       });
 
-      // Update the current workspace's branch name in the store
+      // The daemon decides whether this was a domain switch or an overlay
+      // activation and returns the resulting state either way.
       const updatedWorkspace = {
         ...currentWorkspace,
-        branchName: result.branchName,
+        domainBranchName: result.domainBranchName,
+        activeBranches: result.activeBranches,
       };
       store.set(currentWorkspaceAtom, updatedWorkspace);
 
@@ -1509,6 +1574,8 @@ export default class DaemonHandler {
       if (this.webContents) {
         ipcSend(this.webContents, "workspace:select-branch:success", {
           branchName: result.branchName,
+          domainBranchName: result.domainBranchName,
+          activeBranches: result.activeBranches,
         });
       }
     } catch (error: any) {
@@ -1647,7 +1714,7 @@ export default class DaemonHandler {
 
       if (this.webContents) {
         ipcSend(this.webContents, "workspace:merge-branch:success", {
-          message: `Merged ${data.incomingBranchName} into ${currentWorkspace.branchName} (CL #${result.mergeChangelist.number})`,
+          message: `Merged ${data.incomingBranchName} into ${currentWorkspace.domainBranchName} (CL #${result.mergeChangelist.number})`,
         });
       }
     } catch (error: any) {
@@ -1690,7 +1757,8 @@ export default class DaemonHandler {
             status: FileStatus.Unknown,
             id: null,
             changelist: null,
-            checkouts: [],
+            claims: [],
+            staged: false,
           };
 
           return f;
@@ -2254,27 +2322,28 @@ export default class DaemonHandler {
         const client = await CreateDaemonClient();
 
         // Check if the file is locked by another user
-        if (data.checkForLock) {
-          const checkouts =
-            await client.workspaces.pending.getActiveCheckoutsForFiles.mutate({
+        if (data.checkForClaim) {
+          const claims =
+            await client.workspaces.pending.getClaimsForFiles.mutate({
               daemonId: currentUser.daemonId,
               workspaceId: currentWorkspace.id,
               filePaths: [data.path],
             });
 
-          const lockedByOther = checkouts.find(
-            (c) => c.locked && c.userId !== currentUser.details?.id,
+          const heldByOther = claims.find(
+            (c) => c.blocking && c.userId !== currentUser.details?.id,
           );
 
-          if (lockedByOther) {
+          if (heldByOther) {
             const displayName =
-              lockedByOther.user.name ||
-              lockedByOther.user.username ||
-              lockedByOther.user.email;
+              heldByOther.user.name ||
+              heldByOther.user.username ||
+              heldByOther.user.email;
             if (this.webContents) {
-              ipcSend(this.webContents, "file:checkout:locked-warning", {
+              ipcSend(this.webContents, "file:checkout:claimed-warning", {
                 path: data.path,
-                lockedBy: displayName,
+                claimedBy: displayName,
+                branchName: heldByOther.branchName,
               });
             }
             return;
@@ -2285,7 +2354,7 @@ export default class DaemonHandler {
           daemonId: currentUser.daemonId,
           workspaceId: currentWorkspace.id,
           path: data.path,
-          locked: data.locked ?? false,
+          forceExclusive: data.forceExclusive ?? false,
         });
         this.workspaceRefresh();
       } catch (error: any) {
@@ -2299,7 +2368,7 @@ export default class DaemonHandler {
     });
 
     // Undo checkout
-    ipcOn(this.ipcMain, "file:undo-checkout", async (_event, data) => {
+    ipcOn(this.ipcMain, "file:release-claim", async (_event, data) => {
       const currentWorkspace = store.get(currentWorkspaceAtom);
       if (!currentWorkspace || this.isMocked) return;
 
@@ -2308,7 +2377,7 @@ export default class DaemonHandler {
 
       try {
         const client = await CreateDaemonClient();
-        await client.workspaces.pending.undoCheckout.mutate({
+        await client.workspaces.pending.releaseClaim.mutate({
           daemonId: currentUser.daemonId,
           workspaceId: currentWorkspace.id,
           path: data.path,

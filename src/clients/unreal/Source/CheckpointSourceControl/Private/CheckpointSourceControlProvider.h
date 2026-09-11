@@ -164,6 +164,12 @@ public:
   }
 
 private:
+  /**
+   * Branches the editor asked for cross-branch status on, in priority order,
+   * as handed to RegisterStateBranches.
+   */
+  TArray<FString> StateBranchNames;
+
   /** Create a worker for the given operation */
   TSharedPtr<ICheckpointSourceControlWorker, ESPMode::ThreadSafe> CreateWorker(
     const FName &InOperationName

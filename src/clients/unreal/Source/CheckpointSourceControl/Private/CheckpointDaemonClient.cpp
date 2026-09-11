@@ -340,7 +340,7 @@ bool FCheckpointDaemonClient::GetLocalWorkspaces(
   Input->SetStringField(TEXT("daemonId"), DaemonId);
 
   TSharedPtr<FJsonObject> Result;
-  if (!QueryProcedure(TEXT("workspaces.list.local"), Input, Result, OutError)) {
+  if (!QueryProcedure(TEXT("workspaces.ops.list.local"), Input, Result, OutError)) {
     return false;
   }
 
@@ -369,15 +369,15 @@ bool FCheckpointDaemonClient::GetDirectory(
   Input->SetStringField(TEXT("path"), RelPath);
 
   return QueryProcedure(
-    TEXT("workspaces.getDirectory"), Input, OutDirectory, OutError
+    TEXT("workspaces.pending.getDirectory"), Input, OutDirectory, OutError
   );
 }
 
-bool FCheckpointDaemonClient::GetActiveCheckouts(
+bool FCheckpointDaemonClient::GetActiveClaims(
   const FString &DaemonId,
   const FString &WorkspaceId,
   const TArray<FString> &RelPaths,
-  TArray<TSharedPtr<FJsonValue>> &OutCheckouts,
+  TArray<TSharedPtr<FJsonValue>> &OutClaims,
   FString &OutError
 ) {
   TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
@@ -392,23 +392,22 @@ bool FCheckpointDaemonClient::GetActiveCheckouts(
 
   TSharedPtr<FJsonObject> Result;
   if (!MutateProcedure(
-        TEXT("workspaces.getActiveCheckoutsForFiles"), Input, Result, OutError
+        TEXT("workspaces.pending.getClaimsForFiles"), Input, Result, OutError
       )) {
     return false;
   }
 
-  // The result itself may be the array or wrapped
+  // getClaimsForFiles returns a bare array; the wrapped shape is kept only
+  // for tolerance. The old key was `checkouts`, which no longer exists.
   if (Result.IsValid()) {
-    const TArray<TSharedPtr<FJsonValue>> *CheckoutsArray;
-    if (Result->TryGetArrayField(TEXT("checkouts"), CheckoutsArray)) {
-      OutCheckouts = *CheckoutsArray;
+    const TArray<TSharedPtr<FJsonValue>> *ClaimsArray;
+    if (Result->TryGetArrayField(TEXT("claims"), ClaimsArray)) {
+      OutClaims = *ClaimsArray;
       return true;
     }
   }
 
-  // If the top-level result is the array, it won't be in OutResult
-  // Handle gracefully
-  OutCheckouts.Empty();
+  OutClaims.Empty();
   return true;
 }
 
@@ -416,17 +415,21 @@ bool FCheckpointDaemonClient::Checkout(
   const FString &DaemonId,
   const FString &WorkspaceId,
   const FString &RelPath,
-  bool bLocked,
+  const FString &BranchName,
+  bool bForceExclusive,
   FString &OutError
 ) {
   TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
   Input->SetStringField(TEXT("daemonId"), DaemonId);
   Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
   Input->SetStringField(TEXT("path"), RelPath);
-  Input->SetBoolField(TEXT("locked"), bLocked);
+  Input->SetBoolField(TEXT("forceExclusive"), bForceExclusive);
+  if (!BranchName.IsEmpty()) {
+    Input->SetStringField(TEXT("branchName"), BranchName);
+  }
 
   TSharedPtr<FJsonObject> Result;
-  return MutateProcedure(TEXT("workspaces.checkout"), Input, Result, OutError);
+  return MutateProcedure(TEXT("workspaces.pending.checkout"), Input, Result, OutError);
 }
 
 bool FCheckpointDaemonClient::UndoCheckout(
@@ -442,7 +445,7 @@ bool FCheckpointDaemonClient::UndoCheckout(
 
   TSharedPtr<FJsonObject> Result;
   return MutateProcedure(
-    TEXT("workspaces.undoCheckout"), Input, Result, OutError
+    TEXT("workspaces.pending.releaseClaim"), Input, Result, OutError
   );
 }
 
@@ -450,19 +453,47 @@ bool FCheckpointDaemonClient::Submit(
   const FString &DaemonId,
   const FString &WorkspaceId,
   const FString &Message,
-  const TArray<TSharedPtr<FJsonValue>> &Modifications,
+  const TArray<FString> &Paths,
+  const FString &BranchName,
   bool bKeepCheckedOut,
   FString &OutError
 ) {
+  // Submit sends exactly what is staged for a branch and takes no file list,
+  // so stage the caller's paths first. Staging also points each file's claim
+  // at that branch, which is what makes "staged here" and "destined for this
+  // branch" the same fact.
+  if (Paths.Num() > 0) {
+    TSharedPtr<FJsonObject> StageInput = MakeShareable(new FJsonObject());
+    StageInput->SetStringField(TEXT("daemonId"), DaemonId);
+    StageInput->SetStringField(TEXT("workspaceId"), WorkspaceId);
+    TArray<TSharedPtr<FJsonValue>> PathValues;
+    for (const FString &Path : Paths) {
+      PathValues.Add(MakeShareable(new FJsonValueString(Path)));
+    }
+    StageInput->SetArrayField(TEXT("paths"), PathValues);
+    if (!BranchName.IsEmpty()) {
+      StageInput->SetStringField(TEXT("branchName"), BranchName);
+    }
+
+    TSharedPtr<FJsonObject> StageResult;
+    if (!MutateProcedure(
+          TEXT("workspaces.pending.stage"), StageInput, StageResult, OutError
+        )) {
+      return false;
+    }
+  }
+
   TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
   Input->SetStringField(TEXT("daemonId"), DaemonId);
   Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
   Input->SetStringField(TEXT("message"), Message);
-  Input->SetArrayField(TEXT("modifications"), Modifications);
   Input->SetBoolField(TEXT("keepCheckedOut"), bKeepCheckedOut);
+  if (!BranchName.IsEmpty()) {
+    Input->SetStringField(TEXT("branchName"), BranchName);
+  }
 
   TSharedPtr<FJsonObject> Result;
-  if (!MutateProcedure(TEXT("workspaces.submit"), Input, Result, OutError)) {
+  if (!MutateProcedure(TEXT("workspaces.pending.submit"), Input, Result, OutError)) {
     return false;
   }
 
@@ -498,7 +529,7 @@ bool FCheckpointDaemonClient::Pull(
   }
 
   TSharedPtr<FJsonObject> Result;
-  if (!MutateProcedure(TEXT("workspaces.pull"), Input, Result, OutError)) {
+  if (!MutateProcedure(TEXT("workspaces.sync.pull"), Input, Result, OutError)) {
     return false;
   }
 
@@ -523,7 +554,7 @@ bool FCheckpointDaemonClient::GetHistory(
   Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
 
   TSharedPtr<FJsonObject> Result;
-  if (!QueryProcedure(TEXT("workspaces.history"), Input, Result, OutError)) {
+  if (!QueryProcedure(TEXT("workspaces.history.get"), Input, Result, OutError)) {
     return false;
   }
 
@@ -555,7 +586,7 @@ bool FCheckpointDaemonClient::GetFileHistory(
 
   TSharedPtr<FJsonObject> Result;
   if (!QueryProcedure(
-        TEXT("workspaces.fileHistory"), Input, Result, OutError
+        TEXT("workspaces.history.file"), Input, Result, OutError
       )) {
     return false;
   }
@@ -586,7 +617,7 @@ bool FCheckpointDaemonClient::DiffFile(
   Input->SetStringField(TEXT("path"), RelPath);
 
   TSharedPtr<FJsonObject> Result;
-  if (!QueryProcedure(TEXT("workspaces.diffFile"), Input, Result, OutError)) {
+  if (!QueryProcedure(TEXT("workspaces.pending.diffFile"), Input, Result, OutError)) {
     return false;
   }
 
@@ -608,7 +639,7 @@ bool FCheckpointDaemonClient::RefreshWorkspace(
   Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
 
   TSharedPtr<FJsonObject> Result;
-  return QueryProcedure(TEXT("workspaces.refresh"), Input, Result, OutError);
+  return QueryProcedure(TEXT("workspaces.pending.refresh"), Input, Result, OutError);
 }
 
 bool FCheckpointDaemonClient::GetPendingChanges(
@@ -622,7 +653,7 @@ bool FCheckpointDaemonClient::GetPendingChanges(
   Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
 
   TSharedPtr<FJsonObject> Result;
-  if (!QueryProcedure(TEXT("workspaces.refresh"), Input, Result, OutError)) {
+  if (!QueryProcedure(TEXT("workspaces.pending.refresh"), Input, Result, OutError)) {
     return false;
   }
 
@@ -664,7 +695,7 @@ bool FCheckpointDaemonClient::GetFileAtChangelist(
 
   TSharedPtr<FJsonObject> Result;
   if (!QueryProcedure(
-        TEXT("workspaces.readFileAtChangelist"), Input, Result, OutError
+        TEXT("workspaces.history.readFileAtChangelist"), Input, Result, OutError
       )) {
     return false;
   }
@@ -697,7 +728,7 @@ bool FCheckpointDaemonClient::RevertFiles(
 
   TSharedPtr<FJsonObject> Result;
   return MutateProcedure(
-    TEXT("workspaces.revertFiles"), Input, Result, OutError
+    TEXT("workspaces.pending.revertFiles"), Input, Result, OutError
   );
 }
 
@@ -719,7 +750,7 @@ bool FCheckpointDaemonClient::MarkForAdd(
 
   TSharedPtr<FJsonObject> Result;
   return MutateProcedure(
-    TEXT("workspaces.markForAdd"), Input, Result, OutError
+    TEXT("workspaces.pending.markForAdd"), Input, Result, OutError
   );
 }
 
@@ -741,7 +772,7 @@ bool FCheckpointDaemonClient::UnmarkForAdd(
 
   TSharedPtr<FJsonObject> Result;
   return MutateProcedure(
-    TEXT("workspaces.unmarkForAdd"), Input, Result, OutError
+    TEXT("workspaces.pending.unmarkForAdd"), Input, Result, OutError
   );
 }
 
@@ -862,7 +893,7 @@ bool FCheckpointDaemonClient::CreateWorkspace(
   Input->SetStringField(TEXT("defaultBranchName"), DefaultBranchName);
 
   TSharedPtr<FJsonObject> Result;
-  if (!MutateProcedure(TEXT("workspaces.create"), Input, Result, OutError)) {
+  if (!MutateProcedure(TEXT("workspaces.ops.create"), Input, Result, OutError)) {
     return false;
   }
 

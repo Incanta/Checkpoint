@@ -58,7 +58,11 @@ export type Channels = {
   "workspace:create-branch:success": null;
   "workspace:create-branch:error": { message: string };
   "workspace:select-branch": { name: string };
-  "workspace:select-branch:success": { branchName: string };
+  "workspace:select-branch:success": {
+    branchName: string;
+    domainBranchName: string;
+    activeBranches: string[];
+  };
   "workspace:select-branch:error": { message: string };
   "workspace:branches": null;
   "workspace:branches:data": null;
@@ -93,8 +97,11 @@ export type Channels = {
   "workspace:revert": { filePaths: string[] };
   "workspace:submit": {
     message: string;
-    modifications: Modification[];
+    /** Which bucket to submit. Defaults to the workspace's domain root. */
+    branchName?: string;
   };
+  "workspace:stage": { paths: string[]; branchName?: string };
+  "workspace:unstage": { paths: string[] };
   "workspace:submit:success": null;
   "workspace:submit:error": { message: string };
   "workspace:diff:file": { path: string };
@@ -137,9 +144,20 @@ export type Channels = {
   "file:history:open-window": null;
   "file:mark-as-added": { path: string };
   "file:mark-directory-as-added": { path: string };
-  "file:checkout": { path: string; locked?: boolean; checkForLock?: boolean };
-  "file:undo-checkout": { path: string };
-  "file:checkout:locked-warning": { path: string; lockedBy: string };
+  "file:checkout": {
+    path: string;
+    /** Take an exclusive claim even on a mergeable file. */
+    forceExclusive?: boolean;
+    /** Warn instead of proceeding when someone else's claim blocks this. */
+    checkForClaim?: boolean;
+  };
+  "file:release-claim": { path: string };
+  "file:checkout:claimed-warning": {
+    path: string;
+    claimedBy: string;
+    /** The branch the blocking claim is held on. */
+    branchName: string;
+  };
   "file:checkout:error": { message: string };
   "file:add-to-ignored": { pattern: string };
   "file:remove-from-ignored": { pattern: string };

@@ -77,12 +77,12 @@ public:
     FString &OutError
   );
 
-  /** Get active checkouts for files */
-  bool GetActiveCheckouts(
+  /** Get active claims for files */
+  bool GetActiveClaims(
     const FString &DaemonId,
     const FString &WorkspaceId,
     const TArray<FString> &RelPaths,
-    TArray<TSharedPtr<FJsonValue>> &OutCheckouts,
+    TArray<TSharedPtr<FJsonValue>> &OutClaims,
     FString &OutError
   );
 
@@ -91,7 +91,10 @@ public:
     const FString &DaemonId,
     const FString &WorkspaceId,
     const FString &RelPath,
-    bool bLocked,
+    /** Branch to claim on. Empty means the workspace's domain root. */
+    const FString &BranchName,
+    /** Take an exclusive claim even on a file the repo treats as mergeable. */
+    bool bForceExclusive,
     FString &OutError
   );
 
@@ -103,13 +106,19 @@ public:
     FString &OutError
   );
 
-  /** Submit pending changes */
+  /**
+   * Stage `Paths` onto `BranchName` and submit that branch's staged changes.
+   *
+   * The daemon derives the changelist contents from the staged set, so there
+   * is no modification list to pass. Shelving is gone entirely.
+   */
   bool Submit(
     const FString &DaemonId,
     const FString &WorkspaceId,
     const FString &Message,
-    const TArray<TSharedPtr<FJsonValue>> &Modifications,
-    bool bShelved,
+    const TArray<FString> &Paths,
+    /** Empty means the workspace's domain root. */
+    const FString &BranchName,
     bool bKeepCheckedOut,
     FString &OutError
   );

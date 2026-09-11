@@ -224,27 +224,41 @@ bool FCheckpointSourceControlState::IsCheckedOutOther(FString *Who) const {
 bool FCheckpointSourceControlState::IsCheckedOutInOtherBranch(
   const FString &CurrentBranch
 ) const {
-  return false;
+  // A claim names the branch its work lives on. If that is not the branch the
+  // editor is asking about, this asset is in flight elsewhere in the domain
+  // and editing it here would fork an unmergeable file.
+  return !ClaimBranch.IsEmpty() && ClaimBranch != CurrentBranch;
 }
 
 bool FCheckpointSourceControlState::IsModifiedInOtherBranch(
   const FString &CurrentBranch
 ) const {
-  return false;
+  // Checkpoint does not distinguish "checked out" from "modified" across
+  // branches: a claim covers both, from first claim until the work lands.
+  return IsCheckedOutInOtherBranch(CurrentBranch);
 }
 
 bool FCheckpointSourceControlState::IsCheckedOutOrModifiedInOtherBranch(
   const FString &CurrentBranch
 ) const {
-  return false;
+  return IsCheckedOutInOtherBranch(CurrentBranch);
 }
 
 TArray<FString> FCheckpointSourceControlState::GetCheckedOutBranches() const {
-  return TArray<FString>();
+  TArray<FString> Branches;
+  if (!ClaimBranch.IsEmpty()) {
+    Branches.Add(ClaimBranch);
+  }
+  return Branches;
 }
 
 FString FCheckpointSourceControlState::GetOtherUserBranchCheckedOuts() const {
-  return FString();
+  if (OtherUserCheckedOut.IsEmpty()) {
+    return FString();
+  }
+  return ClaimBranch.IsEmpty()
+    ? OtherUserCheckedOut
+    : FString::Printf(TEXT("%s (%s)"), *OtherUserCheckedOut, *ClaimBranch);
 }
 
 bool FCheckpointSourceControlState::GetOtherBranchHeadModification(
@@ -254,9 +268,6 @@ bool FCheckpointSourceControlState::GetOtherBranchHeadModification(
 }
 
 bool FCheckpointSourceControlState::IsCurrent() const {
-  // TODO MIKE HERE: the daemon needs to keep track if the local file is at the latest revision or not,
-  // and this method should return that value. For now we will just return true to avoid showing
-  // "not at head" status for all files.
   return FileStatus == ECheckpointFileStatus::Added ||
     FileStatus == ECheckpointFileStatus::ReadOnlyControlled ||
     FileStatus == ECheckpointFileStatus::WritableControlled ||

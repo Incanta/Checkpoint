@@ -119,6 +119,18 @@ export interface WorkspaceState {
   artifactFiles?: Record<string, ArtifactStateFile>; // path -> artifact file info
   /** Relative paths of files explicitly marked for add */
   markedForAdd?: string[];
+  /**
+   * Relative paths staged for the next submit.
+   *
+   * Distinct from `markedForAdd`, which promotes an untracked file to
+   * `Added` status. This is git's index: whether a change is ready to go into
+   * its branch's next changelist. A file can be marked for add and unstaged,
+   * or staged without ever being marked (the ordinary modified-file case).
+   *
+   * Which branch a staged file goes to is not stored here. That comes from
+   * the file's `FileClaim.branchName` on the server, so the two cannot drift.
+   */
+  staged?: string[];
   teamSync?: WorkspaceTeamSyncState;
 }
 

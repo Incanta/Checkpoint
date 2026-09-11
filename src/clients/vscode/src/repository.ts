@@ -19,15 +19,49 @@ import {
 export interface WorkspaceConfigFile {
   id: string;
   repoId: string;
-  branchName: string;
+  /**
+   * The domain-root branch this workspace materializes from. Was `branchName`
+   * before multi-branch workspaces; the daemon deletes that key on load, so
+   * reading the old name yielded `undefined` and rendered as literal
+   * "undefined" in the status bar and submit prompt.
+   */
+  domainBranchName: string;
+  /** Feature branches overlaid on the tree. Empty means the domain root only. */
+  activeBranches?: string[];
   workspaceName: string;
   localPath: string;
   daemonId: string;
 }
 
-export type GroupId = "conflicts" | "changes" | "local";
+/**
+ * Resource-group identity.
+ *
+ * The fixed three, plus one per branch bucket. A bucket id is
+ * `branch:<name>`, which is why this is a string rather than a union: the
+ * set of groups now depends on which feature branches the workspace has
+ * overlaid, not just on FileStatus.
+ */
+export type GroupId = string;
+
+export const GROUP_CONFLICTS = "conflicts";
+export const GROUP_UNSTAGED = "unstaged";
+export const GROUP_LOCAL = "local";
+
+export function branchGroupId(branchName: string): GroupId {
+  return `branch:${branchName}`;
+}
+
+export function branchFromGroupId(groupId: GroupId): string | undefined {
+  return groupId.startsWith("branch:")
+    ? groupId.slice("branch:".length)
+    : undefined;
+}
 
 interface StatusInfo {
+  /**
+   * Where this status lands when the file is NOT staged. A staged file goes
+   * to its branch bucket instead, whatever its status.
+   */
   group: GroupId;
   label: string;
   contextValue: string;
@@ -37,63 +71,63 @@ interface StatusInfo {
 
 const STATUS_INFO: Partial<Record<FileStatus, StatusInfo>> = {
   [FileStatus.Added]: {
-    group: "changes",
+    group: GROUP_UNSTAGED,
     label: "Added",
     contextValue: "added",
     badge: "A",
     colorId: "checkpointDecoration.addedResourceForeground",
   },
   [FileStatus.Renamed]: {
-    group: "changes",
+    group: GROUP_UNSTAGED,
     label: "Renamed",
     contextValue: "renamed",
     badge: "R",
     colorId: "checkpointDecoration.modifiedResourceForeground",
   },
   [FileStatus.Deleted]: {
-    group: "changes",
+    group: GROUP_UNSTAGED,
     label: "Deleted",
     contextValue: "deleted",
     badge: "D",
     colorId: "checkpointDecoration.deletedResourceForeground",
   },
   [FileStatus.ChangedNotCheckedOut]: {
-    group: "changes",
+    group: GROUP_UNSTAGED,
     label: "Modified",
     contextValue: "modified",
     badge: "M",
     colorId: "checkpointDecoration.modifiedResourceForeground",
   },
   [FileStatus.ChangedCheckedOut]: {
-    group: "changes",
+    group: GROUP_UNSTAGED,
     label: "Modified (Checked Out)",
     contextValue: "modified-checkedout",
     badge: "M",
     colorId: "checkpointDecoration.modifiedResourceForeground",
   },
   [FileStatus.NotChangedCheckedOut]: {
-    group: "changes",
+    group: GROUP_UNSTAGED,
     label: "Checked Out (Unchanged)",
     contextValue: "checkedout-clean",
     badge: "K",
     colorId: "checkpointDecoration.checkedOutResourceForeground",
   },
   [FileStatus.Conflicted]: {
-    group: "conflicts",
+    group: GROUP_CONFLICTS,
     label: "Conflicted",
     contextValue: "conflicted",
     badge: "!",
     colorId: "checkpointDecoration.conflictResourceForeground",
   },
   [FileStatus.MergeConflict]: {
-    group: "conflicts",
+    group: GROUP_CONFLICTS,
     label: "Merge Conflict",
     contextValue: "mergeconflict",
     badge: "!",
     colorId: "checkpointDecoration.conflictResourceForeground",
   },
   [FileStatus.Local]: {
-    group: "local",
+    group: GROUP_LOCAL,
     label: "Local (Untracked)",
     contextValue: "local",
     badge: "U",
@@ -162,8 +196,13 @@ interface SyncStatusSummary {
 export class CheckpointRepository implements vscode.Disposable {
   public readonly sourceControl: vscode.SourceControl;
   private readonly conflictsGroup: vscode.SourceControlResourceGroup;
-  private readonly changesGroup: vscode.SourceControlResourceGroup;
+  private readonly unstagedGroup: vscode.SourceControlResourceGroup;
   private readonly localGroup: vscode.SourceControlResourceGroup;
+  /**
+   * One group per branch bucket, created on demand as branches are overlaid
+   * and disposed when they go away. Keyed by GroupId, not branch name.
+   */
+  private branchGroups = new Map<GroupId, vscode.SourceControlResourceGroup>();
 
   /** Pending files keyed by workspace-relative path (forward slashes). */
   private pendingFiles = new Map<string, File>();
@@ -222,9 +261,9 @@ export class CheckpointRepository implements vscode.Disposable {
       "Conflicts",
     );
     this.conflictsGroup.hideWhenEmpty = true;
-    this.changesGroup = this.sourceControl.createResourceGroup(
-      "changes",
-      "Pending Changes",
+    this.unstagedGroup = this.sourceControl.createResourceGroup(
+      GROUP_UNSTAGED,
+      "Unstaged Changes",
     );
     this.localGroup = this.sourceControl.createResourceGroup(
       "local",
@@ -235,7 +274,7 @@ export class CheckpointRepository implements vscode.Disposable {
     this.disposables.push(
       this.sourceControl,
       this.conflictsGroup,
-      this.changesGroup,
+      this.unstagedGroup,
       this.localGroup,
     );
 
@@ -388,32 +427,32 @@ export class CheckpointRepository implements vscode.Disposable {
     const resources = new Map<string, CheckpointResource>();
 
     for (const [relPath, file] of next) {
-      const previousStatus = this.pendingFiles.get(relPath)?.status;
-      if (previousStatus !== file.status) {
+      const previous = this.pendingFiles.get(relPath);
+      const previousKey = previous ? this.renderKeyFor(previous) : undefined;
+      const key = this.renderKeyFor(file);
+
+      if (previousKey !== key) {
         changedUris.push(this.uriFor(relPath));
-        const previousInfo =
-          previousStatus === undefined
-            ? undefined
-            : getStatusInfo(previousStatus);
-        if (previousInfo) {
-          dirtyGroups.add(previousInfo.group);
+        const previousBucket = previous ? this.bucketFor(previous) : undefined;
+        if (previousBucket) {
+          dirtyGroups.add(previousBucket);
         }
       }
 
-      const info = getStatusInfo(file.status);
-      if (!info) {
+      const bucket = this.bucketFor(file);
+      if (!bucket) {
         continue;
       }
-      if (previousStatus !== file.status) {
-        dirtyGroups.add(info.group);
+      if (previousKey !== key) {
+        dirtyGroups.add(bucket);
       }
 
       const existing = this.resources.get(relPath);
       resources.set(
         relPath,
-        existing && existing.file.status === file.status
+        existing && this.renderKeyFor(existing.file) === key
           ? existing
-          : new CheckpointResource(this, relPath, file, info.group),
+          : new CheckpointResource(this, relPath, file, bucket),
       );
     }
 
@@ -422,9 +461,9 @@ export class CheckpointRepository implements vscode.Disposable {
         continue;
       }
       changedUris.push(this.uriFor(relPath));
-      const info = getStatusInfo(file.status);
-      if (info) {
-        dirtyGroups.add(info.group);
+      const bucket = this.bucketFor(file);
+      if (bucket) {
+        dirtyGroups.add(bucket);
       }
     }
 
@@ -445,24 +484,48 @@ export class CheckpointRepository implements vscode.Disposable {
     }
     this.applied = true;
 
-    const groups: Record<GroupId, CheckpointResource[]> = {
-      conflicts: [],
-      changes: [],
-      local: [],
-    };
+    // Every group that currently exists must be considered, so a bucket that
+    // has just emptied gets cleared rather than keeping stale rows.
+    const groups = new Map<GroupId, CheckpointResource[]>();
+    for (const groupId of [
+      GROUP_CONFLICTS,
+      GROUP_UNSTAGED,
+      GROUP_LOCAL,
+      ...this.branchGroups.keys(),
+    ]) {
+      groups.set(groupId, []);
+    }
     for (const resource of resources.values()) {
-      groups[resource.groupId].push(resource);
+      const bucket = groups.get(resource.groupId);
+      if (bucket) {
+        bucket.push(resource);
+      } else {
+        groups.set(resource.groupId, [resource]);
+      }
     }
 
-    for (const groupId of Object.keys(groups) as GroupId[]) {
+    for (const [groupId, entries] of groups) {
       if (!firstApply && !dirtyGroups.has(groupId)) {
         continue;
       }
-      groups[groupId].sort((a, b) => a.relPath.localeCompare(b.relPath));
-      this.groupFor(groupId).resourceStates = groups[groupId];
+      entries.sort((a, b) => a.relPath.localeCompare(b.relPath));
+      this.groupFor(groupId).resourceStates = entries;
     }
 
-    const count = groups.conflicts.length + groups.changes.length;
+    // Drop branch groups that no longer hold anything, so the view does not
+    // keep an empty section for a branch that was deactivated.
+    for (const [groupId, group] of this.branchGroups) {
+      if ((groups.get(groupId)?.length ?? 0) === 0) {
+        group.dispose();
+        this.branchGroups.delete(groupId);
+      }
+    }
+
+    const count =
+      (groups.get(GROUP_CONFLICTS)?.length ?? 0) +
+      [...groups]
+        .filter(([id]) => id.startsWith("branch:") || id === GROUP_UNSTAGED)
+        .reduce((sum, [, entries]) => sum + entries.length, 0);
     if (count !== this.lastCount) {
       this.lastCount = count;
       this.sourceControl.count = count;
@@ -474,14 +537,54 @@ export class CheckpointRepository implements vscode.Disposable {
   }
 
   private groupFor(groupId: GroupId): vscode.SourceControlResourceGroup {
-    switch (groupId) {
-      case "conflicts":
-        return this.conflictsGroup;
-      case "changes":
-        return this.changesGroup;
-      case "local":
-        return this.localGroup;
+    if (groupId === GROUP_CONFLICTS) return this.conflictsGroup;
+    if (groupId === GROUP_UNSTAGED) return this.unstagedGroup;
+    if (groupId === GROUP_LOCAL) return this.localGroup;
+
+    // Branch buckets are created the first time a file is staged into them
+    // and disposed in applyPendingFiles when they empty out, so the SCM view
+    // never shows a bucket for a branch that is no longer overlaid.
+    let group = this.branchGroups.get(groupId);
+    if (!group) {
+      const branchName = branchFromGroupId(groupId) ?? groupId;
+      group = this.sourceControl.createResourceGroup(
+        groupId,
+        `Staged: ${branchName}`,
+      );
+      group.hideWhenEmpty = true;
+      this.branchGroups.set(groupId, group);
+      this.disposables.push(group);
     }
+    return group;
+  }
+
+  /**
+   * Which group a file belongs in.
+   *
+   * Staging is what moves a file between groups, and it does not change the
+   * file's status, so this cannot be derived from FileStatus alone the way it
+   * used to be. Conflicts still win: an unresolved file is not submittable
+   * whatever its staged flag says.
+   */
+  private bucketFor(file: File): GroupId | undefined {
+    const info = getStatusInfo(file.status);
+    if (!info) return undefined;
+    if (info.group === GROUP_CONFLICTS) return GROUP_CONFLICTS;
+    if (!file.staged) return info.group;
+
+    const destination =
+      file.claims[0]?.branchName ?? this.config.domainBranchName;
+    return branchGroupId(destination);
+  }
+
+  /**
+   * Identity for change detection.
+   *
+   * Status alone is not enough now: staging a file moves it between groups
+   * without touching its status, and so does moving it between buckets.
+   */
+  private renderKeyFor(file: File): string {
+    return `${file.status}|${file.staged ? 1 : 0}|${file.claims[0]?.branchName ?? ""}`;
   }
 
   private uriFor(relPath: string): vscode.Uri {
@@ -545,7 +648,11 @@ export class CheckpointRepository implements vscode.Disposable {
   private updateStatusBar(): void {
     const branch: vscode.Command = {
       command: "checkpoint.switchBranch",
-      title: `$(git-branch) ${this.config.branchName}`,
+      title:
+        `$(git-branch) ${this.config.domainBranchName}` +
+        ((this.config.activeBranches?.length ?? 0) > 0
+          ? ` +${this.config.activeBranches!.length}`
+          : ""),
       tooltip: `Checkpoint: switch branch (workspace "${this.config.workspaceName}")`,
       arguments: [this.sourceControl],
     };
@@ -653,22 +760,61 @@ export class CheckpointRepository implements vscode.Disposable {
       return;
     }
 
-    const targets =
-      resources && resources.length > 0
-        ? resources
-        : (this.changesGroup.resourceStates as CheckpointResource[]);
+    // Submit is per-bucket: it sends exactly what is staged for one branch.
+    // Work out which bucket, and stage anything the user selected that is not
+    // staged yet, which is the common "select some rows and hit submit" path.
+    let branchName: string;
+    let toStage: string[] = [];
 
-    if (targets.length === 0) {
-      void vscode.window.showInformationMessage(
-        "Checkpoint: there are no pending changes to submit.",
+    if (resources && resources.length > 0) {
+      const buckets = new Set(
+        resources.map(
+          (r) => branchFromGroupId(r.groupId) ?? this.config.domainBranchName,
+        ),
       );
-      return;
+      if (buckets.size > 1) {
+        void vscode.window.showErrorMessage(
+          "Checkpoint: those files are staged for different branches. Submit one branch at a time.",
+        );
+        return;
+      }
+      branchName = [...buckets][0]!;
+      toStage = resources.filter((r) => !r.file.staged).map((r) => r.relPath);
+    } else {
+      const candidates = [...this.branchGroups.entries()]
+        .filter(([, g]) => g.resourceStates.length > 0)
+        .map(([id]) => branchFromGroupId(id)!)
+        .sort();
+
+      if (candidates.length === 0) {
+        // Nothing staged anywhere. Offer the unstaged rows as the selection,
+        // destined for the domain root.
+        const unstaged = this.unstagedGroup
+          .resourceStates as CheckpointResource[];
+        if (unstaged.length === 0) {
+          void vscode.window.showInformationMessage(
+            "Checkpoint: there are no pending changes to submit.",
+          );
+          return;
+        }
+        branchName = this.config.domainBranchName;
+        toStage = unstaged.map((r) => r.relPath);
+      } else if (candidates.length === 1) {
+        branchName = candidates[0]!;
+      } else {
+        const picked = await vscode.window.showQuickPick(candidates, {
+          placeHolder: "Which branch's staged changes should be submitted?",
+          ignoreFocusOut: true,
+        });
+        if (!picked) return;
+        branchName = picked;
+      }
     }
 
     let message = this.sourceControl.inputBox.value.trim();
     if (!message) {
       const input = await vscode.window.showInputBox({
-        prompt: `Submit ${targets.length} file(s) to "${this.config.branchName}"`,
+        prompt: `Submit staged changes to "${branchName}"`,
         placeHolder: "Describe your changes",
         ignoreFocusOut: true,
       });
@@ -678,24 +824,28 @@ export class CheckpointRepository implements vscode.Disposable {
       message = input.trim();
     }
 
-    const modifications = targets.map((r) => ({
-      path: r.relPath,
-      delete: r.file.status === FileStatus.Deleted,
-    }));
-
     try {
-      await this.runJob("Checkpoint: submitting changes", (client) =>
-        client.workspaces.pending.submit.mutate({
+      await this.runJob("Checkpoint: submitting changes", async (client) => {
+        if (toStage.length > 0) {
+          await client.workspaces.pending.stage.mutate({
+            daemonId: this.daemonId,
+            workspaceId: this.workspaceId,
+            paths: toStage,
+            branchName,
+          });
+        }
+
+        return client.workspaces.pending.submit.mutate({
           daemonId: this.daemonId,
           workspaceId: this.workspaceId,
           message,
-          modifications,
-        }),
-      );
+          branchName,
+        });
+      });
       this.sourceControl.inputBox.value = "";
       this.baselineMoved = true;
       void vscode.window.showInformationMessage(
-        `Checkpoint: submitted ${modifications.length} file(s).`,
+        `Checkpoint: submitted to "${branchName}".`,
       );
     } catch (error) {
       void vscode.window.showErrorMessage(
@@ -704,7 +854,6 @@ export class CheckpointRepository implements vscode.Disposable {
     }
 
     await this.refresh();
-    await this.updateSyncStatus(true);
   }
 
   public async pull(): Promise<void> {
@@ -786,7 +935,77 @@ export class CheckpointRepository implements vscode.Disposable {
     await this.refresh();
   }
 
-  public async checkout(relPaths: string[], locked: boolean): Promise<void> {
+  /** Stage files, optionally into a feature branch's bucket. */
+  public async stage(relPaths: string[], branchName?: string): Promise<void> {
+    try {
+      const client = await this.model.getClient();
+      await client.workspaces.pending.stage.mutate({
+        daemonId: this.daemonId,
+        workspaceId: this.workspaceId,
+        paths: relPaths,
+        ...(branchName ? { branchName } : {}),
+      });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Checkpoint: stage failed. ${errorMessage(error)}`,
+      );
+    }
+    await this.refresh();
+  }
+
+  /** Unstage files. Leaves their claims alone. */
+  public async unstage(relPaths: string[]): Promise<void> {
+    try {
+      const client = await this.model.getClient();
+      await client.workspaces.pending.unstage.mutate({
+        daemonId: this.daemonId,
+        workspaceId: this.workspaceId,
+        paths: relPaths,
+      });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Checkpoint: unstage failed. ${errorMessage(error)}`,
+      );
+    }
+    await this.refresh();
+  }
+
+  /** Restage files into a different branch's bucket. */
+  public async moveToBranch(relPaths: string[]): Promise<void> {
+    const branches = [
+      this.config.domainBranchName,
+      ...(this.config.activeBranches ?? []),
+    ];
+    if (branches.length < 2) {
+      void vscode.window.showInformationMessage(
+        "Checkpoint: no feature branches are active in this workspace.",
+      );
+      return;
+    }
+
+    const picked = await vscode.window.showQuickPick(branches, {
+      placeHolder: "Move staged changes to which branch?",
+      ignoreFocusOut: true,
+    });
+    if (!picked) return;
+
+    try {
+      const client = await this.model.getClient();
+      await client.workspaces.pending.moveToBranch.mutate({
+        daemonId: this.daemonId,
+        workspaceId: this.workspaceId,
+        paths: relPaths,
+        branchName: picked,
+      });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Checkpoint: move failed. ${errorMessage(error)}`,
+      );
+    }
+    await this.refresh();
+  }
+
+  public async checkout(relPaths: string[], exclusive: boolean): Promise<void> {
     try {
       const client = await this.model.getClient();
       for (const relPath of relPaths) {
@@ -794,7 +1013,7 @@ export class CheckpointRepository implements vscode.Disposable {
           daemonId: this.daemonId,
           workspaceId: this.workspaceId,
           path: relPath,
-          locked,
+          forceExclusive: exclusive,
         });
       }
     } catch (error) {
@@ -809,7 +1028,7 @@ export class CheckpointRepository implements vscode.Disposable {
     try {
       const client = await this.model.getClient();
       for (const relPath of relPaths) {
-        await client.workspaces.pending.undoCheckout.mutate({
+        await client.workspaces.pending.releaseClaim.mutate({
           daemonId: this.daemonId,
           workspaceId: this.workspaceId,
           path: relPath,
@@ -908,33 +1127,62 @@ export class CheckpointRepository implements vscode.Disposable {
       return;
     }
 
+    // A workspace materializes from a domain root and overlays feature
+    // branches on top, so this list mixes two different actions: switching
+    // the domain (a full re-pull) and activating an overlay (a delta).
+    // Deactivating an already-overlaid branch is the third.
+    const active = new Set(this.config.activeBranches ?? []);
+
     const picked = await vscode.window.showQuickPick(
-      branches.map((b) => ({
-        label: `$(git-branch) ${b.name}`,
-        description:
-          (b.name === currentBranchName ? "current • " : "") +
-          `${b.type.toLowerCase()} • head CL ${b.headNumber}`,
-        branch: b,
-      })),
-      { placeHolder: "Switch to branch" },
+      branches.map((b) => {
+        const isDomain = b.name === currentBranchName;
+        const isActive = active.has(b.name);
+        const action = isDomain
+          ? "current domain"
+          : isActive
+            ? "overlaid • select to deactivate"
+            : b.type === "FEATURE"
+              ? "activate as overlay"
+              : "switch domain";
+        return {
+          label: `$(git-branch) ${b.name}`,
+          description: `${action} • ${b.type.toLowerCase()} • head CL ${b.headNumber}`,
+          branch: b,
+          isActive,
+          isDomain,
+        };
+      }),
+      { placeHolder: "Switch domain, or activate/deactivate an overlay" },
     );
-    if (!picked || picked.branch.name === currentBranchName) {
+    if (!picked || picked.isDomain) {
       return;
     }
+
+    const deactivating = picked.isActive;
 
     try {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: `Checkpoint: switching to branch "${picked.branch.name}"`,
+          title: deactivating
+            ? `Checkpoint: deactivating "${picked.branch.name}"`
+            : `Checkpoint: switching to "${picked.branch.name}"`,
         },
         async () => {
           const client = await this.model.getClient();
-          await client.workspaces.branches.switch.mutate({
-            daemonId: this.daemonId,
-            workspaceId: this.workspaceId,
-            branchName: picked.branch.name,
-          });
+          if (deactivating) {
+            await client.workspaces.branches.deactivate.mutate({
+              daemonId: this.daemonId,
+              workspaceId: this.workspaceId,
+              branchName: picked.branch.name,
+            });
+          } else {
+            await client.workspaces.branches.switch.mutate({
+              daemonId: this.daemonId,
+              workspaceId: this.workspaceId,
+              branchName: picked.branch.name,
+            });
+          }
           this.baselineMoved = true;
         },
       );
@@ -980,7 +1228,7 @@ export class CheckpointRepository implements vscode.Disposable {
         name: name.trim(),
         headNumber,
         type: type as "MAINLINE" | "RELEASE" | "FEATURE",
-        parentBranchName: this.config.branchName,
+        parentBranchName: this.config.domainBranchName,
       });
 
       const switchNow = await vscode.window.showInformationMessage(
@@ -1022,7 +1270,9 @@ export class CheckpointRepository implements vscode.Disposable {
           detail: cl.message,
           changelist: cl,
         })),
-        { placeHolder: `Changelist history for "${this.config.branchName}"` },
+        {
+          placeHolder: `Changelist history for "${this.config.domainBranchName}"`,
+        },
       );
       if (!pickedCl) {
         return;

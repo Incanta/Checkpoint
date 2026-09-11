@@ -19,6 +19,87 @@ import {
 } from "../../../util/index.js";
 import { TRPCError } from "@trpc/server";
 import { JobManager } from "../../../job-manager.js";
+import { DaemonManager } from "../../../daemon-manager.js";
+import {
+  computeHunks,
+  applyHunks,
+  isFullySelected,
+} from "../../../util/hunks.js";
+import {
+  readStagedBlob,
+  writeStagedBlob,
+  clearStagedBlob,
+} from "../../../util/staged-blobs.js";
+import { prepareCompositeRoot } from "../../../util/composite-root.js";
+
+/**
+ * Resolves the manager and workspace for a daemon call, throwing the same way
+ * every procedure in this router already does by hand.
+ */
+function resolveWorkspace(
+  ctx: { manager: DaemonManager },
+  input: { daemonId: string; workspaceId: string },
+) {
+  const manager = ctx.manager;
+  const workspaces = manager.workspaces.get(input.daemonId);
+
+  if (!workspaces) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
+    });
+  }
+
+  const workspace = workspaces.find((w) => w.id === input.workspaceId);
+
+  if (!workspace) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: `Could not find workspace ID ${input.workspaceId}`,
+    });
+  }
+
+  return { manager, workspace };
+}
+
+/** Repo-relative, forward-slashed, no leading separator. */
+function normalizeRelPath(p: string): string {
+  return p.replace(/^[/\\]/, "").replace(/\\/g, "/");
+}
+
+/**
+ * Reads both sides of a text file's diff: the head revision from storage and
+ * the current worktree content from disk.
+ */
+async function readHeadAndWorktree(
+  daemonId: string,
+  workspace: { id: string; repoId: string; localPath: string },
+  relPath: string,
+): Promise<{ head: string; worktree: string } | null> {
+  const manager = DaemonManager.Get();
+  const headInfo = manager.getWorkspaceState(workspace.id)?.files[relPath];
+  if (!headInfo) {
+    return null;
+  }
+
+  const headResult = await readFileFromChangelist({
+    workspace: {
+      daemonId,
+      repoId: workspace.repoId,
+      localPath: workspace.localPath,
+    },
+    filePath: relPath,
+    changelistNumber: headInfo.changelist,
+  });
+
+  return {
+    head: await fs.readFile(headResult.cachePath, "utf-8"),
+    worktree: await fs.readFile(
+      path.join(workspace.localPath, relPath),
+      "utf-8",
+    ),
+  };
+}
 
 export const pendingRouter = router({
   refresh: publicProcedure
@@ -244,6 +325,7 @@ export const pendingRouter = router({
         .filter((fi) => !fi.isDirectory)
         .map((fi) => fi.relativePath);
 
+      const stagedSet = manager.getStaged(workspace.id);
       const claimsMap: Record<string, FileClaimInfo[]> = {};
 
       if (filePaths.length > 0) {
@@ -257,6 +339,8 @@ export const pendingRouter = router({
           claimsMap[claim.filePath] ??= [];
           claimsMap[claim.filePath]!.push({
             id: claim.id,
+            fileId: claim.fileId,
+            filePath: claim.filePath,
             strength: claim.strength,
             state: claim.state,
             branchName: claim.branchName,
@@ -288,6 +372,7 @@ export const pendingRouter = router({
             id: statusResult?.fileId ?? null,
             changelist: statusResult?.changelist ?? null,
             claims: claimsMap[relativePath] ?? [],
+            staged: stagedSet.has(relativePath),
           };
 
           return f;
@@ -349,13 +434,12 @@ export const pendingRouter = router({
         daemonId: z.string(),
         workspaceId: z.string(),
         message: z.string(),
-        modifications: z.array(
-          z.object({
-            delete: z.boolean(),
-            path: z.string(),
-            oldPath: z.string().optional(),
-          }),
-        ),
+        /**
+         * Which bucket to submit. Defaults to the workspace's domain root.
+         * The file list is derived from the staged set filtered to this
+         * branch; callers do not supply modifications.
+         */
+        branchName: z.string().optional(),
         keepCheckedOut: z.boolean().optional(),
         // When true, skip progress/step callbacks entirely (no per-tick
         // callback overhead). Used by the CLI's --no-progress flag.
@@ -390,10 +474,50 @@ export const pendingRouter = router({
         });
       }
 
+      const targetBranch = input.branchName ?? workspace.domainBranchName;
+
+      if (
+        targetBranch !== workspace.domainBranchName &&
+        !workspace.activeBranches.includes(targetBranch)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `"${targetBranch}" is not active in this workspace.`,
+        });
+      }
+
+      // Submit exactly the staged files destined for this branch. Unstaged
+      // work is never submitted, and work staged to a different bucket stays
+      // where it is. This is why the caller supplies no file list: the staged
+      // set plus each file's claim already says what belongs here.
+      const pending = await manager.refreshWorkspaceContents(workspace);
+      const staged = manager.getStaged(workspace.id);
+
+      const modifications = Object.values(pending.files)
+        .filter((f) => staged.has(f.path))
+        .filter((f) => {
+          const claim = f.claims[0];
+          // No claim means nothing has pinned this file to a branch, so it
+          // belongs to the domain root by default.
+          const destined = claim?.branchName ?? workspace.domainBranchName;
+          return destined === targetBranch;
+        })
+        .map((f) => ({
+          path: f.path,
+          delete: f.status === FileStatus.Deleted,
+        }));
+
+      if (modifications.length === 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Nothing staged for "${targetBranch}". Stage files before submitting.`,
+        });
+      }
+
       // Expand any directory paths into individual file modifications
       const expandedModifications = await manager.expandDirectoriesForSubmit(
         workspace,
-        input.modifications,
+        modifications,
       );
 
       // Check for conflicts before submitting (sync, fail fast)
@@ -455,22 +579,47 @@ export const pendingRouter = router({
           }
 
           const reportProgress = !input.noProgress;
-          await submit(
-            workspaceInfo,
-            repo.orgId,
-            input.message,
-            expandedModifications,
-            workspace.id,
-            input.keepCheckedOut ?? false,
-            undefined,
-            reportProgress
-              ? (step) => jobManager.updateStep(job.id, step)
-              : undefined,
-            reportProgress
-              ? (step, done, total) =>
-                  jobManager.updateProgress(job.id, done, total)
-              : undefined,
+
+          // Partially-staged files have content that exists in neither the
+          // head nor the working tree, so they cannot be submitted straight
+          // off disk. Materialize a tree where those files carry their staged
+          // content and everything else is the worktree file, and point the
+          // addon at that instead. Returns null (and costs nothing) when no
+          // submitted file is partially staged, which is the common case.
+          const composite = await prepareCompositeRoot(
+            workspace.localPath,
+            expandedModifications.map((m) => m.path),
           );
+
+          try {
+            await submit(
+              composite
+                ? { ...workspaceInfo, localPath: composite.rootPath }
+                : workspaceInfo,
+              repo.orgId,
+              input.message,
+              expandedModifications,
+              workspace.id,
+              input.keepCheckedOut ?? false,
+              undefined,
+              reportProgress
+                ? (step) => jobManager.updateStep(job.id, step)
+                : undefined,
+              reportProgress
+                ? (step, done, total) =>
+                    jobManager.updateProgress(job.id, done, total)
+                : undefined,
+              undefined, // artifactForChangelistNum
+              targetBranch,
+            );
+          } finally {
+            await composite?.cleanup();
+          }
+
+          // Whatever was staged has landed, so no third state remains.
+          for (const mod of expandedModifications) {
+            await clearStagedBlob(workspace.localPath, mod.path);
+          }
 
           jobManager.updateStep(job.id, "Reloading workspace state");
           await manager.reloadWorkspaceState(workspace);
@@ -580,6 +729,293 @@ export const pendingRouter = router({
       });
     }),
 
+  /**
+   * Stage files for the next submit, and point their claims at `branchName`.
+   *
+   * Staging is the git index: it says a change is ready, not which branch it
+   * belongs to. The branch comes from the claim, which is why this moves the
+   * claim as well rather than recording a target locally where the two could
+   * drift.
+   */
+  stage: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        paths: z.array(z.string()).min(1),
+        /**
+         * Which bucket to stage into. Defaults to the workspace's domain
+         * root, which is where work goes unless you say otherwise.
+         */
+        branchName: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { manager, workspace } = resolveWorkspace(ctx, input);
+
+      const targetBranch = input.branchName ?? workspace.domainBranchName;
+
+      // You may only stage into a bucket you actually have overlaid, or the
+      // domain root. Staging elsewhere would destine a change for a base that
+      // is not on disk.
+      if (
+        targetBranch !== workspace.domainBranchName &&
+        !workspace.activeBranches.includes(targetBranch)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `"${targetBranch}" is not active in this workspace. Activate it before staging to it.`,
+        });
+      }
+
+      const normalizedPaths = input.paths.map((p) =>
+        p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+      );
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      // Claim each path onto the target branch. The server rejects a move
+      // that is not legal (already submitted elsewhere, held by someone else,
+      // or stale), so a failure here means the file genuinely cannot go to
+      // that branch and it must not end up staged.
+      for (const relPath of normalizedPaths) {
+        await client.file.checkout.mutate({
+          repoId: workspace.repoId,
+          workspaceId: workspace.id,
+          filePath: relPath,
+          branchName: targetBranch,
+        });
+      }
+
+      await manager.stage(workspace, normalizedPaths);
+
+      return {
+        success: true,
+        paths: normalizedPaths,
+        branchName: targetBranch,
+      };
+    }),
+
+  /**
+   * Returns the hunks between head and worktree for one text file, plus which
+   * of them are currently staged.
+   *
+   * Only meaningful for mergeable content: a binary has no hunks, which is why
+   * partial staging lines up exactly with advisory claims.
+   */
+  getHunks: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        path: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { manager, workspace } = resolveWorkspace(ctx, input);
+      const relPath = normalizeRelPath(input.path);
+
+      if (
+        isBinaryFile(
+          relPath,
+          await getBinaryExtensions(input.daemonId, workspace.repoId),
+        )
+      ) {
+        return { hunks: [], staged: [], isBinary: true };
+      }
+
+      const sides = await readHeadAndWorktree(
+        input.daemonId,
+        workspace,
+        relPath,
+      );
+      if (!sides) {
+        return { hunks: [], staged: [], isBinary: false };
+      }
+
+      const hunks = computeHunks(sides.head, sides.worktree);
+      const blob = await readStagedBlob(workspace.localPath, relPath);
+
+      // Staged-ness is derived from the stored content, never kept as a
+      // parallel list of indices, so the two cannot drift apart. A hunk is
+      // staged when the staged content changes the same head lines it does.
+      let staged: number[];
+      if (blob === null) {
+        staged = manager.getStaged(workspace.id).has(relPath)
+          ? hunks.map((h) => h.index)
+          : [];
+      } else {
+        const stagedRanges = new Set(
+          computeHunks(sides.head, blob).map(
+            (h) => `${h.oldStart}:${h.oldLines}`,
+          ),
+        );
+        staged = hunks
+          .filter((h) => stagedRanges.has(`${h.oldStart}:${h.oldLines}`))
+          .map((h) => h.index);
+      }
+
+      return { hunks, staged, isBinary: false };
+    }),
+
+  /**
+   * Stages a subset of a text file's hunks.
+   *
+   * Stores the RESULTING CONTENT, not the hunk indices: indices drift as soon
+   * as the worktree file changes again, whereas a snapshot stays meaningful
+   * and gives the honest head/staged/worktree three-way view. This is why git
+   * stores blobs rather than patches.
+   */
+  stageHunks: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        path: z.string(),
+        hunkIndices: z.array(z.number().int().min(0)),
+        branchName: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { manager, workspace } = resolveWorkspace(ctx, input);
+      const relPath = normalizeRelPath(input.path);
+
+      if (
+        isBinaryFile(
+          relPath,
+          await getBinaryExtensions(input.daemonId, workspace.repoId),
+        )
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `"${relPath}" is binary and stages whole-file.`,
+        });
+      }
+
+      const sides = await readHeadAndWorktree(
+        input.daemonId,
+        workspace,
+        relPath,
+      );
+      if (!sides) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `"${relPath}" has no head revision to diff against.`,
+        });
+      }
+
+      const hunks = computeHunks(sides.head, sides.worktree);
+      const selected = new Set(input.hunkIndices);
+
+      if (selected.size === 0) {
+        // Selecting nothing is an unstage, not an empty stage.
+        await clearStagedBlob(workspace.localPath, relPath);
+        await manager.unstage(workspace, [relPath]);
+        return { success: true, partial: false, staged: false };
+      }
+
+      const partial = !isFullySelected(hunks, selected);
+
+      if (partial) {
+        await writeStagedBlob(
+          workspace.localPath,
+          relPath,
+          applyHunks(sides.head, sides.worktree, hunks, selected),
+        );
+      } else {
+        // Fully staged needs no blob: the staged content IS the worktree
+        // content, which submit already reads off disk.
+        await clearStagedBlob(workspace.localPath, relPath);
+      }
+
+      // Partial staging still moves the claim, exactly as whole-file does.
+      const client = await CreateApiClientAuth(input.daemonId);
+      await client.file.checkout.mutate({
+        repoId: workspace.repoId,
+        workspaceId: workspace.id,
+        filePath: relPath,
+        branchName: input.branchName ?? workspace.domainBranchName,
+      });
+      await manager.stage(workspace, [relPath]);
+
+      return { success: true, partial, staged: true };
+    }),
+
+  /**
+   * Remove files from the staged set.
+   *
+   * Leaves their claims alone: unstaging says "not ready yet", not "I am done
+   * with this file". Releasing a claim is `releaseClaim`.
+   */
+  unstage: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        paths: z.array(z.string()).min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { manager, workspace } = resolveWorkspace(ctx, input);
+
+      const normalizedPaths = input.paths.map((p) =>
+        p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+      );
+
+      await manager.unstage(workspace, normalizedPaths);
+
+      return { success: true, paths: normalizedPaths };
+    }),
+
+  /** Move already-staged files from one bucket to another. */
+  moveToBranch: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        paths: z.array(z.string()).min(1),
+        branchName: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { manager, workspace } = resolveWorkspace(ctx, input);
+
+      if (
+        input.branchName !== workspace.domainBranchName &&
+        !workspace.activeBranches.includes(input.branchName)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `"${input.branchName}" is not active in this workspace.`,
+        });
+      }
+
+      const normalizedPaths = input.paths.map((p) =>
+        p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+      );
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      for (const relPath of normalizedPaths) {
+        await client.file.checkout.mutate({
+          repoId: workspace.repoId,
+          workspaceId: workspace.id,
+          filePath: relPath,
+          branchName: input.branchName,
+        });
+      }
+
+      // Already staged by definition, but make it idempotent so a move can
+      // also pull an unstaged file into a bucket.
+      await manager.stage(workspace, normalizedPaths);
+
+      return {
+        success: true,
+        paths: normalizedPaths,
+        branchName: input.branchName,
+      };
+    }),
+
   markForAdd: publicProcedure
     .input(
       z.object({
@@ -646,7 +1082,7 @@ export const pendingRouter = router({
       return { success: true, paths: normalizedPaths };
     }),
 
-  getActiveCheckoutsForFiles: publicProcedure
+  getClaimsForFiles: publicProcedure
     .input(
       z.object({
         daemonId: z.string(),
@@ -679,6 +1115,10 @@ export const pendingRouter = router({
       return client.file.getClaimsForFiles.mutate({
         repoId: workspace.repoId,
         filePaths: normalizedPaths,
+        // Without this the server cannot resolve the caller's domain, and
+        // every exclusive claim comes back blocking, including ones anchored
+        // in a sibling domain that should be context rather than an obstacle.
+        branchName: workspace.domainBranchName,
       });
     }),
 

@@ -112,11 +112,11 @@ export function useFileContextMenu() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const resolveConfirmSuppressed = useAtomValue(resolveConfirmSuppressedAtom);
 
-  // Locked warning dialog state
+  // Blocking-claim warning dialog state
   const [lockedWarningVisible, setLockedWarningVisible] = useState(false);
   const [lockedWarningPath, setLockedWarningPath] = useState("");
   const [lockedWarningUser, setLockedWarningUser] = useState("");
-  const pendingLockedCheckout = useRef<boolean>(false);
+  const [lockedWarningBranch, setLockedWarningBranch] = useState("");
 
   // Resolve confirmation dialog state
   const [resolveDialogVisible, setResolveDialogVisible] = useState(false);
@@ -127,9 +127,10 @@ export function useFileContextMenu() {
   >("today");
 
   useEffect(() => {
-    const unsubscribe = ipc.on("file:checkout:locked-warning", (data) => {
+    const unsubscribe = ipc.on("file:checkout:claimed-warning", (data) => {
       setLockedWarningPath(data.path);
-      setLockedWarningUser(data.lockedBy);
+      setLockedWarningUser(data.claimedBy);
+      setLockedWarningBranch(data.branchName);
       setLockedWarningVisible(true);
     });
 
@@ -223,20 +224,21 @@ export function useFileContextMenu() {
       command: () => {
         ipc.sendMessage("file:checkout", {
           path: file.relativePath,
-          checkForLock: true,
+          checkForClaim: true,
         });
       },
     });
 
-    // Checkout (locked)
+    // Checkout (exclusive): forces an exclusive claim even on a file the
+    // binary-extension set considers mergeable.
     items.push({
-      label: "Checkout (locked)",
+      label: "Checkout (exclusive)",
       disabled: isCheckedOut(status),
       command: () => {
         ipc.sendMessage("file:checkout", {
           path: file.relativePath,
-          locked: true,
-          checkForLock: true,
+          forceExclusive: true,
+          checkForClaim: true,
         });
       },
     });
@@ -246,7 +248,7 @@ export function useFileContextMenu() {
       label: "Undo checkout",
       disabled: !isCheckedOut(status),
       command: () => {
-        ipc.sendMessage("file:undo-checkout", { path: file.relativePath });
+        ipc.sendMessage("file:release-claim", { path: file.relativePath });
       },
     });
 
@@ -516,9 +518,10 @@ export function useFileContextMenu() {
     setLockedWarningVisible,
     lockedWarningPath,
     lockedWarningUser,
+    lockedWarningBranch,
     confirmLockedCheckout: () => {
       setLockedWarningVisible(false);
-      // Proceed with checkout despite the lock (without checkForLock to skip re-check)
+      // Proceed anyway, skipping the re-check.
       ipc.sendMessage("file:checkout", {
         path: lockedWarningPath,
       });

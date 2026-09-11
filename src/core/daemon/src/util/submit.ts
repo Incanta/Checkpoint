@@ -36,6 +36,11 @@ export async function submit(
   onStep?: (step: string) => void,
   onProgress?: (step: string, done: number, total: number) => void,
   artifactForChangelistNum?: number,
+  /**
+   * Branch this changelist lands on. Defaults to the workspace's domain root,
+   * which is where work goes when no feature branch is overlaid.
+   */
+  targetBranchName?: string,
 ): Promise<void> {
   const daemonConfig = await DaemonConfig.Get();
   const resolvedLogLevel =
@@ -69,8 +74,10 @@ export async function submit(
 
   const storageOptions = toStorageOptions(storageTokenResponse);
 
+  const branchName = targetBranchName ?? workspace.domainBranchName;
+
   console.log(`[submit] Calling SubmitAsync:`);
-  console.log(`[submit]   branchName: ${workspace.domainBranchName}`);
+  console.log(`[submit]   branchName: ${branchName}`);
   console.log(`[submit]   message: ${message}`);
   console.log(`[submit]   localPath: ${workspace.localPath}`);
   console.log(`[submit]   remoteRoot: /${orgId}/${workspace.repoId}`);
@@ -80,7 +87,7 @@ export async function submit(
   console.log(`[submit]   modifications: ${modifications.length}`);
 
   const submitOptions: SubmitAsyncOptions = {
-    branchName: workspace.domainBranchName,
+    branchName,
     message,
     targetChunkSize: daemonConfig.longtail.targetChunkSize,
     targetBlockSize: daemonConfig.longtail.targetBlockSize,

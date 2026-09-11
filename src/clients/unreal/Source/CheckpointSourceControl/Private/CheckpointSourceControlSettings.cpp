@@ -84,10 +84,28 @@ bool FCheckpointSourceControlSettings::LoadFromConfigFiles() {
   WsJson->TryGetStringField(TEXT("id"), WorkspaceId);
   WsJson->TryGetStringField(TEXT("daemonId"), DaemonId);
   WsJson->TryGetStringField(TEXT("localPath"), WorkspacePath);
-  WsJson->TryGetStringField(TEXT("name"), WorkspaceName);
+  // The config key is `workspaceName`; reading `name` left this permanently
+  // empty, which is what surfaced as a blank workspace in the status text.
+  WsJson->TryGetStringField(TEXT("workspaceName"), WorkspaceName);
   WsJson->TryGetStringField(TEXT("repoId"), RepoId);
+  // `orgId` has never been written to workspace.json; left here only so the
+  // field keeps its (empty) default rather than appearing to be populated.
   WsJson->TryGetStringField(TEXT("orgId"), OrgId);
-  WsJson->TryGetStringField(TEXT("branchName"), BranchName);
+  // Domain root, with the pre-multi-branch key as a fallback for configs
+  // written by an older daemon.
+  if (!WsJson->TryGetStringField(TEXT("domainBranchName"), BranchName)) {
+    WsJson->TryGetStringField(TEXT("branchName"), BranchName);
+  }
+  ActiveBranches.Empty();
+  const TArray<TSharedPtr<FJsonValue>> *ActiveArray;
+  if (WsJson->TryGetArrayField(TEXT("activeBranches"), ActiveArray)) {
+    for (const auto &Entry : *ActiveArray) {
+      FString Branch;
+      if (Entry->TryGetString(Branch)) {
+        ActiveBranches.Add(Branch);
+      }
+    }
+  }
 
   if (WorkspaceId.IsEmpty() || DaemonId.IsEmpty()) {
     UE_LOG(

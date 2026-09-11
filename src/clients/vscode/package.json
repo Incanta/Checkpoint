@@ -100,6 +100,23 @@
         "icon": "$(discard)"
       },
       {
+        "command": "checkpoint.stage",
+        "title": "Stage Changes",
+        "category": "Checkpoint",
+        "icon": "$(add)"
+      },
+      {
+        "command": "checkpoint.unstage",
+        "title": "Unstage Changes",
+        "category": "Checkpoint",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "checkpoint.moveToBranch",
+        "title": "Move to Branch...",
+        "category": "Checkpoint"
+      },
+      {
         "command": "checkpoint.markForAdd",
         "title": "Mark for Add",
         "category": "Checkpoint",
@@ -201,6 +218,18 @@
           "when": "false"
         },
         {
+          "command": "checkpoint.stage",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.unstage",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.moveToBranch",
+          "when": "false"
+        },
+        {
           "command": "checkpoint.markForAdd",
           "when": "false"
         },
@@ -282,7 +311,7 @@
         {
           "command": "checkpoint.revert",
           "group": "1_modification",
-          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
         },
         {
           "command": "checkpoint.markForAdd",
@@ -292,9 +321,24 @@
       ],
       "scm/resourceState/context": [
         {
+          "command": "checkpoint.stage",
+          "group": "inline@0",
+          "when": "scmProvider == checkpoint && scmResourceGroup == unstaged"
+        },
+        {
+          "command": "checkpoint.unstage",
+          "group": "inline@0",
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^branch:/"
+        },
+        {
+          "command": "checkpoint.moveToBranch",
+          "group": "2_modification@3",
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^branch:/"
+        },
+        {
           "command": "checkpoint.openDiff",
           "group": "inline@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
         },
         {
           "command": "checkpoint.openFile",
@@ -304,7 +348,7 @@
         {
           "command": "checkpoint.revert",
           "group": "inline@3",
-          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
         },
         {
           "command": "checkpoint.markForAdd",
@@ -314,7 +358,7 @@
         {
           "command": "checkpoint.openDiff",
           "group": "navigation@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
         },
         {
           "command": "checkpoint.openFile",
@@ -324,7 +368,7 @@
         {
           "command": "checkpoint.revert",
           "group": "1_modification@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
         },
         {
           "command": "checkpoint.undoCheckout",
@@ -349,7 +393,7 @@
         {
           "command": "checkpoint.fileHistory",
           "group": "2_history@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup == changes"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
         }
       ]
     },

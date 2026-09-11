@@ -5,6 +5,7 @@ import {
   FileStatus,
   FileType,
   type File,
+  type FileClaimInfo,
   type Workspace,
   type WorkspacePendingChanges,
 } from "./types/index.js";
@@ -629,6 +630,7 @@ export class DaemonManager {
               id: null,
               changelist: null,
               claims: [],
+              staged: false,
             });
           }
         } else {
@@ -650,6 +652,7 @@ export class DaemonManager {
               id: null,
               changelist: null,
               claims: [],
+              staged: false,
             });
           }
         }
@@ -676,6 +679,7 @@ export class DaemonManager {
               id: null,
               changelist: null,
               claims: [],
+              staged: false,
             });
           }
           // Tracked & not pending → skip (not a pending change)
@@ -719,6 +723,7 @@ export class DaemonManager {
             id: null,
             changelist: null,
             claims: [],
+            staged: false,
           });
         }
       }
@@ -1042,6 +1047,7 @@ export class DaemonManager {
       id: baselineFile?.fileId ?? null,
       changelist: baselineFile?.changelist ?? null,
       claims: [],
+      staged: false,
     };
   }
 
@@ -1055,7 +1061,7 @@ export class DaemonManager {
     workspace: Workspace,
     baselineState: WorkspaceState,
     result: WorkspacePendingChanges,
-    checkouts: Array<{ fileId: string }>,
+    claims: FileClaimInfo[],
   ): Promise<void> {
     const changedFileIds = new Set(
       Object.values(result.files)
@@ -1063,10 +1069,10 @@ export class DaemonManager {
         .filter(Boolean),
     );
 
-    for (const checkout of checkouts) {
-      if (!changedFileIds.has(checkout.fileId)) {
+    for (const claim of claims) {
+      if (!changedFileIds.has(claim.fileId)) {
         const baselineEntry = Object.entries(baselineState.files).find(
-          ([, file]) => file.fileId === checkout.fileId,
+          ([, file]) => file.fileId === claim.fileId,
         );
 
         if (baselineEntry) {
@@ -1081,9 +1087,10 @@ export class DaemonManager {
               size: stat.size,
               modifiedAt: stat.mtimeMs,
               status: FileStatus.NotChangedCheckedOut,
-              id: checkout.fileId,
+              id: claim.fileId,
               changelist: baselineFile.changelist,
-              claims: [],
+              claims: [claim],
+              staged: false,
             };
             result.numChanges++;
           }
@@ -1221,6 +1228,7 @@ export class DaemonManager {
                 id: null,
                 changelist: null,
                 claims: [],
+                staged: false,
               };
               result.numChanges++;
             }
@@ -1299,6 +1307,7 @@ export class DaemonManager {
           id: baselineFile.fileId,
           changelist: baselineFile.changelist,
           claims: [],
+          staged: false,
         };
         result.numChanges++;
       }
@@ -1312,6 +1321,7 @@ export class DaemonManager {
       checkouts,
     );
 
+    this.applyStagedFlags(workspace.id, result);
     this.workspacePendingChanges.set(workspace.id, result);
 
     // Clear dirty files since we just did a full refresh
@@ -1421,6 +1431,7 @@ export class DaemonManager {
                   id: null,
                   changelist: null,
                   claims: [],
+                  staged: false,
                 };
                 result.numChanges++;
               }
@@ -1444,6 +1455,7 @@ export class DaemonManager {
             id: baselineFile.fileId,
             changelist: baselineFile.changelist,
             claims: [],
+            staged: false,
           };
           result.numChanges++;
         }
@@ -1473,6 +1485,7 @@ export class DaemonManager {
                 id: null,
                 changelist: null,
                 claims: [],
+                staged: false,
               };
               result.numChanges++;
             }
@@ -1514,6 +1527,7 @@ export class DaemonManager {
       checkouts,
     );
 
+    this.applyStagedFlags(workspace.id, result);
     this.workspacePendingChanges.set(workspace.id, result);
     this.dirtyFiles.set(workspace.id, new Set());
 
@@ -1613,6 +1627,75 @@ export class DaemonManager {
   public hasDirtyFiles(workspaceId: string): boolean {
     const dirty = this.dirtyFiles.get(workspaceId);
     return dirty ? dirty.size > 0 : false;
+  }
+
+  /**
+   * Stamps the staged flag onto a freshly computed pending-changes result.
+   *
+   * Done in one place rather than at each of the ~10 File construction sites,
+   * so a new site cannot silently forget it.
+   */
+  private applyStagedFlags(
+    workspaceId: string,
+    result: WorkspacePendingChanges,
+  ): void {
+    const staged = this.getStaged(workspaceId);
+    for (const [relativePath, file] of Object.entries(result.files)) {
+      file.staged = staged.has(relativePath);
+    }
+  }
+
+  /**
+   * Returns the set of relative paths staged for the next submit.
+   *
+   * Staging is the git index: whether a change is ready to go into its
+   * branch's next changelist. Which branch that is comes from the file's
+   * claim on the server, not from here, so the two cannot drift.
+   */
+  public getStaged(workspaceId: string): Set<string> {
+    const state = this.workspaceStates.get(workspaceId);
+    return new Set(state?.staged ?? []);
+  }
+
+  /** Stage one or more files for the next submit. Persists to workspace state. */
+  public async stage(
+    workspace: Workspace,
+    relativePaths: string[],
+  ): Promise<void> {
+    await this.mutateStaged(workspace, (set) => {
+      for (const p of relativePaths) set.add(p);
+    });
+  }
+
+  /**
+   * Unstage one or more files.
+   *
+   * Deliberately leaves any claim in place: unstaging says "not ready yet",
+   * not "I am done with this file". Releasing a claim is a separate act.
+   */
+  public async unstage(
+    workspace: Workspace,
+    relativePaths: string[],
+  ): Promise<void> {
+    await this.mutateStaged(workspace, (set) => {
+      for (const p of relativePaths) set.delete(p);
+    });
+  }
+
+  private async mutateStaged(
+    workspace: Workspace,
+    mutate: (set: Set<string>) => void,
+  ): Promise<void> {
+    const state = this.workspaceStates.get(workspace.id);
+    if (!state) return;
+
+    const existing = new Set(state.staged ?? []);
+    mutate(existing);
+    state.staged = [...existing];
+    await this.persistState(workspace, state);
+
+    // Invalidate so the next refresh reports the new staged flags.
+    this.workspacePendingChanges.delete(workspace.id);
   }
 
   /**

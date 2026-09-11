@@ -8,14 +8,17 @@ A cross-platform C++ command-line client for interacting with the Checkpoint dae
 | -------------------------------- | ----------------------------- | ----------------------------------- |
 | `chk status`                     | Show pending changes          | `chk status`                        |
 | `chk add <file...>`              | Stage files for submission    | `chk add src/main.cpp`              |
+| `chk add -b <branch> <file...>`  | Stage into a feature branch   | `chk add -b feature/hud hud.uasset` |
+| `chk move -b <branch> <file...>` | Restage into another branch   | `chk move -b feature/hud hud.uasset`|
 | `chk restore --staged <file...>` | Unstage files                 | `chk restore --staged src/main.cpp` |
 | `chk restore <file...>`          | Revert files to head          | `chk restore src/main.cpp`          |
 | `chk submit -m <message>`        | Submit staged files           | `chk submit -m "Fix bug"`           |
+| `chk submit -b <branch> -m <msg>`| Submit one branch's bucket    | `chk submit -b feature/hud -m "WIP"`|
 | `chk pull`                       | Sync changes from remote      | `chk pull`                          |
 | `chk log`                        | Show version history          | `chk log`                           |
 | `chk branch`                     | List branches                 | `chk branch`                        |
 | `chk checkout <file>`            | Check out a controlled file   | `chk checkout src/main.cpp`         |
-| `chk checkout --lock <file>`     | Check out with exclusive lock | `chk checkout --lock model.fbx`     |
+| `chk checkout -x <file>`         | Check out with an exclusive claim, even on a mergeable file | `chk checkout -x notes.md` |
 | `chk revert <file...>`           | Revert files to head version  | `chk revert src/main.cpp`           |
 | `chk diff <file>`                | Show diff for a file          | `chk diff src/main.cpp`             |
 

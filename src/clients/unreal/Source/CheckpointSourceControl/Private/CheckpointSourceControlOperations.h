@@ -176,6 +176,9 @@ public:
   /** Other users who have files checked out */
   TMap<FString, FString> OtherCheckouts;
 
+  /** Absolute path -> the branch a blocking claim is held on. */
+  TMap<FString, FString> ClaimBranches;
+
   /** Files that are locked by others */
   TSet<FString> LockedFiles;
 };
@@ -245,6 +248,9 @@ public:
 
   /** Other user checkout info */
   TMap<FString, FString> OtherCheckouts;
+
+  /** Absolute path -> the branch a blocking claim is held on. */
+  TMap<FString, FString> ClaimBranches;
 
   /** Locked files */
   TSet<FString> LockedFiles;

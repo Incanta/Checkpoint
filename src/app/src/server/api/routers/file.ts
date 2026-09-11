@@ -89,15 +89,44 @@ export const fileRouter = createTRPCRouter({
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
       await assertWorkspaceOwnership(ctx, input.workspaceId);
 
-      return ctx.db.fileClaim.findMany({
+      const claims = await ctx.db.fileClaim.findMany({
         where: {
           workspaceId: input.workspaceId,
           releasedAt: null,
         },
         include: {
           file: true,
+          workspace: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  name: true,
+                  username: true,
+                },
+              },
+            },
+          },
         },
       });
+
+      // Same shape as getClaimsForFiles so the daemon can build `File.claims`
+      // from either source. `blocking` is always false here: these are the
+      // caller's own claims, and nobody is blocked by themselves.
+      return claims.map((c) => ({
+        id: c.id,
+        fileId: c.fileId,
+        filePath: c.file.path,
+        strength: c.strength,
+        state: c.state,
+        branchName: c.branchName,
+        domainBranchName: c.domainBranchName,
+        blocking: false,
+        workspaceId: c.workspaceId,
+        userId: c.workspace.userId,
+        user: c.workspace.user,
+      }));
     }),
 
   getClaimsForFiles: protectedProcedure

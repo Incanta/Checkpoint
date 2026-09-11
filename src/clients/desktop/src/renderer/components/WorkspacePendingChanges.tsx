@@ -26,11 +26,7 @@ import DropdownButton from "./DropdownButton";
 import styles from "./Editor.module.css";
 // @ts-ignore
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
-import {
-  FileStatus,
-  FileType,
-  type Modification,
-} from "@checkpointvcs/daemon/types";
+import { FileStatus, FileType } from "@checkpointvcs/daemon/types";
 import FileContextMenu, {
   useFileContextMenu,
   FileContextInfo,
@@ -38,6 +34,8 @@ import FileContextMenu, {
 import prettyBytes from "pretty-bytes";
 import { FileIcon } from "./FileIcon";
 import { EmptyState } from "./ui";
+import StagedChangesTree, { UNSTAGED, type Bucket } from "./StagedChangesTree";
+import type { File as PendingFile } from "@checkpointvcs/daemon/types";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCircleCheck } from "@fortawesome/free-solid-svg-icons/faCircleCheck";
 
@@ -51,124 +49,52 @@ const itemBodyNameStyle: React.CSSProperties = {
   marginLeft: ".5em",
 };
 
-const treeTableRootStyle: React.CSSProperties = { height: "100%" };
-
-const columnNameStyle: React.CSSProperties = { width: "40%" };
-
-const columnSizeStyle: React.CSSProperties = { width: "5rem" };
-
 // ─── Memoized TreeTable wrapper ─────────────────────────────────────
-interface PendingChangesTreeProps {
-  treeTableRef: React.RefObject<TreeTable | null>;
-  nodes: TreeNode[];
-  selectedNodeKeys: TreeTableSelectionKeysType | null;
-  onSelectionChange: (e: any) => void;
-  expandedKeys: TreeTableExpandedKeysType;
-  onToggle: (e: any) => void;
-  onExpand: (e: any) => void;
-  highlightedRowKey: string | null;
-  onRowClick: (e: any) => void;
-  onContextMenu: (e: any) => void;
-  treeTablePt: any;
-  columnPt: ColumnPassThroughOptions;
-  itemBodyTemplate: (rowData: any) => React.ReactNode;
-}
-
-const PendingChangesTree = React.memo(function PendingChangesTree({
-  treeTableRef,
-  nodes,
-  selectedNodeKeys,
-  onSelectionChange,
-  expandedKeys,
-  onToggle,
-  onExpand,
-  highlightedRowKey,
-  onRowClick,
-  onContextMenu,
-  treeTablePt,
-  columnPt,
-  itemBodyTemplate,
-}: PendingChangesTreeProps) {
-  const rowClassName = useCallback(
-    (node: TreeNode) => {
-      const classes: Record<string, boolean> = {};
-      if (node.key === highlightedRowKey) {
-        classes["row-highlighted"] = true;
-      }
-      return classes;
-    },
-    [highlightedRowKey],
-  );
-
-  return (
-    <TreeTable
-      ref={treeTableRef}
-      className="pending-changes-tree"
-      value={nodes}
-      columnResizeMode="expand"
-      resizableColumns
-      showGridlines
-      selectionMode="checkbox"
-      selectionKeys={selectedNodeKeys}
-      onSelectionChange={onSelectionChange}
-      expandedKeys={expandedKeys}
-      onToggle={onToggle}
-      onExpand={onExpand}
-      rowClassName={rowClassName}
-      onRowClick={onRowClick}
-      onContextMenu={onContextMenu}
-      pt={treeTablePt}
-      style={treeTableRootStyle}
-    >
-      <Column
-        field="name"
-        header="Item"
-        expander
-        resizeable
-        sortable
-        body={itemBodyTemplate}
-        pt={columnPt}
-        style={columnNameStyle}
-      />
-      <Column
-        field="status"
-        header="Status"
-        resizeable
-        sortable
-        pt={columnPt}
-      />
-      <Column
-        field="size"
-        header="Size"
-        resizeable
-        sortable
-        pt={columnPt}
-        style={columnSizeStyle}
-      />
-      <Column
-        field="modified"
-        header="Date Modified"
-        resizeable
-        sortable
-        pt={columnPt}
-      />
-      <Column field="type" header="Type" resizeable sortable pt={columnPt} />
-      <Column
-        field="changelist"
-        header="Changelist"
-        resizeable
-        sortable
-        pt={columnPt}
-      />
-    </TreeTable>
-  );
-});
 
 // ─── Main component ─────────────────────────────────────────────────
 export default function WorkspacePendingChanges() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const workspacePendingChanges = useAtomValue(workspacePendingChangesAtom);
   const workspaceDiff = useAtomValue(workspaceDiffAtom);
+
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+
+  // Sections: UNSTAGED first, then the domain root, then each overlaid
+  // feature branch. A file's bucket is its claim's branch; a staged file with
+  // no claim belongs to the domain root by default.
+  const buckets = useMemo<Bucket[]>(() => {
+    const files = Object.values(workspacePendingChanges?.files ?? {});
+    const domain = currentWorkspace?.domainBranchName ?? "main";
+    const overlays = currentWorkspace?.activeBranches ?? [];
+
+    const unstaged = files.filter((f) => !f.staged);
+    const bucketFor = (branch: string) =>
+      files.filter(
+        (f) => f.staged && (f.claims[0]?.branchName ?? domain) === branch,
+      );
+
+    return [
+      { id: UNSTAGED, label: "Unstaged", files: unstaged },
+      { id: domain, label: domain, files: bucketFor(domain) },
+      ...overlays.map((b) => ({ id: b, label: b, files: bucketFor(b) })),
+    ];
+  }, [workspacePendingChanges, currentWorkspace]);
+
+  const handleSelectPath = useCallback((path: string) => {
+    setSelectedPath(path);
+    ipc.sendMessage("workspace:diff:file", { path });
+  }, []);
+
+  const handleMoveBetweenBuckets = useCallback(
+    (path: string, _from: string, to: string) => {
+      if (to === UNSTAGED) {
+        ipc.sendMessage("workspace:unstage", { paths: [path] });
+      } else {
+        ipc.sendMessage("workspace:stage", { paths: [path], branchName: to });
+      }
+    },
+    [],
+  );
 
   const treeTableRef = useRef<TreeTable>(null);
   const [nodes, setNodes] = useState<TreeNode[]>([]);
@@ -220,6 +146,41 @@ export default function WorkspacePendingChanges() {
   const [menuItems, setMenuItems] = useState<any[]>([]);
 
   // Handler for right-click on rows
+  const handleSubmitBucket = useCallback(
+    (bucketId: string) => {
+      setIsSubmitting(true);
+      ipc.sendMessage("workspace:submit", {
+        message: commitMessage,
+        branchName: bucketId,
+      });
+    },
+    [commitMessage],
+  );
+
+  /** Context menu for a row in the bucket tree. */
+  const handleFileContextMenu = useCallback(
+    (event: React.MouseEvent, file: PendingFile) => {
+      if (!currentWorkspace) return;
+
+      const workspaceLocalPath = currentWorkspace.localPath
+        .split(/[/\\]/)
+        .join("/");
+
+      showContextMenu(event, {
+        absolutePath: workspaceLocalPath + "/" + file.path,
+        relativePath: file.path,
+        isDirectory: false,
+        status: FileStatus[file.status] ?? "",
+        hasChangelist: file.changelist != null,
+        changelistId: file.changelist,
+      });
+      setTimeout(() => {
+        setMenuItems(buildMenuItems());
+      }, 0);
+    },
+    [currentWorkspace, showContextMenu, buildMenuItems],
+  );
+
   const handleRowContextMenu = useCallback(
     (event: React.MouseEvent, node: TreeNode) => {
       if (!currentWorkspace) return;
@@ -673,59 +634,23 @@ export default function WorkspacePendingChanges() {
         />
         <Button
           className="px-3 py-1 text-xs"
-          label={isSubmitting ? "Submitting..." : "Submit"}
-          disabled={isSubmitting || !hasSelectedFiles}
+          label="Stage"
+          disabled={isSubmitting || !selectedPath}
           onClick={() => {
-            const keys: TreeTableSelectionKeysType = selectedNodeKeys || {};
-
-            const modifications: Modification[] = [];
-            for (const key in keys) {
-              const selection = keys[key] as {
-                checked?: boolean;
-                partialChecked?: boolean;
-              };
-              if (selection.partialChecked || !selection.checked) {
-                continue;
-              }
-
-              // Key is the relative path directly (no category prefix).
-              const relativePath = key.replace(/^\//, "");
-              if (!relativePath) continue;
-
-              const pendingChange =
-                workspacePendingChanges!.files[relativePath];
-
-              if (pendingChange) {
-                // For directories the daemon will expand into individual
-                // files during submit; for files send delete flag as needed.
-                modifications.push({
-                  path: relativePath,
-                  delete: pendingChange.status === FileStatus.Deleted,
-                });
-              } else {
-                // Key might belong to a lazily-loaded child that isn't in
-                // the top-level pending map. Send it as a non-delete mod;
-                // the daemon will figure out the correct status.
-                modifications.push({
-                  path: relativePath,
-                  delete: false,
-                });
-              }
+            if (selectedPath) {
+              ipc.sendMessage("workspace:stage", { paths: [selectedPath] });
             }
-
-            console.log(modifications);
-
-            setIsSubmitting(true);
-            ipc.sendMessage("workspace:submit", {
-              message: commitMessage,
-              modifications,
-            });
           }}
         />
         <Button
           className="px-3 py-1 text-xs"
-          label="Undo"
-          disabled={isSubmitting}
+          label="Unstage"
+          disabled={isSubmitting || !selectedPath}
+          onClick={() => {
+            if (selectedPath) {
+              ipc.sendMessage("workspace:unstage", { paths: [selectedPath] });
+            }
+          }}
         />
       </div>
       <div
@@ -767,7 +692,7 @@ export default function WorkspacePendingChanges() {
             size={60}
             style={{ overflow: "hidden" }}
           >
-            {nodes.length === 0 ? (
+            {buckets.every((b) => b.files.length === 0) ? (
               <div className="flex h-full w-full items-center justify-center">
                 <EmptyState
                   icon={<FontAwesomeIcon icon={faCircleCheck} size="2x" />}
@@ -776,21 +701,17 @@ export default function WorkspacePendingChanges() {
                 />
               </div>
             ) : (
-              <PendingChangesTree
-                treeTableRef={treeTableRef}
-                nodes={nodes}
-                selectedNodeKeys={selectedNodeKeys}
-                onSelectionChange={handleSelectionChange}
-                expandedKeys={expandedKeys}
-                onToggle={handleToggle}
-                onExpand={handleExpand}
-                highlightedRowKey={highlightedRowKey}
-                onRowClick={handleRowClick}
-                onContextMenu={handleContextMenu}
-                treeTablePt={treeTablePt}
-                columnPt={columnPt}
-                itemBodyTemplate={itemBodyTemplate}
-              />
+              <div className="h-full w-full overflow-auto p-2">
+                <StagedChangesTree
+                  buckets={buckets}
+                  selectedPath={selectedPath}
+                  onSelect={handleSelectPath}
+                  onContextMenu={handleFileContextMenu}
+                  onMove={handleMoveBetweenBuckets}
+                  onSubmit={handleSubmitBucket}
+                  submitDisabled={isSubmitting || commitMessage.trim() === ""}
+                />
+              </div>
             )}
           </SplitterPanel>
           <SplitterPanel

@@ -23,9 +23,6 @@
  *   accounts                      List authenticated accounts
  *   login [--endpoint URL]        Authenticate with a Checkpoint server
  *   logout                        Remove authentication for a Checkpoint server
- *   shelve <name> [-m msg]        Shelve staged files to a named shelf
- *   unshelve <name> [-b branch]   Submit a shelf to a branch
- *   shelf [list|delete <name>]    Manage shelves
  *   artifact upload <cl> <files>  Upload artifacts for a changelist
  *   mcp [status|enable|disable]   Manage the daemon's MCP server
  */
@@ -89,6 +86,13 @@ int main(int argc, char** argv) {
   // add
   argparse::ArgumentParser addCmd("add");
   addCmd.add_description("Stage files for submission (mark for add)");
+  addCmd.add_argument("--patch", "-p")
+      .help("Stage individual hunks of one text file, interactively")
+      .default_value(false)
+      .implicit_value(true);
+  addCmd.add_argument("--branch", "-b")
+      .help("Stage into this feature branch's changelist (default: domain root)")
+      .default_value(std::string(""));
   addCmd.add_argument("files")
       .help("File(s) to stage")
       .nargs(argparse::nargs_pattern::at_least_one);
@@ -110,6 +114,9 @@ int main(int argc, char** argv) {
   submitCmd.add_argument("--message", "-m")
       .help("Submission message")
       .required();
+  submitCmd.add_argument("--branch", "-b")
+      .help("Submit this branch's staged changes (default: domain root)")
+      .default_value(std::string(""));
   submitCmd.add_argument("--no-progress")
       .help("Disable the progress bar (also skips progress callbacks entirely)")
       .default_value(false)
@@ -168,8 +175,8 @@ int main(int argc, char** argv) {
   checkoutCmd.add_description("Check out a controlled file for editing");
   checkoutCmd.add_argument("file")
       .help("File to check out");
-  checkoutCmd.add_argument("--lock", "-l")
-      .help("Lock the file (prevent others from editing)")
+  checkoutCmd.add_argument("--exclusive", "-x")
+      .help("Take an exclusive claim even on a mergeable file (blocks others)")
       .default_value(false)
       .implicit_value(true);
 
@@ -227,36 +234,6 @@ int main(int argc, char** argv) {
   argparse::ArgumentParser logoutCmd("logout");
   logoutCmd.add_description("Remove authentication for a Checkpoint server");
 
-  // shelve
-  argparse::ArgumentParser shelveCmd("shelve");
-  shelveCmd.add_description("Shelve staged files to a named shelf");
-  shelveCmd.add_argument("name")
-      .help("Name of the shelf");
-  shelveCmd.add_argument("--message", "-m")
-      .help("Shelf message")
-      .default_value(std::string(""));
-
-  // unshelve
-  argparse::ArgumentParser unshelveCmd("unshelve");
-  unshelveCmd.add_description("Submit a shelf to a branch");
-  unshelveCmd.add_argument("name")
-      .help("Name of the shelf to submit");
-  unshelveCmd.add_argument("--branch", "-b")
-      .help("Target branch (defaults to current branch)")
-      .default_value(std::string(""));
-
-  // shelf (management subcommand)
-  argparse::ArgumentParser shelfCmd("shelf");
-  shelfCmd.add_description("Manage shelves");
-  shelfCmd.add_argument("action")
-      .help("Action: list, delete")
-      .default_value(std::string("list"))
-      .nargs(argparse::nargs_pattern::optional);
-  shelfCmd.add_argument("name")
-      .help("Shelf name (for delete)")
-      .default_value(std::string(""))
-      .nargs(argparse::nargs_pattern::optional);
-
   // artifact (subcommand)
   argparse::ArgumentParser artifactCmd("artifact");
   artifactCmd.add_description("Manage artifacts");
@@ -306,7 +283,17 @@ int main(int argc, char** argv) {
   // ─── Register sub-commands ─────────────────────────────────────
 
   program.add_subparser(statusCmd);
+  argparse::ArgumentParser moveCmd("move");
+  moveCmd.add_description("Restage files into a different branch's changelist");
+  moveCmd.add_argument("--branch", "-b")
+      .help("Target branch (must be active in this workspace)")
+      .required();
+  moveCmd.add_argument("files")
+      .help("Files to move")
+      .remaining();
+
   program.add_subparser(addCmd);
+  program.add_subparser(moveCmd);
   program.add_subparser(restoreCmd);
   program.add_subparser(submitCmd);
   program.add_subparser(pullCmd);
@@ -323,9 +310,6 @@ int main(int argc, char** argv) {
   program.add_subparser(accountsCmd);
   program.add_subparser(loginCmd);
   program.add_subparser(logoutCmd);
-  program.add_subparser(shelveCmd);
-  program.add_subparser(unshelveCmd);
-  program.add_subparser(shelfCmd);
   program.add_subparser(artifactCmd);
   program.add_subparser(configCmd);
   program.add_subparser(mcpCmd);
@@ -347,6 +331,8 @@ int main(int argc, char** argv) {
         std::cerr << statusCmd;
       } else if (cmd == "add") {
         std::cerr << addCmd;
+      } else if (cmd == "move") {
+        std::cerr << moveCmd;
       } else if (cmd == "restore") {
         std::cerr << restoreCmd;
       } else if (cmd == "submit") {
@@ -379,12 +365,6 @@ int main(int argc, char** argv) {
         std::cerr << loginCmd;
       } else if (cmd == "logout") {
         std::cerr << logoutCmd;
-      } else if (cmd == "shelve") {
-        std::cerr << shelveCmd;
-      } else if (cmd == "unshelve") {
-        std::cerr << unshelveCmd;
-      } else if (cmd == "shelf") {
-        std::cerr << shelfCmd;
       } else if (cmd == "artifact") {
         std::cerr << artifactCmd;
       } else if (cmd == "config") {
@@ -418,9 +398,27 @@ int main(int argc, char** argv) {
       return checkpoint::cmdStatus();
     }
 
+    if (program.is_subcommand_used(moveCmd)) {
+      auto files = moveCmd.get<std::vector<std::string>>("files");
+      auto branch = moveCmd.get<std::string>("--branch");
+      if (files.empty()) {
+        std::cerr << "error: move requires at least one file." << std::endl;
+        return 1;
+      }
+      return checkpoint::cmdMove(files, branch);
+    }
+
     if (program.is_subcommand_used(addCmd)) {
       auto files = addCmd.get<std::vector<std::string>>("files");
-      return checkpoint::cmdAdd(files);
+      auto branch = addCmd.get<std::string>("--branch");
+      if (addCmd.get<bool>("--patch")) {
+        if (files.size() != 1) {
+          std::cerr << "error: add --patch takes exactly one file." << std::endl;
+          return 1;
+        }
+        return checkpoint::cmdAddPatch(files[0], branch);
+      }
+      return checkpoint::cmdAdd(files, branch);
     }
 
     if (program.is_subcommand_used(restoreCmd)) {
@@ -432,7 +430,8 @@ int main(int argc, char** argv) {
     if (program.is_subcommand_used(submitCmd)) {
       auto message = submitCmd.get<std::string>("--message");
       bool noProgress = submitCmd.get<bool>("--no-progress");
-      return checkpoint::cmdSubmit(message, noProgress);
+      auto branch = submitCmd.get<std::string>("--branch");
+      return checkpoint::cmdSubmit(message, noProgress, branch);
     }
 
     if (program.is_subcommand_used(pullCmd)) {
@@ -467,8 +466,8 @@ int main(int argc, char** argv) {
 
     if (program.is_subcommand_used(checkoutCmd)) {
       auto file = checkoutCmd.get<std::string>("file");
-      bool locked = checkoutCmd.get<bool>("--lock");
-      return checkpoint::cmdCheckout(file, locked);
+      bool exclusive = checkoutCmd.get<bool>("--exclusive");
+      return checkpoint::cmdCheckout(file, exclusive);
     }
 
     if (program.is_subcommand_used(revertCmd)) {
@@ -517,35 +516,6 @@ int main(int argc, char** argv) {
 
     if (program.is_subcommand_used(logoutCmd)) {
       return checkpoint::cmdLogout();
-    }
-
-    if (program.is_subcommand_used(shelveCmd)) {
-      auto name = shelveCmd.get<std::string>("name");
-      auto msg = shelveCmd.get<std::string>("--message");
-      return checkpoint::cmdShelve(name, msg);
-    }
-
-    if (program.is_subcommand_used(unshelveCmd)) {
-      auto name = unshelveCmd.get<std::string>("name");
-      auto branch = unshelveCmd.get<std::string>("--branch");
-      return checkpoint::cmdUnshelve(name, branch);
-    }
-
-    if (program.is_subcommand_used(shelfCmd)) {
-      auto action = shelfCmd.get<std::string>("action");
-      auto name = shelfCmd.get<std::string>("name");
-      if (action == "list" || action.empty()) {
-        return checkpoint::cmdShelfList();
-      } else if (action == "delete") {
-        if (name.empty()) {
-          std::cerr << "error: shelf delete requires a shelf name." << std::endl;
-          return 1;
-        }
-        return checkpoint::cmdShelfDelete(name);
-      } else {
-        std::cerr << "error: unknown shelf action '" << action << "'. Use 'list' or 'delete'." << std::endl;
-        return 1;
-      }
     }
 
     if (program.is_subcommand_used(artifactCmd)) {

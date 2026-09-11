@@ -76,7 +76,7 @@ class JsonStateStore implements StateStore {
       // artifactType); no structural migration is needed for JSON.
       return JSON.parse(raw) as WorkspaceState;
     } catch {
-      return { changelistNumber: 0, files: {}, markedForAdd: [] };
+      return { changelistNumber: 0, files: {}, markedForAdd: [], staged: [] };
     }
   }
 
@@ -144,7 +144,8 @@ class SqliteStateStore implements StateStore {
         changelist INTEGER NOT NULL,
         hash       TEXT NOT NULL,
         size       INTEGER NOT NULL,
-        mtime      REAL
+        mtime      REAL,
+        branch     TEXT
       );
       CREATE TABLE IF NOT EXISTS artifact_files (
         path          TEXT PRIMARY KEY,
@@ -156,6 +157,9 @@ class SqliteStateStore implements StateStore {
         artifact_type TEXT
       );
       CREATE TABLE IF NOT EXISTS marked_for_add (
+        path TEXT PRIMARY KEY
+      );
+      CREATE TABLE IF NOT EXISTS staged (
         path TEXT PRIMARY KEY
       );
       CREATE TABLE IF NOT EXISTS bisect (
@@ -187,6 +191,15 @@ class SqliteStateStore implements StateStore {
       `CREATE TABLE IF NOT EXISTS bisect (
         changelist INTEGER PRIMARY KEY,
         verdict    TEXT NOT NULL
+      )`,
+    ],
+    // Multi-branch workspaces and staging: per-file branch attribution, the
+    // staged set, and overlay branch heads (kept in workspace_meta as JSON,
+    // alongside the teamSync scalars).
+    3: [
+      "ALTER TABLE files ADD COLUMN branch TEXT",
+      `CREATE TABLE IF NOT EXISTS staged (
+        path TEXT PRIMARY KEY
       )`,
     ],
   };
@@ -262,6 +275,7 @@ class SqliteStateStore implements StateStore {
       hash: string;
       size: number;
       mtime: number | null;
+      branch: string | null;
     }>;
     for (const r of fileRows) {
       files[r.path] = {
@@ -270,6 +284,7 @@ class SqliteStateStore implements StateStore {
         md5: r.hash,
         size: r.size,
         ...(r.mtime != null && { mtime: r.mtime }),
+        ...(r.branch != null && { branch: r.branch }),
       };
     }
 
@@ -299,6 +314,28 @@ class SqliteStateStore implements StateStore {
       .all() as Array<{ path: string }>;
     const markedForAdd = markedRows.map((r) => r.path);
 
+    const stagedRows = db.prepare("SELECT path FROM staged").all() as Array<{
+      path: string;
+    }>;
+    const staged = stagedRows.map((r) => r.path);
+
+    const branchHeadsRow = db
+      .prepare("SELECT value FROM workspace_meta WHERE key = 'branchHeads'")
+      .get() as { value: string } | undefined;
+    let branchHeads: Record<string, number> | undefined;
+    if (branchHeadsRow) {
+      try {
+        branchHeads = JSON.parse(branchHeadsRow.value) as Record<
+          string,
+          number
+        >;
+      } catch {
+        // Corrupt overlay heads are recoverable: the next sync recomputes
+        // them. Losing the tree over a bad JSON blob is not.
+        branchHeads = undefined;
+      }
+    }
+
     const teamSync = this.loadTeamSync(db);
 
     return {
@@ -307,6 +344,8 @@ class SqliteStateStore implements StateStore {
       files,
       artifactFiles,
       markedForAdd,
+      staged,
+      ...(branchHeads !== undefined && { branchHeads }),
       ...(teamSync !== undefined && { teamSync }),
     };
   }
@@ -386,7 +425,7 @@ class SqliteStateStore implements StateStore {
     );
     const clearFiles = db.prepare("DELETE FROM files");
     const insertFile = db.prepare(
-      "INSERT INTO files (path, file_id, changelist, hash, size, mtime) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO files (path, file_id, changelist, hash, size, mtime, branch) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     const clearArtifacts = db.prepare("DELETE FROM artifact_files");
     const insertArtifact = db.prepare(
@@ -396,6 +435,8 @@ class SqliteStateStore implements StateStore {
     const insertMarked = db.prepare(
       "INSERT INTO marked_for_add (path) VALUES (?)",
     );
+    const clearStaged = db.prepare("DELETE FROM staged");
+    const insertStaged = db.prepare("INSERT INTO staged (path) VALUES (?)");
     const deleteMeta = db.prepare("DELETE FROM workspace_meta WHERE key = ?");
     const clearBisect = db.prepare("DELETE FROM bisect");
     const insertBisect = db.prepare(
@@ -414,6 +455,7 @@ class SqliteStateStore implements StateStore {
           f.md5,
           f.size,
           f.mtime ?? null,
+          f.branch ?? null,
         );
       }
 
@@ -439,8 +481,21 @@ class SqliteStateStore implements StateStore {
         }
       }
 
+      clearStaged.run();
+      if (state.staged) {
+        for (const p of state.staged) {
+          insertStaged.run(p);
+        }
+      }
+
       const teamSync = state.teamSync;
       const scalars: [string, string | undefined][] = [
+        [
+          "branchHeads",
+          state.branchHeads !== undefined
+            ? JSON.stringify(state.branchHeads)
+            : undefined,
+        ],
         ["syncFilterHash", teamSync?.syncFilterHash],
         [
           "lastBuiltChangelist",

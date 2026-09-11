@@ -228,6 +228,30 @@ export function registerCommands(model: CheckpointModel): vscode.Disposable {
     await resources[0].repository.revert(resources);
   });
 
+  register("checkpoint.stage", async (...args) => {
+    const repository = await resolveRepository(args[0]);
+    if (!repository) {
+      return;
+    }
+    await repository.stage(resolveRelPaths(repository, args));
+  });
+
+  register("checkpoint.unstage", async (...args) => {
+    const repository = await resolveRepository(args[0]);
+    if (!repository) {
+      return;
+    }
+    await repository.unstage(resolveRelPaths(repository, args));
+  });
+
+  register("checkpoint.moveToBranch", async (...args) => {
+    const repository = await resolveRepository(args[0]);
+    if (!repository) {
+      return;
+    }
+    await repository.moveToBranch(resolveRelPaths(repository, args));
+  });
+
   register("checkpoint.markForAdd", async (...args) => {
     const repository = await resolveRepository(args[0]);
     if (!repository) {

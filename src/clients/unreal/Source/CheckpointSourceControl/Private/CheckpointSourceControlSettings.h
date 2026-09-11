@@ -70,8 +70,14 @@ public:
   }
 
   /** Get the branch name */
-  const FString &GetBranchName() const {
+  /** The domain-root branch this workspace materializes from. */
+  const FString &GetDomainBranchName() const {
     return BranchName;
+  }
+
+  /** Feature branches overlaid on this workspace's tree. */
+  const TArray<FString> &GetActiveBranches() const {
+    return ActiveBranches;
   }
 
   /** Get the full daemon URL */
@@ -118,6 +124,8 @@ private:
 
   /** Branch name */
   FString BranchName;
+  /** Feature branches overlaid on the tree; empty is the ordinary case. */
+  TArray<FString> ActiveBranches;
 
   /** Whether all settings were resolved successfully */
   bool bConfigured;
