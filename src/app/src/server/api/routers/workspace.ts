@@ -6,7 +6,7 @@ import {
   assertWorkspaceOwnership,
   getUserAndRepoWithAccess,
 } from "../auth-utils";
-import { RepoAccess } from "@prisma/client";
+import { ClaimState, RepoAccess } from "@prisma/client";
 import { resolveDomainBranchName } from "~/server/claims/domain";
 
 export const workspaceRouter = createTRPCRouter({
@@ -147,6 +147,14 @@ export const workspaceRouter = createTRPCRouter({
       // A cross-domain move cannot carry claims: they are anchored to the
       // domain they were taken in, and re-anchoring would silently validate
       // against a domain that may already hold the path.
+      //
+      // Only OPEN claims block. An OPEN claim means the work is still in this
+      // working tree, which is what a domain switch is about to replace. A
+      // SUBMITTED claim has already reached the server and left the tree; it
+      // stays anchored in its own domain and resolves when its branch merges,
+      // regardless of where this workspace points next. Counting those too
+      // would make submitting to a branch fail to clear the way for a switch,
+      // which is exactly what the message below tells people to do.
       if (
         workspace.domainBranchName &&
         workspace.domainBranchName !== input.domainBranchName
@@ -155,6 +163,7 @@ export const workspaceRouter = createTRPCRouter({
           where: {
             workspaceId: input.workspaceId,
             releasedAt: null,
+            state: ClaimState.OPEN,
             domainBranchName: workspace.domainBranchName,
           },
         });
@@ -162,7 +171,7 @@ export const workspaceRouter = createTRPCRouter({
         if (outstanding > 0) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: `This workspace holds ${outstanding} claim${outstanding === 1 ? "" : "s"} in the "${workspace.domainBranchName}" domain. Submit, shelve, or release them before switching to "${input.domainBranchName}".`,
+            message: `This workspace has ${outstanding} file${outstanding === 1 ? "" : "s"} checked out in the "${workspace.domainBranchName}" domain. Submit or release them before switching to "${input.domainBranchName}".`,
           });
         }
       }
