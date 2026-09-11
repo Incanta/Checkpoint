@@ -1,10 +1,25 @@
 import type { ApiTypes } from "./api-types.js";
 import type { Modification as CommonModification } from "@checkpointvcs/common";
 
-export interface Workspace extends ApiTypes.Workspace {
+export interface Workspace extends Omit<
+  ApiTypes.Workspace,
+  "domainBranchName"
+> {
   localPath: string;
   daemonId: string;
-  branchName: string;
+  /**
+   * The domain-root branch this workspace's tree is materialized from.
+   *
+   * Narrowed to non-null: the server column is nullable only for rows that
+   * predate it, and the daemon always knows its own domain root because it
+   * reads it from workspace.json before ever constructing this.
+   */
+  domainBranchName: string;
+  /**
+   * Feature branches overlaid on the tree, applied ancestor-first. Empty means
+   * working directly on the domain root.
+   */
+  activeBranches: string[];
 }
 
 export interface WorkspacePendingChanges {
@@ -72,9 +87,24 @@ export enum FileStatus {
   MergeConflict = 15,
 }
 
-export interface FileCheckoutInfo {
+/**
+ * A claim on a file, as the UI needs to see it.
+ *
+ * `blocking` is the server's answer to "does this stop me", which the client
+ * cannot work out on its own: it depends on the claim's strength and on
+ * whether the claim's domain is the one this workspace is in. An advisory
+ * claim, or one anchored in a sibling domain such as a release branch, shows
+ * as context rather than an obstacle.
+ */
+export interface FileClaimInfo {
   id: string;
-  locked: boolean;
+  strength: "ADVISORY" | "EXCLUSIVE";
+  state: "OPEN" | "SUBMITTED";
+  /** The branch the work currently lives on. */
+  branchName: string;
+  /** The domain-root branch the exclusion applies to. */
+  domainBranchName: string;
+  blocking: boolean;
   workspaceId: string;
   userId: string;
   user: {
@@ -95,7 +125,7 @@ export interface File {
   id: string | null;
   changelist: number | null;
 
-  checkouts: FileCheckoutInfo[];
+  claims: FileClaimInfo[];
 }
 
 export interface Directory {

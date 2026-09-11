@@ -47,7 +47,7 @@ export const conflictsRouter = router({
         {
           id: workspace.id,
           repoId: workspace.repoId,
-          branchName: workspace.branchName,
+          domainBranchName: workspace.domainBranchName,
           workspaceName: workspace.name,
           localPath: workspace.localPath,
           daemonId: workspace.daemonId,
@@ -99,7 +99,7 @@ export const conflictsRouter = router({
         const client = await CreateApiClientAuth(workspace.daemonId);
         const branch = await client.branch.getBranch.query({
           repoId: workspace.repoId,
-          name: workspace.branchName,
+          name: workspace.domainBranchName,
         });
 
         if (branch && branch.headNumber !== config.lastSyncStatusRemoteHead) {
@@ -174,7 +174,7 @@ export const conflictsRouter = router({
         const utilWorkspace: UtilWorkspace = {
           id: workspace.id,
           repoId: workspace.repoId,
-          branchName: workspace.branchName,
+          domainBranchName: workspace.domainBranchName,
           workspaceName: workspace.name,
           localPath: workspace.localPath,
           daemonId: workspace.daemonId,
@@ -266,7 +266,7 @@ export const conflictsRouter = router({
       const workspaceConfigToSave: UtilWorkspace = workspaceConfig ?? {
         id: workspace.id,
         repoId: workspace.repoId,
-        branchName: workspace.branchName,
+        domainBranchName: workspace.domainBranchName,
         workspaceName: workspace.name,
         localPath: workspace.localPath,
         daemonId: workspace.daemonId,

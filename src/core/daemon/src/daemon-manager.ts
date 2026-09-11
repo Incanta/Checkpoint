@@ -246,7 +246,8 @@ export class DaemonManager {
       id: wsConfig.id,
       repoId: wsConfig.repoId,
       name: wsConfig.workspaceName,
-      branchName: wsConfig.branchName,
+      domainBranchName: wsConfig.domainBranchName,
+      activeBranches: wsConfig.activeBranches ?? [],
       localPath: workspacePath,
       daemonId: wsConfig.daemonId,
       userId: "",
@@ -259,6 +260,60 @@ export class DaemonManager {
 
     await this.registerWorkspace(workspace, { watch: false });
     // Intentionally NO watchWorkspace() and NO startSyncPolling().
+  }
+
+  /**
+   * Tells the server which domain root this workspace materializes from and
+   * which feature branches it has overlaid.
+   *
+   * Claims are attributed per branch and taken at checkout time, so the server
+   * needs the branch then, not only at submit. This also repairs a workspace
+   * whose config predates overlays and recorded a feature branch as its
+   * "branch": only the server knows which branch anchors the domain, so it
+   * answers with the root and the feature branch becomes an overlay.
+   *
+   * Fire-and-forget. A daemon that cannot reach the server still works
+   * offline, and the next registration reports again.
+   */
+  private async reportBranchState(workspace: Workspace): Promise<void> {
+    try {
+      const client = await CreateApiClientAuth(workspace.daemonId);
+
+      const branch = await client.branch.getBranch.query({
+        repoId: workspace.repoId,
+        name: workspace.domainBranchName,
+      });
+
+      if (!branch) {
+        return;
+      }
+
+      const domainBranchName = branch.isClaimDomainRoot
+        ? branch.name
+        : (branch.domainBranchName ?? branch.name);
+
+      // A config that named a feature branch becomes root + that branch
+      // overlaid, which is the same tree described in the new vocabulary.
+      const activeBranches = branch.isClaimDomainRoot
+        ? (workspace.activeBranches ?? [])
+        : Array.from(
+            new Set([...(workspace.activeBranches ?? []), branch.name]),
+          );
+
+      await client.workspace.setBranchState.mutate({
+        workspaceId: workspace.id,
+        domainBranchName,
+        activeBranches,
+      });
+
+      workspace.domainBranchName = domainBranchName;
+      workspace.activeBranches = activeBranches;
+    } catch (err) {
+      console.warn(
+        `[branch-state] could not report branch state for workspace ${workspace.id}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   /**
@@ -283,6 +338,7 @@ export class DaemonManager {
 
     await this.loadWorkspaceState(workspace);
     await this.scanIgnoreFiles(workspace);
+    void this.reportBranchState(workspace);
 
     if (options?.watch !== false) {
       this.watchWorkspace(workspace);
@@ -572,7 +628,7 @@ export class DaemonManager {
               status: FileStatus.Local,
               id: null,
               changelist: null,
-              checkouts: [],
+              claims: [],
             });
           }
         } else {
@@ -593,7 +649,7 @@ export class DaemonManager {
               status: FileStatus.Unknown,
               id: null,
               changelist: null,
-              checkouts: [],
+              claims: [],
             });
           }
         }
@@ -619,7 +675,7 @@ export class DaemonManager {
               status: FileStatus.Local,
               id: null,
               changelist: null,
-              checkouts: [],
+              claims: [],
             });
           }
           // Tracked & not pending → skip (not a pending change)
@@ -641,7 +697,7 @@ export class DaemonManager {
           const subdirName = remainingPath.split("/")[0];
           pendingSubdirs.add(subdirName);
         } else {
-          // Direct child — add if not already present
+          // Direct child: add if not already present
           if (!childrenMap.has(remainingPath)) {
             childrenMap.set(remainingPath, {
               ...file,
@@ -662,7 +718,7 @@ export class DaemonManager {
             status: FileStatus.Unknown,
             id: null,
             changelist: null,
-            checkouts: [],
+            claims: [],
           });
         }
       }
@@ -746,7 +802,7 @@ export class DaemonManager {
     for (const { mod, isDir, exists } of classified) {
       if (!isDir) {
         if (!exists) {
-          // Path doesn't exist on disk — could be a deleted file, pass through
+          // Path doesn't exist on disk: could be a deleted file, pass through
           result.push(mod);
         } else {
           result.push(mod);
@@ -985,7 +1041,7 @@ export class DaemonManager {
       status,
       id: baselineFile?.fileId ?? null,
       changelist: baselineFile?.changelist ?? null,
-      checkouts: [],
+      claims: [],
     };
   }
 
@@ -1027,7 +1083,7 @@ export class DaemonManager {
               status: FileStatus.NotChangedCheckedOut,
               id: checkout.fileId,
               changelist: baselineFile.changelist,
-              checkouts: [],
+              claims: [],
             };
             result.numChanges++;
           }
@@ -1164,7 +1220,7 @@ export class DaemonManager {
                   : FileStatus.Local,
                 id: null,
                 changelist: null,
-                checkouts: [],
+                claims: [],
               };
               result.numChanges++;
             }
@@ -1183,7 +1239,7 @@ export class DaemonManager {
 
     // Get checkouts from API for checked-out file status
     const client = await CreateApiClientAuth(workspace.daemonId);
-    const checkouts = await client.file.getCheckouts.query({
+    const checkouts = await client.file.getWorkspaceClaims.query({
       workspaceId: workspace.id,
       repoId: workspace.repoId,
     });
@@ -1242,7 +1298,7 @@ export class DaemonManager {
           status: FileStatus.Deleted,
           id: baselineFile.fileId,
           changelist: baselineFile.changelist,
-          checkouts: [],
+          claims: [],
         };
         result.numChanges++;
       }
@@ -1288,7 +1344,7 @@ export class DaemonManager {
 
     // Fetch checkouts from API
     const client = await CreateApiClientAuth(workspace.daemonId);
-    const checkouts = await client.file.getCheckouts.query({
+    const checkouts = await client.file.getWorkspaceClaims.query({
       workspaceId: workspace.id,
       repoId: workspace.repoId,
     });
@@ -1364,7 +1420,7 @@ export class DaemonManager {
                     : FileStatus.Local,
                   id: null,
                   changelist: null,
-                  checkouts: [],
+                  claims: [],
                 };
                 result.numChanges++;
               }
@@ -1387,7 +1443,7 @@ export class DaemonManager {
             status: FileStatus.Deleted,
             id: baselineFile.fileId,
             changelist: baselineFile.changelist,
-            checkouts: [],
+            claims: [],
           };
           result.numChanges++;
         }
@@ -1416,7 +1472,7 @@ export class DaemonManager {
                 status: FileStatus.Local,
                 id: null,
                 changelist: null,
-                checkouts: [],
+                claims: [],
               };
               result.numChanges++;
             }
@@ -1632,7 +1688,7 @@ export class DaemonManager {
     this.vcsOperationActive.set(workspaceId, true);
     this.vcsBufferedEvents.set(workspaceId, new Set());
     Logger.debug(
-      `[DaemonManager] VCS operation started for workspace ${workspaceId} — watcher events buffered`,
+      `[DaemonManager] VCS operation started for workspace ${workspaceId}, watcher events buffered`,
     );
   }
 
@@ -1684,11 +1740,11 @@ export class DaemonManager {
       }
 
       Logger.debug(
-        `[DaemonManager] VCS operation ended for workspace ${workspaceId} — replayed ${buffered.size} buffered event(s)`,
+        `[DaemonManager] VCS operation ended for workspace ${workspaceId}, replayed ${buffered.size} buffered event(s)`,
       );
     } else {
       Logger.debug(
-        `[DaemonManager] VCS operation ended for workspace ${workspaceId} — no buffered events`,
+        `[DaemonManager] VCS operation ended for workspace ${workspaceId}, no buffered events`,
       );
     }
 
@@ -1760,7 +1816,7 @@ export class DaemonManager {
     const status = await checkSyncStatus({
       id: workspace.id,
       repoId: workspace.repoId,
-      branchName: workspace.branchName,
+      domainBranchName: workspace.domainBranchName,
       workspaceName: workspace.name,
       localPath: workspace.localPath,
       daemonId: workspace.daemonId,

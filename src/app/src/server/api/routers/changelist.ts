@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { FileChangeType, RepoAccess } from "@prisma/client";
+import { ClaimStrength, FileChangeType, RepoAccess } from "@prisma/client";
 import {
   assertWorkspaceOwnership,
   getUserAndRepoWithAccess,
@@ -17,6 +17,8 @@ import {
 import type { InputJsonValue } from "@prisma/client/runtime/library";
 import { walkChangelistAncestry } from "~/server/changelist-walk";
 import { classifyPaths } from "~/server/team-sync/classify";
+import { settleClaimsForSubmit } from "~/server/claims/claims";
+import { resolveDomainBranchName } from "~/server/claims/domain";
 
 export const changelistRouter = createTRPCRouter({
   // Path-keyed diff between two changelists' state trees. The daemon's sync
@@ -293,26 +295,66 @@ export const changelistRouter = createTRPCRouter({
       );
       await assertWorkspaceOwnership(ctx, input.workspaceId);
 
-      // Check for locked files by other users
       const normalizedPaths = input.modifications.map((mod) =>
         mod.path.replaceAll("\\", "/"),
       );
 
+      const submitBranch = await ctx.db.branch.findFirst({
+        where: {
+          repoId: input.repoId,
+          name: input.branchName,
+        },
+      });
+
+      if (!submitBranch) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Branch ${input.branchName} not found in the repo`,
+        });
+      }
+
+      if (submitBranch.archivedAt) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Branch ${input.branchName} is archived and read-only`,
+        });
+      }
+
+      // Resolve the claim domain this submit lands in. Claims anchored at
+      // other domains (a release branch, another mainline) are irrelevant here
+      // by design.
+      const submitDomainBranchName = await resolveDomainBranchName(
+        ctx.db,
+        input.repoId,
+        submitBranch,
+      );
+
       const BATCH_SIZE = 20000;
 
-      const lockedCheckouts: any[] = [];
+      // Exclusion guard. The predicate spells out both index columns so the
+      // planner uses the partial unique index and never scans advisory rows.
+      // Holding the claim is the requirement: reclaiming is how another
+      // workspace takes one over, which collapses the "started on main then
+      // branched", collaborator, and cross-branch cases into one check.
+      const blockingClaims: {
+        file: { path: string };
+        branchName: string;
+        workspace: {
+          user: { email: string; name: string | null; username: string | null };
+        };
+      }[] = [];
+
       for (let i = 0; i < normalizedPaths.length; i += BATCH_SIZE) {
         const batch = normalizedPaths.slice(i, i + BATCH_SIZE);
-        const results = await ctx.db.fileCheckout.findMany({
+        const results = await ctx.db.fileClaim.findMany({
           where: {
             repoId: input.repoId,
-            removedAt: null,
-            locked: true,
+            domainBranchName: submitDomainBranchName,
+            releasedAt: null,
+            strength: ClaimStrength.EXCLUSIVE,
+            workspaceId: { not: input.workspaceId },
             file: {
               path: { in: batch },
-            },
-            workspace: {
-              userId: { not: ctx.session.user.id },
             },
           },
           include: {
@@ -326,20 +368,20 @@ export const changelistRouter = createTRPCRouter({
             },
           },
         });
-        for (const r of results) lockedCheckouts.push(r);
+        for (const r of results) blockingClaims.push(r);
       }
 
-      if (lockedCheckouts.length > 0) {
-        const lockedFiles = lockedCheckouts.map((c) => {
+      if (blockingClaims.length > 0) {
+        const blocked = blockingClaims.map((c) => {
           const displayName =
             c.workspace.user.name ||
             c.workspace.user.username ||
             c.workspace.user.email;
-          return `${c.file.path} (locked by ${displayName})`;
+          return `${c.file.path} (claimed on "${c.branchName}" by ${displayName})`;
         });
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: `Cannot submit: the following files are locked by other users:\n${lockedFiles.join("\n")}`,
+          message: `Cannot submit: the following files are claimed by others in the "${submitDomainBranchName}" domain:\n${blocked.join("\n")}`,
         });
       }
 
@@ -351,26 +393,7 @@ export const changelistRouter = createTRPCRouter({
 
       const nextNumber = (lastChangelist?.number ?? -1) + 1;
 
-      const branch = await ctx.db.branch.findFirst({
-        where: {
-          repoId: input.repoId,
-          name: input.branchName,
-        },
-      });
-
-      if (!branch) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: `Branch ${input.branchName} not found in the repo`,
-        });
-      }
-
-      if (branch.archivedAt) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Branch ${input.branchName} is archived and read-only`,
-        });
-      }
+      const branch = submitBranch;
 
       const parentChangelist = await ctx.db.changelist.findUnique({
         where: {
@@ -506,21 +529,32 @@ export const changelistRouter = createTRPCRouter({
 
       primeStateTreePaths(input.repoId, stateRootHash, paths);
 
-      if (!input.keepCheckedOut) {
-        await ctx.db.fileCheckout.updateMany({
-          where: {
-            workspaceId: input.workspaceId,
-            fileId: {
-              in: Object.values(fileIdsForPaths)
-                .filter((id) => !!id)
-                .map((id) => id!),
-            },
-          },
-          data: {
-            removedAt: new Date(),
-          },
-        });
-      }
+      // Settle claims for everything this changelist carried.
+      //
+      // Submitting to the domain root closes the gap between "the change
+      // exists somewhere" and "the change reached the root" in this same
+      // transaction, so those claims release outright. Submitting to a feature
+      // branch parks them as SUBMITTED: still blocking the domain, but
+      // reclaimable by anyone on that branch or below it.
+      //
+      // Paths that were never checked out get a claim created here, at the
+      // strength the org's binary-extension set resolves to. This is the only
+      // claim-creation point that can fail a submit, because the claim is
+      // taken after the work rather than before it.
+      await settleClaimsForSubmit(ctx.db, {
+        repoId: input.repoId,
+        branchName: input.branchName,
+        domainBranchName: submitDomainBranchName,
+        targetIsDomainRoot: submitDomainBranchName === input.branchName,
+        changelistNumber: nextNumber,
+        fileIdsForPaths,
+        orgBinaryExtensions: repo.org.binaryExtensions,
+        keepCheckedOut: input.keepCheckedOut,
+        actor: {
+          userId: ctx.session.user.id,
+          workspaceId: input.workspaceId,
+        },
+      });
 
       // Record write activity for billing (fire-and-forget)
       void recordActivity(ctx.db, {

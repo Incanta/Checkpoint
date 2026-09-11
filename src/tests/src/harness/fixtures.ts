@@ -135,12 +135,63 @@ export async function makeRepo(
         headNumber: 0,
         isDefault: true,
         type: "MAINLINE",
+        // A mainline anchors its own claim domain.
+        isClaimDomainRoot: true,
+        domainBranchName: "main",
         createdById: userId,
       },
     });
   }
 
   return { id: repo.id, name: repo.name, orgId: repo.orgId };
+}
+
+// ── Workspaces ───────────────────────────────────────────────────
+
+export interface MakeWorkspaceOpts {
+  name?: string;
+  /** The domain root the workspace materializes from. Defaults to "main". */
+  domainBranchName?: string;
+  /** Feature branches overlaid on the tree. Empty is the ordinary case. */
+  activeBranches?: string[];
+  syncedChangelistNumber?: number;
+}
+
+export async function makeWorkspace(
+  db: PrismaClient,
+  repoId: string,
+  orgId: string,
+  userId: string,
+  opts: MakeWorkspaceOpts = {},
+): Promise<{ id: string; name: string }> {
+  const workspace = await db.workspace.create({
+    data: {
+      name: opts.name ?? `ws-${nextId("w")}`,
+      repoId,
+      orgId,
+      userId,
+      domainBranchName: opts.domainBranchName ?? "main",
+      syncedChangelistNumber: opts.syncedChangelistNumber ?? null,
+      activeBranches: opts.activeBranches
+        ? {
+            create: opts.activeBranches.map((branchName) => ({ branchName })),
+          }
+        : undefined,
+    },
+  });
+
+  return { id: workspace.id, name: workspace.name };
+}
+
+// ── Files ────────────────────────────────────────────────────────
+
+export async function makeFile(
+  db: PrismaClient,
+  repoId: string,
+  path: string,
+): Promise<{ id: string; path: string }> {
+  const file = await db.file.create({ data: { repoId, path } });
+  return { id: file.id, path: file.path };
 }
 
 // ── Branches ─────────────────────────────────────────────────────
@@ -159,14 +210,35 @@ export async function makeBranch(
   userId: string,
   opts: MakeBranchOpts = {},
 ): Promise<{ id: string; name: string }> {
+  const name = opts.name ?? `branch-${nextId("b")}`;
+  const type = opts.type ?? "FEATURE";
+  const isClaimDomainRoot = type !== "FEATURE";
+
+  // Mirror what branch.createBranch computes, so fixtures produce branches the
+  // claim system can resolve a domain for. A feature branch inherits its
+  // parent's domain (which for a stacked branch means walking past the parent),
+  // and anything else anchors its own.
+  let domainBranchName = name;
+  if (!isClaimDomainRoot && opts.parentName) {
+    const parent = await db.branch.findUnique({
+      where: { repoId_name: { repoId, name: opts.parentName } },
+      select: { name: true, domainBranchName: true, isClaimDomainRoot: true },
+    });
+    domainBranchName = parent?.isClaimDomainRoot
+      ? parent.name
+      : (parent?.domainBranchName ?? opts.parentName);
+  }
+
   const branch = await db.branch.create({
     data: {
-      name: opts.name ?? `branch-${nextId("b")}`,
+      name,
       repoId,
       headNumber: opts.headNumber ?? 0,
       isDefault: opts.isDefault ?? false,
-      type: opts.type ?? "FEATURE",
+      type,
       parentBranchName: opts.parentName ?? null,
+      isClaimDomainRoot,
+      domainBranchName,
       createdById: userId,
     },
   });

@@ -7,6 +7,9 @@ import { FileChangeType, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
 import { subscribeToPR, notifyPRSubscribers } from "~/server/notifications";
+import { releaseClaimsForBranch } from "~/server/claims/claims";
+import { settleClaimsForMerge } from "~/server/claims/landing";
+import { restackChildren } from "~/server/claims/domain";
 import {
   getStateTreePaths,
   buildStateTreeBlocks,
@@ -607,6 +610,31 @@ export const pullRequestRouter = createTRPCRouter({
       await ctx.db.branch.update({
         where: { id: targetBranch.id },
         data: { headNumber: nextNumber },
+      });
+
+      // Settle claims the merge carried: release when the target anchors its
+      // own domain, advance onto the target when this was a stacked branch
+      // merging one rung up.
+      await settleClaimsForMerge(ctx.db, {
+        repoId: input.repoId,
+        incomingBranchName: pr.sourceBranchName,
+        targetBranchName: pr.targetBranchName,
+        mergeChangelistNumber: nextNumber,
+        paths: fileChanges.map((fc) => fc.file.path),
+        actor: { userId: ctx.session.user.id },
+      });
+
+      // Anything stacked on the merged branch re-parents to its parent, or the
+      // stack deadlocks: a branch can only merge into its own parent.
+      await restackChildren(ctx.db, {
+        repoId: input.repoId,
+        mergedBranchName: pr.sourceBranchName,
+        newParentBranchName: pr.targetBranchName,
+      });
+
+      // Release claims taken on the source branch but never submitted.
+      await releaseClaimsForBranch(ctx.db, input.repoId, pr.sourceBranchName, {
+        userId: ctx.session.user.id,
       });
 
       // Delete source branch

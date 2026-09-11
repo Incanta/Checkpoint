@@ -84,7 +84,7 @@ export async function checkSyncStatus(
   // Get branch head info
   const branchResponse = await client.branch.getBranch.query({
     repoId: workspace.repoId,
-    name: workspace.branchName,
+    name: workspace.domainBranchName,
   });
 
   if (!branchResponse) {

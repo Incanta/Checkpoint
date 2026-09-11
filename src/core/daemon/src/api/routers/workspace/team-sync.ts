@@ -37,7 +37,7 @@ async function loadUtilWorkspace(workspace: Workspace): Promise<UtilWorkspace> {
     ({
       id: workspace.id,
       repoId: workspace.repoId,
-      branchName: workspace.branchName,
+      domainBranchName: workspace.domainBranchName,
       workspaceName: workspace.name,
       localPath: workspace.localPath,
       daemonId: workspace.daemonId,
@@ -316,7 +316,7 @@ export const teamSyncRouter = router({
 
         const branch = await client.branch.getBranch.query({
           repoId: workspace.repoId,
-          name: workspace.branchName,
+          name: workspace.domainBranchName,
         });
         if (!branch) return null;
 
@@ -464,7 +464,7 @@ export const teamSyncRouter = router({
         ({
           id: workspace.id,
           repoId: workspace.repoId,
-          branchName: workspace.branchName,
+          domainBranchName: workspace.domainBranchName,
           workspaceName: workspace.name,
           localPath: workspace.localPath,
           daemonId: workspace.daemonId,
@@ -500,7 +500,7 @@ export const teamSyncRouter = router({
         ({
           id: workspace.id,
           repoId: workspace.repoId,
-          branchName: workspace.branchName,
+          domainBranchName: workspace.domainBranchName,
           workspaceName: workspace.name,
           localPath: workspace.localPath,
           daemonId: workspace.daemonId,
@@ -564,7 +564,7 @@ export const teamSyncRouter = router({
         ({
           id: workspace.id,
           repoId: workspace.repoId,
-          branchName: workspace.branchName,
+          domainBranchName: workspace.domainBranchName,
           workspaceName: workspace.name,
           localPath: workspace.localPath,
           daemonId: workspace.daemonId,
@@ -652,7 +652,7 @@ export const teamSyncRouter = router({
       const changelists = await client.changelist.getChangelists
         .query({
           repoId: workspace.repoId,
-          branchName: workspace.branchName,
+          branchName: workspace.domainBranchName,
           start: { number: null, timestamp: null },
           count: 250,
         })

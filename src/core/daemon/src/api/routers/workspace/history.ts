@@ -41,7 +41,7 @@ export const historyRouter = router({
 
       const changelists = await client.changelist.getChangelists.query({
         repoId: repo.id,
-        branchName: workspace.branchName,
+        branchName: workspace.domainBranchName,
         start: {
           number: null,
           timestamp: null,

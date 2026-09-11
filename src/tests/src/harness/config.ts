@@ -5,7 +5,7 @@
 // global beforeEach).
 //
 // Defaults represent the most common path through the app on the `main`
-// branch — SeaweedFS storage, sqlite, dev login enabled. Tests that need a
+// branch: SeaweedFS storage, sqlite, dev login enabled. Tests that need a
 // different shape override individual keys.
 
 type ConfigValue =
@@ -39,7 +39,7 @@ function applyDefaults(): void {
   setConfig("server.listen-port", 13000);
   setConfig("server.external-url", "https://app.test.local");
 
-  // Auth — enable dev login by default so router tests can mint tokens.
+  // Auth: enable dev login by default so router tests can mint tokens.
   setConfig("auth.dev.allow-dev-login", true);
   setConfig("auth.secret", "test-better-auth-secret-min-32-chars-long");
   setConfig("auth.email-password.enabled", true);
@@ -62,10 +62,29 @@ function applyDefaults(): void {
   // Tree blocks go to the TreeBlock table in tests (no storage server running).
   setConfig("state-tree.block-store", "postgres");
 
-  // Logging — silence by default
+  // Unmergeable content types. This list is also what resolves a file claim's
+  // strength: binary means EXCLUSIVE, everything else ADVISORY. Kept to a
+  // representative subset of config/default/binary-extensions.yaml rather than
+  // the whole thing, since tests only need the distinction to exist.
+  setConfig("binary-extensions.defaults", [
+    ".uasset",
+    ".umap",
+    ".ubulk",
+    ".png",
+    ".jpg",
+    ".tga",
+    ".psd",
+    ".wav",
+    ".mp3",
+    ".fbx",
+    ".obj",
+    ".blend",
+  ]);
+
+  // Logging: silence by default
   setConfig("logging.level", "error");
 
-  // Email — disabled
+  // Email: disabled
   setConfig("email.enabled", false);
   setConfig("email.from.name", "Test");
   setConfig("email.from.address", "noreply@test.local");

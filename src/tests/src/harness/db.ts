@@ -42,7 +42,10 @@ export interface TestDb {
 const tableOrder = [
   "TreeBlock",
   "FileChange",
-  "FileCheckout",
+  // FileClaimEvent references FileClaim, so it has to go first.
+  "FileClaimEvent",
+  "FileClaim",
+  "WorkspaceBranch",
   "Notification",
   "IssueSubscription",
   "PullRequestSubscription",

@@ -9,7 +9,7 @@ import {
 } from "@checkpointvcs/longtail-addon";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { RepoAccess, type Prisma } from "@prisma/client";
+import { ClaimEventType, ClaimStrength, RepoAccess } from "@prisma/client";
 import {
   assertWorkspaceOwnership,
   getUserAndRepoWithAccess,
@@ -21,6 +21,15 @@ import {
 } from "~/server/binary-extensions";
 import { getStateTreePaths } from "~/server/state-tree";
 import { buildAddonStorageOptions } from "~/server/storage-options";
+import {
+  acquireClaim,
+  releaseClaim as releaseClaimRecord,
+} from "~/server/claims/claims";
+import { reconcileClaims } from "~/server/claims/landing";
+import {
+  resolveDomainBranchName,
+  resolveWorkspaceBranch,
+} from "~/server/claims/domain";
 
 const MAX_TEXT_SIZE = 5 * 1024 * 1024; // 5 MB text limit
 
@@ -69,7 +78,7 @@ export const fileRouter = createTRPCRouter({
       }));
     }),
 
-  getCheckouts: protectedProcedure
+  getWorkspaceClaims: protectedProcedure
     .input(
       z.object({
         workspaceId: z.string(),
@@ -80,10 +89,10 @@ export const fileRouter = createTRPCRouter({
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
       await assertWorkspaceOwnership(ctx, input.workspaceId);
 
-      return ctx.db.fileCheckout.findMany({
+      return ctx.db.fileClaim.findMany({
         where: {
           workspaceId: input.workspaceId,
-          removedAt: null,
+          releasedAt: null,
         },
         include: {
           file: true,
@@ -91,11 +100,17 @@ export const fileRouter = createTRPCRouter({
       });
     }),
 
-  getActiveCheckoutsForFiles: protectedProcedure
+  getClaimsForFiles: protectedProcedure
     .input(
       z.object({
         repoId: z.string(),
         filePaths: z.array(z.string()),
+        /**
+         * The branch asking. Claims in the caller's own domain block them;
+         * claims in a sibling domain (a release branch, another mainline) are
+         * returned as context only.
+         */
+        branchName: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -105,69 +120,90 @@ export const fileRouter = createTRPCRouter({
         p.replaceAll("\\", "/"),
       );
 
-      type CheckoutWithRelations = Prisma.FileCheckoutGetPayload<{
+      let callerDomain: string | null = null;
+      if (input.branchName) {
+        const branch = await ctx.db.branch.findUnique({
+          where: {
+            repoId_name: { repoId: input.repoId, name: input.branchName },
+          },
+        });
+        if (branch) {
+          callerDomain = await resolveDomainBranchName(
+            ctx.db,
+            input.repoId,
+            branch,
+          );
+        }
+      }
+
+      const claims = await ctx.db.fileClaim.findMany({
+        where: {
+          repoId: input.repoId,
+          releasedAt: null,
+          file: { path: { in: normalizedPaths } },
+        },
         include: {
-          file: true;
+          file: true,
           workspace: {
             include: {
               user: {
                 select: {
-                  id: true;
-                  email: true;
-                  name: true;
-                  username: true;
-                };
-              };
-            };
-          };
-        };
-      }>;
-
-      const checkouts: CheckoutWithRelations[] =
-        await ctx.db.fileCheckout.findMany({
-          where: {
-            repoId: input.repoId,
-            removedAt: null,
-            file: {
-              path: { in: normalizedPaths },
-            },
-          },
-          include: {
-            file: true,
-            workspace: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    email: true,
-                    name: true,
-                    username: true,
-                  },
+                  id: true,
+                  email: true,
+                  name: true,
+                  username: true,
                 },
               },
             },
           },
-        });
+        },
+      });
 
-      return checkouts.map((c) => ({
-        id: c.id,
-        fileId: c.fileId,
-        filePath: c.file.path,
-        locked: c.locked,
-        workspaceId: c.workspaceId,
-        userId: c.workspace.userId,
-        user: c.workspace.user,
-      }));
+      // Lazy reconcile: drop anything whose content already reached its domain
+      // root by a route other than a merge of the holding branch.
+      const reconciled = await reconcileClaims(ctx.db, input.repoId, claims);
+
+      return claims
+        .filter((c) => !reconciled.has(c.id))
+        .map((c) => ({
+          id: c.id,
+          fileId: c.fileId,
+          filePath: c.file.path,
+          strength: c.strength,
+          state: c.state,
+          branchName: c.branchName,
+          domainBranchName: c.domainBranchName,
+          /**
+           * Whether this claim actually blocks the asking branch. False for
+           * advisory claims and for claims anchored in another domain.
+           */
+          blocking:
+            c.strength === ClaimStrength.EXCLUSIVE &&
+            (callerDomain === null || c.domainBranchName === callerDomain),
+          workspaceId: c.workspaceId,
+          userId: c.workspace.userId,
+          user: c.workspace.user,
+        }));
     }),
 
-  // TODO MIKE HERE: should we have a checkoutMany?
   checkout: protectedProcedure
     .input(
       z.object({
         repoId: z.string(),
         workspaceId: z.string(),
         filePath: z.string(),
-        locked: z.boolean().default(false),
+        /**
+         * The branch the work is happening on. Defaults to the workspace's
+         * domain root when the caller does not say.
+         */
+        branchName: z.string().optional(),
+        /**
+         * Bypasses strength resolution and takes an exclusive claim on a path
+         * the binary-extension set considers mergeable. This is how a user
+         * says "I am taking this file through a large refactor, keep everyone
+         * off it". Any writer may pass it.
+         */
+        forceExclusive: z.boolean().default(false),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -180,7 +216,24 @@ export const fileRouter = createTRPCRouter({
 
       const normalizedPath = input.filePath.replaceAll("\\", "/");
 
-      // Find or create the file record
+      const workspace = await ctx.db.workspace.findUnique({
+        where: { id: input.workspaceId },
+      });
+
+      if (!workspace) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Workspace not found",
+        });
+      }
+
+      const branchName = await resolveWorkspaceBranch(
+        ctx.db,
+        input.repoId,
+        workspace,
+        input.branchName,
+      );
+
       let file = await ctx.db.file.findFirst({
         where: {
           repoId: input.repoId,
@@ -197,81 +250,18 @@ export const fileRouter = createTRPCRouter({
         });
       }
 
-      // Check if this user already has an active checkout for this file
-      const existingCheckout = await ctx.db.fileCheckout.findFirst({
-        where: {
-          fileId: file.id,
+      const { claim } = await acquireClaim(ctx.db, {
+        repoId: input.repoId,
+        fileId: file.id,
+        filePath: normalizedPath,
+        branchName,
+        orgBinaryExtensions: repo.org.binaryExtensions,
+        forceExclusive: input.forceExclusive,
+        actor: {
+          userId: ctx.session.user.id,
           workspaceId: input.workspaceId,
-          removedAt: null,
         },
-      });
-
-      if (existingCheckout) {
-        if (input.locked && !existingCheckout.locked) {
-          const existingLock = await ctx.db.fileCheckout.findFirst({
-            where: {
-              fileId: file.id,
-              removedAt: null,
-              locked: true,
-            },
-          });
-
-          if (existingLock) {
-            throw new TRPCError({
-              code: "CONFLICT",
-              message: "This file is already locked by another user",
-            });
-          }
-
-          await ctx.db.fileCheckout.update({
-            where: { id: existingCheckout.id },
-            data: { locked: true },
-          });
-
-          // Record write activity for billing (fire-and-forget)
-          void recordActivity(ctx.db, {
-            userId: ctx.session.user.id,
-            orgId: repo.orgId,
-            type: "write",
-          });
-
-          return {
-            ...existingCheckout,
-            locked: true,
-          };
-        }
-
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "You already have an active checkout for this file",
-        });
-      }
-
-      // If requesting a lock, check that no other active checkout has locked=true
-      if (input.locked) {
-        const existingLock = await ctx.db.fileCheckout.findFirst({
-          where: {
-            fileId: file.id,
-            removedAt: null,
-            locked: true,
-          },
-        });
-
-        if (existingLock) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "This file is already locked by another user",
-          });
-        }
-      }
-
-      const checkout = await ctx.db.fileCheckout.create({
-        data: {
-          fileId: file.id,
-          repoId: input.repoId,
-          workspaceId: input.workspaceId,
-          locked: input.locked,
-        },
+        syncedChangelistNumber: workspace.syncedChangelistNumber,
       });
 
       // Record write activity for billing (fire-and-forget)
@@ -281,10 +271,10 @@ export const fileRouter = createTRPCRouter({
         type: "write",
       });
 
-      return checkout;
+      return claim;
     }),
 
-  undoCheckout: protectedProcedure
+  releaseClaim: protectedProcedure
     .input(
       z.object({
         repoId: z.string(),
@@ -312,47 +302,50 @@ export const fileRouter = createTRPCRouter({
         });
       }
 
-      const checkout = await ctx.db.fileCheckout.findFirst({
+      const claim = await ctx.db.fileClaim.findFirst({
         where: {
           fileId: file.id,
           workspaceId: input.workspaceId,
-          removedAt: null,
+          releasedAt: null,
         },
       });
 
-      if (!checkout) {
+      if (!claim) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "No active checkout found for this file",
+          message: "No active claim found for this file",
         });
       }
 
-      await ctx.db.fileCheckout.update({
-        where: { id: checkout.id },
-        data: { removedAt: new Date() },
+      await releaseClaimRecord(ctx.db, claim, {
+        userId: ctx.session.user.id,
+        workspaceId: input.workspaceId,
       });
 
       return { success: true };
     }),
 
-  getRepoCheckouts: protectedProcedure
+  getRepoClaims: protectedProcedure
     .input(
       z.object({
         repoId: z.string(),
-        lockedOnly: z.boolean().default(false),
+        exclusiveOnly: z.boolean().default(false),
+        /** Restrict to one claim domain. Omit for every domain in the repo. */
+        domainBranchName: z.string().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
-      const where: Prisma.FileCheckoutWhereInput = {
-        repoId: input.repoId,
-        removedAt: null,
-        ...(input.lockedOnly && { locked: true }),
-      };
-
-      const checkouts = await ctx.db.fileCheckout.findMany({
-        where,
+      const claims = await ctx.db.fileClaim.findMany({
+        where: {
+          repoId: input.repoId,
+          releasedAt: null,
+          ...(input.exclusiveOnly && { strength: ClaimStrength.EXCLUSIVE }),
+          ...(input.domainBranchName && {
+            domainBranchName: input.domainBranchName,
+          }),
+        },
         include: {
           file: true,
           workspace: {
@@ -371,49 +364,57 @@ export const fileRouter = createTRPCRouter({
         orderBy: { createdAt: "desc" },
       });
 
-      return checkouts.map((c) => ({
-        id: c.id,
-        fileId: c.fileId,
-        filePath: c.file.path,
-        locked: c.locked,
-        createdAt: c.createdAt,
-        workspaceId: c.workspaceId,
-        workspaceName: c.workspace.name,
-        userId: c.workspace.userId,
-        user: c.workspace.user,
-      }));
+      const reconciled = await reconcileClaims(ctx.db, input.repoId, claims);
+
+      return claims
+        .filter((c) => !reconciled.has(c.id))
+        .map((c) => ({
+          id: c.id,
+          fileId: c.fileId,
+          filePath: c.file.path,
+          strength: c.strength,
+          state: c.state,
+          branchName: c.branchName,
+          domainBranchName: c.domainBranchName,
+          createdAt: c.createdAt,
+          workspaceId: c.workspaceId,
+          workspaceName: c.workspace.name,
+          userId: c.workspace.userId,
+          user: c.workspace.user,
+        }));
     }),
 
-  adminUnlockFile: protectedProcedure
+  forceReleaseClaim: protectedProcedure
     .input(
       z.object({
         repoId: z.string(),
-        checkoutId: z.string(),
+        claimId: z.string(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.ADMIN);
 
-      const checkout = await ctx.db.fileCheckout.findFirst({
+      const claim = await ctx.db.fileClaim.findFirst({
         where: {
-          id: input.checkoutId,
+          id: input.claimId,
           repoId: input.repoId,
-          removedAt: null,
-          locked: true,
+          releasedAt: null,
         },
       });
 
-      if (!checkout) {
+      if (!claim) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "No active locked checkout found",
+          message: "No active claim found",
         });
       }
 
-      await ctx.db.fileCheckout.update({
-        where: { id: checkout.id },
-        data: { locked: false },
-      });
+      await releaseClaimRecord(
+        ctx.db,
+        claim,
+        { userId: ctx.session.user.id },
+        ClaimEventType.FORCE_RELEASE,
+      );
 
       return { success: true };
     }),

@@ -10,6 +10,12 @@ import {
   buildStateTreeBlocks,
   primeStateTreePaths,
 } from "~/server/state-tree";
+import { releaseClaimsForBranch } from "~/server/claims/claims";
+import { settleClaimsForMerge } from "~/server/claims/landing";
+import {
+  resolveDomainBranchName,
+  restackChildren,
+} from "~/server/claims/domain";
 
 export const branchRouter = createTRPCRouter({
   getBranch: protectedProcedure
@@ -102,15 +108,6 @@ export const branchRouter = createTRPCRouter({
           });
         }
 
-        // Feature branches can only be children of mainline or release
-        if (input.type === "FEATURE" && parentBranch.type === "FEATURE") {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message:
-              "Feature branches cannot be children of other feature branches",
-          });
-        }
-
         // Release branches can only be children of mainline
         if (input.type === "RELEASE" && parentBranch.type !== "MAINLINE") {
           throw new TRPCError({
@@ -134,6 +131,27 @@ export const branchRouter = createTRPCRouter({
       const effectiveParent =
         input.type === "MAINLINE" ? null : input.parentBranchName;
 
+      // Mainline and release branches anchor their own claim domain; feature
+      // branches inherit their parent's. This is what isolates release work
+      // from the mainline, and one mainline from another.
+      const isClaimDomainRoot = input.type !== "FEATURE";
+
+      const parent = effectiveParent
+        ? await ctx.db.branch.findUnique({
+            where: {
+              repoId_name: { repoId: input.repoId, name: effectiveParent },
+            },
+          })
+        : null;
+
+      // Resolve rather than read the parent's column directly: a branch
+      // stacked on a feature branch inherits the domain from further up, and
+      // rows seeded before the column existed still need the walk.
+      const domainBranchName =
+        isClaimDomainRoot || !parent
+          ? input.name
+          : await resolveDomainBranchName(ctx.db, input.repoId, parent);
+
       return ctx.db.branch.create({
         data: {
           repoId: input.repoId,
@@ -142,6 +160,8 @@ export const branchRouter = createTRPCRouter({
           isDefault: input.isDefault,
           type: input.type,
           parentBranchName: effectiveParent,
+          isClaimDomainRoot,
+          domainBranchName,
           createdById: ctx.session.user.id,
         },
         include: {
@@ -157,6 +177,22 @@ export const branchRouter = createTRPCRouter({
       z.object({
         repoId: z.string(),
         branchName: z.string(),
+        /**
+         * How this branch ended. "Discarded" archives it and releases its
+         * claims; purgeable additionally marks its dangling changelists
+         * eligible for a future garbage collection pass. Purgeability is
+         * deliberately orthogonal to disposition: "discarded, keep the CLs
+         * referenceable" and "discarded, reclaim the storage" differ only in
+         * this flag.
+         */
+        disposition: z.enum(["MERGED", "DISCARDED"]).default("DISCARDED"),
+        purgeable: z.boolean().default(false),
+        /**
+         * Archiving with claims still in flight strands committed binary work
+         * with no owner and no signal, so it is refused unless the caller says
+         * explicitly that discarding them is intended.
+         */
+        releaseOutstandingClaims: z.boolean().default(false),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -195,9 +231,37 @@ export const branchRouter = createTRPCRouter({
         });
       }
 
+      const outstanding = await ctx.db.fileClaim.count({
+        where: {
+          repoId: input.repoId,
+          branchName: input.branchName,
+          releasedAt: null,
+        },
+      });
+
+      if (outstanding > 0 && !input.releaseOutstandingClaims) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `"${input.branchName}" still holds ${outstanding} claim${outstanding === 1 ? "" : "s"}. Merge, release, or confirm discarding them before archiving.`,
+        });
+      }
+
+      if (outstanding > 0) {
+        // Both discard flavours release. The work is not reaching the domain
+        // root either way, so holding the path hostage forever is wrong;
+        // purgeability is a separate question about content GC.
+        await releaseClaimsForBranch(ctx.db, input.repoId, input.branchName, {
+          userId: ctx.session.user.id,
+        });
+      }
+
       return ctx.db.branch.update({
         where: { id: branch.id },
-        data: { archivedAt: new Date() },
+        data: {
+          archivedAt: new Date(),
+          disposition: input.disposition,
+          purgeable: input.purgeable,
+        },
       });
     }),
 
@@ -238,7 +302,7 @@ export const branchRouter = createTRPCRouter({
 
       return ctx.db.branch.update({
         where: { id: branch.id },
-        data: { archivedAt: null },
+        data: { archivedAt: null, disposition: "ACTIVE", purgeable: false },
       });
     }),
 
@@ -304,6 +368,14 @@ export const branchRouter = createTRPCRouter({
             "Cannot delete a branch that has child branches. Delete or merge the children first.",
         });
       }
+
+      // Deleting a branch discards its work, so its claims release. Otherwise
+      // the paths stay locked in the domain forever with nothing to unlock
+      // them. The next claimant starts from the domain head, which does not
+      // contain the discarded work, and the freshness gate agrees.
+      await releaseClaimsForBranch(ctx.db, input.repoId, input.branchName, {
+        userId: ctx.session.user.id,
+      });
 
       return ctx.db.branch.delete({
         where: { id: branch.id },
@@ -572,6 +644,38 @@ export const branchRouter = createTRPCRouter({
         where: { id: targetBranch.id },
         data: { headNumber: nextNumber },
       });
+
+      // Settle claims the merge carried. Release when the target anchors its
+      // own domain (the work has landed), advance onto the target otherwise
+      // (a stacked branch merged one rung up, still in flight).
+      await settleClaimsForMerge(ctx.db, {
+        repoId: input.repoId,
+        incomingBranchName: input.incomingBranchName,
+        targetBranchName: input.targetBranchName,
+        mergeChangelistNumber: nextNumber,
+        paths: fileChanges.map((fc) => fc.file.path),
+        actor: { userId: ctx.session.user.id },
+      });
+
+      // Restack: anything stacked on the merged branch re-parents to its
+      // parent. Without this a stack deadlocks, because a branch can only
+      // merge into its own parent and merging into an archived or deleted
+      // branch is refused. Domains are unaffected, since a branch and its
+      // parent always share one.
+      await restackChildren(ctx.db, {
+        repoId: input.repoId,
+        mergedBranchName: input.incomingBranchName,
+        newParentBranchName: input.targetBranchName,
+      });
+
+      // Release anything still held on the merged branch that the merge did
+      // not carry (claims taken but never submitted).
+      await releaseClaimsForBranch(
+        ctx.db,
+        input.repoId,
+        input.incomingBranchName,
+        { userId: ctx.session.user.id },
+      );
 
       // Delete the incoming branch (CLs are preserved)
       await ctx.db.branch.delete({

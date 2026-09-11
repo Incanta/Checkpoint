@@ -68,7 +68,7 @@ export const syncRouter = router({
           {
             id: workspace.id,
             repoId: workspace.repoId,
-            branchName: workspace.branchName,
+            domainBranchName: workspace.domainBranchName,
             workspaceName: workspace.name,
             localPath: workspace.localPath,
             daemonId: workspace.daemonId,
@@ -104,7 +104,7 @@ export const syncRouter = router({
       const workspaceInfo = {
         id: workspace.id,
         repoId: workspace.repoId,
-        branchName: workspace.branchName,
+        domainBranchName: workspace.domainBranchName,
         workspaceName: workspace.name,
         localPath: workspace.localPath,
         daemonId: workspace.daemonId,
@@ -266,12 +266,12 @@ export const syncRouter = router({
 
               // Release any checkout this workspace holds on the file
               if (
-                file.checkouts.length > 0 ||
+                file.claims.length > 0 ||
                 file.status === FileStatus.ChangedCheckedOut ||
                 file.status === FileStatus.NotChangedCheckedOut
               ) {
                 try {
-                  await client.file.undoCheckout.mutate({
+                  await client.file.releaseClaim.mutate({
                     repoId: workspace.repoId,
                     workspaceId: workspace.id,
                     filePath: file.path,

@@ -209,7 +209,7 @@ export class TeamSyncScheduler {
 
       const branch = await client.branch.getBranch.query({
         repoId: workspace.repoId,
-        name: workspace.branchName,
+        name: workspace.domainBranchName,
       });
       if (!branch) {
         return null;

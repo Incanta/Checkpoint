@@ -12,6 +12,7 @@ import {
 import { createTestDb, type TestDb } from "../harness/db";
 import { makeUser, makeOrg, makeRepo, makeBranch } from "../harness/fixtures";
 import { makeAppCaller } from "../harness/caller";
+import { restackChildren } from "~/server/claims/domain";
 
 describe("branch router", () => {
   let testDb: TestDb;
@@ -159,7 +160,7 @@ describe("branch router", () => {
       expect(branch.headNumber).toBe(7);
     });
 
-    it("rejects FEATURE-on-FEATURE parentage", async () => {
+    it("allows FEATURE-on-FEATURE stacking, inheriting the domain root", async () => {
       const owner = await makeUser(testDb.client);
       const org = await makeOrg(testDb.client, {
         ownerId: owner.id,
@@ -173,15 +174,53 @@ describe("branch router", () => {
       });
       const caller = await makeAppCaller({ asUser: owner });
 
-      await expect(
-        caller.branch.createBranch({
-          repoId: repo.id,
-          name: "feature/b",
-          parentBranchName: "feature/a",
-        }),
-      ).rejects.toMatchObject({
-        code: "BAD_REQUEST",
+      // Splitting work into reviewable milestones that depend on earlier
+      // unreviewed work is ordinary, so stacking is permitted.
+      const stacked = await caller.branch.createBranch({
+        repoId: repo.id,
+        name: "feature/b",
+        parentBranchName: "feature/a",
       });
+
+      expect(stacked.parentBranchName).toBe("feature/a");
+      expect(stacked.isClaimDomainRoot).toBe(false);
+      // The whole stack resolves to one domain, so a claim taken anywhere in
+      // it blocks the mainline and every sibling feature branch.
+      expect(stacked.domainBranchName).toBe("main");
+    });
+
+    it("restacks children onto the grandparent when their parent merges", async () => {
+      const owner = await makeUser(testDb.client);
+      const org = await makeOrg(testDb.client, {
+        ownerId: owner.id,
+        ownerRole: "ADMIN",
+      });
+      const repo = await makeRepo(testDb.client, org.id, owner.id);
+      await makeBranch(testDb.client, repo.id, owner.id, {
+        name: "feature/base",
+        type: "FEATURE",
+        parentName: "main",
+      });
+      await makeBranch(testDb.client, repo.id, owner.id, {
+        name: "feature/stacked",
+        type: "FEATURE",
+        parentName: "feature/base",
+      });
+
+      // Without a restack the stack deadlocks: a branch can only merge into
+      // its own parent, and merging into a deleted branch is impossible.
+      await restackChildren(testDb.client, {
+        repoId: repo.id,
+        mergedBranchName: "feature/base",
+        newParentBranchName: "main",
+      });
+
+      const stacked = await testDb.client.branch.findUnique({
+        where: { repoId_name: { repoId: repo.id, name: "feature/stacked" } },
+      });
+
+      expect(stacked?.parentBranchName).toBe("main");
+      expect(stacked?.domainBranchName).toBe("main");
     });
 
     it("rejects RELEASE branches off non-MAINLINE parents", async () => {

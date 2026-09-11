@@ -47,6 +47,7 @@ model User {
   buildBadgesPosted  BuildBadge[]        @relation("BuildBadgePoster")
   changelistReviews  ChangelistReview[]
   changelistComments ChangelistComment[]
+  claimEvents        FileClaimEvent[]
 
   notifications      Notification[]            @relation("NotificationRecipient")
   actedNotifications Notification[]            @relation("NotificationActor")
@@ -246,7 +247,7 @@ model Repo {
   branches         Branch[]          @relation("RepoBranch")
   labels           ChangelistLabel[]
   workspaces       Workspace[]
-  fileCheckouts    FileCheckout[]
+  fileClaims       FileClaim[]
   pullRequests     PullRequest[]
   mergePermissions MergePermission[]
   shelves          Shelf[]
@@ -279,6 +280,12 @@ enum BranchType {
   FEATURE
 }
 
+enum BranchDisposition {
+  ACTIVE
+  MERGED
+  DISCARDED
+}
+
 model Branch {
   id String @id @default(cuid())
 
@@ -293,7 +300,25 @@ model Branch {
   type       BranchType @default(MAINLINE)
   archivedAt DateTime?
 
-  // Parent branch relationship (feature→mainline/release, release→mainline)
+  // Whether this branch anchors its own claim domain. Mainline and release
+  // branches do; feature branches never do. A claim taken anywhere in a domain
+  // blocks the whole domain, so this is what isolates release-branch work from
+  // mainline work and one mainline from another.
+  isClaimDomainRoot Boolean @default(true)
+
+  // Denormalized at creation by walking up to the nearest domain root. Stable,
+  // because parentage only changes on a restack and a restack never crosses a
+  // domain. Equals `name` when isClaimDomainRoot is true.
+  domainBranchName String?
+
+  // How this branch ended relative to its parent, and whether its dangling
+  // changelists may be garbage collected. Deliberately orthogonal: "discarded
+  // but keep the CLs referenceable" and "discarded, reclaim the storage" are
+  // the same disposition with one flag flipped.
+  disposition BranchDisposition @default(ACTIVE)
+  purgeable   Boolean           @default(false)
+
+  // Parent branch relationship (feature→mainline/release/feature, release→mainline)
   parentBranch     Branch?  @relation("BranchParent", fields: [repoId, parentBranchName], references: [repoId, name])
   parentBranchName String?
   childBranches    Branch[] @relation("BranchParent")
@@ -532,19 +557,54 @@ model File {
   repoId String
 
   changes       FileChange[]
-  checkouts     FileCheckout[]
+  claims        FileClaim[]
   shelfChanges  ShelfFileChange[]
   artifactFiles ArtifactFile[]
 
   @@index([repoId])
 }
 
-model FileCheckout {
-  id        String    @id @default(cuid())
-  createdAt DateTime  @default(now())
-  removedAt DateTime?
+// How strongly a claim binds. Derived from the org's binary-extensions set:
+// unmergeable content is EXCLUSIVE, everything else ADVISORY. See
+// server/claims/strength.ts.
+enum ClaimStrength {
+  // Recorded and displayed, never enforced. Many may be active on the same
+  // path in the same domain (Perforce `p4 edit`).
+  ADVISORY
+  // Exactly one may be active on a path in a domain, enforced by a partial
+  // unique index (Perforce's `+l` exclusive-open filetype, not `p4 lock`).
+  EXCLUSIVE
+}
 
-  locked Boolean @default(false)
+enum ClaimState {
+  // A workspace is actively editing. Nobody may take over.
+  OPEN
+  // Work is parked on a branch and has not reached the domain root. Still
+  // blocks the domain, but a workspace on the holding branch (or below it)
+  // may reclaim it.
+  SUBMITTED
+}
+
+enum ClaimEventType {
+  CLAIM
+  SUBMIT
+  ADVANCE
+  RELEASE
+  FORCE_RELEASE
+  DISCARD_RELEASE
+}
+
+// A reservation on a path, scoped to a claim domain rather than to the
+// whole repo. Replaces the repo-wide FileCheckout model.
+//
+// `domainBranchName` is where the exclusion applies (always a branch with
+// isClaimDomainRoot = true). `branchName` is where the work currently
+// lives, and equals domainBranchName for work done directly on the root.
+// A claim releases when its content reaches domainBranchName.
+model FileClaim {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   fileId String
   file   File   @relation(fields: [fileId], references: [id])
@@ -552,8 +612,56 @@ model FileCheckout {
   repoId String
   repo   Repo   @relation(fields: [repoId], references: [id])
 
+  domainBranchName String
+  branchName       String
+
+  // Audit only: resolves the claim to a user. Enforcement only ever asks
+  // "does the submitting workspace hold this claim", never who owns it.
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  strength ClaimStrength @default(EXCLUSIVE)
+  state    ClaimState    @default(OPEN)
+
+  // Head of branchName when the claim was taken. Freshness baseline.
+  baseChangelistNumber Int
+  // Latest changelist on branchName touching this path. Null until first
+  // submit; used by the reconciler to detect the content landing.
+  headChangelistNumber Int?
+
+  releasedAt                 DateTime?
+  releasedByChangelistNumber Int?
+
+  events FileClaimEvent[]
+
+  // Primary exclusion lookup (submit guard, claim acquisition).
+  @@index([repoId, fileId, domainBranchName, releasedAt])
+  // Claims page, grouped by domain.
+  @@index([repoId, domainBranchName, releasedAt])
+  // Release-on-merge and release-on-discard scans.
+  @@index([repoId, branchName, releasedAt])
+  @@index([workspaceId, releasedAt])
+}
+
+// Append-only audit trail. An active-row-only design loses the history the
+// moment a claim releases, and forced releases in particular need a record.
+model FileClaimEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  claim   FileClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  claimId String
+
+  type ClaimEventType
+
+  user   User?   @relation(fields: [userId], references: [id])
+  userId String?
+
+  workspaceId      String?
+  branchName       String
+  changelistNumber Int?
+
+  @@index([claimId, createdAt])
 }
 
 model Workspace {
@@ -572,13 +680,35 @@ model Workspace {
   orgId String
   org   Org    @relation(fields: [orgId], references: [id])
 
+  // The domain-root branch this workspace's tree is materialized from.
+  // Nullable only for rows predating the column; the daemon populates it on
+  // connect.
+  domainBranchName String?
+
   // Team Sync presence: last changelist this workspace successfully synced to.
   syncedChangelistNumber Int?
   syncedAt               DateTime?
 
-  fileCheckouts FileCheckout[]
+  claims         FileClaim[]
+  activeBranches WorkspaceBranch[]
 
   @@index([repoId, syncedChangelistNumber])
+}
+
+// Feature branches currently overlaid on a workspace's tree. Zero rows means
+// the workspace is working directly on its domain root, which is what every
+// workspace did before multi-branch workspaces existed.
+model WorkspaceBranch {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  branchName String
+
+  @@unique([workspaceId, branchName])
+  @@index([workspaceId])
 }
 
 model ApiToken {

@@ -3,7 +3,12 @@ import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
 import fs from "fs/promises";
 import path from "path";
-import { File, FileStatus, FileType } from "../../../types/index.js";
+import {
+  File,
+  FileClaimInfo,
+  FileStatus,
+  FileType,
+} from "../../../types/index.js";
 import {
   getBinaryExtensions,
   isBinaryFile,
@@ -231,44 +236,35 @@ export const pendingRouter = router({
         pendingChangesMap,
       );
 
-      // Fetch active checkouts for files in this directory
+      // Fetch active claims for files in this directory. The workspace's
+      // domain root goes along so the server can say which claims actually
+      // block this workspace and which are context from another domain.
       const client = await CreateApiClientAuth(input.daemonId);
       const filePaths = fileInfos
         .filter((fi) => !fi.isDirectory)
         .map((fi) => fi.relativePath);
 
-      const checkoutsMap: Record<
-        string,
-        Array<{
-          id: string;
-          locked: boolean;
-          workspaceId: string;
-          userId: string;
-          user: {
-            id: string;
-            email: string;
-            name: string | null;
-            username: string | null;
-          };
-        }>
-      > = {};
+      const claimsMap: Record<string, FileClaimInfo[]> = {};
 
       if (filePaths.length > 0) {
-        const checkouts = await client.file.getActiveCheckoutsForFiles.mutate({
+        const claims = await client.file.getClaimsForFiles.mutate({
           repoId: workspace.repoId,
           filePaths,
+          branchName: workspace.domainBranchName,
         });
 
-        for (const checkout of checkouts) {
-          if (!checkoutsMap[checkout.filePath]) {
-            checkoutsMap[checkout.filePath] = [];
-          }
-          checkoutsMap[checkout.filePath].push({
-            id: checkout.id,
-            locked: checkout.locked,
-            workspaceId: checkout.workspaceId,
-            userId: checkout.userId,
-            user: checkout.user,
+        for (const claim of claims) {
+          claimsMap[claim.filePath] ??= [];
+          claimsMap[claim.filePath]!.push({
+            id: claim.id,
+            strength: claim.strength,
+            state: claim.state,
+            branchName: claim.branchName,
+            domainBranchName: claim.domainBranchName,
+            blocking: claim.blocking,
+            workspaceId: claim.workspaceId,
+            userId: claim.userId,
+            user: claim.user,
           });
         }
       }
@@ -291,7 +287,7 @@ export const pendingRouter = router({
             status: statusResult?.status ?? 0,
             id: statusResult?.fileId ?? null,
             changelist: statusResult?.changelist ?? null,
-            checkouts: checkoutsMap[relativePath] ?? [],
+            claims: claimsMap[relativePath] ?? [],
           };
 
           return f;
@@ -401,7 +397,7 @@ export const pendingRouter = router({
         input.modifications,
       );
 
-      // Check for conflicts before submitting (sync — fail fast)
+      // Check for conflicts before submitting (sync, fail fast)
       const modificationPaths = expandedModifications.map((m) =>
         m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
       );
@@ -409,7 +405,7 @@ export const pendingRouter = router({
         {
           id: workspace.id,
           repoId: workspace.repoId,
-          branchName: workspace.branchName,
+          domainBranchName: workspace.domainBranchName,
           workspaceName: workspace.name,
           localPath: workspace.localPath,
           daemonId: workspace.daemonId,
@@ -434,7 +430,7 @@ export const pendingRouter = router({
       const workspaceInfo = {
         id: workspace.id,
         repoId: workspace.repoId,
-        branchName: workspace.branchName,
+        domainBranchName: workspace.domainBranchName,
         workspaceName: workspace.name,
         localPath: workspace.localPath,
         daemonId: workspace.daemonId,
@@ -505,7 +501,17 @@ export const pendingRouter = router({
         daemonId: z.string(),
         workspaceId: z.string(),
         path: z.string(),
-        locked: z.boolean().default(false),
+        /**
+         * Which of the workspace's active branches this edit belongs to.
+         * Defaults to the domain root, which is where a workspace with no
+         * overlays is always working.
+         */
+        branchName: z.string().optional(),
+        /**
+         * Take an exclusive claim on a path the binary-extension set considers
+         * mergeable. The escape hatch for a large refactor of a text file.
+         */
+        forceExclusive: z.boolean().default(false),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -534,11 +540,12 @@ export const pendingRouter = router({
         repoId: workspace.repoId,
         workspaceId: workspace.id,
         filePath: normalizedPath,
-        locked: input.locked,
+        branchName: input.branchName ?? workspace.domainBranchName,
+        forceExclusive: input.forceExclusive,
       });
     }),
 
-  undoCheckout: publicProcedure
+  releaseClaim: publicProcedure
     .input(
       z.object({
         daemonId: z.string(),
@@ -568,7 +575,7 @@ export const pendingRouter = router({
         .replace(/^[/\\]/, "")
         .replace(/\\/g, "/");
 
-      return client.file.undoCheckout.mutate({
+      return client.file.releaseClaim.mutate({
         repoId: workspace.repoId,
         workspaceId: workspace.id,
         filePath: normalizedPath,
@@ -671,7 +678,7 @@ export const pendingRouter = router({
         p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
       );
 
-      return client.file.getActiveCheckoutsForFiles.mutate({
+      return client.file.getClaimsForFiles.mutate({
         repoId: workspace.repoId,
         filePaths: normalizedPaths,
       });
@@ -720,7 +727,7 @@ export const pendingRouter = router({
           const headFileInfo = workspaceState?.files[normalizedPath];
 
           if (headFileInfo && headFileInfo.changelist) {
-            // File exists in head — download head version and overwrite local
+            // File exists in head: download head version and overwrite local
             const result = await readFileFromChangelist({
               workspace: {
                 daemonId: input.daemonId,
@@ -753,13 +760,13 @@ export const pendingRouter = router({
 
           // Undo checkout if the file was checked out
           try {
-            await client.file.undoCheckout.mutate({
+            await client.file.releaseClaim.mutate({
               repoId: workspace.repoId,
               workspaceId: workspace.id,
               filePath: normalizedPath,
             });
           } catch {
-            // Not checked out — that's fine
+            // Not claimed, which is fine
           }
 
           results.push({ filePath: normalizedPath, success: true });

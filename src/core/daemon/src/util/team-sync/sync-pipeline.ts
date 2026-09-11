@@ -118,7 +118,7 @@ export async function runSyncPipeline(
     wroteVersionFiles = await writeVersionFiles(
       workspace,
       syncedChangelistNumber,
-      workspace.branchName,
+      workspace.domainBranchName,
     );
   }
 

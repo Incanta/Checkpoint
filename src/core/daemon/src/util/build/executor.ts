@@ -308,7 +308,7 @@ export async function runBuild(
   const ctx: BuildVariableContext = {
     workspaceDir: workspace.localPath,
     change: changelistNumber,
-    branch: workspace.branchName,
+    branch: workspace.domainBranchName,
     workspaceName: workspace.workspaceName,
     platformName,
     ...(unrealVars && { unreal: unrealVars }),
@@ -523,7 +523,7 @@ export async function runBuild(
           await writeVersionFiles(
             workspace,
             changelistNumber,
-            workspace.branchName,
+            workspace.domainBranchName,
           );
         } catch (e) {
           Logger.warn(

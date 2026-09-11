@@ -14,6 +14,39 @@ import {
 } from "../../../util/index.js";
 import { TRPCError } from "@trpc/server";
 
+/**
+ * Walks a feature branch up to its domain root, returning the chain in
+ * ancestor-first order.
+ *
+ * Overlays are applied in this order, and a stacked branch is meaningless
+ * without the branches beneath it, so activation always takes the whole chain
+ * rather than a single name.
+ */
+async function resolveBranchChain(
+  client: Awaited<ReturnType<typeof CreateApiClientAuth>>,
+  repoId: string,
+  branchName: string,
+): Promise<string[]> {
+  const chain: string[] = [];
+  let current: string | null = branchName;
+
+  for (let hops = 0; hops < 64 && current; hops++) {
+    const branch = await client.branch.getBranch.query({
+      repoId,
+      name: current,
+    });
+
+    if (!branch || branch.isClaimDomainRoot) {
+      break;
+    }
+
+    chain.unshift(branch.name);
+    current = branch.parentBranchName;
+  }
+
+  return chain;
+}
+
 export const branchesRouter = router({
   list: publicProcedure
     .input(
@@ -47,7 +80,7 @@ export const branchesRouter = router({
         includeArchived: input.includeArchived,
       });
 
-      return { branches, currentBranchName: workspace.branchName };
+      return { branches, currentBranchName: workspace.domainBranchName };
     }),
 
   create: publicProcedure
@@ -160,7 +193,7 @@ export const branchesRouter = router({
           // Get all files changed between the current and target branch heads
           const currentBranch = await client.branch.getBranch.query({
             repoId: workspace.repoId,
-            name: workspace.branchName,
+            name: workspace.domainBranchName,
           });
 
           if (currentBranch) {
@@ -203,8 +236,49 @@ export const branchesRouter = router({
         }
       }
 
-      // Update the workspace branch name
-      workspace.branchName = input.branchName;
+      // A workspace materializes from a domain root and overlays feature
+      // branches on top, so "switch" means two different operations depending
+      // on what you point it at.
+      //
+      // Switching domains re-pulls the whole tree, and the server refuses it
+      // outright when this workspace still holds claims in the old domain:
+      // claims are anchored to the domain they were taken in and cannot follow.
+      //
+      // Activating a feature branch is not a re-pull at all. It adds the branch
+      // to the overlay and pulls only its delta, which is the entire reason
+      // multi-branch workspaces are worth having.
+      const activatingOverlay = !targetBranch.isClaimDomainRoot;
+
+      const domainBranchName = activatingOverlay
+        ? (targetBranch.domainBranchName ?? workspace.domainBranchName)
+        : input.branchName;
+
+      // A stacked branch expresses its changes relative to its parent, so it
+      // cannot be overlaid alone: activating it activates its whole chain.
+      const activeBranches = activatingOverlay
+        ? await resolveBranchChain(client, workspace.repoId, input.branchName)
+        : [];
+
+      if (
+        activatingOverlay &&
+        domainBranchName !== workspace.domainBranchName
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `"${input.branchName}" belongs to the "${domainBranchName}" domain. Switch this workspace to "${domainBranchName}" before activating it.`,
+        });
+      }
+
+      // The server owns the decision: it rejects a cross-domain move that
+      // would strand claims, and validates that the chain is complete.
+      await client.workspace.setBranchState.mutate({
+        workspaceId: workspace.id,
+        domainBranchName,
+        activeBranches,
+      });
+
+      workspace.domainBranchName = domainBranchName;
+      workspace.activeBranches = activeBranches;
 
       // Update daemon config
       const daemonConfig = DaemonConfig.Ensure();
@@ -212,7 +286,8 @@ export const branchesRouter = router({
         (w) => w.id === workspace.id,
       );
       if (configWorkspace) {
-        configWorkspace.branchName = input.branchName;
+        configWorkspace.domainBranchName = domainBranchName;
+        configWorkspace.activeBranches = activeBranches;
       }
       await DaemonConfig.Save();
 
@@ -221,15 +296,19 @@ export const branchesRouter = router({
       const workspaceConfigToSave: UtilWorkspace = workspaceConfig ?? {
         id: workspace.id,
         repoId: workspace.repoId,
-        branchName: input.branchName,
+        domainBranchName,
+        activeBranches,
         workspaceName: workspace.name,
         localPath: workspace.localPath,
         daemonId: workspace.daemonId,
       };
-      workspaceConfigToSave.branchName = input.branchName;
+      workspaceConfigToSave.domainBranchName = domainBranchName;
+      workspaceConfigToSave.activeBranches = activeBranches;
       await saveWorkspaceConfig(workspaceConfigToSave);
 
-      // Pull to the target branch head
+      // Pull to the target head. For an overlay this is the feature branch's
+      // head, which carries the domain root's content plus that branch's
+      // changes; for a domain switch it is the new root's head.
       const repo = await client.repo.getRepo.query({ id: workspace.repoId });
       if (repo) {
         manager.beginVcsOperation(workspace.id);
@@ -238,7 +317,8 @@ export const branchesRouter = router({
             {
               id: workspace.id,
               repoId: workspace.repoId,
-              branchName: input.branchName,
+              domainBranchName: input.branchName,
+              activeBranches,
               workspaceName: workspace.name,
               localPath: workspace.localPath,
               daemonId: workspace.daemonId,
@@ -256,7 +336,104 @@ export const branchesRouter = router({
       await manager.reloadWorkspaceState(workspace);
       manager.clearSyncStatus(workspace.id);
 
-      return { success: true, branchName: input.branchName };
+      return {
+        success: true,
+        branchName: input.branchName,
+        domainBranchName,
+        activeBranches,
+      };
+    }),
+
+  /**
+   * Removes a feature branch from the workspace's overlay and re-pulls to
+   * whatever remains. Anything stacked on it comes off too, since a stacked
+   * branch cannot stand without its parent.
+   */
+  deactivate: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        branchName: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = ctx.manager;
+      const workspaces = manager.workspaces.get(input.daemonId);
+      const workspace = workspaces?.find((w) => w.id === input.workspaceId);
+
+      if (!workspace) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Could not find workspace ID ${input.workspaceId}`,
+        });
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+
+      const remaining: string[] = [];
+      for (const name of workspace.activeBranches) {
+        if (name === input.branchName) {
+          continue;
+        }
+        const chain = await resolveBranchChain(client, workspace.repoId, name);
+        if (chain.includes(input.branchName)) {
+          continue;
+        }
+        remaining.push(name);
+      }
+
+      await client.workspace.setBranchState.mutate({
+        workspaceId: workspace.id,
+        domainBranchName: workspace.domainBranchName,
+        activeBranches: remaining,
+      });
+
+      workspace.activeBranches = remaining;
+
+      const daemonConfig = DaemonConfig.Ensure();
+      const configWorkspace = daemonConfig.vars.workspaces.find(
+        (w) => w.id === workspace.id,
+      );
+      if (configWorkspace) {
+        configWorkspace.activeBranches = remaining;
+      }
+      await DaemonConfig.Save();
+
+      const workspaceConfig = await getWorkspaceConfig(workspace.localPath);
+      if (workspaceConfig) {
+        workspaceConfig.activeBranches = remaining;
+        await saveWorkspaceConfig(workspaceConfig);
+      }
+
+      const repo = await client.repo.getRepo.query({ id: workspace.repoId });
+      if (repo) {
+        manager.beginVcsOperation(workspace.id);
+        try {
+          await pull(
+            {
+              id: workspace.id,
+              repoId: workspace.repoId,
+              domainBranchName:
+                remaining[remaining.length - 1] ?? workspace.domainBranchName,
+              activeBranches: remaining,
+              workspaceName: workspace.name,
+              localPath: workspace.localPath,
+              daemonId: workspace.daemonId,
+            },
+            repo.orgId,
+            null,
+            null,
+          );
+        } finally {
+          await manager.endVcsOperation(workspace.id);
+        }
+      }
+
+      await manager.reloadWorkspaceState(workspace);
+      manager.clearSyncStatus(workspace.id);
+
+      return { success: true, activeBranches: remaining };
     }),
 
   archive: publicProcedure
@@ -392,7 +569,7 @@ export const branchesRouter = router({
       const result = await client.branch.mergeBranch.mutate({
         repoId: workspace.repoId,
         incomingBranchName: input.incomingBranchName,
-        targetBranchName: workspace.branchName,
+        targetBranchName: workspace.domainBranchName,
       });
 
       // Pull the merge CL into the workspace
@@ -404,7 +581,7 @@ export const branchesRouter = router({
             {
               id: workspace.id,
               repoId: workspace.repoId,
-              branchName: workspace.branchName,
+              domainBranchName: workspace.domainBranchName,
               workspaceName: workspace.name,
               localPath: workspace.localPath,
               daemonId: workspace.daemonId,

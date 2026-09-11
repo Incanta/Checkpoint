@@ -275,15 +275,15 @@ export const repoRouter = createTRPCRouter({
         RepoAccess.ADMIN,
       );
 
-      const [commitCount, branchCount, checkoutCount] = await Promise.all([
+      const [commitCount, branchCount, claimCount] = await Promise.all([
         // CL 0 is the auto-generated "Repo Creation" changelist; exclude it so
         // the count reflects real commits.
         ctx.db.changelist.count({
           where: { repoId: repo.id, number: { gt: 0 } },
         }),
         ctx.db.branch.count({ where: { repoId: repo.id } }),
-        ctx.db.fileCheckout.count({
-          where: { repoId: repo.id, removedAt: null },
+        ctx.db.fileClaim.count({
+          where: { repoId: repo.id, releasedAt: null },
         }),
       ]);
 
@@ -291,7 +291,7 @@ export const repoRouter = createTRPCRouter({
         storageBytes: Number(repo.storageBytes),
         commitCount,
         branchCount,
-        checkoutCount,
+        claimCount,
       };
     }),
 

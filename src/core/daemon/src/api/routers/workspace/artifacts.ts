@@ -65,7 +65,7 @@ export const artifactsRouter = router({
       const workspaceInfo = {
         id: workspace.id,
         repoId: workspace.repoId,
-        branchName: workspace.branchName,
+        domainBranchName: workspace.domainBranchName,
         workspaceName: workspace.name,
         localPath: workspace.localPath,
         daemonId: workspace.daemonId,

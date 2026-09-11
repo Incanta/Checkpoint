@@ -94,12 +94,27 @@ export type ArtifactStateFile = WorkspaceStateFile & {
   artifactType?: string;
 };
 
-export const WORKSPACE_STATE_VERSION = 2;
+export const WORKSPACE_STATE_VERSION = 3;
 
 export interface WorkspaceState {
   /** State schema version; absent = 1. Current: WORKSPACE_STATE_VERSION. */
   version?: number;
+  /**
+   * The changelist the tree is materialized at on its domain root.
+   *
+   * A workspace with feature branches overlaid is not "at" one changelist, so
+   * this is the domain-root component and `branchHeads` carries the rest. The
+   * field keeps its old name so v2 state files load unchanged: before overlays
+   * existed, the workspace's branch was its domain root and this was the whole
+   * answer.
+   */
   changelistNumber: number;
+  /**
+   * branchName -> last synced head, for each overlaid feature branch. Empty or
+   * absent means no overlay, which is a workspace working directly on its
+   * domain root.
+   */
+  branchHeads?: Record<string, number>;
   files: Record<string, WorkspaceStateFile>; // path -> file info
   artifactFiles?: Record<string, ArtifactStateFile>; // path -> artifact file info
   /** Relative paths of files explicitly marked for add */
@@ -110,7 +125,25 @@ export interface WorkspaceState {
 export interface WorkspaceConfig {
   id: string;
   repoId: string;
-  branchName: string;
+  /**
+   * The domain-root branch this workspace's tree is materialized from: a
+   * mainline or release branch, never a feature branch.
+   *
+   * Was `branchName` before multi-branch workspaces. `readWorkspaceConfig`
+   * migrates the old key on load, so v1 config files keep working: the branch
+   * a workspace was pinned to becomes its domain root, which is correct
+   * whenever that branch was a mainline or release branch, and is repaired
+   * against the server otherwise.
+   */
+  domainBranchName: string;
+  /**
+   * Feature branches overlaid on the tree, applied ancestor-first.
+   *
+   * Empty is the ordinary case and means working directly on the domain root.
+   * A stacked branch cannot be overlaid alone, so this always holds complete
+   * ancestor chains rather than an arbitrary set.
+   */
+  activeBranches?: string[];
   workspaceName: string;
   /**
    * Controls whether the "mark as resolved" confirmation dialog is suppressed.
@@ -186,10 +219,32 @@ export async function getWorkspaceConfig(
   const configPath = path.join(workspaceConfigDir, "workspace.json");
   try {
     const raw = await fs.readFile(configPath, "utf-8");
-    return JSON.parse(raw);
+    return migrateWorkspaceConfig(JSON.parse(raw));
   } catch {
     return null;
   }
+}
+
+/**
+ * Brings a workspace.json forward to the current shape.
+ *
+ * Pre-overlay configs carried a single `branchName`. That branch becomes the
+ * domain root with no overlays, which is exactly what the workspace was doing.
+ * If it was actually a feature branch, the daemon repairs it against the server
+ * on connect (see `reportBranchState`), because only the server knows which
+ * branch anchors the domain.
+ */
+export function migrateWorkspaceConfig(
+  raw: Workspace & { branchName?: string },
+): Workspace {
+  if (!raw.domainBranchName && raw.branchName) {
+    raw.domainBranchName = raw.branchName;
+  }
+
+  delete raw.branchName;
+  raw.activeBranches ??= [];
+
+  return raw;
 }
 
 /**
@@ -239,7 +294,7 @@ export async function getLatestChangelistId(
 
   const branch = await client.branch.getBranch.query({
     repoId: workspace.repoId,
-    name: workspace.branchName,
+    name: workspace.domainBranchName,
   });
 
   if (!branch) {
@@ -259,7 +314,7 @@ export async function getChangelistId(
 
   const changelists = await client.changelist.getChangelists.query({
     repoId: workspace.repoId,
-    branchName: workspace.branchName,
+    branchName: workspace.domainBranchName,
     start: {
       number: changelistNumber,
       timestamp: null,

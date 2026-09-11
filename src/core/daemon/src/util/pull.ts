@@ -106,7 +106,7 @@ export async function pull(
   if (changelistNumber === null) {
     const branchResponse = await client.branch.getBranch.query({
       repoId: workspace.repoId,
-      name: workspace.branchName,
+      name: workspace.domainBranchName,
     });
 
     if (!branchResponse) {
@@ -555,7 +555,7 @@ export async function pullTextFilesForSubmit(
   // Get the remote branch head
   const branchResponse = await client.branch.getBranch.query({
     repoId: workspace.repoId,
-    name: workspace.branchName,
+    name: workspace.domainBranchName,
   });
 
   if (!branchResponse) {

@@ -71,7 +71,7 @@ export async function submit(
   const storageOptions = toStorageOptions(storageTokenResponse);
 
   console.log(`[submit] Calling SubmitAsync:`);
-  console.log(`[submit]   branchName: ${workspace.branchName}`);
+  console.log(`[submit]   branchName: ${workspace.domainBranchName}`);
   if (shelfName) {
     console.log(`[submit]   shelfName: ${shelfName}`);
   }
@@ -84,7 +84,7 @@ export async function submit(
   console.log(`[submit]   modifications: ${modifications.length}`);
 
   const submitOptions: SubmitAsyncOptions = {
-    branchName: workspace.branchName,
+    branchName: workspace.domainBranchName,
     message,
     targetChunkSize: daemonConfig.longtail.targetChunkSize,
     targetBlockSize: daemonConfig.longtail.targetBlockSize,

@@ -237,7 +237,7 @@ function RepoStats({ repoId }: { repoId: string }) {
         <StatTile label="Branches" value={data.branchCount.toLocaleString()} />
         <StatTile
           label="Active checkouts"
-          value={data.checkoutCount.toLocaleString()}
+          value={data.claimCount.toLocaleString()}
         />
       </div>
     </>

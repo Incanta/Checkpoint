@@ -60,7 +60,8 @@ export const opsRouter = router({
         ...newWorkspaceApi,
         localPath: input.path.replace(/\\/g, "/"),
         daemonId: input.daemonId,
-        branchName: input.defaultBranchName,
+        domainBranchName: input.defaultBranchName,
+        activeBranches: [],
       };
 
       DaemonConfig.Ensure().vars.workspaces.push(newWorkspace);
@@ -70,7 +71,8 @@ export const opsRouter = router({
       await saveWorkspaceConfig({
         id: newWorkspace.id,
         repoId: newWorkspace.repoId,
-        branchName: newWorkspace.branchName,
+        domainBranchName: newWorkspace.domainBranchName,
+        activeBranches: [],
         workspaceName: newWorkspace.name,
         localPath: newWorkspace.localPath,
         daemonId: newWorkspace.daemonId,
