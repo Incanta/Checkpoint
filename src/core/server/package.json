@@ -17,7 +17,7 @@
     "@incanta/config": "^2.1.18",
     "date-fns": "^4.1.0",
     "express": "^5.2.1",
-    "multer": "^2.2.0",
+    "multer": "^2.3.0",
     "njwt": "^2.0.1",
     "pino": "^10.1.0",
     "pino-pretty": "^13.1.2",
