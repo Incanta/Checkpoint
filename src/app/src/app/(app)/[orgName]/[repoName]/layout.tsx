@@ -72,18 +72,6 @@ export default function RepoLayout({
           Files
         </Tab>
         <Tab href={`${basePath}/history`}>History</Tab>
-        {showPullRequests && (
-          <Tab href={`${basePath}/pull-requests`}>
-            <span className="flex items-center gap-1.5">
-              Pull Requests
-              {!!openPrCount && openPrCount > 0 && (
-                <Badge variant="accent" className="ml-0.5">
-                  {openPrCount}
-                </Badge>
-              )}
-            </span>
-          </Tab>
-        )}
         {showIssues && (
           <Tab href={`${basePath}/issues`}>
             <span className="flex items-center gap-1.5">
@@ -91,6 +79,18 @@ export default function RepoLayout({
               {!!openIssueCount && openIssueCount > 0 && (
                 <Badge variant="accent" className="ml-0.5">
                   {openIssueCount}
+                </Badge>
+              )}
+            </span>
+          </Tab>
+        )}
+        {showPullRequests && (
+          <Tab href={`${basePath}/pull-requests`}>
+            <span className="flex items-center gap-1.5">
+              Pull Requests
+              {!!openPrCount && openPrCount > 0 && (
+                <Badge variant="accent" className="ml-0.5">
+                  {openPrCount}
                 </Badge>
               )}
             </span>
