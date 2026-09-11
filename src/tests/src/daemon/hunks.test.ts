@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeHunks,
+  computeLineChanges,
   applyHunks,
   isFullySelected,
 } from "../../../core/daemon/src/util/hunks.js";
@@ -137,5 +138,61 @@ describe("the round trip staging depends on", () => {
     // applyHunks is pure: it returns new content and never rewrites a file,
     // so a partial stage followed by a submit cannot disturb the tree.
     expect(WORKTREE).toBe(before);
+  });
+});
+
+describe("computeLineChanges", () => {
+  // These feed VS Code's applyLineChanges, which encodes "no lines on this
+  // side" as an end line of 0 and expects an insertion's original start to be
+  // the count of preceding original lines. Getting either wrong silently
+  // stages the wrong text, so each shape is pinned.
+  const three = joined(["L1", "L2", "L3"]);
+
+  it("maps a modification to matching 1-based ranges", () => {
+    const [change] = computeLineChanges(three, joined(["L1", "XX", "L3"]));
+    expect(change).toEqual({
+      originalStartLineNumber: 2,
+      originalEndLineNumber: 2,
+      modifiedStartLineNumber: 2,
+      modifiedEndLineNumber: 2,
+    });
+  });
+
+  it("maps an insertion at the top to original start 0", () => {
+    const [change] = computeLineChanges(
+      three,
+      joined(["NEW", "L1", "L2", "L3"]),
+    );
+    expect(change!.originalStartLineNumber).toBe(0);
+    expect(change!.originalEndLineNumber).toBe(0);
+    expect(change!.modifiedStartLineNumber).toBe(1);
+    expect(change!.modifiedEndLineNumber).toBe(1);
+  });
+
+  it("maps an insertion at the end to the preceding line count", () => {
+    const [change] = computeLineChanges(
+      three,
+      joined(["L1", "L2", "L3", "NEW"]),
+    );
+    expect(change!.originalStartLineNumber).toBe(3);
+    expect(change!.originalEndLineNumber).toBe(0);
+  });
+
+  it("maps a deletion to modified end 0", () => {
+    const [change] = computeLineChanges(three, joined(["L1", "L3"]));
+    expect(change!.originalStartLineNumber).toBe(2);
+    expect(change!.originalEndLineNumber).toBe(2);
+    expect(change!.modifiedEndLineNumber).toBe(0);
+  });
+
+  it("returns one entry per change, with no context merging them", () => {
+    // computeHunks keeps 3 lines of context and would report these as one
+    // hunk; the editor flows need them separate so a selection can pick one.
+    const head = joined(LINES);
+    const worktree = joined(
+      LINES.map((l, i) => (i === 1 ? "A" : i === 3 ? "B" : l)),
+    );
+    expect(computeLineChanges(head, worktree)).toHaveLength(2);
+    expect(computeHunks(head, worktree)).toHaveLength(1);
   });
 });

@@ -1,6 +1,7 @@
 import * as path from "path";
 import { promises as fs } from "fs";
 import * as vscode from "vscode";
+import type { LineChange } from "./staging";
 import { FileStatus, FileType } from "@checkpointvcs/daemon";
 import type { File } from "@checkpointvcs/daemon";
 import { pollJob, type DaemonClient, type JobResult } from "./daemon";
@@ -951,6 +952,86 @@ export class CheckpointRepository implements vscode.Disposable {
       );
     }
     await this.refresh();
+  }
+
+  /**
+   * Stages explicit content for one file: the baseline with some blocks
+   * applied, as produced by the diff-editor staging flows.
+   */
+  public async stageContent(
+    relPath: string,
+    content: string,
+    branchName?: string,
+  ): Promise<void> {
+    try {
+      const client = await this.model.getClient();
+      await client.workspaces.pending.stageContent.mutate({
+        daemonId: this.daemonId,
+        workspaceId: this.workspaceId,
+        path: relPath,
+        content,
+        ...(branchName ? { branchName } : {}),
+      });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Checkpoint: stage failed. ${errorMessage(error)}`,
+      );
+    }
+    await this.refresh();
+  }
+
+  /**
+   * Writes content back to the working tree.
+   *
+   * Used by the revert flows, which differ from staging in exactly this way:
+   * staging records content without touching the tree, reverting changes the
+   * tree itself.
+   */
+  public async writeWorkingTree(
+    document: vscode.TextDocument,
+    content: string,
+  ): Promise<void> {
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(
+      document.uri,
+      new vscode.Range(
+        new vscode.Position(0, 0),
+        document.lineAt(document.lineCount - 1).range.end,
+      ),
+      content,
+    );
+    await vscode.workspace.applyEdit(edit);
+    await document.save();
+    await this.refresh();
+  }
+
+  /** Context-free changed regions for a file, computed by the daemon. */
+  public async getLineChanges(
+    relPath: string,
+  ): Promise<{ changes: LineChange[]; isBinary: boolean } | undefined> {
+    try {
+      const client = await this.model.getClient();
+      return await client.workspaces.pending.getLineChanges.query({
+        daemonId: this.daemonId,
+        workspaceId: this.workspaceId,
+        path: relPath,
+      });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Checkpoint: could not diff "${relPath}". ${errorMessage(error)}`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * The branch a file's claim names, when it has one.
+   *
+   * Used so staging a second block of an already-staged file keeps it in the
+   * bucket it is already destined for rather than silently moving it.
+   */
+  public claimBranchFor(relPath: string): string | undefined {
+    return this.pendingFiles.get(relPath)?.claims[0]?.branchName;
   }
 
   /** Unstage files. Leaves their claims alone. */

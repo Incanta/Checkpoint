@@ -118,3 +118,40 @@ export function applyHunks(
 export function isFullySelected(hunks: Hunk[], selected: Set<number>): boolean {
   return hunks.length > 0 && hunks.every((h) => selected.has(h.index));
 }
+
+/**
+ * A single changed region, with no surrounding context, in the shape VS Code's
+ * diff APIs use.
+ *
+ * Distinct from {@link computeHunks}, which keeps three lines of context
+ * because that reads better in an interactive terminal prompt. Editor-driven
+ * staging wants the opposite: exactly the changed lines, one entry per change,
+ * so a selection can be intersected with them precisely.
+ *
+ * Line numbers are 1-based. An end of 0 means "no lines on this side": an
+ * insertion has originalEndLineNumber 0, a deletion has modifiedEndLineNumber 0.
+ */
+export interface LineChange {
+  originalStartLineNumber: number;
+  originalEndLineNumber: number;
+  modifiedStartLineNumber: number;
+  modifiedEndLineNumber: number;
+}
+
+export function computeLineChanges(
+  head: string,
+  worktree: string,
+): LineChange[] {
+  const patch = structuredPatch("head", "worktree", head, worktree, "", "", {
+    context: 0,
+  });
+
+  return patch.hunks.map((h) => ({
+    // For an insertion jsdiff reports the 1-based line the content goes at,
+    // while this shape wants the count of original lines before it.
+    originalStartLineNumber: h.oldLines === 0 ? h.oldStart - 1 : h.oldStart,
+    originalEndLineNumber: h.oldLines === 0 ? 0 : h.oldStart + h.oldLines - 1,
+    modifiedStartLineNumber: h.newLines === 0 ? h.newStart - 1 : h.newStart,
+    modifiedEndLineNumber: h.newLines === 0 ? 0 : h.newStart + h.newLines - 1,
+  }));
+}

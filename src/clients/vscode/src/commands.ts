@@ -10,6 +10,14 @@ import {
   errorMessage,
 } from "./repository";
 import { relativeWorkspacePath } from "./util";
+import {
+  applyLineChanges,
+  intersectDiffWithRange,
+  invertLineChange,
+  toLineRanges,
+  type DiffEditorSelectionHunkToolbarContext,
+  type LineChange,
+} from "./staging";
 
 function isSourceControl(arg: unknown): arg is vscode.SourceControl {
   return (
@@ -226,6 +234,292 @@ export function registerCommands(model: CheckpointModel): vscode.Disposable {
       return;
     }
     await resources[0].repository.revert(resources);
+  });
+
+  // ── Line-range staging ────────────────────────────────────────────
+  //
+  // Mirrors the built-in git extension's Stage Change / Stage Selected Ranges
+  // flows. All of them end the same way: produce the baseline content with
+  // some changes applied, and hand that string to the daemon. Checkpoint's
+  // staged-blob store keeps content, not hunk selections, so nothing here has
+  // to be persisted as a selection.
+
+  /**
+   * Opens both sides of a file's diff: the workspace baseline (a checkpoint:
+   * document) and the working-tree file.
+   */
+  async function openDiffSides(
+    repository: CheckpointRepository,
+    relPath: string,
+  ): Promise<
+    { original: vscode.TextDocument; modified: vscode.TextDocument } | undefined
+  > {
+    try {
+      const original = await vscode.workspace.openTextDocument(
+        headUri(repository.root, relPath),
+      );
+      const modified = await vscode.workspace.openTextDocument(
+        vscode.Uri.file(path.join(repository.root, relPath)),
+      );
+      return { original, modified };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Applies `changes` to the baseline and stages the result. */
+  async function stageLineChanges(
+    repository: CheckpointRepository,
+    relPath: string,
+    changes: LineChange[],
+  ): Promise<void> {
+    const sides = await openDiffSides(repository, relPath);
+    if (!sides) {
+      return;
+    }
+    await repository.stageContent(
+      relPath,
+      applyLineChanges(sides.original, sides.modified, changes),
+      resolveBucketFor(repository, relPath),
+    );
+  }
+
+  /**
+   * Which bucket a file's staged content belongs to.
+   *
+   * A file already staged somewhere keeps that destination, so staging a
+   * second block does not silently move the first one. Otherwise the default
+   * applies, which is the workspace's domain root.
+   */
+  function resolveBucketFor(
+    repository: CheckpointRepository,
+    relPath: string,
+  ): string | undefined {
+    return repository.claimBranchFor(relPath);
+  }
+
+  /**
+   * Reverts `changes` by writing the baseline back over them in the working
+   * tree. Unlike staging, this does change the file on disk.
+   */
+  async function revertLineChanges(
+    repository: CheckpointRepository,
+    relPath: string,
+    changes: LineChange[],
+  ): Promise<void> {
+    const sides = await openDiffSides(repository, relPath);
+    if (!sides) {
+      return;
+    }
+    const inverted = changes.map(invertLineChange);
+    const result = applyLineChanges(sides.modified, sides.original, inverted);
+    await repository.writeWorkingTree(sides.modified, result);
+  }
+
+  /** The line changes for a file, computed by the daemon. */
+  async function lineChangesFor(
+    repository: CheckpointRepository,
+    relPath: string,
+  ): Promise<LineChange[] | undefined> {
+    const result = await repository.getLineChanges(relPath);
+    if (!result || result.isBinary) {
+      return undefined;
+    }
+    return result.changes;
+  }
+
+  /**
+   * Stage Change: the inline change widget VS Code renders from our
+   * quickDiffProvider. It hands us the full change list plus which one was
+   * clicked, so there is nothing to compute.
+   */
+  register("checkpoint.stageChange", async (...args) => {
+    const uri = args[0];
+    const changes = args[1] as LineChange[] | undefined;
+    const index = args[2] as number | undefined;
+    if (
+      !(uri instanceof vscode.Uri) ||
+      !changes ||
+      index === undefined ||
+      !changes[index]
+    ) {
+      return;
+    }
+
+    const repository = await resolveRepository(uri);
+    if (!repository) {
+      return;
+    }
+
+    await stageLineChanges(
+      repository,
+      relativeWorkspacePath(repository.root, uri.fsPath),
+      [changes[index]!],
+    );
+  });
+
+  /** Revert Change: the same widget's discard action. */
+  register("checkpoint.revertChange", async (...args) => {
+    const uri = args[0];
+    const changes = args[1] as LineChange[] | undefined;
+    const index = args[2] as number | undefined;
+    if (
+      !(uri instanceof vscode.Uri) ||
+      !changes ||
+      index === undefined ||
+      !changes[index]
+    ) {
+      return;
+    }
+
+    const repository = await resolveRepository(uri);
+    if (!repository) {
+      return;
+    }
+
+    await revertLineChanges(
+      repository,
+      relativeWorkspacePath(repository.root, uri.fsPath),
+      [changes[index]!],
+    );
+  });
+
+  /** Stage Selected Ranges: every change the selection touches. */
+  register("checkpoint.stageSelectedRanges", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      return;
+    }
+
+    const repository = await resolveRepository(editor.document.uri);
+    if (!repository || !repository.containsUri(editor.document.uri)) {
+      return;
+    }
+
+    const relPath = relativeWorkspacePath(
+      repository.root,
+      editor.document.uri.fsPath,
+    );
+    const changes = await lineChangesFor(repository, relPath);
+    if (!changes) {
+      return;
+    }
+
+    const selectedLines = toLineRanges(editor.selections, editor.document);
+    const selected = changes
+      .map((change) =>
+        selectedLines.reduce<LineChange | null>(
+          (result, range) =>
+            result ?? intersectDiffWithRange(editor.document, change, range),
+          null,
+        ),
+      )
+      .filter((c): c is LineChange => c !== null);
+
+    if (selected.length === 0) {
+      void vscode.window.showInformationMessage(
+        "Checkpoint: the selection does not contain any changes.",
+      );
+      return;
+    }
+
+    await stageLineChanges(repository, relPath, selected);
+  });
+
+  /** Revert Selected Ranges: discards those changes in the working tree. */
+  register("checkpoint.revertSelectedRanges", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      return;
+    }
+
+    const repository = await resolveRepository(editor.document.uri);
+    if (!repository || !repository.containsUri(editor.document.uri)) {
+      return;
+    }
+
+    const relPath = relativeWorkspacePath(
+      repository.root,
+      editor.document.uri.fsPath,
+    );
+    const changes = await lineChangesFor(repository, relPath);
+    if (!changes) {
+      return;
+    }
+
+    const selectedLines = toLineRanges(editor.selections, editor.document);
+    const selected = changes
+      .map((change) =>
+        selectedLines.reduce<LineChange | null>(
+          (result, range) =>
+            result ?? intersectDiffWithRange(editor.document, change, range),
+          null,
+        ),
+      )
+      .filter((c): c is LineChange => c !== null);
+
+    if (selected.length === 0) {
+      void vscode.window.showInformationMessage(
+        "Checkpoint: the selection does not contain any changes.",
+      );
+      return;
+    }
+
+    const confirmed = await vscode.window.showWarningMessage(
+      `Discard ${selected.length} change(s) in ${relPath}?`,
+      { modal: true },
+      "Discard",
+    );
+    if (confirmed !== "Discard") {
+      return;
+    }
+
+    await revertLineChanges(repository, relPath, selected);
+  });
+
+  /**
+   * Stage Block / Stage Selection, from the diff editor's gutter toolbar.
+   *
+   * VS Code hands over `originalWithModifiedChanges`: the baseline with that
+   * block already applied. That is precisely what the staged-blob store wants,
+   * so this path does no diff arithmetic at all.
+   *
+   * NOTE: the gutter menus these are wired to (`diffEditor/gutter/hunk` and
+   * `diffEditor/gutter/selection`) are a PROPOSED VS Code API
+   * (`contribDiffEditorGutterToolBarMenus`), as is `TextEditor.diffInformation`.
+   * The built-in git extension can use them because it ships inside VS Code.
+   * These commands therefore only surface when the extension runs with
+   * proposed APIs enabled; the Stage Change and Stage Selected Ranges flows
+   * above are on stable API and work everywhere.
+   */
+  async function stageFromDiffToolbar(arg: unknown): Promise<void> {
+    const context = arg as DiffEditorSelectionHunkToolbarContext | undefined;
+    if (!context?.modifiedUri || context.modifiedUri.scheme !== "file") {
+      return;
+    }
+
+    const repository = await resolveRepository(context.modifiedUri);
+    if (!repository || !repository.containsUri(context.modifiedUri)) {
+      return;
+    }
+
+    const relPath = relativeWorkspacePath(
+      repository.root,
+      context.modifiedUri.fsPath,
+    );
+    await repository.stageContent(
+      relPath,
+      context.originalWithModifiedChanges,
+      resolveBucketFor(repository, relPath),
+    );
+  }
+
+  register("checkpoint.diff.stageHunk", async (...args) => {
+    await stageFromDiffToolbar(args[0]);
+  });
+
+  register("checkpoint.diff.stageSelection", async (...args) => {
+    await stageFromDiffToolbar(args[0]);
   });
 
   register("checkpoint.stage", async (...args) => {

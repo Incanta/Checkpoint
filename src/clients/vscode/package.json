@@ -20,6 +20,10 @@
   "engines": {
     "vscode": "^1.96.0"
   },
+  "//enabledApiProposals": "The diffEditor/gutter/* menus that surface Stage Block and Stage Selection are gated behind a PROPOSED VS Code API. Extensions using proposed APIs cannot be published to the Marketplace, so this is commented out by name: rename to enabledApiProposals and run with --enable-proposed-api=checkpointvcs.checkpoint to get the gutter buttons. Stage Change, Revert Change, and Stage/Revert Selected Ranges are all on stable API and need none of this.",
+  "//proposals": [
+    "contribDiffEditorGutterToolBarMenus"
+  ],
   "categories": [
     "SCM Providers"
   ],
@@ -98,6 +102,40 @@
         "title": "Revert Changes",
         "category": "Checkpoint",
         "icon": "$(discard)"
+      },
+      {
+        "command": "checkpoint.stageChange",
+        "title": "Stage Change",
+        "category": "Checkpoint",
+        "icon": "$(add)"
+      },
+      {
+        "command": "checkpoint.revertChange",
+        "title": "Revert Change",
+        "category": "Checkpoint",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "checkpoint.stageSelectedRanges",
+        "title": "Stage Selected Ranges",
+        "category": "Checkpoint"
+      },
+      {
+        "command": "checkpoint.revertSelectedRanges",
+        "title": "Revert Selected Ranges",
+        "category": "Checkpoint"
+      },
+      {
+        "command": "checkpoint.diff.stageHunk",
+        "title": "Stage Block",
+        "category": "Checkpoint",
+        "icon": "$(plus)"
+      },
+      {
+        "command": "checkpoint.diff.stageSelection",
+        "title": "Stage Selection",
+        "category": "Checkpoint",
+        "icon": "$(plus)"
       },
       {
         "command": "checkpoint.stage",
@@ -193,6 +231,30 @@
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "checkpoint.stageChange",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.revertChange",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.diff.stageHunk",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.diff.stageSelection",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.stageSelectedRanges",
+          "when": "checkpoint.enabled"
+        },
+        {
+          "command": "checkpoint.revertSelectedRanges",
+          "when": "checkpoint.enabled"
+        },
         {
           "command": "checkpoint.refresh",
           "when": "checkpoint.enabled"
@@ -317,6 +379,54 @@
           "command": "checkpoint.markForAdd",
           "group": "1_modification",
           "when": "scmProvider == checkpoint && scmResourceGroup == local"
+        }
+      ],
+      "scm/change/title": [
+        {
+          "command": "checkpoint.stageChange",
+          "when": "checkpoint.enabled && originalResource =~ /^checkpoint\\:.*%22type%22%3A%22head%22/"
+        },
+        {
+          "command": "checkpoint.revertChange",
+          "when": "checkpoint.enabled && originalResource =~ /^checkpoint\\:.*%22type%22%3A%22head%22/"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "checkpoint.stageSelectedRanges",
+          "group": "2_checkpoint@1",
+          "when": "checkpoint.enabled && isInDiffEditor && isInDiffRightEditor && !isEmbeddedDiffEditor && resourceScheme == file"
+        },
+        {
+          "command": "checkpoint.revertSelectedRanges",
+          "group": "2_checkpoint@2",
+          "when": "checkpoint.enabled && isInDiffEditor && isInDiffRightEditor && !isEmbeddedDiffEditor && resourceScheme == file"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "checkpoint.stageSelectedRanges",
+          "group": "2_checkpoint@1",
+          "when": "checkpoint.enabled && isInDiffEditor && isInDiffRightEditor && !isEmbeddedDiffEditor && resourceScheme == file"
+        },
+        {
+          "command": "checkpoint.revertSelectedRanges",
+          "group": "2_checkpoint@2",
+          "when": "checkpoint.enabled && isInDiffEditor && isInDiffRightEditor && !isEmbeddedDiffEditor && resourceScheme == file"
+        }
+      ],
+      "diffEditor/gutter/hunk": [
+        {
+          "command": "checkpoint.diff.stageHunk",
+          "group": "primary@10",
+          "when": "checkpoint.enabled && diffEditorOriginalUri =~ /^checkpoint\\:.*%22type%22%3A%22head%22/"
+        }
+      ],
+      "diffEditor/gutter/selection": [
+        {
+          "command": "checkpoint.diff.stageSelection",
+          "group": "primary@10",
+          "when": "checkpoint.enabled && diffEditorOriginalUri =~ /^checkpoint\\:.*%22type%22%3A%22head%22/"
         }
       ],
       "scm/resourceState/context": [

@@ -22,6 +22,7 @@ import { JobManager } from "../../../job-manager.js";
 import { DaemonManager } from "../../../daemon-manager.js";
 import {
   computeHunks,
+  computeLineChanges,
   applyHunks,
   isFullySelected,
 } from "../../../util/hunks.js";
@@ -856,6 +857,119 @@ export const pendingRouter = router({
       }
 
       return { hunks, staged, isBinary: false };
+    }),
+
+  /**
+   * The changed regions between baseline and working tree, context-free, in
+   * the shape the editor's staging flows use.
+   *
+   * Separate from getHunks, which keeps context for terminal display.
+   */
+  getLineChanges: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        path: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { workspace } = resolveWorkspace(ctx, input);
+      const relPath = normalizeRelPath(input.path);
+
+      if (
+        isBinaryFile(
+          relPath,
+          await getBinaryExtensions(input.daemonId, workspace.repoId),
+        )
+      ) {
+        return { changes: [], isBinary: true };
+      }
+
+      const sides = await readHeadAndWorktree(
+        input.daemonId,
+        workspace,
+        relPath,
+      );
+      if (!sides) {
+        return { changes: [], isBinary: false };
+      }
+
+      return {
+        changes: computeLineChanges(sides.head, sides.worktree),
+        isBinary: false,
+      };
+    }),
+
+  /**
+   * Stages explicit content for a text file.
+   *
+   * This is the primitive the editor-driven flows use: VS Code hands back
+   * "the baseline with these blocks applied" as a string, so there is no hunk
+   * arithmetic to redo on this side. `stageHunks` is the same operation with
+   * the content computed here instead.
+   *
+   * Content equal to the working tree means the file is fully staged and
+   * needs no blob, because submit already reads the tree off disk.
+   */
+  stageContent: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        path: z.string(),
+        /** The file as it should be submitted. */
+        content: z.string(),
+        branchName: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { manager, workspace } = resolveWorkspace(ctx, input);
+      const relPath = normalizeRelPath(input.path);
+
+      if (
+        isBinaryFile(
+          relPath,
+          await getBinaryExtensions(input.daemonId, workspace.repoId),
+        )
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `"${relPath}" is binary and stages whole-file.`,
+        });
+      }
+
+      const sides = await readHeadAndWorktree(
+        input.daemonId,
+        workspace,
+        relPath,
+      );
+
+      if (sides && input.content === sides.head) {
+        // Staging the baseline back is an unstage: there is nothing to submit.
+        await clearStagedBlob(workspace.localPath, relPath);
+        await manager.unstage(workspace, [relPath]);
+        return { success: true, partial: false, staged: false };
+      }
+
+      const partial = !sides || input.content !== sides.worktree;
+
+      if (partial) {
+        await writeStagedBlob(workspace.localPath, relPath, input.content);
+      } else {
+        await clearStagedBlob(workspace.localPath, relPath);
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+      await client.file.checkout.mutate({
+        repoId: workspace.repoId,
+        workspaceId: workspace.id,
+        filePath: relPath,
+        branchName: input.branchName ?? workspace.domainBranchName,
+      });
+      await manager.stage(workspace, [relPath]);
+
+      return { success: true, partial, staged: true };
     }),
 
   /**
