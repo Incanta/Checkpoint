@@ -113,7 +113,7 @@ export function DeleteEntityModal(props: DeleteEntityModalProps) {
                     {orgName}
                   </strong>{" "}
                   organization and all of its repositories, stored data, issues,
-                  pull requests, and comments.
+                  merge requests, and comments.
                 </>
               ) : (
                 <>
@@ -121,7 +121,7 @@ export function DeleteEntityModal(props: DeleteEntityModalProps) {
                   <strong className="text-[var(--color-text-primary)]">
                     {displayName}
                   </strong>{" "}
-                  repository, stored data, issues, pull requests, and comments.
+                  repository, stored data, issues, merge requests, and comments.
                 </>
               )}
             </p>

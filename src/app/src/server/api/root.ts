@@ -11,7 +11,7 @@ import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 import { workspaceRouter } from "./routers/workspace";
 import { versionRouter } from "./routers/version";
 import { labelRouter } from "./routers/label";
-import { pullRequestRouter } from "./routers/pullRequest";
+import { mergeRequestRouter } from "./routers/mergeRequest";
 import { licenseRouter } from "./routers/license";
 import { issueRouter } from "./routers/issue";
 import { issueTrackerRouter } from "./routers/issue-tracker";
@@ -46,7 +46,7 @@ export const appRouter = createTRPCRouter({
   workspace: workspaceRouter,
   version: versionRouter,
   label: labelRouter,
-  pullRequest: pullRequestRouter,
+  mergeRequest: mergeRequestRouter,
   license: licenseRouter,
   issue: issueRouter,
   issueTracker: issueTrackerRouter,

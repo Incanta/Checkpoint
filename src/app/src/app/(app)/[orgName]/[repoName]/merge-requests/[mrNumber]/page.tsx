@@ -90,15 +90,15 @@ const FILE_TYPE_COLOR: Record<string, "success" | "warning" | "danger"> = {
 };
 
 // ── Main page ──────────────────────────────────────────────────
-export default function PullRequestDetailPage() {
+export default function MergeRequestDetailPage() {
   const params = useParams<{
     orgName: string;
     repoName: string;
-    prNumber: string;
+    mrNumber: string;
   }>();
   const orgName = decodeURIComponent(params.orgName);
   const repoName = decodeURIComponent(params.repoName);
-  const prNumber = parseInt(params.prNumber, 10);
+  const mrNumber = parseInt(params.mrNumber, 10);
   const router = useRouter();
   const { data: session } = useSession();
   const utils = api.useUtils();
@@ -111,44 +111,44 @@ export default function PullRequestDetailPage() {
     (r: { name: string }) => r.name === repoName,
   );
 
-  const { data: pr, isLoading } = api.pullRequest.get.useQuery(
-    { repoId: repoData?.id ?? "", number: prNumber },
+  const { data: mr, isLoading } = api.mergeRequest.get.useQuery(
+    { repoId: repoData?.id ?? "", number: mrNumber },
     { enabled: !!repoData?.id },
   );
 
-  const { data: isSubscribed } = api.pullRequest.isSubscribed.useQuery(
-    { pullRequestId: pr?.id ?? "" },
-    { enabled: !!pr?.id },
+  const { data: isSubscribed } = api.mergeRequest.isSubscribed.useQuery(
+    { mergeRequestId: mr?.id ?? "" },
+    { enabled: !!mr?.id },
   );
 
   useDocumentTitle(
-    pr
-      ? `${pr.title} #${pr.number} · ${repoName} in ${orgName}`
-      : `PR #${prNumber} · ${repoName}`,
+    mr
+      ? `${mr.title} #${mr.number} · ${repoName} in ${orgName}`
+      : `MR #${mrNumber} · ${repoName}`,
   );
 
   const [activeTab, setActiveTab] = useState<
     "discussion" | "history" | "changes"
   >("discussion");
 
-  const invalidatePr = () => {
-    void utils.pullRequest.get.invalidate();
-    void utils.pullRequest.list.invalidate();
-    void utils.pullRequest.countOpen.invalidate();
+  const invalidateMr = () => {
+    void utils.mergeRequest.get.invalidate();
+    void utils.mergeRequest.list.invalidate();
+    void utils.mergeRequest.countOpen.invalidate();
   };
 
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const updatePr = api.pullRequest.update.useMutation({
-    onSuccess: invalidatePr,
+  const updateMr = api.mergeRequest.update.useMutation({
+    onSuccess: invalidateMr,
   });
-  const subscribeMut = api.pullRequest.subscribe.useMutation({
-    onSuccess: () => void utils.pullRequest.isSubscribed.invalidate(),
+  const subscribeMut = api.mergeRequest.subscribe.useMutation({
+    onSuccess: () => void utils.mergeRequest.isSubscribed.invalidate(),
   });
-  const unsubscribeMut = api.pullRequest.unsubscribe.useMutation({
-    onSuccess: () => void utils.pullRequest.isSubscribed.invalidate(),
+  const unsubscribeMut = api.mergeRequest.unsubscribe.useMutation({
+    onSuccess: () => void utils.mergeRequest.isSubscribed.invalidate(),
   });
-  const isAuthor = session?.user?.id === pr?.authorId;
+  const isAuthor = session?.user?.id === mr?.authorId;
 
   if (isLoading) {
     return (
@@ -157,9 +157,9 @@ export default function PullRequestDetailPage() {
       </div>
     );
   }
-  if (!pr) {
+  if (!mr) {
     return (
-      <EmptyState title="Not found" description="Pull request not found." />
+      <EmptyState title="Not found" description="Merge request not found." />
     );
   }
 
@@ -177,9 +177,9 @@ export default function PullRequestDetailPage() {
                   onChange={(e) => setTitleDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && titleDraft.trim()) {
-                      updatePr.mutate({
+                      updateMr.mutate({
                         repoId: repoData?.id ?? "",
-                        number: pr.number,
+                        number: mr.number,
                         title: titleDraft.trim(),
                       });
                       setEditingTitle(false);
@@ -190,12 +190,12 @@ export default function PullRequestDetailPage() {
                 />
                 <Button
                   size="sm"
-                  disabled={!titleDraft.trim() || updatePr.isPending}
+                  disabled={!titleDraft.trim() || updateMr.isPending}
                   onClick={() => {
                     if (titleDraft.trim()) {
-                      updatePr.mutate({
+                      updateMr.mutate({
                         repoId: repoData?.id ?? "",
-                        number: pr.number,
+                        number: mr.number,
                         title: titleDraft.trim(),
                       });
                       setEditingTitle(false);
@@ -214,15 +214,15 @@ export default function PullRequestDetailPage() {
               </div>
             ) : (
               <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
-                {pr.title}{" "}
+                {mr.title}{" "}
                 <span className="font-normal text-[var(--color-text-muted)]">
-                  #{pr.number}
+                  #{mr.number}
                 </span>
                 {isAuthor && (
                   <button
                     type="button"
                     onClick={() => {
-                      setTitleDraft(pr.title);
+                      setTitleDraft(mr.title);
                       setEditingTitle(true);
                     }}
                     className="ml-2 align-middle text-xs text-[var(--color-text-link)] hover:underline"
@@ -235,22 +235,22 @@ export default function PullRequestDetailPage() {
             <div className="mt-1 flex items-center gap-3 text-sm text-[var(--color-text-secondary)]">
               <Badge
                 variant={
-                  pr.status === "OPEN"
+                  mr.status === "OPEN"
                     ? "success"
-                    : pr.status === "MERGED"
+                    : mr.status === "MERGED"
                       ? "accent"
                       : "danger"
                 }
               >
-                {pr.status}
+                {mr.status}
               </Badge>
-              <span>{pr.author.name ?? pr.author.email} wants to merge</span>
+              <span>{mr.author.name ?? mr.author.email} wants to merge</span>
               <span className="font-medium text-[var(--color-text-primary)]">
-                {pr.sourceBranchName}
+                {mr.sourceBranchName}
               </span>
               <span>into</span>
               <span className="font-medium text-[var(--color-text-primary)]">
-                {pr.targetBranchName}
+                {mr.targetBranchName}
               </span>
             </div>
           </div>
@@ -280,20 +280,20 @@ export default function PullRequestDetailPage() {
 
       {activeTab === "discussion" && (
         <DiscussionTab
-          pr={pr}
+          mr={mr}
           repoId={repoData?.id ?? ""}
           session={session}
-          invalidatePr={invalidatePr}
+          invalidateMr={invalidateMr}
           router={router}
           orgName={orgName}
           repoName={repoName}
         />
       )}
       {activeTab === "history" && (
-        <HistoryTab repoId={repoData?.id ?? ""} prNumber={prNumber} />
+        <HistoryTab repoId={repoData?.id ?? ""} mrNumber={mrNumber} />
       )}
       {activeTab === "changes" && (
-        <ChangesTab repoId={repoData?.id ?? ""} prNumber={prNumber} />
+        <ChangesTab repoId={repoData?.id ?? ""} mrNumber={mrNumber} />
       )}
     </div>
   );
@@ -301,15 +301,15 @@ export default function PullRequestDetailPage() {
 
 // ── Discussion Tab ─────────────────────────────────────────────
 function DiscussionTab({
-  pr,
+  mr,
   repoId,
   session,
-  invalidatePr,
+  invalidateMr,
   router,
   orgName,
   repoName,
 }: {
-  pr: NonNullable<RouterOutputs["pullRequest"]["get"]>;
+  mr: NonNullable<RouterOutputs["mergeRequest"]["get"]>;
   repoId: string;
   session: {
     user?: {
@@ -319,7 +319,7 @@ function DiscussionTab({
       image?: string | null;
     };
   } | null;
-  invalidatePr: () => void;
+  invalidateMr: () => void;
   router: ReturnType<typeof useRouter>;
   orgName: string;
   repoName: string;
@@ -348,64 +348,64 @@ function DiscussionTab({
     };
   }>;
 
-  const addComment = api.pullRequest.addComment.useMutation({
+  const addComment = api.mergeRequest.addComment.useMutation({
     onSuccess: () => {
       setCommentBody("");
-      invalidatePr();
+      invalidateMr();
     },
   });
-  const deleteComment = api.pullRequest.deleteComment.useMutation({
-    onSuccess: invalidatePr,
+  const deleteComment = api.mergeRequest.deleteComment.useMutation({
+    onSuccess: invalidateMr,
   });
-  const updateComment = api.pullRequest.updateComment.useMutation({
+  const updateComment = api.mergeRequest.updateComment.useMutation({
     onSuccess: () => {
       setEditingCommentId(null);
-      invalidatePr();
+      invalidateMr();
     },
   });
-  const updatePr = api.pullRequest.update.useMutation({
+  const updateMr = api.mergeRequest.update.useMutation({
     onSuccess: () => {
       setEditingDesc(false);
-      invalidatePr();
+      invalidateMr();
     },
   });
-  const addReview = api.pullRequest.addReview.useMutation({
+  const addReview = api.mergeRequest.addReview.useMutation({
     onSuccess: () => {
       setReviewerEmail("");
-      invalidatePr();
+      invalidateMr();
     },
   });
-  const closePr = api.pullRequest.close.useMutation({
-    onSuccess: invalidatePr,
+  const closeMr = api.mergeRequest.close.useMutation({
+    onSuccess: invalidateMr,
   });
   const utils = api.useUtils();
-  const { data: isSubscribed } = api.pullRequest.isSubscribed.useQuery(
-    { pullRequestId: pr.id },
-    { enabled: !!pr.id },
+  const { data: isSubscribed } = api.mergeRequest.isSubscribed.useQuery(
+    { mergeRequestId: mr.id },
+    { enabled: !!mr.id },
   );
-  const subscribeMut = api.pullRequest.subscribe.useMutation({
-    onSuccess: () => void utils.pullRequest.isSubscribed.invalidate(),
+  const subscribeMut = api.mergeRequest.subscribe.useMutation({
+    onSuccess: () => void utils.mergeRequest.isSubscribed.invalidate(),
   });
-  const unsubscribeMut = api.pullRequest.unsubscribe.useMutation({
-    onSuccess: () => void utils.pullRequest.isSubscribed.invalidate(),
+  const unsubscribeMut = api.mergeRequest.unsubscribe.useMutation({
+    onSuccess: () => void utils.mergeRequest.isSubscribed.invalidate(),
   });
-  const reopenPr = api.pullRequest.reopen.useMutation({
-    onSuccess: invalidatePr,
+  const reopenMr = api.mergeRequest.reopen.useMutation({
+    onSuccess: invalidateMr,
   });
-  const mergePr = api.pullRequest.merge.useMutation({
+  const mergeMr = api.mergeRequest.merge.useMutation({
     onSuccess: () => {
-      invalidatePr();
+      invalidateMr();
     },
   });
 
   const currentUserId = session?.user?.id;
-  const approvedCount = pr.reviews.filter((r) => r.state === "APPROVED").length;
-  const hasRequestChanges = pr.reviews.some(
+  const approvedCount = mr.reviews.filter((r) => r.state === "APPROVED").length;
+  const hasRequestChanges = mr.reviews.some(
     (r) => r.state === "REQUEST_CHANGES",
   );
-  const requiredReviews = pr.repo?.requiredReviews ?? 0;
+  const requiredReviews = mr.repo?.requiredReviews ?? 0;
   const canMerge =
-    pr.status === "OPEN" &&
+    mr.status === "OPEN" &&
     !hasRequestChanges &&
     approvedCount >= requiredReviews;
 
@@ -419,23 +419,23 @@ function DiscussionTab({
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Avatar
-                  src={pr.author.image}
-                  name={pr.author.name}
-                  email={pr.author.email}
+                  src={mr.author.image}
+                  name={mr.author.name}
+                  email={mr.author.email}
                   size="sm"
                 />
                 <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                  {pr.author.name ?? pr.author.email}
+                  {mr.author.name ?? mr.author.email}
                 </span>
                 <span className="text-xs text-[var(--color-text-muted)]">
-                  {new Date(pr.createdAt).toLocaleString()}
+                  {new Date(mr.createdAt).toLocaleString()}
                 </span>
               </div>
-              {currentUserId === pr.authorId && !editingDesc && (
+              {currentUserId === mr.authorId && !editingDesc && (
                 <button
                   type="button"
                   onClick={() => {
-                    setDescDraft(pr.description ?? "");
+                    setDescDraft(mr.description ?? "");
                     setEditingDesc(true);
                   }}
                   className="text-xs text-[var(--color-text-link)] hover:underline"
@@ -464,11 +464,11 @@ function DiscussionTab({
                   </Button>
                   <Button
                     size="sm"
-                    disabled={updatePr.isPending}
+                    disabled={updateMr.isPending}
                     onClick={() =>
-                      updatePr.mutate({
+                      updateMr.mutate({
                         repoId,
-                        number: pr.number,
+                        number: mr.number,
                         description: descDraft,
                       })
                     }
@@ -477,8 +477,8 @@ function DiscussionTab({
                   </Button>
                 </div>
               </div>
-            ) : pr.description ? (
-              <MarkdownContent content={pr.description} issueLink={issueLink} />
+            ) : mr.description ? (
+              <MarkdownContent content={mr.description} issueLink={issueLink} />
             ) : (
               <p className="text-sm text-[var(--color-text-muted)] italic">
                 No description provided.
@@ -494,9 +494,9 @@ function DiscussionTab({
             <h4 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
               Reviewers
             </h4>
-            {pr.reviews.length > 0 ? (
+            {mr.reviews.length > 0 ? (
               <div className="space-y-2">
-                {pr.reviews.map((review) => {
+                {mr.reviews.map((review) => {
                   const badge =
                     REVIEW_BADGE[review.state as string] ??
                     REVIEW_BADGE.PENDING!;
@@ -518,13 +518,13 @@ function DiscussionTab({
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
                         <Badge variant={badge.variant}>{badge.label}</Badge>
-                        {pr.status === "OPEN" && review.state !== "PENDING" && (
+                        {mr.status === "OPEN" && review.state !== "PENDING" && (
                           <button
                             type="button"
                             onClick={() =>
                               addReview.mutate({
                                 repoId,
-                                prNumber: pr.number,
+                                mrNumber: mr.number,
                                 reviewerId: review.reviewerId,
                                 state: "PENDING",
                               })
@@ -547,7 +547,7 @@ function DiscussionTab({
           </Card>
 
           {/* Request review */}
-          {pr.status === "OPEN" && (
+          {mr.status === "OPEN" && (
             <Card>
               <h4 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
                 Request review
@@ -559,10 +559,10 @@ function DiscussionTab({
               >
                 <option value="">Select member…</option>
                 {members
-                  .filter((m) => m.user.id !== pr.authorId)
+                  .filter((m) => m.user.id !== mr.authorId)
                   .filter(
                     (m) =>
-                      !pr.reviews.some(
+                      !mr.reviews.some(
                         (r) =>
                           r.reviewerId === m.user.id && r.state === "PENDING",
                       ),
@@ -581,7 +581,7 @@ function DiscussionTab({
                   if (!reviewerEmail) return;
                   addReview.mutate({
                     repoId,
-                    prNumber: pr.number,
+                    mrNumber: mr.number,
                     reviewerId: reviewerEmail,
                     state: "PENDING",
                   });
@@ -598,9 +598,9 @@ function DiscussionTab({
           )}
 
           {/* Submit your review */}
-          {pr.status === "OPEN" &&
+          {mr.status === "OPEN" &&
             currentUserId &&
-            currentUserId !== pr.authorId && (
+            currentUserId !== mr.authorId && (
               <Card>
                 <h4 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
                   Your review
@@ -612,7 +612,7 @@ function DiscussionTab({
                     onClick={() =>
                       addReview.mutate({
                         repoId,
-                        prNumber: pr.number,
+                        mrNumber: mr.number,
                         reviewerId: currentUserId,
                         state: "APPROVED",
                       })
@@ -628,7 +628,7 @@ function DiscussionTab({
                     onClick={() =>
                       addReview.mutate({
                         repoId,
-                        prNumber: pr.number,
+                        mrNumber: mr.number,
                         reviewerId: currentUserId,
                         state: "REQUEST_CHANGES",
                       })
@@ -649,11 +649,11 @@ function DiscussionTab({
             <button
               type="button"
               onClick={() => {
-                if (!pr) return;
+                if (!mr) return;
                 if (isSubscribed) {
-                  unsubscribeMut.mutate({ pullRequestId: pr.id });
+                  unsubscribeMut.mutate({ mergeRequestId: mr.id });
                 } else {
-                  subscribeMut.mutate({ pullRequestId: pr.id });
+                  subscribeMut.mutate({ mergeRequestId: mr.id });
                 }
               }}
               disabled={subscribeMut.isPending || unsubscribeMut.isPending}
@@ -667,7 +667,7 @@ function DiscussionTab({
             </button>
             <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
               {isSubscribed
-                ? "You\u2019re receiving notifications for this PR."
+                ? "You\u2019re receiving notifications for this MR."
                 : "Subscribe to get notified of updates."}
             </p>
           </Card>
@@ -675,7 +675,7 @@ function DiscussionTab({
       </div>
 
       {/* Comments, full width below */}
-      {pr.comments.map((comment) => (
+      {mr.comments.map((comment) => (
         <Card key={comment.id}>
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -774,22 +774,22 @@ function DiscussionTab({
           className="w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)]"
         />
         <div className="mt-2 flex justify-end gap-2">
-          {pr.status === "OPEN" && (
+          {mr.status === "OPEN" && (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => closePr.mutate({ repoId, number: pr.number })}
-              disabled={closePr.isPending}
+              onClick={() => closeMr.mutate({ repoId, number: mr.number })}
+              disabled={closeMr.isPending}
             >
-              Close pull request
+              Close merge request
             </Button>
           )}
-          {pr.status === "CLOSED" && (
+          {mr.status === "CLOSED" && (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => reopenPr.mutate({ repoId, number: pr.number })}
-              disabled={reopenPr.isPending}
+              onClick={() => reopenMr.mutate({ repoId, number: mr.number })}
+              disabled={reopenMr.isPending}
             >
               Reopen
             </Button>
@@ -801,7 +801,7 @@ function DiscussionTab({
               if (!commentBody.trim()) return;
               addComment.mutate({
                 repoId,
-                prNumber: pr.number,
+                mrNumber: mr.number,
                 body: commentBody.trim(),
               });
             }}
@@ -817,7 +817,7 @@ function DiscussionTab({
       </Card>
 
       {/* Merge area */}
-      {pr.status === "OPEN" && (
+      {mr.status === "OPEN" && (
         <Card
           className={
             canMerge
@@ -842,28 +842,28 @@ function DiscussionTab({
             </div>
             <Button
               size="sm"
-              disabled={!canMerge || mergePr.isPending}
-              onClick={() => mergePr.mutate({ repoId, number: pr.number })}
+              disabled={!canMerge || mergeMr.isPending}
+              onClick={() => mergeMr.mutate({ repoId, number: mr.number })}
             >
-              {mergePr.isPending ? "Merging…" : "Squash and merge"}
+              {mergeMr.isPending ? "Merging…" : "Squash and merge"}
             </Button>
           </div>
-          {mergePr.error && (
+          {mergeMr.error && (
             <p className="mt-2 text-xs text-[var(--color-danger)]">
-              {mergePr.error.message}
+              {mergeMr.error.message}
             </p>
           )}
         </Card>
       )}
 
-      {pr.status === "MERGED" && (
+      {mr.status === "MERGED" && (
         <Card className="border-[var(--color-accent)]/30">
           <p className="text-sm text-[var(--color-text-secondary)]">
-            This pull request was merged on{" "}
+            This merge request was merged on{" "}
             <span className="font-medium text-[var(--color-text-primary)]">
-              {pr.mergedAt ? new Date(pr.mergedAt).toLocaleString() : "unknown"}
+              {mr.mergedAt ? new Date(mr.mergedAt).toLocaleString() : "unknown"}
             </span>
-            . Branch <span className="font-medium">{pr.sourceBranchName}</span>{" "}
+            . Branch <span className="font-medium">{mr.sourceBranchName}</span>{" "}
             has been deleted.
           </p>
         </Card>
@@ -875,14 +875,14 @@ function DiscussionTab({
 // ── History Tab ───────────────────────────────────────────────
 function HistoryTab({
   repoId,
-  prNumber,
+  mrNumber,
 }: {
   repoId: string;
-  prNumber: number;
+  mrNumber: number;
 }) {
   const { data: changelists, isLoading } =
-    api.pullRequest.getChangelists.useQuery(
-      { repoId, prNumber },
+    api.mergeRequest.getChangelists.useQuery(
+      { repoId, mrNumber },
       { enabled: !!repoId },
     );
 
@@ -900,7 +900,7 @@ function HistoryTab({
     return (
       <EmptyState
         title="No changelists"
-        description="No changelists found for this pull request."
+        description="No changelists found for this merge request."
       />
     );
   }
@@ -1148,13 +1148,13 @@ function FileDiff({
 // ── Changes Tab ──────────────────────────────────────────────
 function ChangesTab({
   repoId,
-  prNumber,
+  mrNumber,
 }: {
   repoId: string;
-  prNumber: number;
+  mrNumber: number;
 }) {
-  const { data, isLoading } = api.pullRequest.getChangedFiles.useQuery(
-    { repoId, prNumber },
+  const { data, isLoading } = api.mergeRequest.getChangedFiles.useQuery(
+    { repoId, mrNumber },
     { enabled: !!repoId },
   );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -1171,7 +1171,7 @@ function ChangesTab({
     return (
       <EmptyState
         title="No changes"
-        description="No file changes found for this pull request."
+        description="No file changes found for this merge request."
       />
     );
   }

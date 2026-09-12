@@ -133,9 +133,9 @@ const TABLE_ORDER = [
   "FileCheckout",
   "ApiToken",
   "OrgUserActivity",
-  "PullRequest",
-  "PullRequestComment",
-  "PullRequestReview",
+  "MergeRequest",
+  "MergeRequestComment",
+  "MergeRequestReview",
   "MergePermission",
   "Shelf",
   "ShelfFileChange",
@@ -146,7 +146,7 @@ const TABLE_ORDER = [
   "IssueAssignee",
   "Notification",
   "IssueSubscription",
-  "PullRequestSubscription",
+  "MergeRequestSubscription",
 ];
 
 // ---------------------------------------------------------------------------

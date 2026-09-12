@@ -34,9 +34,9 @@ model User {
   createdBranches   Branch[]          @relation("BranchCreator")
   activity          OrgUserActivity[]
 
-  pullRequests     PullRequest[]
-  prComments       PullRequestComment[]
-  prReviews        PullRequestReview[]
+  mergeRequests    MergeRequest[]
+  mrComments       MergeRequestComment[]
+  mrReviews        MergeRequestReview[]
   mergePermissions MergePermission[]
 
   issues           Issue[]
@@ -48,10 +48,10 @@ model User {
   changelistComments ChangelistComment[]
   claimEvents        FileClaimEvent[]
 
-  notifications      Notification[]            @relation("NotificationRecipient")
-  actedNotifications Notification[]            @relation("NotificationActor")
+  notifications      Notification[]             @relation("NotificationRecipient")
+  actedNotifications Notification[]             @relation("NotificationActor")
   issueSubscriptions IssueSubscription[]
-  prSubscriptions    PullRequestSubscription[]
+  mrSubscriptions    MergeRequestSubscription[]
 
   // Auth
   accounts Account[]
@@ -247,7 +247,7 @@ model Repo {
   labels           ChangelistLabel[]
   workspaces       Workspace[]
   fileClaims       FileClaim[]
-  pullRequests     PullRequest[]
+  mergeRequests    MergeRequest[]
   mergePermissions MergePermission[]
   issues           Issue[]
   issueLabels      IssueLabel[]
@@ -746,13 +746,13 @@ model OrgUserActivity {
   @@index([orgId, year, month])
 }
 
-enum PullRequestStatus {
+enum MergeRequestStatus {
   OPEN
   MERGED
   CLOSED
 }
 
-model PullRequest {
+model MergeRequest {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -762,7 +762,7 @@ model PullRequest {
   title       String
   description String @default("")
 
-  status   PullRequestStatus @default(OPEN)
+  status   MergeRequestStatus @default(OPEN)
   mergedAt DateTime?
   closedAt DateTime?
 
@@ -775,24 +775,24 @@ model PullRequest {
   author   User   @relation(fields: [authorId], references: [id])
   authorId String
 
-  comments      PullRequestComment[]
-  reviews       PullRequestReview[]
-  subscriptions PullRequestSubscription[]
+  comments      MergeRequestComment[]
+  reviews       MergeRequestReview[]
+  subscriptions MergeRequestSubscription[]
   notifications Notification[]
 
   @@unique([repoId, number])
   @@index([repoId, status])
 }
 
-model PullRequestComment {
+model MergeRequestComment {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   body String
 
-  pullRequest   PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
-  pullRequestId String
+  mergeRequest   MergeRequest @relation(fields: [mergeRequestId], references: [id], onDelete: Cascade)
+  mergeRequestId String
 
   author   User   @relation(fields: [authorId], references: [id])
   authorId String
@@ -804,20 +804,20 @@ enum ReviewState {
   APPROVED
 }
 
-model PullRequestReview {
+model MergeRequestReview {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   state ReviewState @default(PENDING)
 
-  pullRequest   PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
-  pullRequestId String
+  mergeRequest   MergeRequest @relation(fields: [mergeRequestId], references: [id], onDelete: Cascade)
+  mergeRequestId String
 
   reviewer   User   @relation(fields: [reviewerId], references: [id])
   reviewerId String
 
-  @@unique([pullRequestId, reviewerId])
+  @@unique([mergeRequestId, reviewerId])
 }
 
 enum LicenseTier {
@@ -1088,7 +1088,7 @@ model OrgStoragePeak {
 
 model Notification {
   id    String @id @default(cuid())
-  type  String // e.g. "issue_comment", "issue_mention", "pr_review", etc.
+  type  String // e.g. "issue_comment", "issue_mention", "mr_review", etc.
   title String
   body  String @default("")
   link  String // relative URL to navigate to
@@ -1104,8 +1104,8 @@ model Notification {
   issue   Issue?  @relation(fields: [issueId], references: [id], onDelete: Cascade)
   issueId String?
 
-  pullRequest   PullRequest? @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
-  pullRequestId String?
+  mergeRequest   MergeRequest? @relation(fields: [mergeRequestId], references: [id], onDelete: Cascade)
+  mergeRequestId String?
 
   createdAt DateTime @default(now())
 
@@ -1127,18 +1127,18 @@ model IssueSubscription {
   @@unique([issueId, userId])
 }
 
-model PullRequestSubscription {
+model MergeRequestSubscription {
   id String @id @default(cuid())
 
-  pullRequest   PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
-  pullRequestId String
+  mergeRequest   MergeRequest @relation(fields: [mergeRequestId], references: [id], onDelete: Cascade)
+  mergeRequestId String
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String
 
   createdAt DateTime @default(now())
 
-  @@unique([pullRequestId, userId])
+  @@unique([mergeRequestId, userId])
 }
 
 // better-auth models

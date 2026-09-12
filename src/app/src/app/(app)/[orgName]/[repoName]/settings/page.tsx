@@ -184,7 +184,7 @@ function IssueTrackerCard({ repoId }: { repoId: string }) {
           <p className="mb-1.5 text-xs text-[var(--color-text-muted)]">
             Where issues for this repository are tracked. External platforms
             show a read-only list that links to the tracker, and issue mentions
-            like #123 in pull requests and changelists link there too.
+            like #123 in merge requests and changelists link there too.
           </p>
           <select
             value={platform}
@@ -369,7 +369,7 @@ export default function RepoSettingsPage() {
   }
 
   const { hasFeature } = useLicenseTier(org?.id);
-  const showPrSettings = hasFeature("pullRequests");
+  const showMrSettings = hasFeature("mergeRequests");
   const showIssueSettings = hasFeature("issues");
 
   const [name, setName] = useState("");
@@ -471,12 +471,12 @@ export default function RepoSettingsPage() {
         </form>
       </Card>
 
-      {/* Pull Request / Merge settings (Pro+ only) */}
-      {showPrSettings && (
+      {/* Merge Request / Merge settings (Pro+ only) */}
+      {showMrSettings && (
         <>
           <Card>
             <h3 className="mb-4 text-sm font-semibold text-[var(--color-text-primary)]">
-              Pull request settings
+              Merge request settings
             </h3>
             <div className="space-y-4">
               <div>
@@ -484,7 +484,7 @@ export default function RepoSettingsPage() {
                   Required approving reviews
                 </label>
                 <p className="mb-1.5 text-xs text-[var(--color-text-muted)]">
-                  Minimum number of approvals before a pull request can be
+                  Minimum number of approvals before a merge request can be
                   merged. Set to 0 to allow merging without reviews.
                 </p>
                 <input
@@ -530,7 +530,7 @@ export default function RepoSettingsPage() {
                     });
                   }}
                 >
-                  {updateRepo.isPending ? "Saving..." : "Save PR settings"}
+                  {updateRepo.isPending ? "Saving..." : "Save MR settings"}
                 </Button>
               </div>
             </div>

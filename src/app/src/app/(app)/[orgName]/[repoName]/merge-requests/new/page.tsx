@@ -8,11 +8,11 @@ import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 import { useIssueLinker } from "~/app/_hooks/use-issue-linker";
 import { MarkdownContent } from "~/app/_components/markdown";
 
-export default function NewPullRequestPage() {
+export default function NewMergeRequestPage() {
   const params = useParams<{ orgName: string; repoName: string }>();
   const orgName = decodeURIComponent(params.orgName);
   const repoName = decodeURIComponent(params.repoName);
-  useDocumentTitle(`New Pull Request · ${repoName} in ${orgName}`);
+  useDocumentTitle(`New Merge Request · ${repoName} in ${orgName}`);
   const router = useRouter();
   const { issueLink } = useIssueLinker(orgName, repoName);
 
@@ -44,9 +44,9 @@ export default function NewPullRequestPage() {
     }
   }, [sourceBranch, branches]);
 
-  const createPr = api.pullRequest.create.useMutation({
-    onSuccess: (pr) => {
-      router.push(`/${orgName}/${repoName}/pull-requests/${pr.number}`);
+  const createMr = api.mergeRequest.create.useMutation({
+    onSuccess: (mr) => {
+      router.push(`/${orgName}/${repoName}/merge-requests/${mr.number}`);
     },
   });
 
@@ -58,7 +58,7 @@ export default function NewPullRequestPage() {
   return (
     <div className="mx-auto max-w-2xl">
       <h2 className="mb-4 text-lg font-semibold text-[var(--color-text-primary)]">
-        New pull request
+        New merge request
       </h2>
 
       <Card>
@@ -67,7 +67,7 @@ export default function NewPullRequestPage() {
             e.preventDefault();
             if (!repoData || !title.trim() || !sourceBranch || !targetBranch)
               return;
-            createPr.mutate({
+            createMr.mutate({
               repoId: repoData.id,
               title: title.trim(),
               description,
@@ -171,16 +171,16 @@ export default function NewPullRequestPage() {
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe the changes in this pull request (Markdown supported)"
+                placeholder="Describe the changes in this merge request (Markdown supported)"
                 rows={6}
                 className="w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)]"
               />
             )}
           </div>
 
-          {createPr.error && (
+          {createMr.error && (
             <p className="text-sm text-[var(--color-danger)]">
-              {createPr.error.message}
+              {createMr.error.message}
             </p>
           )}
 
@@ -200,10 +200,10 @@ export default function NewPullRequestPage() {
                 !title.trim() ||
                 !sourceBranch ||
                 !targetBranch ||
-                createPr.isPending
+                createMr.isPending
               }
             >
-              {createPr.isPending ? "Creating…" : "Create pull request"}
+              {createMr.isPending ? "Creating…" : "Create merge request"}
             </Button>
           </div>
         </form>

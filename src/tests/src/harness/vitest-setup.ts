@@ -121,9 +121,9 @@ vi.mock("~/server/notifications", () => ({
   parseMentions: vi.fn().mockReturnValue([]),
   resolveUsernames: vi.fn().mockResolvedValue([]),
   subscribeToIssue: vi.fn().mockResolvedValue(undefined),
-  subscribeToPR: vi.fn().mockResolvedValue(undefined),
+  subscribeToMR: vi.fn().mockResolvedValue(undefined),
   notifyIssueSubscribers: vi.fn().mockResolvedValue(undefined),
-  notifyPRSubscribers: vi.fn().mockResolvedValue(undefined),
+  notifyMRSubscribers: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("~/server/license-client", () => ({

@@ -7,7 +7,7 @@ export const LICENSE_TIERS = ["BASIC", "PRO", "STUDIO", "INCANTA"] as const;
 export type LicenseTier = (typeof LICENSE_TIERS)[number];
 
 export const LicenseFeatures = [
-  "pullRequests",
+  "mergeRequests",
   "reviews",
   "hordeIntegration",
   "artifacts",
@@ -22,7 +22,7 @@ export type LicenseFeature = (typeof LicenseFeatures)[number];
 
 // Minimum tier required for each feature
 const FEATURE_MIN_TIER: Record<LicenseFeature, LicenseTier> = {
-  pullRequests: "PRO",
+  mergeRequests: "PRO",
   reviews: "PRO",
   hordeIntegration: "PRO",
   artifacts: "PRO",

@@ -31,13 +31,13 @@ export default function RepoLayout({
   );
 
   const { hasFeature } = useLicenseTier(org?.id);
-  const showPullRequests = hasFeature("pullRequests");
+  const showMergeRequests = hasFeature("mergeRequests");
   const showIssues =
     hasFeature("issues") && repoData?.issuesPlatform !== "DISABLED";
 
-  const { data: openPrCount } = api.pullRequest.countOpen.useQuery(
+  const { data: openMrCount } = api.mergeRequest.countOpen.useQuery(
     { repoId: repoData?.id ?? "" },
-    { enabled: !!repoData?.id && showPullRequests },
+    { enabled: !!repoData?.id && showMergeRequests },
   );
 
   const { data: openIssueCount } = api.issue.countOpen.useQuery(
@@ -84,13 +84,13 @@ export default function RepoLayout({
             </span>
           </Tab>
         )}
-        {showPullRequests && (
-          <Tab href={`${basePath}/pull-requests`}>
+        {showMergeRequests && (
+          <Tab href={`${basePath}/merge-requests`}>
             <span className="flex items-center gap-1.5">
-              Pull Requests
-              {!!openPrCount && openPrCount > 0 && (
+              Merge Requests
+              {!!openMrCount && openMrCount > 0 && (
                 <Badge variant="accent" className="ml-0.5">
-                  {openPrCount}
+                  {openMrCount}
                 </Badge>
               )}
             </span>

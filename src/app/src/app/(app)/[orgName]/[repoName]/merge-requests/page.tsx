@@ -29,19 +29,19 @@ function ReviewSummary({ reviews }: { reviews: { state: string }[] }) {
   );
 }
 
-export default function PullRequestsListPage() {
+export default function MergeRequestsListPage() {
   const params = useParams<{ orgName: string; repoName: string }>();
   const orgName = decodeURIComponent(params.orgName);
   const repoName = decodeURIComponent(params.repoName);
   const basePath = `/${orgName}/${repoName}`;
-  useDocumentTitle(`Pull Requests · ${repoName} in ${orgName}`);
+  useDocumentTitle(`Merge Requests · ${repoName} in ${orgName}`);
 
   const [statusFilter, setStatusFilter] = useState<"OPEN" | "CLOSED" | "ALL">("OPEN");
 
   const { data: org } = api.org.getOrg.useQuery({ id: orgName, idIsName: true });
   const repoData = org?.repos?.find((r: { name: string }) => r.name === repoName);
 
-  const { data: pullRequests, isLoading } = api.pullRequest.list.useQuery(
+  const { data: mergeRequests, isLoading } = api.mergeRequest.list.useQuery(
     { repoId: repoData?.id ?? "", status: statusFilter },
     { enabled: !!repoData?.id },
   );
@@ -65,41 +65,41 @@ export default function PullRequestsListPage() {
             </button>
           ))}
         </div>
-        <Link href={`${basePath}/pull-requests/new`}>
-          <Button size="sm">New pull request</Button>
+        <Link href={`${basePath}/merge-requests/new`}>
+          <Button size="sm">New merge request</Button>
         </Link>
       </div>
 
       {isLoading ? (
         <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">Loading…</div>
-      ) : pullRequests && pullRequests.length > 0 ? (
+      ) : mergeRequests && mergeRequests.length > 0 ? (
         <Card padding={false}>
           <div className="divide-y divide-[var(--color-border-default)]">
-            {pullRequests.map((pr) => (
+            {mergeRequests.map((mr) => (
               <Link
-                key={pr.id}
-                href={`${basePath}/pull-requests/${pr.number}`}
+                key={mr.id}
+                href={`${basePath}/merge-requests/${mr.number}`}
                 className="block px-4 py-3 transition-colors hover:bg-[var(--color-bg-surface)]"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <Badge variant={STATUS_COLORS[pr.status]}>{pr.status}</Badge>
+                      <Badge variant={STATUS_COLORS[mr.status]}>{mr.status}</Badge>
                       <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                        {pr.title}
+                        {mr.title}
                       </span>
                     </div>
                     <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
-                      <span>#{pr.number}</span>
+                      <span>#{mr.number}</span>
                       <span>
-                        {pr.sourceBranchName} → {pr.targetBranchName}
+                        {mr.sourceBranchName} → {mr.targetBranchName}
                       </span>
-                      <span>by {pr.author.name ?? pr.author.email}</span>
-                      <span>{new Date(pr.createdAt).toLocaleDateString()}</span>
-                      {pr._count.comments > 0 && <span>💬 {pr._count.comments}</span>}
+                      <span>by {mr.author.name ?? mr.author.email}</span>
+                      <span>{new Date(mr.createdAt).toLocaleDateString()}</span>
+                      {mr._count.comments > 0 && <span>💬 {mr._count.comments}</span>}
                     </div>
                   </div>
-                  <ReviewSummary reviews={pr.reviews} />
+                  <ReviewSummary reviews={mr.reviews} />
                 </div>
               </Link>
             ))}
@@ -107,11 +107,11 @@ export default function PullRequestsListPage() {
         </Card>
       ) : (
         <EmptyState
-          title="No pull requests"
+          title="No merge requests"
           description={
             statusFilter === "OPEN"
-              ? "There are no open pull requests. Create one to start a code review."
-              : "No pull requests match the current filter."
+              ? "There are no open merge requests. Create one to start a code review."
+              : "No merge requests match the current filter."
           }
         />
       )}

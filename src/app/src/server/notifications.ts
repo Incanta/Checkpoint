@@ -53,16 +53,16 @@ export async function subscribeToIssue(
 }
 
 /**
- * Ensure a user is subscribed to a pull request. No-op if already subscribed.
+ * Ensure a user is subscribed to a merge request. No-op if already subscribed.
  */
-export async function subscribeToPR(
+export async function subscribeToMR(
   db: PrismaClient,
-  pullRequestId: string,
+  mergeRequestId: string,
   userId: string,
 ): Promise<void> {
-  await db.pullRequestSubscription.upsert({
-    where: { pullRequestId_userId: { pullRequestId, userId } },
-    create: { pullRequestId, userId },
+  await db.mergeRequestSubscription.upsert({
+    where: { mergeRequestId_userId: { mergeRequestId, userId } },
+    create: { mergeRequestId, userId },
     update: {},
   });
 }
@@ -120,29 +120,29 @@ export async function notifyIssueSubscribers(
 }
 
 /**
- * Send in-app notifications to all subscribers of a pull request,
+ * Send in-app notifications to all subscribers of a merge request,
  * excluding the actor.
  */
-export async function notifyPRSubscribers(
+export async function notifyMRSubscribers(
   opts: NotifyOptions & {
-    pullRequestId: string;
+    mergeRequestId: string;
     text?: string;
   },
 ): Promise<void> {
-  const { db, actorId, type, title, body, link, pullRequestId, text } = opts;
+  const { db, actorId, type, title, body, link, mergeRequestId, text } = opts;
 
   // Auto-subscribe mentioned users
   if (text) {
     const usernames = parseMentions(text);
     const mentionedIds = await resolveUsernames(db, usernames);
     for (const uid of mentionedIds) {
-      await subscribeToPR(db, pullRequestId, uid);
+      await subscribeToMR(db, mergeRequestId, uid);
     }
   }
 
   // Get all subscribers except the actor
-  const subs = await db.pullRequestSubscription.findMany({
-    where: { pullRequestId, userId: { not: actorId } },
+  const subs = await db.mergeRequestSubscription.findMany({
+    where: { mergeRequestId, userId: { not: actorId } },
     select: { userId: true },
   });
 
@@ -156,7 +156,7 @@ export async function notifyPRSubscribers(
       title,
       body: body ?? "",
       link,
-      pullRequestId,
+      mergeRequestId,
     })),
   });
 }
