@@ -184,10 +184,13 @@ int32_t SubmitSync(
       return ECANCELED;
     }
 
-    // Build lookup: filename -> index into entries vector
-    std::unordered_map<std::string, size_t> name_lookup;
+    // Build lookup: filename -> indices into entries vector. A path can appear
+    // more than once in a single submit, so every entry sharing a name has to
+    // be filled in; mapping a name to a single index would leave the others at
+    // size 0, which silently commits them as empty files.
+    std::unordered_map<std::string, std::vector<size_t>> name_lookup;
     for (size_t j = 0; j < entries.size(); ++j) {
-      name_lookup[entries[j].filename] = j;
+      name_lookup[entries[j].filename].push_back(j);
     }
 
     char* search_path;
@@ -209,10 +212,14 @@ int32_t SubmitSync(
         }
         if (!props.m_IsDir) {
           auto it = name_lookup.find(props.m_Name);
-          if (it != name_lookup.end() && !entries[it->second].found) {
-            entries[it->second].size = props.m_Size;
-            entries[it->second].found = true;
-            --remaining;
+          if (it != name_lookup.end()) {
+            for (size_t entry_index : it->second) {
+              if (!entries[entry_index].found) {
+                entries[entry_index].size = props.m_Size;
+                entries[entry_index].found = true;
+                --remaining;
+              }
+            }
           }
         }
         find_err = file_storage_api->FindNext(file_storage_api, iterator);
@@ -224,6 +231,48 @@ int32_t SubmitSync(
       file_storage_api->CloseFind(file_storage_api, iterator);
     }
     Longtail_Free(search_path);
+  }
+
+  // Anything the directory scan did not account for gets its size read
+  // directly. Leaving an entry at its initial 0 would hand Longtail a zero
+  // byte asset and commit an empty file over real content, so a file we cannot
+  // size at all fails the submit instead.
+  for (auto& [dir, entries] : dir_to_files) {
+    for (auto& entry : entries) {
+      if (entry.found) {
+        continue;
+      }
+
+      const char* mod_path = Modifications[entry.mod_index].Path;
+      char* full_path = file_storage_api->ConcatPath(file_storage_api, LocalRootPath, mod_path);
+      Longtail_StorageAPI_HOpenFile open_file = 0;
+      int size_err = file_storage_api->OpenReadFile(file_storage_api, full_path, &open_file);
+      if (size_err == 0) {
+        size_err = file_storage_api->GetSize(file_storage_api, open_file, &entry.size);
+        file_storage_api->CloseFile(file_storage_api, open_file);
+      }
+      Longtail_Free(full_path);
+
+      if (size_err != 0) {
+        std::string message = std::string("Failed to read the size of ") + mod_path;
+        SetHandleStep(handle, message.c_str());
+        handle->error = size_err;
+        handle->completed = 1;
+        Longtail_Free(file_infos);
+        Longtail_Free(source_version_index);
+        SAFE_DISPOSE_API(chunker_api);
+        SAFE_DISPOSE_API(store_block_store_api);
+        SAFE_DISPOSE_API(store_block_fsstore_api);
+        SAFE_DISPOSE_API(file_storage_api);
+        SAFE_DISPOSE_API(remote_storage_api);
+        SAFE_DISPOSE_API(compression_registry);
+        SAFE_DISPOSE_API(hash_registry);
+        SAFE_DISPOSE_API(job_api);
+        return size_err;
+      }
+
+      entry.found = true;
+    }
   }
 
   // Assemble file_infos in original modification order

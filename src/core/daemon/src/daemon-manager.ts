@@ -752,6 +752,13 @@ export class DaemonManager {
    * Expands directory paths in the modifications list into individual file
    * entries. Used during submit so that a user can submit a whole directory
    * and the daemon will enumerate the files, applying ignore rules.
+   *
+   * The result is deduplicated by path. A selection may legitimately name both
+   * a directory and files under it (pending changes reports untracked
+   * directories as a single entry, and its tracked children individually), and
+   * the same file must never be handed to the native submit twice: the addon
+   * keys its file-size lookup by name, so one of the duplicates ends up with
+   * size 0 and lands in the changelist as an empty file.
    */
   public async expandDirectoriesForSubmit(
     workspace: Workspace,
@@ -768,6 +775,17 @@ export class DaemonManager {
       path: string;
       oldPath?: string;
     }> = [];
+    const seen = new Set<string>();
+    const push = (mod: {
+      delete: boolean;
+      path: string;
+      oldPath?: string;
+    }): void => {
+      const normalized = mod.path.replace(/^[/\\]/, "").replace(/\\/g, "/");
+      if (seen.has(normalized)) return;
+      seen.add(normalized);
+      result.push({ ...mod, path: normalized });
+    };
 
     // Classify modifications into files vs directories in parallel batches
     const CONCURRENCY = 256;
@@ -775,7 +793,6 @@ export class DaemonManager {
       mod: { delete: boolean; path: string; oldPath?: string };
       normalizedPath: string;
       isDir: boolean;
-      exists: boolean;
     };
 
     const classified: ClassifiedMod[] = [];
@@ -789,29 +806,20 @@ export class DaemonManager {
           const fullPath = path.join(workspace.localPath, normalizedPath);
           try {
             const stat = await fs.stat(fullPath);
-            return {
-              mod,
-              normalizedPath,
-              isDir: stat.isDirectory(),
-              exists: true,
-            };
+            return { mod, normalizedPath, isDir: stat.isDirectory() };
           } catch {
-            return { mod, normalizedPath, isDir: false, exists: false };
+            return { mod, normalizedPath, isDir: false };
           }
         }),
       );
       for (const r of results) classified.push(r);
     }
 
-    // Process non-directory modifications (the vast majority)
-    for (const { mod, isDir, exists } of classified) {
+    // Process non-directory modifications (the vast majority). A path that
+    // doesn't exist on disk passes through as-is: it is a deleted file.
+    for (const { mod, isDir } of classified) {
       if (!isDir) {
-        if (!exists) {
-          // Path doesn't exist on disk: could be a deleted file, pass through
-          result.push(mod);
-        } else {
-          result.push(mod);
-        }
+        push(mod);
       }
     }
 
@@ -834,7 +842,7 @@ export class DaemonManager {
         if (entry.isDirectory()) {
           subdirs.push(childRelative);
         } else {
-          result.push({ delete: false, path: childRelative });
+          push({ delete: false, path: childRelative });
         }
       }
       // Walk subdirectories in parallel
@@ -868,7 +876,7 @@ export class DaemonManager {
           );
           for (let j = 0; j < batch.length; j++) {
             if (!exists[j]) {
-              result.push({ delete: true, path: batch[j].normalized });
+              push({ delete: true, path: batch[j].normalized });
             }
           }
         }

@@ -76,6 +76,29 @@ export async function submit(
 
   const branchName = targetBranchName ?? workspace.domainBranchName;
 
+  // Last line of defense against a caller handing us the same path twice. The
+  // native submit sizes files by name, so a duplicate path used to come back
+  // with size 0 and commit an empty file over real content; it also writes a
+  // duplicate FileChange row server-side. Callers are expected to have
+  // deduplicated already, so a hit here is a bug worth seeing in the log.
+  const seenPaths = new Set<string>();
+  const uniqueModifications = modifications.filter((mod) => {
+    const normalized = mod.path.replace(/^[/\\]/, "").replace(/\\/g, "/");
+    if (seenPaths.has(normalized)) {
+      return false;
+    }
+    seenPaths.add(normalized);
+    return true;
+  });
+
+  if (uniqueModifications.length !== modifications.length) {
+    console.warn(
+      `[submit] Dropped ${
+        modifications.length - uniqueModifications.length
+      } duplicate path(s) from the modification list`,
+    );
+  }
+
   console.log(`[submit] Calling SubmitAsync:`);
   console.log(`[submit]   branchName: ${branchName}`);
   console.log(`[submit]   message: ${message}`);
@@ -84,7 +107,7 @@ export async function submit(
   console.log(`[submit]   storage: ${storageOptions.storageType}`);
   console.log(`[submit]   serverUrl: ${storageTokenResponse.serverUrl}`);
   console.log(`[submit]   workspaceId: ${workspaceId}`);
-  console.log(`[submit]   modifications: ${modifications.length}`);
+  console.log(`[submit]   modifications: ${uniqueModifications.length}`);
 
   const submitOptions: SubmitAsyncOptions = {
     branchName,
@@ -104,7 +127,7 @@ export async function submit(
     apiJwt: user.apiToken,
     keepCheckedOut,
     workspaceId,
-    modifications,
+    modifications: uniqueModifications,
     logLevel: GetLogLevel(resolvedLogLevel),
   };
 
@@ -185,7 +208,7 @@ export async function submit(
   }
   console.log(
     `[submit-timing] ${JSON.stringify({
-      modifications: modifications.length,
+      modifications: uniqueModifications.length,
       stagesMs,
     })}`,
   );
@@ -209,14 +232,14 @@ export async function submit(
 
     const fileIds = await client.file.getFileIds.mutate({
       repoId: workspace.repoId,
-      paths: modifications.map((mod) => mod.path),
+      paths: uniqueModifications.map((mod) => mod.path),
     });
 
     let processed = 0;
-    const total = modifications.length;
+    const total = uniqueModifications.length;
     onProgress?.("Updating workspace state", 0, total);
 
-    for (const modification of modifications) {
+    for (const modification of uniqueModifications) {
       // Normalize the path (use forward slashes, no leading slash)
       const normalizedPath = modification.path
         .replace(/\\/g, "/")

@@ -92,8 +92,11 @@ void SetHandleStep(WrapperAsyncHandle* handle, const char* step) {
   handle->changingStep = 1;
   handle->progressDone = 0;
   handle->progressTotal = 0;
+  // Steps carry error text built from server responses and file paths, either
+  // of which can be longer than the buffer, so the copy is bounded and the
+  // terminator is guaranteed by the memset.
   memset(handle->currentStep, 0, sizeof(handle->currentStep));
-  strcpy(handle->currentStep, step);
+  strncpy(handle->currentStep, step, sizeof(handle->currentStep) - 1);
   handle->changingStep = 0;
 }
 
