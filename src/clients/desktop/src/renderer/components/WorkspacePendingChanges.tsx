@@ -34,7 +34,11 @@ import FileContextMenu, {
 import prettyBytes from "pretty-bytes";
 import { FileIcon } from "./FileIcon";
 import { EmptyState } from "./ui";
-import StagedChangesTree, { UNSTAGED, type Bucket } from "./StagedChangesTree";
+import StagedChangesTree, {
+  UNSTAGED,
+  type Bucket,
+  type PendingSelection,
+} from "./StagedChangesTree";
 import type { File as PendingFile } from "@checkpointvcs/daemon/types";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCircleCheck } from "@fortawesome/free-solid-svg-icons/faCircleCheck";
@@ -57,7 +61,11 @@ export default function WorkspacePendingChanges() {
   const workspacePendingChanges = useAtomValue(workspacePendingChangesAtom);
   const workspaceDiff = useAtomValue(workspaceDiffAtom);
 
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  // A selection is one row: a file, or a directory standing in for every
+  // pending change beneath it. Stage/unstage act on `selection.paths`.
+  const [selection, setSelection] = useState<PendingSelection | null>(null);
+  const selectedPath = selection?.path ?? null;
+  const selectedPaths = selection?.paths ?? [];
 
   // Sections: UNSTAGED first, then the domain root, then each overlaid
   // feature branch. A file's bucket is its claim's branch; a staged file with
@@ -80,17 +88,20 @@ export default function WorkspacePendingChanges() {
     ];
   }, [workspacePendingChanges, currentWorkspace]);
 
-  const handleSelectPath = useCallback((path: string) => {
-    setSelectedPath(path);
-    ipc.sendMessage("workspace:diff:file", { path });
+  const handleSelect = useCallback((next: PendingSelection) => {
+    setSelection(next);
+    // Directories have nothing to diff; they only stand in for their files.
+    if (!next.isDirectory) {
+      ipc.sendMessage("workspace:diff:file", { path: next.path });
+    }
   }, []);
 
   const handleMoveBetweenBuckets = useCallback(
-    (path: string, _from: string, to: string) => {
+    (paths: string[], _from: string, to: string) => {
       if (to === UNSTAGED) {
-        ipc.sendMessage("workspace:unstage", { paths: [path] });
+        ipc.sendMessage("workspace:unstage", { paths });
       } else {
-        ipc.sendMessage("workspace:stage", { paths: [path], branchName: to });
+        ipc.sendMessage("workspace:stage", { paths, branchName: to });
       }
     },
     [],
@@ -159,7 +170,7 @@ export default function WorkspacePendingChanges() {
 
   /** Context menu for a row in the bucket tree. */
   const handleFileContextMenu = useCallback(
-    (event: React.MouseEvent, file: PendingFile) => {
+    (event: React.MouseEvent, file: PendingFile, isDirectory: boolean) => {
       if (!currentWorkspace) return;
 
       const workspaceLocalPath = currentWorkspace.localPath
@@ -169,7 +180,7 @@ export default function WorkspacePendingChanges() {
       showContextMenu(event, {
         absolutePath: workspaceLocalPath + "/" + file.path,
         relativePath: file.path,
-        isDirectory: false,
+        isDirectory,
         status: FileStatus[file.status] ?? "",
         hasChangelist: file.changelist != null,
         changelistId: file.changelist,
@@ -635,20 +646,22 @@ export default function WorkspacePendingChanges() {
         <Button
           className="px-3 py-1 text-xs"
           label="Stage"
-          disabled={isSubmitting || !selectedPath}
+          disabled={isSubmitting || !selectedPaths.length}
           onClick={() => {
-            if (selectedPath) {
-              ipc.sendMessage("workspace:stage", { paths: [selectedPath] });
+            if (selectedPaths.length) {
+              ipc.sendMessage("workspace:stage", { paths: selectedPaths });
             }
           }}
         />
         <Button
           className="px-3 py-1 text-xs"
           label="Unstage"
-          disabled={isSubmitting || !selectedPath}
+          disabled={isSubmitting || !selectedPaths.length}
           onClick={() => {
-            if (selectedPath) {
-              ipc.sendMessage("workspace:unstage", { paths: [selectedPath] });
+            if (selectedPaths.length) {
+              ipc.sendMessage("workspace:unstage", {
+                paths: selectedPaths,
+              });
             }
           }}
         />
@@ -705,7 +718,7 @@ export default function WorkspacePendingChanges() {
                 <StagedChangesTree
                   buckets={buckets}
                   selectedPath={selectedPath}
-                  onSelect={handleSelectPath}
+                  onSelect={handleSelect}
                   onContextMenu={handleFileContextMenu}
                   onMove={handleMoveBetweenBuckets}
                   onSubmit={handleSubmitBucket}

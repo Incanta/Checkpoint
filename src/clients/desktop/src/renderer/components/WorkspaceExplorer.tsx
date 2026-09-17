@@ -182,9 +182,14 @@ export default function WorkspaceExplorer() {
         }
 
         currentNode.children = dir.children.map((file) => {
+          const isDirectory = file.type === FileType.Directory;
+          // A directory is a container, never a change of its own, so it shows
+          // no status even when the daemon reports its subtree as pending.
           let status =
-            file.status === FileStatus.Unknown ? "" : FileStatus[file.status];
-          if (workspacePendingChanges?.files[file.path]) {
+            isDirectory || file.status === FileStatus.Unknown
+              ? ""
+              : FileStatus[file.status];
+          if (!isDirectory && workspacePendingChanges?.files[file.path]) {
             status =
               FileStatus[workspacePendingChanges.files[file.path].status];
           }
@@ -196,20 +201,15 @@ export default function WorkspaceExplorer() {
             key: currentNode.key + "/" + name,
             data: {
               name,
-              ext:
-                file.type === FileType.Directory
-                  ? " "
-                  : file.path.split(".").pop() || "",
+              ext: isDirectory ? " " : file.path.split(".").pop() || "",
               status,
-              size:
-                file.type === FileType.Directory ? "" : prettyBytes(file.size),
+              size: isDirectory ? "" : prettyBytes(file.size),
               modified: new Date(file.modifiedAt).toLocaleDateString(),
-              type:
-                file.type === FileType.Directory ? " " : FileType[file.type],
+              type: isDirectory ? " " : FileType[file.type],
               changelist: file.changelist ? file.changelist.toString() : "",
-              ...treeSortFields(name, file.type === FileType.Directory),
+              ...treeSortFields(name, isDirectory),
             },
-            leaf: file.type !== FileType.Directory,
+            leaf: !isDirectory,
           };
         });
       }
@@ -243,9 +243,12 @@ export default function WorkspaceExplorer() {
               const absolutePath =
                 currentWorkspace.localPath.split(/[/\\/]/).join("/") +
                 relativePath;
-              let status =
-                file.type === FileType.Directory ? "" : FileStatus[file.status];
-              if (workspacePendingChanges?.files[absolutePath]) {
+              const isDirectory = file.type === FileType.Directory;
+              let status = isDirectory ? "" : FileStatus[file.status];
+              if (
+                !isDirectory &&
+                workspacePendingChanges?.files[absolutePath]
+              ) {
                 status =
                   FileStatus[
                     workspacePendingChanges.files[absolutePath].status
@@ -259,24 +262,15 @@ export default function WorkspaceExplorer() {
                 key: relativePath,
                 data: {
                   name,
-                  ext:
-                    file.type === FileType.Directory
-                      ? " "
-                      : file.path.split(".").pop() || "",
+                  ext: isDirectory ? " " : file.path.split(".").pop() || "",
                   status,
-                  size:
-                    file.type === FileType.Directory
-                      ? ""
-                      : prettyBytes(file.size),
+                  size: isDirectory ? "" : prettyBytes(file.size),
                   modified: new Date(file.modifiedAt).toLocaleDateString(),
-                  type:
-                    file.type === FileType.Directory
-                      ? " "
-                      : FileType[file.type],
+                  type: isDirectory ? " " : FileType[file.type],
                   changelist: file.changelist ? file.changelist.toString() : "",
-                  ...treeSortFields(name, file.type === FileType.Directory),
+                  ...treeSortFields(name, isDirectory),
                 },
-                leaf: file.type !== FileType.Directory,
+                leaf: !isDirectory,
               };
             });
           setNodes([...nodes]);
@@ -484,11 +478,12 @@ export default function WorkspaceExplorer() {
                           currentWorkspace!.localPath
                             .split(/[/\\/]/)
                             .join("/") + relativePath;
-                        let status =
-                          file.type === FileType.Directory
-                            ? ""
-                            : FileStatus[file.status];
-                        if (workspacePendingChanges?.files[absolutePath]) {
+                        const isDirectory = file.type === FileType.Directory;
+                        let status = isDirectory ? "" : FileStatus[file.status];
+                        if (
+                          !isDirectory &&
+                          workspacePendingChanges?.files[absolutePath]
+                        ) {
                           status =
                             FileStatus[
                               workspacePendingChanges.files[absolutePath].status
@@ -502,31 +497,21 @@ export default function WorkspaceExplorer() {
                           key: relativePath,
                           data: {
                             name,
-                            ext:
-                              file.type === FileType.Directory
-                                ? " "
-                                : file.path.split(".").pop() || "",
+                            ext: isDirectory
+                              ? " "
+                              : file.path.split(".").pop() || "",
                             status,
-                            size:
-                              file.type === FileType.Directory
-                                ? ""
-                                : prettyBytes(file.size),
+                            size: isDirectory ? "" : prettyBytes(file.size),
                             modified: new Date(
                               file.modifiedAt,
                             ).toLocaleDateString(),
-                            type:
-                              file.type === FileType.Directory
-                                ? " "
-                                : FileType[file.type],
+                            type: isDirectory ? " " : FileType[file.type],
                             changelist: file.changelist
                               ? file.changelist.toString()
                               : "",
-                            ...treeSortFields(
-                              name,
-                              file.type === FileType.Directory,
-                            ),
+                            ...treeSortFields(name, isDirectory),
                           },
-                          leaf: file.type !== FileType.Directory,
+                          leaf: !isDirectory,
                         };
                       });
                     if (node.id === "/" && directory.children.length > 0) {

@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { FileIcon } from "./FileIcon";
-import { FileStatus } from "@checkpointvcs/daemon/types";
+import { FileStatus, FileType } from "@checkpointvcs/daemon/types";
 import type { File as PendingFile } from "@checkpointvcs/daemon/types";
 import { compareTreeEntries } from "./file-tree-sort";
 
@@ -11,6 +11,11 @@ import { compareTreeEntries } from "./file-tree-sort";
  * each overlaid feature branch. Dragging a row between sections restages it,
  * which also moves that file's claim, so "staged here" and "destined for this
  * branch" stay the same fact rather than two that can disagree.
+ *
+ * Directories are shown as containers, never as changes: no status marker, and
+ * clicking one acts on everything pending beneath it. That holds for the
+ * collapsed untracked-subtree rows the daemon sends as a single Directory entry
+ * too, which are staged and submitted by their own path.
  *
  * Deliberately not a PrimeReact TreeTable: bucket headers fight a uniform
  * column layout, and drag-and-drop across groups is awkward there. This
@@ -35,6 +40,44 @@ export interface Bucket {
   files: PendingFile[];
 }
 
+/**
+ * What a click selected. A directory stands in for every change beneath it,
+ * since a directory is never itself committed: the daemon expands a staged
+ * directory path into its files at submit time.
+ */
+export interface PendingSelection {
+  /** The clicked row, used for the highlight. */
+  path: string;
+  isDirectory: boolean;
+  /** The pending paths the selection acts on, in daemon terms. */
+  paths: string[];
+}
+
+/**
+ * The pending-change paths at or below a node.
+ *
+ * A node carries a `file` when the daemon reported it as a change. That
+ * includes collapsed untracked directories, which the daemon deliberately
+ * reports as one row rather than enumerating a subtree that may hold thousands
+ * of files, so its own path is what we hand back rather than its (unloaded)
+ * children.
+ */
+function pendingPathsUnder(node: PendingTreeNode): string[] {
+  const paths = node.file ? [node.path] : [];
+  for (const child of node.children) {
+    paths.push(...pendingPathsUnder(child));
+  }
+  return paths;
+}
+
+function selectionFor(node: PendingTreeNode): PendingSelection {
+  return {
+    path: node.path,
+    isDirectory: node.isDirectory,
+    paths: pendingPathsUnder(node),
+  };
+}
+
 /** Order every level the way the explorer does: directories first, then name. */
 function sortLevels(nodes: PendingTreeNode[]): PendingTreeNode[] {
   nodes.sort(compareTreeEntries);
@@ -56,17 +99,22 @@ function buildTree(files: PendingFile[]): PendingTreeNode[] {
       const isLast = i === parts.length - 1;
       let node = level.find((n) => n.name === part);
 
+      // The daemon reports an untracked subtree as a single Directory row, so
+      // the last part of a path is not necessarily a file.
+      const isDir = !isLast || file.type === FileType.Directory;
+
       if (!node) {
         node = {
           name: part,
           path: isLast ? file.path : parts.slice(0, i + 1).join("/"),
-          isDirectory: !isLast,
+          isDirectory: isDir,
           ...(isLast ? { file } : {}),
           children: [],
         };
         level.push(node);
       } else if (isLast) {
         node.file = file;
+        node.isDirectory = node.isDirectory || isDir;
       }
 
       level = node.children;
@@ -99,8 +147,12 @@ interface RowProps {
   depth: number;
   bucketId: string;
   selectedPath: string | null;
-  onSelect: (path: string) => void;
-  onContextMenu: (event: React.MouseEvent, file: PendingFile) => void;
+  onSelect: (selection: PendingSelection) => void;
+  onContextMenu: (
+    event: React.MouseEvent,
+    file: PendingFile,
+    isDirectory: boolean,
+  ) => void;
   expanded: Set<string>;
   onToggle: (path: string) => void;
   draggable: boolean;
@@ -119,7 +171,11 @@ function Row({
 }: RowProps) {
   const isOpen = expanded.has(node.path);
   const claim = node.file?.claims?.[0];
-  const marker = node.file ? statusMarker(node.file.status) : null;
+  // Directories are containers, not changes: no status, however the daemon
+  // labelled the row.
+  const marker =
+    node.file && !node.isDirectory ? statusMarker(node.file.status) : null;
+  const canToggle = node.isDirectory && node.children.length > 0;
 
   return (
     <>
@@ -129,27 +185,28 @@ function Row({
           (selectedPath === node.path ? " bg-[var(--color-bg-selected)]" : "")
         }
         style={{ paddingLeft: `${0.5 + depth * 0.85}rem` }}
-        draggable={draggable && !node.isDirectory}
+        draggable={draggable}
         onDragStart={(e) => {
+          // A directory carries everything pending beneath it, so dragging a
+          // folder stages or unstages its whole subtree.
           e.dataTransfer.setData(
             "application/checkpoint-path",
-            JSON.stringify({ path: node.path, from: bucketId }),
+            JSON.stringify({ paths: pendingPathsUnder(node), from: bucketId }),
           );
           e.dataTransfer.effectAllowed = "move";
         }}
         onClick={() => {
-          if (node.isDirectory) {
+          onSelect(selectionFor(node));
+          if (canToggle) {
             onToggle(node.path);
-          } else {
-            onSelect(node.path);
           }
         }}
         onContextMenu={(e) => {
-          if (node.file) onContextMenu(e, node.file);
+          if (node.file) onContextMenu(e, node.file, node.isDirectory);
         }}
       >
         <span className="flex min-w-0 items-center gap-1.5">
-          {node.isDirectory ? (
+          {canToggle ? (
             <span className="w-4 text-center text-[0.7rem] text-[var(--color-text-muted)]">
               {isOpen ? "▾" : "▸"}
             </span>
@@ -208,7 +265,7 @@ function Row({
         )}
       </div>
 
-      {node.isDirectory &&
+      {canToggle &&
         isOpen &&
         node.children.map((child) => (
           <Row
@@ -231,10 +288,14 @@ function Row({
 interface StagedChangesTreeProps {
   buckets: Bucket[];
   selectedPath: string | null;
-  onSelect: (path: string) => void;
-  onContextMenu: (event: React.MouseEvent, file: PendingFile) => void;
-  /** Fired when a row is dragged into another section. */
-  onMove: (path: string, from: string, to: string) => void;
+  onSelect: (selection: PendingSelection) => void;
+  onContextMenu: (
+    event: React.MouseEvent,
+    file: PendingFile,
+    isDirectory: boolean,
+  ) => void;
+  /** Fired when a row is dragged into another section, with its paths. */
+  onMove: (paths: string[], from: string, to: string) => void;
   /** Fired by a bucket's own Submit button. Absent for UNSTAGED. */
   onSubmit: (bucketId: string) => void;
   submitDisabled: boolean;
@@ -290,10 +351,12 @@ export default function StagedChangesTree({
             e.preventDefault();
             setDragOver(null);
             try {
-              const { path, from } = JSON.parse(
+              const { paths, from } = JSON.parse(
                 e.dataTransfer.getData("application/checkpoint-path"),
-              ) as { path: string; from: string };
-              if (from !== bucket.id) onMove(path, from, bucket.id);
+              ) as { paths: string[]; from: string };
+              if (from !== bucket.id && paths.length > 0) {
+                onMove(paths, from, bucket.id);
+              }
             } catch {
               // A drag from outside the app; nothing to do.
             }
