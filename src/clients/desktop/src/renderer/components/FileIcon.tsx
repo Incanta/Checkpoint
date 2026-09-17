@@ -1,10 +1,15 @@
 import React from "react";
 
+// Public assets must go through BASE_URL. The packaged app loads index.html
+// over file://, where a leading "/" resolves to the drive root instead of the
+// app directory. Vite rewrites such paths in index.html but not in JS strings.
+const asset = (file: string) => `${import.meta.env.BASE_URL}${file}`;
+
 const overrides: Record<string, string> = {
-  blend: "/blender.svg",
-  uproject: "/unreal.svg",
-  umap: "/unreal.svg",
-  uasset: "/unreal.svg",
+  blend: asset("blender.svg"),
+  uproject: asset("unreal.svg"),
+  umap: asset("unreal.svg"),
+  uasset: asset("unreal.svg"),
 };
 
 const aliases: Record<string, string> = {
