@@ -14,7 +14,8 @@
   "scripts": {
     "dev": "vite",
     "dev:mock": "cross-env MOCK_DATA=true vite",
-    "build": "tsc && vite build && electron-builder",
+    "typecheck": "tsc --noEmit",
+    "build": "yarn typecheck && vite build && electron-builder",
     "lint": "eslint .",
     "preview": "vite preview"
   },
