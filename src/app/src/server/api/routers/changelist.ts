@@ -16,6 +16,7 @@ import {
 } from "~/server/state-tree";
 import type { InputJsonValue } from "@prisma/client/runtime/library";
 import { walkChangelistAncestry } from "~/server/changelist-walk";
+import { compareTreePaths } from "~/lib/file-tree-sort";
 import { classifyPaths } from "~/server/team-sync/classify";
 import { settleClaimsForSubmit } from "~/server/claims/claims";
 import { resolveDomainBranchName } from "~/server/claims/domain";
@@ -253,20 +254,19 @@ export const changelistRouter = createTRPCRouter({
             },
           },
         },
-        orderBy: {
-          file: {
-            path: "asc",
-          },
-        },
       });
 
-      return fileChanges.map((fc) => ({
-        id: fc.id,
-        fileId: fc.file.id,
-        path: fc.file.path,
-        changeType: fc.type,
-        oldPath: fc.oldPath,
-      }));
+      // Sorted here rather than by the database: a plain path sort interleaves
+      // a directory's own files with its subdirectories.
+      return fileChanges
+        .map((fc) => ({
+          id: fc.id,
+          fileId: fc.file.id,
+          path: fc.file.path,
+          changeType: fc.type,
+          oldPath: fc.oldPath,
+        }))
+        .sort((a, b) => compareTreePaths(a.path, b.path));
     }),
 
   createChangelist: protectedProcedure

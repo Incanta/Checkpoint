@@ -30,6 +30,7 @@ import {
   resolveDomainBranchName,
   resolveWorkspaceBranch,
 } from "~/server/claims/domain";
+import { compareNames } from "~/lib/file-tree-sort";
 
 const MAX_TEXT_SIZE = 5 * 1024 * 1024; // 5 MB text limit
 
@@ -617,9 +618,11 @@ export const fileRouter = createTRPCRouter({
         }
       }
 
+      // Folders and files are returned as separate lists, so the browse UI
+      // already renders directories first; this only settles name order.
       return {
-        folders: [...folders].sort((a, b) => a.localeCompare(b)),
-        files: files.sort((a, b) => a.name.localeCompare(b.name)),
+        folders: [...folders].sort(compareNames),
+        files: files.sort((a, b) => compareNames(a.name, b.name)),
         totalFileCount,
       };
     }),

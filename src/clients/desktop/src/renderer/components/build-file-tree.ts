@@ -1,4 +1,14 @@
 import type { FileTreeNode } from "./FileTreeItem";
+import { compareTreeEntries } from "./file-tree-sort";
+
+/** Order every level the same way the explorer does: directories, then name. */
+function sortLevels(nodes: FileTreeNode[]): FileTreeNode[] {
+  nodes.sort(compareTreeEntries);
+  for (const node of nodes) {
+    sortLevels(node.children);
+  }
+  return nodes;
+}
 
 /**
  * Build a nested file-tree from a flat list of file entries.
@@ -38,7 +48,7 @@ export function buildFileTree<
     }
   }
 
-  return root;
+  return sortLevels(root);
 }
 
 /**

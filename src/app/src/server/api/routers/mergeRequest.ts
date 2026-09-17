@@ -15,6 +15,7 @@ import {
   buildStateTreeBlocks,
   primeStateTreePaths,
 } from "~/server/state-tree";
+import { compareTreePaths } from "~/lib/file-tree-sort";
 
 function mrLink(orgName: string, repoName: string, number: number) {
   return `/${orgName}/${repoName}/merge-requests/${number}`;
@@ -1040,7 +1041,7 @@ export const mergeRequestRouter = createTRPCRouter({
 
       return {
         files: Array.from(byPath.values()).sort((a, b) =>
-          a.path.localeCompare(b.path),
+          compareTreePaths(a.path, b.path),
         ),
         sourceHead: sourceBranch.headNumber,
         targetHead: targetBranch.headNumber,

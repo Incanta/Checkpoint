@@ -7,6 +7,7 @@ import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
 import { assertFeature } from "~/server/license-client";
 import { walkChangelistAncestry } from "~/server/changelist-walk";
+import { compareTreePaths } from "~/lib/file-tree-sort";
 
 const artifactTypeSchema = z
   .string()
@@ -245,16 +246,18 @@ export const artifactRouter = createTRPCRouter({
         include: {
           file: { select: { id: true, path: true } },
         },
-        orderBy: { file: { path: "asc" } },
       });
 
-      return artifacts.map((a) => ({
-        id: a.id,
-        fileId: a.file.id,
-        path: a.file.path,
-        size: Number(a.size),
-        createdAt: a.createdAt,
-      }));
+      // Sorted here rather than by the database, so the list reads as a tree.
+      return artifacts
+        .map((a) => ({
+          id: a.id,
+          fileId: a.file.id,
+          path: a.file.path,
+          size: Number(a.size),
+          createdAt: a.createdAt,
+        }))
+        .sort((a, b) => compareTreePaths(a.path, b.path));
     }),
 
   // Batch query: which of the given CL numbers have artifacts?
