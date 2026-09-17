@@ -32,6 +32,11 @@ import FileContextMenu, {
 } from "./FileContextMenu";
 import FileHistory from "./FileHistory";
 import { FileIcon } from "./FileIcon";
+import {
+  extractUserSortMeta,
+  treeSortFields,
+  withDirectoriesFirst,
+} from "./file-tree-sort";
 
 export default function WorkspaceExplorer() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
@@ -47,9 +52,13 @@ export default function WorkspaceExplorer() {
     useState<TreeTableSelectionKeysType | null>(null);
   const hasAutoExpandedRoot = useRef(false);
 
-  const [multiSortMeta, setMultiSortMeta] = useState<TreeTableSortMeta[]>([
-    { field: "type", order: 1 }, // order 1 for ascending (directories first, then files)
-  ]);
+  // Only the sorts the user clicked; directories-first is layered on top of
+  // them so it survives whatever column and direction they pick.
+  const [userSortMeta, setUserSortMeta] = useState<TreeTableSortMeta[]>([]);
+  const multiSortMeta = useMemo(
+    () => withDirectoriesFirst(userSortMeta),
+    [userSortMeta],
+  );
 
   // Context menu hook
   const {
@@ -131,6 +140,7 @@ export default function WorkspaceExplorer() {
               modified: "",
               type: " ",
               changelist: "",
+              ...treeSortFields(currentWorkspace.localPath, true),
             },
             leaf: false,
             children: [],
@@ -157,6 +167,7 @@ export default function WorkspaceExplorer() {
                 modified: "",
                 type: " ",
                 changelist: "",
+                ...treeSortFields(part, true),
               },
               leaf: false,
               children: [],
@@ -178,11 +189,13 @@ export default function WorkspaceExplorer() {
               FileStatus[workspacePendingChanges.files[file.path].status];
           }
 
+          const name = file.path.split("/").pop() || "";
+
           return {
-            id: currentNode.id + "/" + file.path.split("/").pop(),
-            key: currentNode.key + "/" + file.path.split("/").pop(),
+            id: currentNode.id + "/" + name,
+            key: currentNode.key + "/" + name,
             data: {
-              name: file.path.split("/").pop() || "",
+              name,
               ext:
                 file.type === FileType.Directory
                   ? " "
@@ -194,6 +207,7 @@ export default function WorkspaceExplorer() {
               type:
                 file.type === FileType.Directory ? " " : FileType[file.type],
               changelist: file.changelist ? file.changelist.toString() : "",
+              ...treeSortFields(name, file.type === FileType.Directory),
             },
             leaf: file.type !== FileType.Directory,
           };
@@ -238,11 +252,13 @@ export default function WorkspaceExplorer() {
                   ];
               }
 
+              const name = file.path.split("/").pop() || "";
+
               return {
                 id: relativePath,
                 key: relativePath,
                 data: {
-                  name: file.path.split("/").pop() || "",
+                  name,
                   ext:
                     file.type === FileType.Directory
                       ? " "
@@ -258,6 +274,7 @@ export default function WorkspaceExplorer() {
                       ? " "
                       : FileType[file.type],
                   changelist: file.changelist ? file.changelist.toString() : "",
+                  ...treeSortFields(name, file.type === FileType.Directory),
                 },
                 leaf: file.type !== FileType.Directory,
               };
@@ -287,24 +304,11 @@ export default function WorkspaceExplorer() {
     }
   }, [workspaceDirectories, currentWorkspace]);
 
-  // Handler for when the user clicks a column header
-  const onSort = (event: TreeTableSortEvent) => {
-    // The user's requested sort is in event.multiSortMeta (if multiple is used) or sortField/sortOrder (if single mode but we use multiple)
-
-    // Find the user's clicked sort configuration
-    const userSort = event.multiSortMeta?.find((meta) => meta.field !== "type");
-
-    // Always prepend the mandatory sort criterion
-    const newSortMeta: TreeTableSortMeta[] = [{ field: "type", order: 1 }];
-
-    if (userSort) {
-      // Add the user's sort field, unless it's already the 'type' field which is handled
-      newSortMeta.push(userSort);
-    }
-
-    setMultiSortMeta(newSortMeta);
-    // Note: If you are using server-side sorting, you would make an API call here
-  };
+  // Handler for when the user clicks a column header. The event carries our
+  // injected criteria too, so keep only the columns the user actually clicked.
+  const onSort = useCallback((event: TreeTableSortEvent) => {
+    setUserSortMeta(extractUserSortMeta(event.multiSortMeta));
+  }, []);
 
   const columnPt = useMemo<ColumnPassThroughOptions>(
     () => ({
@@ -491,11 +495,13 @@ export default function WorkspaceExplorer() {
                             ];
                         }
 
+                        const name = file.path.split("/").pop() || "";
+
                         return {
                           id: relativePath,
                           key: relativePath,
                           data: {
-                            name: file.path.split("/").pop() || "",
+                            name,
                             ext:
                               file.type === FileType.Directory
                                 ? " "
@@ -515,6 +521,10 @@ export default function WorkspaceExplorer() {
                             changelist: file.changelist
                               ? file.changelist.toString()
                               : "",
+                            ...treeSortFields(
+                              name,
+                              file.type === FileType.Directory,
+                            ),
                           },
                           leaf: file.type !== FileType.Directory,
                         };

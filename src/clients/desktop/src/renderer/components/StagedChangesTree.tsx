@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { FileIcon } from "./FileIcon";
 import { FileStatus } from "@checkpointvcs/daemon/types";
 import type { File as PendingFile } from "@checkpointvcs/daemon/types";
+import { compareTreeEntries } from "./file-tree-sort";
 
 /**
  * The pending-changes tree, grouped by where each change is going.
@@ -34,10 +35,19 @@ export interface Bucket {
   files: PendingFile[];
 }
 
+/** Order every level the way the explorer does: directories first, then name. */
+function sortLevels(nodes: PendingTreeNode[]): PendingTreeNode[] {
+  nodes.sort(compareTreeEntries);
+  for (const node of nodes) {
+    sortLevels(node.children);
+  }
+  return nodes;
+}
+
 function buildTree(files: PendingFile[]): PendingTreeNode[] {
   const root: PendingTreeNode[] = [];
 
-  for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
+  for (const file of files) {
     const parts = file.path.split("/");
     let level = root;
 
@@ -63,7 +73,7 @@ function buildTree(files: PendingFile[]): PendingTreeNode[] {
     }
   }
 
-  return root;
+  return sortLevels(root);
 }
 
 /** Single-letter marker, matching the vocabulary used elsewhere in the app. */
