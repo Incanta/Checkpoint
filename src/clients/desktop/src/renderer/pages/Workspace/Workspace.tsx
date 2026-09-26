@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import WorkspaceMenu from "../../components/WorkspaceMenu";
 import WorkspaceExplorer from "../../components/WorkspaceExplorer";
 import WorkspacePendingChanges from "../../components/WorkspacePendingChanges";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dropdown } from "primereact/dropdown";
 import {
   currentWorkspaceAtom,
@@ -22,6 +22,22 @@ import { Badge, Button } from "../../components/ui";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCodeBranch } from "@fortawesome/free-solid-svg-icons/faCodeBranch";
 
+const SIDEBAR_STORAGE_KEY = "chk-desktop-workspace-sidebar-expanded";
+
+/**
+ * The page unmounts whenever we navigate away (Team Sync, dashboard, ...), so
+ * the sidebar's collapsed state lives in localStorage to survive both route
+ * changes and app restarts. Defaults to expanded.
+ */
+function getInitialSidebarExpanded(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_STORAGE_KEY) !== "false";
+  } catch {
+    /* localStorage unavailable */
+    return true;
+  }
+}
+
 const dropdownPt = {
   root: {
     className:
@@ -39,8 +55,16 @@ export default function Workspace(): React.ReactElement {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const syncPreview = useAtomValue(workspaceSyncPreviewAtom);
   const [activeTabIndex, setActiveTabIndex] = useState<number>(0);
-  const [expanded, setExpanded] = useState<boolean>(true);
+  const [expanded, setExpanded] = useState<boolean>(getInitialSidebarExpanded);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(expanded));
+    } catch {
+      /* localStorage unavailable */
+    }
+  }, [expanded]);
 
   const tabs = [
     <WorkspaceExplorer key="explorer" />,
