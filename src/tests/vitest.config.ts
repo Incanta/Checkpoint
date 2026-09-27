@@ -18,6 +18,9 @@ export default defineConfig({
   },
   test: {
     include: ["src/**/*.test.ts"],
+    // Integration tests need the real addon and running services; they have
+    // their own config (vitest.integration.config.ts) without the mocks below.
+    exclude: ["src/integration/**", "**/node_modules/**"],
     setupFiles: ["./src/harness/vitest-setup.ts"],
     testTimeout: 30_000,
     hookTimeout: 120_000,

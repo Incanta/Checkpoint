@@ -13,7 +13,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # A cold longtail addon build (cache miss below) adds several minutes.
+    timeout-minutes: 40
 
     steps:
       # ----------------------------------------------------------------
@@ -62,7 +63,34 @@ jobs:
       - name: Install C++ dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake g++ libcurl4-openssl-dev nlohmann-json3-dev
+          sudo apt-get install -y cmake g++ libcurl4-openssl-dev nlohmann-json3-dev libssl-dev
+
+      # ----------------------------------------------------------------
+      # Longtail addon: test the C++ in this commit, not the last npm publish.
+      #
+      # `yarn install` pulls the published @checkpointvcs/longtail-addon, so
+      # by itself this workflow would never run a change to src/longtail until
+      # someone publishes it. Instead the addon is built from source and
+      # overlaid onto node_modules before the services start. The build output
+      # is cached by a hash of everything that feeds it, so the (slow) build
+      # only reruns when the addon, wrapper, or library sources change.
+      #
+      # No restore-keys on purpose: a partial match would silently run a
+      # stale binary, which is the exact gap this exists to close.
+      # ----------------------------------------------------------------
+      - name: Restore source-built longtail addon
+        id: addon-cache
+        uses: actions/cache@v6
+        with:
+          path: .ci/longtail-addon
+          key: longtail-addon-${{ runner.os }}-${{ runner.arch }}-node24-${{ hashFiles('scripts/ci/build-longtail-addon.mjs', 'src/longtail/addon/CMakeLists.txt', 'src/longtail/addon/package.json', 'src/longtail/addon/yarn.lock', 'src/longtail/addon/tsconfig.json', 'src/longtail/addon/src/**', 'src/longtail/addon/lib/**', 'src/longtail/wrapper/**', 'src/longtail/library/CMakeLists.txt', 'src/longtail/library/src/**', 'src/longtail/library/lib/**') }}
+
+      - name: Build longtail addon from source
+        if: steps.addon-cache.outputs.cache-hit != 'true'
+        run: node scripts/ci/build-longtail-addon.mjs
+
+      - name: Use the source-built longtail addon
+        run: node scripts/ci/install-local-addon.mjs
 
       # ----------------------------------------------------------------
       # Build the CLI
@@ -497,6 +525,31 @@ jobs:
           echo "OK: readme.txt matches after round-trip modify"
           echo ""
           echo "All files verified!"
+
+      # ----------------------------------------------------------------
+      # Realistic tree through the daemon API: a few hundred files, nested
+      # directories, repeated filenames, an empty file, a >8 MiB file, staged
+      # as whole directories plus explicit children (what the desktop client
+      # sends). Compares the entire tree by hash after a pull and fails on
+      # any file that came back empty. See scripts/ci/tree-roundtrip.mjs.
+      # ----------------------------------------------------------------
+      - name: Realistic tree round trip (daemon API)
+        run: |
+          node scripts/ci/tree-roundtrip.mjs \
+            --chk "$GITHUB_WORKSPACE/src/clients/cli/build/chk" \
+            --daemon-id "${{ steps.auth.outputs.DAEMON_ID }}" \
+            --token "${{ steps.auth.outputs.API_TOKEN }}"
+
+      # ----------------------------------------------------------------
+      # Native submit edge cases: calls the addon directly (bypassing the
+      # daemon's dedupe) with repeated paths, missing files, directories,
+      # empty files, large files, and more. See src/tests/src/integration.
+      # ----------------------------------------------------------------
+      - name: Native submit edge cases (real addon, running services)
+        working-directory: src/tests
+        env:
+          CHECKPOINT_TEST_DAEMON_ID: ${{ steps.auth.outputs.DAEMON_ID }}
+        run: yarn test:integration
 
       # ----------------------------------------------------------------
       # Cleanup

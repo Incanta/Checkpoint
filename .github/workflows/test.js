@@ -15,6 +15,11 @@
  *
  * Defaults:
  *   --chk   src/clients/cli/build/chk   (or .exe on Windows)
+ *
+ * To run against the addon built from this checkout (as CI does) instead of
+ * the published one, before starting the services:
+ *   node scripts/ci/build-longtail-addon.mjs
+ *   node scripts/ci/install-local-addon.mjs
  */
 
 import { execSync } from "node:child_process";
@@ -367,6 +372,28 @@ async function main() {
     ws1Readme.trim() === "Hello from workspace 2 — modified!",
     "readme.txt has expected content",
   );
+
+  // ----------------------------------------------------------------
+  // Realistic tree round trip through the daemon API
+  // (scripts/ci/tree-roundtrip.mjs creates its own org and repo)
+  // ----------------------------------------------------------------
+  heading("Realistic tree round trip (daemon API)");
+
+  run(
+    `node scripts/ci/tree-roundtrip.mjs --chk "${CHK}" --daemon-id "${daemonId}" --token "${apiToken}" --daemon-url "${DAEMON_URL}" --app-url "${APP_URL}"`,
+    { timeout: 15 * 60_000 },
+  );
+
+  // ----------------------------------------------------------------
+  // Native submit edge cases (src/tests/src/integration)
+  // ----------------------------------------------------------------
+  heading("Native submit edge cases (real addon, running services)");
+
+  run("yarn test:integration", {
+    cwd: path.resolve("src/tests"),
+    env: { CHECKPOINT_TEST_DAEMON_ID: daemonId },
+    timeout: 15 * 60_000,
+  });
 
   // ----------------------------------------------------------------
   // Done

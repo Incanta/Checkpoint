@@ -1681,6 +1681,7 @@ __metadata:
     "@checkpointvcs/app": "workspace:*"
     "@checkpointvcs/common": "workspace:*"
     "@checkpointvcs/daemon": "workspace:*"
+    "@checkpointvcs/longtail-addon": "npm:^2.0.0"
     "@types/node": "npm:^25.3.3"
     stripe: "npm:22.1.0-beta.2"
     typescript: "npm:^7.0.2"

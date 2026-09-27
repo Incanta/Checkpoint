@@ -8,3 +8,5 @@ override.json
 dev-shadow.db
 .env
 *.tsbuildinfo
+# Source-built longtail addon staged by scripts/ci/build-longtail-addon.mjs
+.ci/

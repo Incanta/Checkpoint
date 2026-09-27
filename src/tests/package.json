@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:billing": "vitest run src/billing"
+    "test:billing": "vitest run src/billing",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "peerDependencies": {
     "@trpc/client": "^11.11.0",
@@ -20,6 +21,7 @@
     "@checkpointvcs/app": "workspace:*",
     "@checkpointvcs/common": "workspace:*",
     "@checkpointvcs/daemon": "workspace:*",
+    "@checkpointvcs/longtail-addon": "^2.0.0",
     "uuid": "^14.0.2"
   },
   "devDependencies": {

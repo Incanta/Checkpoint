@@ -122,6 +122,19 @@ const env = createTestEnvironment({
 });
 ```
 
+## Integration tests (real addon, running services)
+
+`src/integration/` holds tests that call the native longtail addon directly against a running app, daemon, and server. They are excluded from `yarn test` and run with:
+
+```bash
+export CHECKPOINT_TEST_DAEMON_ID=<daemon id with an entry in ~/.checkpoint/auth.json>
+yarn test:integration
+```
+
+Without `CHECKPOINT_TEST_DAEMON_ID` every integration file skips itself. Each file creates its own org and repo so it never shares changelists with anything else in the run. CI runs these after the CLI flow in `.github/workflows/test.yaml`, against an addon built from the checkout (see `scripts/ci/build-longtail-addon.mjs`).
+
+The daemon-driven counterpart, which seeds a realistic tree, stages whole directories through the daemon API, and compares the pulled tree by hash, lives in `scripts/ci/tree-roundtrip.mjs`.
+
 ## Timeouts
 
 Integration tests have a default timeout of 2 minutes (120000ms). Adjust per-test if needed:
