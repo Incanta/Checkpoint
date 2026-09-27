@@ -9,9 +9,12 @@
  * 708b223). The contract these tests pin:
  *
  *   - every non-delete modification is committed with its on-disk bytes;
- *   - a path the addon cannot size fails the submit, it never commits empty;
  *   - the shape of the list (repeats, order, root vs nested, names shared
  *     across directories) does not change what gets committed.
+ *
+ * Inputs the addon must REJECT rather than commit live in
+ * native-submit-rejects.test.ts, in a separate file because a native crash
+ * takes the whole vitest worker down with it and would hide every test after it.
  *
  * The daemon deduplicates before calling the addon; these tests call the
  * addon directly so that safety net is not in the way.
@@ -28,7 +31,6 @@ import {
   createContext,
   createWorkspace,
   enabled,
-  headChangelistNumber,
   nativeSubmit,
   readCommitted,
   write,
@@ -187,63 +189,6 @@ describe.skipIf(!enabled)(
         .map((f) => f.path)
         .sort();
       expect(committed).toEqual(Object.keys(contents).sort());
-    });
-
-    it("fails the submit when a listed file is missing from disk instead of committing it empty", async () => {
-      ws = await createWorkspace(ctx, "missing");
-      await write(ws, "Exists.txt", "present\n");
-      const before = await headChangelistNumber(ctx);
-
-      const outcome = await nativeSubmit(ctx, ws, [
-        add("Exists.txt"),
-        add("Missing.txt"),
-      ]);
-
-      expect(
-        outcome.error,
-        "a file that cannot be sized must fail the submit",
-      ).not.toBe(0);
-      expect(outcome.step).toContain("Missing.txt");
-      expect(await headChangelistNumber(ctx)).toBe(before);
-    });
-
-    it.skipIf(process.platform === "win32")(
-      "fails rather than committing empty when a path uses backslashes on POSIX",
-      async () => {
-        // The daemon normalizes separators before the addon sees a path. If a
-        // caller skips that, the addon must not resolve "Source\\Game.cpp" to
-        // nothing and commit a 0-byte asset under that name.
-        ws = await createWorkspace(ctx, "backslash");
-        await write(ws, "Source/Game.cpp", "// game\n");
-        const before = await headChangelistNumber(ctx);
-
-        const outcome = await nativeSubmit(ctx, ws, [
-          add("Source/Game.cpp"),
-          add("Source\\Game.cpp"),
-        ]);
-
-        expect(outcome.error).not.toBe(0);
-        expect(await headChangelistNumber(ctx)).toBe(before);
-      },
-    );
-
-    it("fails rather than committing when a directory is listed as if it were a file", async () => {
-      // Directory expansion is the caller's job. A directory that slips through
-      // must not become an empty (or garbage) asset in the version index.
-      ws = await createWorkspace(ctx, "dirpath");
-      await write(ws, "Dir/file.txt", "inside\n");
-      const before = await headChangelistNumber(ctx);
-
-      const outcome = await nativeSubmit(ctx, ws, [
-        add("Dir"),
-        add("Dir/file.txt"),
-      ]);
-
-      expect(
-        outcome.error,
-        "a directory path must not be committed as a file",
-      ).not.toBe(0);
-      expect(await headChangelistNumber(ctx)).toBe(before);
     });
 
     it("sizes a submitted subset of a large directory, including its first and last entries", async () => {

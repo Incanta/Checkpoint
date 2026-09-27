@@ -245,16 +245,44 @@ int32_t SubmitSync(
 
       const char* mod_path = Modifications[entry.mod_index].Path;
       char* full_path = file_storage_api->ConcatPath(file_storage_api, LocalRootPath, mod_path);
-      Longtail_StorageAPI_HOpenFile open_file = 0;
-      int size_err = file_storage_api->OpenReadFile(file_storage_api, full_path, &open_file);
-      if (size_err == 0) {
-        size_err = file_storage_api->GetSize(file_storage_api, open_file, &entry.size);
-        file_storage_api->CloseFile(file_storage_api, open_file);
+
+      int size_err = 0;
+      std::string message;
+
+      // A directory must never reach the sizing calls below. The scan above
+      // skips m_IsDir entries, so a directory handed to us as a modification
+      // always lands here, and on POSIX it would sail straight through:
+      // fopen() on a directory SUCCEEDS, and fseek/ftell then reports the
+      // inode size (4096 on ext4), so the entry looks like a perfectly good
+      // asset. Longtail later pread()s it, gets EISDIR, and the read path
+      // crashes the process with SIGSEGV rather than returning the error.
+      //
+      // Windows hides this: CreateFileW without FILE_FLAG_BACKUP_SEMANTICS
+      // fails on a directory, so OpenReadFile errors out and the submit fails
+      // cleanly. The bug is POSIX-only, which is why it took a Linux CI run to
+      // surface it.
+      //
+      // Callers are expected to have expanded directories into their files
+      // already (DaemonManager.expandDirectoriesForSubmit does this, and every
+      // in-tree caller goes through it). This is the guard for one that does
+      // not: an error naming the path beats both a crash and a corrupt asset.
+      if (file_storage_api->IsDir(file_storage_api, full_path)) {
+        size_err = EISDIR;
+        message = std::string("Refusing to submit a directory as a file: ") + mod_path;
+      } else {
+        Longtail_StorageAPI_HOpenFile open_file = 0;
+        size_err = file_storage_api->OpenReadFile(file_storage_api, full_path, &open_file);
+        if (size_err == 0) {
+          size_err = file_storage_api->GetSize(file_storage_api, open_file, &entry.size);
+          file_storage_api->CloseFile(file_storage_api, open_file);
+        }
+        if (size_err != 0) {
+          message = std::string("Failed to read the size of ") + mod_path;
+        }
       }
       Longtail_Free(full_path);
 
       if (size_err != 0) {
-        std::string message = std::string("Failed to read the size of ") + mod_path;
         SetHandleStep(handle, message.c_str());
         handle->error = size_err;
         handle->completed = 1;
