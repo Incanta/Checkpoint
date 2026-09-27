@@ -101,6 +101,34 @@ jobs:
             --stream "${{ steps.stream.outputs.stream }}" \
             --sha "${{ steps.detect.outputs.head }}"
 
+      # Every consumer pins the addon exactly, so a consumer left behind would
+      # bundle a second copy of the native module. Cheap, offline, and always
+      # worth blocking on.
+      - name: Check addon version pins
+        run: node scripts/check-addon-version.js
+
+      # The server, client and vscode jobs all install the PUBLISHED addon. When
+      # this run is not republishing it, the pinned version must already have
+      # been built from the addon sources being released, or the release ships
+      # native code that was never released and CI never ran against.
+      #
+      # Fatal only for the release stream, which is what moves the `latest`
+      # dist-tag and therefore what reaches users. Nightlies stay advisory: they
+      # run unattended on a schedule, and a hard stop there would park CD on a
+      # condition that predates the run and that nobody is watching for. The
+      # `addon-publish-status` job on test.yaml is what keeps that visible.
+      - name: Verify the bundled addon matches the addon sources
+        if: >-
+          steps.stream.outputs.stream == 'release'
+          && steps.detect.outputs.longtail_addon != 'true'
+        run: node scripts/check-addon-version.js --sources --registry --strict
+
+      - name: Report addon publish status (advisory)
+        if: >-
+          steps.stream.outputs.stream != 'release'
+          && steps.detect.outputs.longtail_addon != 'true'
+        run: node scripts/check-addon-version.js --sources --registry
+
       - name: Summarize
         run: |
           {

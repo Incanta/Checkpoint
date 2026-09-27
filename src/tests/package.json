@@ -21,7 +21,7 @@
     "@checkpointvcs/app": "workspace:*",
     "@checkpointvcs/common": "workspace:*",
     "@checkpointvcs/daemon": "workspace:*",
-    "@checkpointvcs/longtail-addon": "^2.0.0",
+    "@checkpointvcs/longtail-addon": "2.0.0",
     "uuid": "^14.0.2"
   },
   "devDependencies": {

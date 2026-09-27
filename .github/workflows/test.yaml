@@ -42,6 +42,20 @@ jobs:
           node-version: "24"
 
       # ----------------------------------------------------------------
+      # Addon pins: offline, instant, and deterministic, so it runs before
+      # anything expensive. Every consumer pins the addon exactly (see
+      # scripts/set-addon-version.js), which means a consumer left behind
+      # installs a SECOND copy of a native module rather than deduplicating
+      # onto one. Nothing about that is ambiguous, so it fails the build.
+      #
+      # The advisory checks (is the pinned version built from these sources,
+      # what is the registry serving) are a separate job below, so they only
+      # speak up once the tests say the code is good.
+      # ----------------------------------------------------------------
+      - name: Check addon version pins
+        run: node scripts/check-addon-version.js
+
+      # ----------------------------------------------------------------
       # Install & build Node.js services
       # ----------------------------------------------------------------
       - name: Install dependencies
@@ -77,13 +91,31 @@ jobs:
       #
       # No restore-keys on purpose: a partial match would silently run a
       # stale binary, which is the exact gap this exists to close.
+      #
+      # The key comes from scripts/addon-source-fingerprint.js rather than a
+      # hand-written hashFiles list, so it reads the same file set as CD change
+      # detection (.github/release-config.json) and cannot drift from it. A
+      # hand-maintained list that missed a new source directory would serve a
+      # stale cache entry and quietly test the wrong binary.
       # ----------------------------------------------------------------
+      - name: Fingerprint the addon sources
+        id: addon-fp
+        run: |
+          # One invocation: the script writes `fingerprint` and `file_count` to
+          # GITHUB_OUTPUT itself, and running it twice would append the key twice.
+          # --verbose puts the per-file digests on stderr, inside a collapsed log
+          # group, which is what you need to explain an unexpected cache miss.
+          echo "::group::addon source digests"
+          fingerprint=$(node scripts/addon-source-fingerprint.js --verbose)
+          echo "::endgroup::"
+          echo "Addon source fingerprint: ${fingerprint}"
+
       - name: Restore source-built longtail addon
         id: addon-cache
         uses: actions/cache@v6
         with:
           path: .ci/longtail-addon
-          key: longtail-addon-${{ runner.os }}-${{ runner.arch }}-node24-${{ hashFiles('scripts/ci/build-longtail-addon.mjs', 'src/longtail/addon/CMakeLists.txt', 'src/longtail/addon/package.json', 'src/longtail/addon/yarn.lock', 'src/longtail/addon/tsconfig.json', 'src/longtail/addon/src/**', 'src/longtail/addon/lib/**', 'src/longtail/wrapper/**', 'src/longtail/library/CMakeLists.txt', 'src/longtail/library/src/**', 'src/longtail/library/lib/**') }}
+          key: longtail-addon-${{ runner.os }}-${{ runner.arch }}-node24-build1-${{ steps.addon-fp.outputs.fingerprint }}
 
       - name: Build longtail addon from source
         if: steps.addon-cache.outputs.cache-hit != 'true'
@@ -580,3 +612,46 @@ jobs:
           echo ""
           echo "=== daemon.json ==="
           cat ~/.checkpoint/daemon.json 2>/dev/null || echo "(not found)"
+
+  # ==================================================================
+  # Is the addon everyone installs built from the sources we just tested?
+  #
+  # Deliberately a second job rather than a step in `test`. The question only
+  # means something once the tests are green: "the addon sources in this commit
+  # are good AND nobody outside this repo has them yet" is the state that kept
+  # the submit sizing fix (708b223) away from users for two weeks while CI was
+  # passing the whole time. `needs: test` gives that gating for free, since a
+  # job with `needs` is skipped when its dependency fails.
+  #
+  # Never fails the build. On a branch, "not published yet" is simply true and
+  # there is nothing wrong with it. The release stream is where it becomes an
+  # error, and .github/workflows/release.yaml does that with --strict.
+  #
+  # Pull requests are excluded on purpose. The drift it reports is a property of
+  # the branch, not of the change under review, so annotating every open pull
+  # request with the same warning would train everyone to ignore it. One report
+  # per merge, addressed to whoever just merged, is the actionable version.
+  # ==================================================================
+  addon-publish-status:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # A release version carries no commit in its version string, so the
+          # check finds the commit it shipped from by searching for the publish
+          # workflow's own commit message. A shallow clone has no history to
+          # search and the check would report "cannot tell" instead.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      # Writes a table to the run summary either way, and adds a warning
+      # annotation when the published addon is behind these sources.
+      - name: Report addon publish status
+        run: node scripts/check-addon-version.js --sources --registry

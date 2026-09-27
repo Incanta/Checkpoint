@@ -1,21 +1,32 @@
 #!/usr/bin/env node
 // Point the repo at a specific @checkpointvcs/longtail-addon version.
 //
-// The addon is consumed by three workspaces (src/app, src/core/server,
-// src/core/daemon), so a publish has to rewrite four package.json files in
-// lockstep. That used to live as an inline `node -e` blob inside
+// The addon is consumed by four workspaces (src/app, src/core/server,
+// src/core/daemon, src/tests), so a publish has to rewrite five package.json
+// files in lockstep. That used to live as an inline `node -e` blob inside
 // .github/workflows/publish-longtail-addon.yaml; it is a script now because
 // the nightly stream also needs it, in a second job, without a commit.
 //
+// Dependents pin the addon EXACTLY (x.y.z, no caret). The addon is a native
+// binary whose blast radius is the whole storage path, and every consumer
+// installs from a committed lockfile with --immutable, so a range buys nothing
+// at install time: it only adds a way for the version to move without a
+// reviewable diff whenever the lockfile is regenerated. An exact pin also
+// means the version is one string to compare, which is what
+// scripts/check-addon-version.js relies on, and it removes the old split where
+// releases used a caret but prereleases had to pin (a caret range does not
+// match a prerelease at all).
+//
+// Because the pins are exact, every dependent must move together: a dependent
+// left behind resolves a second copy of the package rather than quietly
+// deduplicating onto one. check-addon-version.js fails CI when that happens.
+//
 // Usage:
-//   node scripts/set-addon-version.js <version> [--dep-only] [--range caret|exact]
+//   node scripts/set-addon-version.js <version> [--dep-only]
 //
 //   --dep-only  Only rewrite the dependents, not the addon's own package.json.
 //               Used by downstream build jobs that consume an already-published
 //               addon.
-//   --range     How dependents pin the addon. Defaults to `caret` (^x.y.z) for
-//               plain releases and `exact` for prereleases: a caret range does
-//               not match prerelease versions, so nightly builds must pin.
 
 const fs = require("fs");
 const path = require("path");
@@ -27,6 +38,7 @@ const DEPENDENTS = [
   "src/app/package.json",
   "src/core/server/package.json",
   "src/core/daemon/package.json",
+  "src/tests/package.json",
 ];
 const ADDON_NAME = "@checkpointvcs/longtail-addon";
 
@@ -35,25 +47,27 @@ const ADDON_NAME = "@checkpointvcs/longtail-addon";
 const args = process.argv.slice(2);
 let version = null;
 let depOnly = false;
-let range = null;
 
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   const eq = a.indexOf("=");
   const flag = eq === -1 ? a : a.slice(0, eq);
-  const inline = eq === -1 ? null : a.slice(eq + 1);
   if (flag === "--dep-only") depOnly = true;
-  else if (flag === "--range") range = inline ?? args[++i];
   else if (!a.startsWith("--")) version = a;
   else {
     console.error(`unknown flag: ${flag}`);
+    if (flag === "--range") {
+      console.error(
+        "  --range was removed: dependents always pin exactly. See the header comment.",
+      );
+    }
     process.exit(1);
   }
 }
 
 if (!version) {
   console.error(
-    "usage: node scripts/set-addon-version.js <version> [--dep-only] [--range caret|exact]",
+    "usage: node scripts/set-addon-version.js <version> [--dep-only]",
   );
   process.exit(1);
 }
@@ -63,22 +77,8 @@ if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(version)) {
   process.exit(1);
 }
 
-const isPrerelease = version.includes("-");
-range ??= isPrerelease ? "exact" : "caret";
-
-if (range !== "caret" && range !== "exact") {
-  console.error(`--range must be caret or exact, got: ${range}`);
-  process.exit(1);
-}
-
-if (range === "caret" && isPrerelease) {
-  console.error(
-    `refusing to write a caret range for prerelease ${version}: ^${version} does not match other prereleases`,
-  );
-  process.exit(1);
-}
-
-const spec = range === "caret" ? `^${version}` : version;
+// Exact, always. See the header comment for why there is no range option.
+const spec = version;
 
 // ─── Rewrite ────────────────────────────────────────────────────────
 
