@@ -4,6 +4,7 @@
 #include "../util/progress.h"
 #include "main.h"
 
+#include <iostream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -210,7 +211,13 @@ int32_t SubmitSync(
         if (find_err != 0) {
           break;
         }
-        if (!props.m_IsDir) {
+        // m_IsDir comes from stat(), but m_Name comes from d_type:
+        // Longtail_GetFileName returns NULL unless d_type == DT_REG, and
+        // d_type is DT_UNKNOWN on filesystems that do not carry it. So a
+        // regular file can arrive here with m_IsDir == 0 and m_Name == NULL,
+        // and handing NULL to std::string is undefined behaviour. Skipping the
+        // match is safe: the entry stays unfound and gets sized directly below.
+        if (!props.m_IsDir && props.m_Name != nullptr) {
           auto it = name_lookup.find(props.m_Name);
           if (it != name_lookup.end()) {
             for (size_t entry_index : it->second) {
@@ -233,13 +240,33 @@ int32_t SubmitSync(
     Longtail_Free(search_path);
   }
 
-  // Anything the directory scan did not account for gets its size read
-  // directly. Leaving an entry at its initial 0 would hand Longtail a zero
-  // byte asset and commit an empty file over real content, so a file we cannot
-  // size at all fails the submit instead.
+  // Establish a trustworthy size for every entry the scan left uncertain, by
+  // reading it through OpenReadFile/GetSize: the per-file path the batched
+  // directory scan replaced in 5f3d675, and the one this code trusts most.
+  //
+  // Two kinds of entry land here.
+  //
+  //   1. The scan never saw the name (found == false). Leaving the entry at its
+  //      initial 0 would hand Longtail a zero byte asset and commit an empty
+  //      file over real content, so a file that cannot be sized at all fails
+  //      the submit rather than committing a lie.
+  //
+  //   2. The scan reported 0 (found == true, size == 0). A zero is only
+  //      legitimate if the file really is empty, and CI has caught the scan
+  //      reporting 0 for a 276 byte file: once, on one file out of 44, with the
+  //      same binary that had passed the same test on the previous run. The
+  //      root cause is NOT established. Until it is, every zero the scan
+  //      produces is re-read here and the direct answer wins, because
+  //      committing an empty file over real content is the worst thing this
+  //      codebase can do and one extra open per genuinely empty file costs
+  //      nothing. A disagreement is reported on stderr rather than failing the
+  //      submit: the direct read is authoritative, so the data is already
+  //      correct, and a hard failure would turn a transient into a broken
+  //      submit. If those lines ever show up, they are the lead to follow.
   for (auto& [dir, entries] : dir_to_files) {
     for (auto& entry : entries) {
-      if (entry.found) {
+      const bool verify_zero = entry.found && entry.size == 0;
+      if (entry.found && !verify_zero) {
         continue;
       }
 
@@ -270,14 +297,26 @@ int32_t SubmitSync(
         size_err = EISDIR;
         message = std::string("Refusing to submit a directory as a file: ") + mod_path;
       } else {
+        uint64_t direct_size = 0;
         Longtail_StorageAPI_HOpenFile open_file = 0;
         size_err = file_storage_api->OpenReadFile(file_storage_api, full_path, &open_file);
         if (size_err == 0) {
-          size_err = file_storage_api->GetSize(file_storage_api, open_file, &entry.size);
+          size_err = file_storage_api->GetSize(file_storage_api, open_file, &direct_size);
           file_storage_api->CloseFile(file_storage_api, open_file);
         }
         if (size_err != 0) {
           message = std::string("Failed to read the size of ") + mod_path;
+        } else {
+          if (verify_zero && direct_size != 0) {
+            // The scan and a direct read disagree, and the direct read wins.
+            // This is the diagnostic for the unexplained zero described above:
+            // if it appears in a log, the scan produced a size that would have
+            // committed an empty file, and this is where to start.
+            std::cerr << "[submit] WARNING: directory scan reported 0 bytes for '"
+                      << mod_path << "' but a direct read reports " << direct_size
+                      << "; using the direct size" << std::endl;
+          }
+          entry.size = direct_size;
         }
       }
       Longtail_Free(full_path);
