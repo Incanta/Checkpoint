@@ -650,6 +650,14 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
+          # This job installs nothing: check-addon-version.js and the
+          # fingerprint module it requires use only node builtins. Leaving the
+          # default on makes setup-node probe `yarn cache dir`, and the runner's
+          # global yarn is 1.x while packageManager pins yarn@4, so the probe
+          # fails the job before it runs anything. The `test` job above solves
+          # the same clash by enabling Corepack first, which is the right answer
+          # when you are about to install; here there is nothing to cache.
+          package-manager-cache: false
 
       # Writes a table to the run summary either way, and adds a warning
       # annotation when the published addon is behind these sources.
