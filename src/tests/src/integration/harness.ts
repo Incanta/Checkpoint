@@ -209,9 +209,20 @@ export async function nativeSubmit(
 }
 
 /**
- * Reads a file straight out of a changelist's version index. This is the
- * read path a pull resolves through, so it sees exactly what a teammate
- * would receive. Rejects when the path is not in the version.
+ * Reads a file straight out of one changelist's version index, which is the
+ * read path a pull resolves through, so it sees exactly the bytes a teammate
+ * would receive.
+ *
+ * IMPORTANT: a version index contains ONLY that changelist's own
+ * modifications, not a snapshot of the tree. Pass the changelist that actually
+ * wrote the path, or this rejects with "File not found in version" even though
+ * the file is perfectly alive at that point in history. A delete-only
+ * changelist has an index with zero assets.
+ *
+ * Reading a path "as of" an arbitrary changelist means first finding the most
+ * recent change to it at or before that number, which is what the app's
+ * file.readFileContent does server-side. Nothing here needs that yet, so this
+ * stays the narrow primitive.
  */
 export async function readCommitted(
   ctx: IntegrationContext,

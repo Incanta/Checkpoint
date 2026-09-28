@@ -91,6 +91,14 @@ describe.skipIf(!enabled)(
     }
 
     it("commits the real bytes when the same path is listed more than once", async () => {
+      // The addon does not deduplicate: the version index ends up with one
+      // entry per modification, so this submit of 4 modifications over 2 paths
+      // produces 4 assets, three of them the same path. That is fine and is not
+      // what broke before. The requirement is that EVERY one of those entries
+      // carries the true size, because the old name-keyed lookup filled in only
+      // the last and left the rest at 0, which is what committed an empty file
+      // over real content. Keeping duplicates out of a real submit is the
+      // daemon's job (expandDirectoriesForSubmit, then submit.ts).
       ws = await createWorkspace(ctx, "dup");
       const body = Buffer.from("real content that has to survive the repeat\n");
       await write(ws, "Source/Game.Target.cs", body);
@@ -270,7 +278,13 @@ describe.skipIf(!enabled)(
       }
     });
 
-    it("removes a deleted path from the next version without touching its siblings", async () => {
+    it("records a delete on its own without dragging siblings into the changelist", async () => {
+      // A version index holds only the changelist's own modifications, so a
+      // delete-only submit produces one with zero assets and nothing to read.
+      // Whether a later reader still SEES Keep.txt is a question about
+      // resolving a path across changelist history, which the pull path answers
+      // and scripts/ci/tree-roundtrip.mjs covers end to end. What belongs here
+      // is what the addon put in this changelist.
       ws = await createWorkspace(ctx, "delete");
       await write(ws, "Keep.txt", "keep me\n");
       await write(ws, "Drop.txt", "drop me\n");
@@ -280,6 +294,8 @@ describe.skipIf(!enabled)(
         add("Drop.txt"),
       ]);
       expect(first.error, first.step).toBe(0);
+      await expectCommitted(first.changelistNumber!, "Keep.txt", "keep me\n");
+      await expectCommitted(first.changelistNumber!, "Drop.txt", "drop me\n");
 
       await rm(path.join(ws.root, "Drop.txt"));
       const second = await nativeSubmit(
@@ -291,13 +307,14 @@ describe.skipIf(!enabled)(
       expect(second.error, second.step).toBe(0);
       expect(second.changelistNumber).toBe(first.changelistNumber! + 1);
 
+      // Exactly one change, typed as a delete. A sibling pulled in here would
+      // mean the submit rewrote a file nobody touched.
       const recorded = await changelistPaths(ctx, second.changelistNumber!);
       expect(recorded).toEqual([{ path: "Drop.txt", changeType: "DELETE" }]);
-      await expectCommitted(second.changelistNumber!, "Keep.txt", "keep me\n");
-      await expect(
-        readCommitted(ctx, second.changelistNumber!, "Drop.txt"),
-      ).rejects.toThrow();
-      // The earlier version still has it.
+
+      // History is intact: both files still read out of the changelist that
+      // last wrote them, the delete did not destroy the old content.
+      await expectCommitted(first.changelistNumber!, "Keep.txt", "keep me\n");
       await expectCommitted(first.changelistNumber!, "Drop.txt", "drop me\n");
     });
 
