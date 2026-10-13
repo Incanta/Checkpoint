@@ -20,6 +20,13 @@ import { compareTreePaths } from "~/lib/file-tree-sort";
 import { classifyPaths } from "~/server/team-sync/classify";
 import { settleClaimsForSubmit } from "~/server/claims/claims";
 import { resolveDomainBranchName } from "~/server/claims/domain";
+import {
+  MAX_SUBMIT_ATTEMPTS,
+  SubmitContention,
+  describeBaseConflicts,
+  findBaseConflicts,
+  isSubmitContention,
+} from "~/server/changelist-commit";
 
 export const changelistRouter = createTRPCRouter({
   // Path-keyed diff between two changelists' state trees. The daemon's sync
@@ -281,6 +288,10 @@ export const changelistRouter = createTRPCRouter({
             delete: z.boolean(),
             path: z.string(),
             oldPath: z.string().optional(),
+            // The changelist the submitter's copy of the file came from, or
+            // null for a file it believes is new to the branch. See
+            // findBaseConflicts.
+            baseChangelist: z.number().int().nonnegative().nullish(),
           }),
         ),
         keepCheckedOut: z.boolean(),
@@ -385,176 +396,297 @@ export const changelistRouter = createTRPCRouter({
         });
       }
 
-      // Get the next changelist number
-      const lastChangelist = await ctx.db.changelist.findFirst({
-        where: { repoId: input.repoId },
-        orderBy: { number: "desc" },
-      });
-
-      const nextNumber = (lastChangelist?.number ?? -1) + 1;
-
-      const branch = submitBranch;
-
-      const parentChangelist = await ctx.db.changelist.findUnique({
-        where: {
-          repoId_number: {
-            repoId: input.repoId,
-            number: branch.headNumber,
-          },
-        },
-      });
-
-      if (!parentChangelist) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: `Parent changelist ${branch.headNumber} not found in the repo`,
-        });
-      }
-
-      // Parent head's materialized path tree (cached); clone before mutating.
-      const paths = new Map(
-        await getStateTreePaths(ctx.db, input.repoId, branch.headNumber),
-      );
-
-      // Resolve / create File rows for the modified paths (for the FileChange
-      // log and the fileId wire shim). Batched to avoid DB parameter limits.
-      const allPaths = input.modifications.map((mod) =>
-        mod.path.replaceAll("\\", "/"),
-      );
-
-      const modifiedFiles: Awaited<ReturnType<typeof ctx.db.file.findMany>> =
-        [];
-      for (let i = 0; i < allPaths.length; i += BATCH_SIZE) {
-        const batch = allPaths.slice(i, i + BATCH_SIZE);
-        const results = await ctx.db.file.findMany({
-          where: {
-            repoId: input.repoId,
-            path: { in: batch },
-          },
-        });
-        for (const r of results) modifiedFiles.push(r);
-      }
-
-      // Batch-create any new file entries that don't already exist
-      const existingPathSet = new Set(modifiedFiles.map((f) => f.path));
-      const newFilePaths = input.modifications
-        .filter((mod) => !mod.delete)
-        .map((mod) => mod.path.replaceAll("\\", "/"))
-        .filter((p) => !existingPathSet.has(p));
-
-      if (newFilePaths.length > 0) {
-        for (let i = 0; i < newFilePaths.length; i += BATCH_SIZE) {
-          const batch = newFilePaths.slice(i, i + BATCH_SIZE);
-          await ctx.db.file.createMany({
-            data: batch.map((path) => ({
-              repoId: input.repoId,
-              path,
-            })),
-          });
-        }
-
-        // Re-fetch to get the newly created file records with their IDs
-        for (let i = 0; i < newFilePaths.length; i += BATCH_SIZE) {
-          const batch = newFilePaths.slice(i, i + BATCH_SIZE);
-          const newFiles = await ctx.db.file.findMany({
-            where: {
-              repoId: input.repoId,
-              path: { in: batch },
-            },
-          });
-          for (const f of newFiles) modifiedFiles.push(f);
-        }
-      }
-
-      // Build a path→file map for O(1) lookups, record fileIds for the log, and
-      // apply the modifications to the path tree.
-      const filesByPath = new Map(modifiedFiles.map((f) => [f.path, f]));
-      const fileIdsForPaths: Record<string, string | undefined> = {};
-      for (const mod of input.modifications) {
-        const modPath = mod.path.replaceAll("\\", "/");
-        fileIdsForPaths[mod.path] = filesByPath.get(modPath)?.id;
-        if (mod.delete) {
-          paths.delete(modPath);
-        } else {
-          paths.set(modPath, nextNumber);
-        }
-      }
-
-      // Build the content-addressed state tree and store its blocks.
-      const stateRootHash = await buildStateTreeBlocks(
-        ctx.db,
-        input.repoId,
-        paths.entries(),
-      );
-
       // Classify code vs content from the modified paths (already in memory)
-      const { hasCodeChanges, hasContentChanges } = classifyPaths(allPaths);
+      const { hasCodeChanges, hasContentChanges } =
+        classifyPaths(normalizedPaths);
 
-      // Create the changelist (inherit artifact state from parent)
-      const changelist = await ctx.db.changelist.create({
-        data: {
-          number: nextNumber,
-          message: input.message,
-          versionIndex: input.versionIndex,
-          parentNumber: branch.headNumber,
-          stateRootHash,
-          artifactVersionIndex: parentChangelist.artifactVersionIndex,
-          artifactStateTree:
-            parentChangelist.artifactStateTree as InputJsonValue,
-          repoId: input.repoId,
-          userId: ctx.session.user.id,
-          hasCodeChanges,
-          hasContentChanges,
-        },
-      });
+      // Everything from reading the head to committing is one attempt, and an
+      // attempt that loses a race is thrown away and redone from the top.
+      //
+      // Two things can only be decided against the head the changelist will
+      // actually sit on: the tree it produces, and whether the submitter's
+      // files were based on what that head holds. So nothing is trusted across
+      // attempts. The transaction then holds only the writes, and it has two
+      // gates that turn "the world moved" into a clean failure of the whole
+      // attempt: the unique (repoId, number) index, and a head update that
+      // matches only if the head is still the one this attempt read.
+      let committed: {
+        id: string;
+        number: number;
+        stateRootHash: string;
+        paths: Map<string, number>;
+      } | null = null;
 
-      await ctx.db.branch.update({
-        where: { id: branch.id },
-        data: { headNumber: nextNumber },
-      });
+      for (
+        let attempt = 0;
+        attempt < MAX_SUBMIT_ATTEMPTS && !committed;
+        attempt++
+      ) {
+        if (attempt > 0) {
+          // Spread retries out so the same submits do not collide again.
+          await new Promise((resolve) =>
+            setTimeout(resolve, 15 * attempt + Math.random() * 60),
+          );
+        }
 
-      await ctx.db.fileChange.createMany({
-        data: input.modifications
-          .filter((mod) => fileIdsForPaths[mod.path])
-          .map((mod) => {
-            return {
+        const branch = await ctx.db.branch.findUnique({
+          where: { id: submitBranch.id },
+        });
+
+        if (!branch) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `Branch ${input.branchName} not found in the repo`,
+          });
+        }
+
+        if (branch.archivedAt) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Branch ${input.branchName} is archived and read-only`,
+          });
+        }
+
+        const parentChangelist = await ctx.db.changelist.findUnique({
+          where: {
+            repoId_number: {
               repoId: input.repoId,
-              fileId: fileIdsForPaths[mod.path]!,
-              changelistNumber: nextNumber,
-              type: mod.delete ? FileChangeType.DELETE : FileChangeType.MODIFY,
-              oldPath: mod.oldPath ? mod.oldPath.replaceAll("\\", "/") : null,
-            };
-          }),
-      });
+              number: branch.headNumber,
+            },
+          },
+        });
 
-      primeStateTreePaths(input.repoId, stateRootHash, paths);
+        if (!parentChangelist) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `Parent changelist ${branch.headNumber} not found in the repo`,
+          });
+        }
 
-      // Settle claims for everything this changelist carried.
-      //
-      // Submitting to the domain root closes the gap between "the change
-      // exists somewhere" and "the change reached the root" in this same
-      // transaction, so those claims release outright. Submitting to a feature
-      // branch parks them as SUBMITTED: still blocking the domain, but
-      // reclaimable by anyone on that branch or below it.
-      //
-      // Paths that were never checked out get a claim created here, at the
-      // strength the org's binary-extension set resolves to. This is the only
-      // claim-creation point that can fail a submit, because the claim is
-      // taken after the work rather than before it.
-      await settleClaimsForSubmit(ctx.db, {
-        repoId: input.repoId,
-        branchName: input.branchName,
-        domainBranchName: submitDomainBranchName,
-        targetIsDomainRoot: submitDomainBranchName === input.branchName,
-        changelistNumber: nextNumber,
-        fileIdsForPaths,
-        orgBinaryExtensions: repo.org.binaryExtensions,
-        keepCheckedOut: input.keepCheckedOut,
-        actor: {
-          userId: ctx.session.user.id,
-          workspaceId: input.workspaceId,
-        },
-      });
+        // Parent head's materialized path tree (cached); clone before mutating.
+        const headPaths = await getStateTreePaths(
+          ctx.db,
+          input.repoId,
+          branch.headNumber,
+        );
+
+        const conflicts = findBaseConflicts(input.modifications, headPaths);
+        if (conflicts.length > 0) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: describeBaseConflicts(input.branchName, conflicts),
+          });
+        }
+
+        // Get the next changelist number. Another submit to this repo may take
+        // it first; the unique index decides, inside the transaction.
+        const lastChangelist = await ctx.db.changelist.findFirst({
+          where: { repoId: input.repoId },
+          orderBy: { number: "desc" },
+          select: { number: true },
+        });
+
+        const nextNumber = (lastChangelist?.number ?? -1) + 1;
+
+        const paths = new Map(headPaths);
+        for (const mod of input.modifications) {
+          const modPath = mod.path.replaceAll("\\", "/");
+          if (mod.delete) {
+            paths.delete(modPath);
+          } else {
+            paths.set(modPath, nextNumber);
+          }
+        }
+
+        // Build the content-addressed state tree and store its blocks. Blocks
+        // are keyed by their content, so one written by an attempt that is
+        // later thrown away is harmless.
+        const stateRootHash = await buildStateTreeBlocks(
+          ctx.db,
+          input.repoId,
+          paths.entries(),
+        );
+
+        try {
+          const created = await ctx.db.$transaction(
+            async (tx) => {
+              // Create the changelist (inherit artifact state from parent)
+              const changelist = await tx.changelist.create({
+                data: {
+                  number: nextNumber,
+                  message: input.message,
+                  versionIndex: input.versionIndex,
+                  parentNumber: branch.headNumber,
+                  stateRootHash,
+                  artifactVersionIndex: parentChangelist.artifactVersionIndex,
+                  artifactStateTree:
+                    parentChangelist.artifactStateTree as InputJsonValue,
+                  repoId: input.repoId,
+                  userId: ctx.session.user.id,
+                  hasCodeChanges,
+                  hasContentChanges,
+                },
+              });
+
+              // Move the head only if it is still where this attempt found it.
+              // An unconditional update here is how a changelist gets dropped
+              // from its branch: a second submit that read the same head would
+              // overwrite the first one's update with its own.
+              const moved = await tx.branch.updateMany({
+                where: {
+                  id: branch.id,
+                  headNumber: branch.headNumber,
+                  archivedAt: null,
+                },
+                data: { headNumber: nextNumber },
+              });
+              if (moved.count !== 1) {
+                throw new SubmitContention(
+                  `the head of ${input.branchName} moved`,
+                );
+              }
+
+              // Resolve / create File rows for the modified paths (for the
+              // FileChange log and the fileId wire shim). Batched to avoid DB
+              // parameter limits. Inside the transaction, after the changelist
+              // insert, so two submits adding the same new path cannot both
+              // create a row for it: only one of them gets this far.
+              const modifiedFiles: Awaited<
+                ReturnType<typeof tx.file.findMany>
+              > = [];
+              for (let i = 0; i < normalizedPaths.length; i += BATCH_SIZE) {
+                const batch = normalizedPaths.slice(i, i + BATCH_SIZE);
+                const results = await tx.file.findMany({
+                  where: {
+                    repoId: input.repoId,
+                    path: { in: batch },
+                  },
+                });
+                for (const r of results) modifiedFiles.push(r);
+              }
+
+              // Batch-create any new file entries that don't already exist
+              const existingPathSet = new Set(modifiedFiles.map((f) => f.path));
+              const newFilePaths = [
+                ...new Set(
+                  input.modifications
+                    .filter((mod) => !mod.delete)
+                    .map((mod) => mod.path.replaceAll("\\", "/"))
+                    .filter((p) => !existingPathSet.has(p)),
+                ),
+              ];
+
+              if (newFilePaths.length > 0) {
+                for (let i = 0; i < newFilePaths.length; i += BATCH_SIZE) {
+                  const batch = newFilePaths.slice(i, i + BATCH_SIZE);
+                  await tx.file.createMany({
+                    data: batch.map((path) => ({
+                      repoId: input.repoId,
+                      path,
+                    })),
+                  });
+                }
+
+                // Re-fetch to get the newly created file records with their IDs
+                for (let i = 0; i < newFilePaths.length; i += BATCH_SIZE) {
+                  const batch = newFilePaths.slice(i, i + BATCH_SIZE);
+                  const newFiles = await tx.file.findMany({
+                    where: {
+                      repoId: input.repoId,
+                      path: { in: batch },
+                    },
+                  });
+                  for (const f of newFiles) modifiedFiles.push(f);
+                }
+              }
+
+              // Build a path→file map for O(1) lookups and record fileIds for
+              // the log.
+              const filesByPath = new Map(
+                modifiedFiles.map((f) => [f.path, f]),
+              );
+              const fileIdsForPaths: Record<string, string | undefined> = {};
+              for (const mod of input.modifications) {
+                const modPath = mod.path.replaceAll("\\", "/");
+                fileIdsForPaths[mod.path] = filesByPath.get(modPath)?.id;
+              }
+
+              await tx.fileChange.createMany({
+                data: input.modifications
+                  .filter((mod) => fileIdsForPaths[mod.path])
+                  .map((mod) => {
+                    return {
+                      repoId: input.repoId,
+                      fileId: fileIdsForPaths[mod.path]!,
+                      changelistNumber: nextNumber,
+                      type: mod.delete
+                        ? FileChangeType.DELETE
+                        : FileChangeType.MODIFY,
+                      oldPath: mod.oldPath
+                        ? mod.oldPath.replaceAll("\\", "/")
+                        : null,
+                    };
+                  }),
+              });
+
+              // Settle claims for everything this changelist carried.
+              //
+              // Submitting to the domain root closes the gap between "the
+              // change exists somewhere" and "the change reached the root" in
+              // this same transaction, so those claims release outright.
+              // Submitting to a feature branch parks them as SUBMITTED: still
+              // blocking the domain, but reclaimable by anyone on that branch
+              // or below it.
+              //
+              // Paths that were never checked out get a claim created here, at
+              // the strength the org's binary-extension set resolves to. This
+              // is the only claim-creation point that can fail a submit,
+              // because the claim is taken after the work rather than before
+              // it. When it does fail, the changelist goes with it.
+              await settleClaimsForSubmit(tx, {
+                repoId: input.repoId,
+                branchName: input.branchName,
+                domainBranchName: submitDomainBranchName,
+                targetIsDomainRoot: submitDomainBranchName === input.branchName,
+                changelistNumber: nextNumber,
+                fileIdsForPaths,
+                orgBinaryExtensions: repo.org.binaryExtensions,
+                keepCheckedOut: input.keepCheckedOut,
+                actor: {
+                  userId: ctx.session.user.id,
+                  workspaceId: input.workspaceId,
+                },
+              });
+
+              return { id: changelist.id, number: changelist.number };
+            },
+            // A large submit writes hundreds of thousands of rows; the default
+            // five seconds would abort it.
+            { maxWait: 60_000, timeout: 15 * 60_000 },
+          );
+
+          committed = { ...created, stateRootHash, paths };
+        } catch (error) {
+          if (!isSubmitContention(error)) {
+            throw error;
+          }
+        }
+      }
+
+      if (!committed) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Could not submit to ${input.branchName}: other submits kept landing first. Nothing was changed; submit again.`,
+        });
+      }
+
+      const changelist = committed;
+
+      primeStateTreePaths(
+        input.repoId,
+        committed.stateRootHash,
+        committed.paths,
+      );
 
       // Record write activity for billing (fire-and-forget)
       void recordActivity(ctx.db, {

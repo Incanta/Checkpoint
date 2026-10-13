@@ -136,6 +136,9 @@ const RequestSchema = object({
       delete: boolean().required(),
       path: string().required(),
       oldPath: string().optional(),
+      // The changelist the submitter's copy came from, or null for a file
+      // that is new to the branch. Checked by the app against the branch head.
+      baseChangelist: number().integer().min(0).nullable().optional(),
     }).required(),
   ).required(),
   keepCheckedOut: boolean().required(),
@@ -362,7 +365,16 @@ export function routeSubmit(): Router {
         }
       } catch (e: any) {
         Logger.error(`[Submit] ${e.message}`);
-        res.status(500).send(e.message);
+        // The app refusing a submit (a stale file, someone else's claim) is
+        // the caller's to fix, not a server fault; say which.
+        const httpStatus = e?.data?.httpStatus;
+        res
+          .status(
+            typeof httpStatus === "number" && httpStatus >= 400
+              ? httpStatus
+              : 500,
+          )
+          .send(e.message);
       }
     },
   );

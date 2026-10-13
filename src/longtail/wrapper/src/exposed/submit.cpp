@@ -762,6 +762,12 @@ int32_t SubmitSync(
     if (Modifications[i].OldPath != nullptr) {
       payload["modifications"][i]["oldPath"] = std::string(Modifications[i].OldPath);
     }
+
+    if (Modifications[i].BaseState == Checkpoint::BASE_CHANGELIST) {
+      payload["modifications"][i]["baseChangelist"] = Modifications[i].BaseChangelist;
+    } else if (Modifications[i].BaseState == Checkpoint::BASE_ABSENT) {
+      payload["modifications"][i]["baseChangelist"] = nullptr;
+    }
   }
 
   SetHandleStep(handle, "Uploading to server");

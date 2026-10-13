@@ -104,6 +104,13 @@ export interface Modification {
   delete: boolean;
   path: string;
   oldPath?: string;
+  /**
+   * The changelist the submitter's copy of this file came from, or null if the
+   * file is new to the branch. The server refuses the submit when the branch
+   * head holds a different version, so a change the submitter never saw cannot
+   * be silently replaced. Leave it out and the path is not checked.
+   */
+  baseChangelist?: number | null;
 }
 
 // Storage backend selection shared by the async operations. See STORAGE.md.

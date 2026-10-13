@@ -250,6 +250,20 @@ static Napi::Value NapiSubmitAsync(const Napi::CallbackInfo& info) {
     } else {
       ctx->modifications[i].OldPath = nullptr;
     }
+
+    // baseChangelist: a number, null (the file is new to the branch), or
+    // absent (unspecified, not checked).
+    Napi::Value baseVal = mod.Get("baseChangelist");
+    if (baseVal.IsNumber()) {
+      ctx->modifications[i].BaseState = Checkpoint::BASE_CHANGELIST;
+      ctx->modifications[i].BaseChangelist = baseVal.As<Napi::Number>().Int64Value();
+    } else if (baseVal.IsNull()) {
+      ctx->modifications[i].BaseState = Checkpoint::BASE_ABSENT;
+      ctx->modifications[i].BaseChangelist = 0;
+    } else {
+      ctx->modifications[i].BaseState = Checkpoint::BASE_UNSPECIFIED;
+      ctx->modifications[i].BaseChangelist = 0;
+    }
   }
 
   WrapperAsyncHandle* handle = ::SubmitAsync(

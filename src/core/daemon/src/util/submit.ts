@@ -25,6 +25,12 @@ import path from "path";
 import { promises as fs } from "fs";
 import { DaemonConfig } from "../daemon-config.js";
 
+// A modification plus what the local copy was based on: a changelist number,
+// or null for a file that is new to the branch. Declared here rather than
+// taken from the addon's types so this builds against an installed addon that
+// predates the field; such an addon ignores it and the server skips the check.
+type SubmitModification = Modification & { baseChangelist?: number | null };
+
 export async function submit(
   workspace: Workspace,
   orgId: string,
@@ -99,6 +105,41 @@ export async function submit(
     );
   }
 
+  // Tell the server what each file was based on, so it can refuse a submit
+  // that would replace a change this workspace never pulled. The per-file
+  // changelist in the workspace state is exactly that: the changelist the
+  // local copy came from.
+  //
+  // A base is only sent when it is comparable with the target branch's head:
+  // the file's content came from the branch being submitted to. A file that
+  // came from the domain root and is being submitted to a feature branch
+  // overlaid on it can legitimately be newer than the branch's copy, so it is
+  // left unchecked rather than reported as a conflict that a pull cannot fix.
+  const isArtifactSubmit =
+    artifactForChangelistNum != null && artifactForChangelistNum >= 0;
+  const baseState = isArtifactSubmit
+    ? null
+    : await getWorkspaceState(workspace.localPath, stateBackend);
+  const modificationsWithBase: SubmitModification[] = uniqueModifications.map(
+    (mod) => {
+      if (!baseState) {
+        return mod;
+      }
+      const normalized = mod.path.replace(/\\/g, "/").replace(/^\//, "");
+      const entry = baseState.files[normalized];
+      if (!entry) {
+        // Nothing local to have been based on. An add asserts the path is new
+        // to the branch; a delete of an untracked path asserts nothing.
+        return mod.delete ? mod : { ...mod, baseChangelist: null };
+      }
+      const cameFrom = entry.branch ?? workspace.domainBranchName;
+      if (cameFrom !== branchName) {
+        return mod;
+      }
+      return { ...mod, baseChangelist: entry.changelist };
+    },
+  );
+
   console.log(`[submit] Calling SubmitAsync:`);
   console.log(`[submit]   branchName: ${branchName}`);
   console.log(`[submit]   message: ${message}`);
@@ -127,7 +168,7 @@ export async function submit(
     apiJwt: user.apiToken,
     keepCheckedOut,
     workspaceId,
-    modifications: uniqueModifications,
+    modifications: modificationsWithBase,
     logLevel: GetLogLevel(resolvedLogLevel),
   };
 
@@ -258,7 +299,7 @@ export async function submit(
         // Remove the file entry using the path key
         delete workspaceState.files[normalizedPath];
       } else {
-        // Add/update the file entry — hash deferred until change detection
+        // Add/update the file entry: hash deferred until change detection
         const fullPath = path.join(workspace.localPath, modification.path);
         const stat = await fs.stat(fullPath);
 
