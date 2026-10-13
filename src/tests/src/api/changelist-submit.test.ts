@@ -393,6 +393,61 @@ describe("changelist.createChangelist", () => {
     });
   });
 
+  describe("getPullAnomalies", () => {
+    const anomalies = (toNumber: number, numbers: number[]) =>
+      caller.changelist.getPullAnomalies({ repoId, toNumber, numbers });
+
+    it("reports nothing for a plain forward pull", async () => {
+      const c1 = (await submit([{ path: "a.txt" }, { path: "b.txt" }])).number;
+      const c2 = (await submit([{ path: "a.txt" }])).number;
+
+      expect(await anomalies(c2, [c1, c2])).toEqual({ stray: [], stale: [] });
+      expect(await anomalies(c2, [])).toEqual({ stray: [], stale: [] });
+    });
+
+    it("reports a file that a pulled changelist wrote and a later one deleted", async () => {
+      // To reach c2 from nothing, the pull applies c1's index for keep.txt.
+      // That index also holds gone.txt, which c2's state no longer has.
+      const c1 = (await submit([{ path: "keep.txt" }, { path: "gone.txt" }]))
+        .number;
+      const c2 = (await submit([{ path: "gone.txt", delete: true }])).number;
+
+      expect(await anomalies(c2, [c1])).toEqual({
+        stray: ["gone.txt"],
+        stale: [],
+      });
+    });
+
+    it("reports a path whose wanted version is not the last one the pull writes", async () => {
+      // Syncing back to c2 from c3: c1's index is applied for b.txt, and it
+      // also rewrites a.txt, whose version at c2 is c2's.
+      const c1 = (await submit([{ path: "a.txt" }, { path: "b.txt" }])).number;
+      const c2 = (await submit([{ path: "a.txt" }])).number;
+      await submit([{ path: "b.txt" }]);
+
+      expect(await anomalies(c2, [c1])).toEqual({
+        stray: [],
+        stale: [{ path: "a.txt", cl: c2 }],
+      });
+    });
+
+    it("judges against the target changelist's own branch", async () => {
+      const c1 = (await submit([{ path: "a.txt" }, { path: "b.txt" }])).number;
+      const feature = await makeBranch(testDb.client, repoId, ownerId, {
+        name: "feature",
+      });
+      await testDb.client.branch.update({
+        where: { id: feature.id },
+        data: { headNumber: c1 },
+      });
+      // b.txt is deleted on main only.
+      const mainHead = (await submit([{ path: "b.txt", delete: true }])).number;
+
+      expect((await anomalies(mainHead, [c1])).stray).toEqual(["b.txt"]);
+      expect((await anomalies(c1, [c1])).stray).toEqual([]);
+    });
+  });
+
   describe("a submit that fails partway", () => {
     it("leaves no changelist, no file changes, and the head where it was", async () => {
       await submit([{ path: "kept.txt" }]);

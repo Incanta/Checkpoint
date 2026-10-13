@@ -238,6 +238,85 @@ export const changelistRouter = createTRPCRouter({
         .filter((cl) => cl !== undefined);
     }),
 
+  // What pulling a set of changelists would put on disk that the target
+  // changelist's state does not want there.
+  //
+  // A pull applies the version index of every changelist that is the source
+  // of some changed path, and an index holds everything its changelist
+  // touched, not only the paths the pull is after. So an index can write:
+  //
+  //   - a "stray": a path the target state does not contain at all (added in
+  //     one changelist, deleted in a later one);
+  //   - a "stale" write: a path whose version in the target state comes from
+  //     a different changelist than the last one in the set to write it.
+  //
+  // Neither shows up in the diff the daemon pulls from. It asks for them up
+  // front so it can protect local files at those paths, and removes or
+  // restores them afterwards. A mutation only because the list of numbers can
+  // be long.
+  getPullAnomalies: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        /** The changelist the workspace is being brought to. */
+        toNumber: z.number(),
+        /** The changelists whose version indexes will be applied. */
+        numbers: z.array(z.number()),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
+
+      const stray: string[] = [];
+      const stale: { path: string; cl: number }[] = [];
+      if (input.numbers.length === 0) {
+        return { stray, stale };
+      }
+
+      const target = await getStateTreePaths(
+        ctx.db,
+        input.repoId,
+        input.toNumber,
+      );
+
+      // The last changelist in the set to write each path. Indexes are
+      // applied in ascending order, so that is what ends up on disk.
+      const lastWriter = new Map<string, number>();
+      const BATCH_SIZE = 500;
+      for (let i = 0; i < input.numbers.length; i += BATCH_SIZE) {
+        const rows = await ctx.db.fileChange.findMany({
+          where: {
+            repoId: input.repoId,
+            changelistNumber: { in: input.numbers.slice(i, i + BATCH_SIZE) },
+            type: { not: FileChangeType.DELETE },
+          },
+          select: {
+            changelistNumber: true,
+            file: { select: { path: true } },
+          },
+        });
+        for (const row of rows) {
+          const previous = lastWriter.get(row.file.path);
+          if (previous === undefined || row.changelistNumber > previous) {
+            lastWriter.set(row.file.path, row.changelistNumber);
+          }
+        }
+      }
+
+      for (const [path, writer] of lastWriter) {
+        const expected = target.get(path);
+        if (expected === undefined) {
+          stray.push(path);
+        } else if (expected !== writer) {
+          stale.push({ path, cl: expected });
+        }
+      }
+
+      stray.sort();
+      stale.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      return { stray, stale };
+    }),
+
   getChangelistFiles: protectedProcedure
     .input(
       z.object({

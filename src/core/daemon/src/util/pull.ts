@@ -22,6 +22,12 @@ import {
 import { readFileFromChangelist } from "./read-file.js";
 import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 import { autoMergeText } from "./auto-merge.js";
+import {
+  LocalChangeGuard,
+  describeSetAside,
+  isMergeableText,
+  type SetAsideFile,
+} from "./pull-local-changes.js";
 import { existsSync, promises as fs } from "fs";
 import path from "path";
 import { homedir } from "os";
@@ -35,8 +41,18 @@ import { DaemonConfig } from "../daemon-config.js";
 export interface PullMergeResult {
   /** Files that were cleanly auto-merged (no conflicts). */
   cleanMerges: string[];
-  /** Files that were merged but contain conflict markers that need manual resolution. */
+  /**
+   * Files that need manual attention: merged with conflict markers left in
+   * them, or (see localChangesSetAside) replaced by the server's version with
+   * the local one kept as a backup.
+   */
   conflictMerges: string[];
+  /**
+   * Files whose local changes could not be merged. The workspace has the
+   * server's version; the local version is at backupPath. Also listed in
+   * conflictMerges so older clients surface them.
+   */
+  localChangesSetAside: SetAsideFile[];
 }
 
 export async function pull(
@@ -158,54 +174,78 @@ export async function pull(
     (changelist: any) => changelist.versionIndex,
   );
 
-  // Pre-pull: save locally-modified text files for auto-merge.
-  // The diff's modified files are the ones the pull will overwrite. If a file is
-  // locally edited (text), save its current content + base CL for a 3-way merge
-  // after the pull completes.
-  interface MergeCandidate {
-    /** Normalized relative path */
-    relativePath: string;
-    /** The CL number the local state has for this file (base version) */
-    baseCl: number;
-    /** The file content on disk BEFORE pull (local modifications) */
-    currentContent: string;
-  }
-
-  const mergeCandidates: MergeCandidate[] = [];
-
-  for (const change of diff.modified) {
-    const localPath = change.path;
-    const localFile = workspaceState.files[localPath];
-    if (!localFile || localFile.changelist === change.cl) continue; // up to date
-
-    // Only auto-merge text files
-    if (isBinaryFile(localPath, binaryExts)) continue;
-
-    const fullPath = path.join(workspace.localPath, localPath);
-    if (!existsSync(fullPath)) continue; // deleted locally, no merge
-
-    // Check if the file has been modified locally
+  // A changelist's version index holds everything that changelist touched,
+  // so applying it can write paths the diff says nothing about: a file a later
+  // changelist deleted (a stray), or a file whose current version comes from
+  // some other changelist (a stale write). Ask the server which, so local
+  // files at those paths can be protected now and the workspace corrected
+  // afterwards. See changelist.getPullAnomalies.
+  let anomalies: { stray: string[]; stale: { path: string; cl: number }[] } = {
+    stray: [],
+    stale: [],
+  };
+  const pulledNumbers: number[] = sortedChangelists
+    .filter((cl: any) => cl.versionIndex !== "")
+    .map((cl: any) => cl.number);
+  if (pulledNumbers.length > 0) {
     try {
-      if (localFile.md5 === "") {
-        // Hash was deferred (post-pull optimisation). Fall back to mtime+size.
-        const stat = await fs.stat(fullPath);
-        if (stat.mtimeMs === localFile.mtime && stat.size === localFile.size) {
-          continue; // not modified locally
-        }
-      } else {
-        const currentHash = await hashFileMD5(fullPath);
-        if (currentHash === localFile.md5) continue; // not modified locally
-      }
-
-      const currentContent = await fs.readFile(fullPath, "utf-8");
-      mergeCandidates.push({
-        relativePath: localPath,
-        baseCl: localFile.changelist,
-        currentContent,
+      anomalies = await client.changelist.getPullAnomalies.mutate({
+        repoId: workspace.repoId,
+        toNumber: changelistNumber,
+        numbers: pulledNumbers,
       });
-    } catch {
-      // Can't read; skip merge for this file.
+    } catch (err) {
+      // A server from before this check. The pull still works; it just cannot
+      // clean up after itself.
+      Logger.warn(`Could not check for stray files before pulling: ${err}`);
     }
+  }
+  const diffPaths = new Set<string>([
+    ...diff.modified.map((c) => c.path),
+    ...diff.added.map((c) => c.path),
+    ...diff.removed,
+  ]);
+
+  // Pre-pull: copy aside every file the pull is about to overwrite or delete
+  // that has local changes. See pull-local-changes.ts for what happens to
+  // them afterwards. This runs before anything in the workspace is touched,
+  // and a failure here stops the pull.
+  const guard = new LocalChangeGuard(
+    workspace.localPath,
+    `cl${changelistNumber}`,
+  );
+  onStep?.("Protecting local changes");
+  for (const change of diff.modified) {
+    const localFile = workspaceState.files[change.path];
+    if (localFile && localFile.changelist === change.cl) continue; // up to date
+    await guard.protect(change.path, "modified", localFile);
+  }
+  for (const change of diff.added) {
+    await guard.protect(change.path, "added", workspaceState.files[change.path]);
+  }
+  for (const removedPath of diff.removed) {
+    await guard.protect(
+      removedPath,
+      "removed",
+      workspaceState.files[removedPath],
+    );
+  }
+  for (const strayPath of anomalies.stray) {
+    if (diffPaths.has(strayPath)) continue;
+    await guard.protect(strayPath, "added", workspaceState.files[strayPath]);
+  }
+  for (const entry of anomalies.stale) {
+    if (diffPaths.has(entry.path)) continue;
+    await guard.protect(
+      entry.path,
+      "modified",
+      workspaceState.files[entry.path],
+    );
+  }
+  if (guard.files.length > 0) {
+    Logger.info(
+      `Pull will touch ${guard.files.length} file(s) with local changes; copies kept in ${guard.backupRoot}`,
+    );
   }
 
   // ─── Longtail pull ────────────────────────────────────────────────
@@ -300,159 +340,110 @@ export async function pull(
       }
     }
 
-    // ─── Downgrade correction pass ──────────────────────────────────
-    // When syncing BACKWARD (target < current), the version indices applied
-    // above can overwrite paths with stale content: a pulled CL B may have
-    // touched a path whose target-state reference is a newer CL C that is not
-    // itself in the pull set (only possible for paths unchanged between the
-    // two states). Forward pulls cannot hit this (every pulled CL is newer
-    // than the previous state, so any path it touches is a changed path whose
-    // target reference is >= that CL). Detect such paths by computing the
-    // last pulled writer per path and restore the ones whose last writer is
-    // not the CL the target state references. Stray paths written by a pulled
-    // index but absent from the target state entirely are removed.
-    const isDowngrade =
-      changelistResponse.number < workspaceState.changelistNumber;
-    if (isDowngrade && sortedChangelists.length > 0) {
-      onStep?.("Verifying downgraded files");
+    // ─── Correction pass ───────────────────────────────────────────
+    // Undo what the applied version indexes wrote beyond the diff. This used
+    // to exist only for syncing backward, where it is common; it can happen
+    // going forward too (a file added and later deleted leaves a stray, and
+    // histories merged before merges were three-way can leave stale content).
+    //
+    // Files restored here that are not part of the diff keep their existing
+    // state entry, so their new size and mtime are collected to update it.
+    const restoredUnchanged = new Map<string, { size: number; mtime: number }>();
+    if (anomalies.stray.length > 0 || anomalies.stale.length > 0) {
+      onStep?.("Verifying pulled files");
+      Logger.info(
+        `Pull correction: removing ${anomalies.stray.length} stray file(s), restoring ${anomalies.stale.length}`,
+      );
 
-      // Expected per-path reference in the TARGET state: unchanged paths keep
-      // the previous state's reference; changed paths come from the diff.
-      const expectedCl = new Map<string, number>();
-      for (const [p, f] of Object.entries(workspaceState.files)) {
-        expectedCl.set(p, f.changelist);
-      }
-      for (const removedPath of diff.removed) {
-        expectedCl.delete(removedPath);
-      }
-      for (const change of [...diff.added, ...diff.modified]) {
-        expectedCl.set(change.path, change.cl);
-      }
-
-      // Last pulled CL that wrote each path (ascending apply order, so the
-      // newest pulled writer is what's on disk now)
-      const lastWriter = new Map<string, number>();
-      for (const cl of sortedChangelists) {
-        const clFiles = await client.changelist.getChangelistFiles.query({
-          repoId: workspace.repoId,
-          changelistNumber: (cl as any).number,
-        });
-        for (const f of clFiles) {
-          if (f.changeType === "DELETE") continue;
-          const normalized = f.path.replace(/^\//, "").replace(/\\/g, "/");
-          lastWriter.set(normalized, (cl as any).number);
+      for (const strayPath of anomalies.stray) {
+        if (diffPaths.has(strayPath)) continue; // the delete pass handled it
+        const fullPath = path.join(workspace.localPath, strayPath);
+        if (existsSync(fullPath)) {
+          await fs.rm(fullPath, { force: true });
         }
+        // An untracked local file that happened to sit at this path is not
+        // the server's business: put it back exactly as it was.
+        await guard.putBack(strayPath);
       }
 
-      const toRestore: Array<{ relativePath: string; cl: number }> = [];
-      const toRemove: string[] = [];
-      for (const [p, writer] of lastWriter) {
-        const expected = expectedCl.get(p);
-        if (expected === undefined) {
-          toRemove.push(p);
-        } else if (expected !== writer) {
-          toRestore.push({ relativePath: p, cl: expected });
-        }
-      }
-
-      if (toRestore.length > 0 || toRemove.length > 0) {
-        Logger.info(
-          `Downgrade correction: restoring ${toRestore.length} file(s), removing ${toRemove.length} stray file(s)`,
-        );
-
-        for (const strayPath of toRemove) {
-          const fullPath = path.join(workspace.localPath, strayPath);
-          if (existsSync(fullPath)) {
-            await fs.rm(fullPath, { force: true });
-          }
-        }
-
-        let restoredCount = 0;
-        onProgress?.("Verifying downgraded files", 0, toRestore.length);
-        for (const entry of toRestore) {
+      let restoredCount = 0;
+      onProgress?.("Verifying pulled files", 0, anomalies.stale.length);
+      for (const entry of anomalies.stale) {
+        const fullPath = path.join(workspace.localPath, entry.path);
+        // Not on disk means the pull never wrote it (filtered out).
+        if (existsSync(fullPath)) {
           const result = await readFileFromChangelist({
             workspace,
-            filePath: entry.relativePath,
+            filePath: entry.path,
             changelistNumber: entry.cl,
           });
-          const fullPath = path.join(workspace.localPath, entry.relativePath);
           await fs.mkdir(path.dirname(fullPath), { recursive: true });
           await fs.copyFile(result.cachePath, fullPath);
-          restoredCount++;
-          onProgress?.(
-            "Verifying downgraded files",
-            restoredCount,
-            toRestore.length,
-          );
+
+          if (!diffPaths.has(entry.path)) {
+            // The workspace already had this version and the pull should not
+            // have touched it. Local edits were made on top of exactly this
+            // content, so they go straight back.
+            if (!(await guard.putBack(entry.path))) {
+              const stat = await fs.stat(fullPath);
+              restoredUnchanged.set(entry.path, {
+                size: stat.size,
+                mtime: stat.mtimeMs,
+              });
+            }
+          }
         }
+        restoredCount++;
+        onProgress?.(
+          "Verifying pulled files",
+          restoredCount,
+          anomalies.stale.length,
+        );
       }
     }
 
-    // ─── Post-pull: auto-merge text files ───────────────────────────
+    // ─── Post-pull: settle files that had local changes ────────────
     const mergeResult: PullMergeResult = {
       cleanMerges: [],
       conflictMerges: [],
+      localChangesSetAside: [],
     };
+    // Baselines for merged files: what the server's version looked like, so
+    // the local edits a merged file contains still show as local edits.
+    const incomingBaselines = new Map<
+      string,
+      { size: number; mtime: number; md5: string }
+    >();
 
-    if (mergeCandidates.length > 0) {
-      onStep?.("Merging text files");
-      let mergedCount = 0;
-      const mergeTotal = mergeCandidates.length;
-      onProgress?.("Merging text files", 0, mergeTotal);
-
-      const MERGE_CONCURRENCY = 8;
-
-      const processMerge = async (candidate: MergeCandidate) => {
-        try {
+    if (guard.files.length > 0) {
+      onStep?.("Merging local changes");
+      const resolved = await guard.resolve(
+        (relativePath) => isBinaryFile(relativePath, binaryExts),
+        async (relativePath, baseCl) => {
           const baseResult = await readFileFromChangelist({
             workspace,
-            filePath: candidate.relativePath,
-            changelistNumber: candidate.baseCl,
+            filePath: relativePath,
+            changelistNumber: baseCl,
           });
-          const baseContent = await fs.readFile(baseResult.cachePath, "utf-8");
-
-          const incomingPath = path.join(
-            workspace.localPath,
-            candidate.relativePath,
-          );
-          const incomingContent = await fs.readFile(incomingPath, "utf-8");
-
-          const merged = autoMergeText(
-            baseContent,
-            candidate.currentContent,
-            incomingContent,
-          );
-
-          await fs.writeFile(incomingPath, merged.content, "utf-8");
-
-          if (merged.clean) {
-            mergeResult.cleanMerges.push(candidate.relativePath);
-          } else {
-            mergeResult.conflictMerges.push(candidate.relativePath);
-          }
-        } catch (err) {
-          Logger.error(
-            `Auto-merge failed for ${candidate.relativePath}: ${err}`,
-          );
-        }
-
-        mergedCount++;
-        onProgress?.("Merging text files", mergedCount, mergeTotal);
-      };
-
-      // Worker pool: run up to MERGE_CONCURRENCY merges at a time
-      let idx = 0;
-      const next = async (): Promise<void> => {
-        while (idx < mergeCandidates.length) {
-          const candidate = mergeCandidates[idx++]!;
-          await processMerge(candidate);
-        }
-      };
-      const workers = Array.from(
-        { length: Math.min(MERGE_CONCURRENCY, mergeCandidates.length) },
-        () => next(),
+          return fs.readFile(baseResult.cachePath);
+        },
       );
-      await Promise.all(workers);
+
+      for (const merged of resolved.merged) {
+        incomingBaselines.set(merged.relativePath, merged.incoming);
+        if (merged.clean) {
+          mergeResult.cleanMerges.push(merged.relativePath);
+        } else {
+          mergeResult.conflictMerges.push(merged.relativePath);
+        }
+      }
+      for (const file of resolved.setAside) {
+        Logger.warn(`Local changes set aside by pull: ${describeSetAside(file)}`);
+        mergeResult.localChangesSetAside.push(file);
+        // Clients that only know about conflictMerges still need to tell the
+        // user this file wants attention.
+        mergeResult.conflictMerges.push(file.relativePath);
+      }
     }
 
     // Update workspace state incrementally from the diff: start from the old
@@ -484,7 +475,16 @@ export async function pull(
     );
     for (let i = 0; i < statResults.length; i++) {
       const { change, stat } = statResults[i]!;
-      if (stat) {
+      const incoming = incomingBaselines.get(change.path);
+      if (incoming) {
+        newFiles[change.path] = {
+          fileId: change.fileId,
+          changelist: change.cl,
+          md5: incoming.md5,
+          size: incoming.size,
+          mtime: incoming.mtime,
+        };
+      } else if (stat) {
         newFiles[change.path] = {
           fileId: change.fileId,
           changelist: change.cl,
@@ -494,6 +494,18 @@ export async function pull(
         };
       }
       onProgress?.("Updating workspace state", i + 1, stateTotal);
+    }
+
+    for (const [restoredPath, stat] of restoredUnchanged) {
+      const existing = newFiles[restoredPath];
+      if (existing) {
+        newFiles[restoredPath] = {
+          ...existing,
+          md5: "",
+          size: stat.size,
+          mtime: stat.mtime,
+        };
+      }
     }
 
     await saveWorkspaceState(
@@ -513,11 +525,15 @@ export async function pull(
   }
 
   if (errored) {
+    // The workspace state was not advanced, so as far as it is concerned the
+    // local versions are still the current ones. Put them back over whatever
+    // the partial pull wrote.
+    await guard.restoreAll();
     throw new Error("Pull failed: " + lastStep);
   }
 
   // Should not reach here: errored throws above, and !errored returns above
-  return { cleanMerges: [], conflictMerges: [] };
+  return { cleanMerges: [], conflictMerges: [], localChangesSetAside: [] };
 }
 
 /**
@@ -566,7 +582,7 @@ export async function pullTextFilesForSubmit(
 
   // Already at head, nothing to do
   if (workspaceState.changelistNumber === remoteHeadNumber) {
-    return { cleanMerges: [], conflictMerges: [] };
+    return { cleanMerges: [], conflictMerges: [], localChangesSetAside: [] };
   }
 
   // Path-keyed diff from our base to head: the modified files are the outdated
@@ -586,7 +602,7 @@ export async function pullTextFilesForSubmit(
     fileId: string;
     baseCl: number;
     remoteCl: number;
-    currentContent: string;
+    currentContent: Buffer;
   }
 
   const candidates: TextMergeCandidate[] = [];
@@ -605,7 +621,7 @@ export async function pullTextFilesForSubmit(
     if (!existsSync(fullPath)) continue; // deleted locally
 
     try {
-      const currentContent = await fs.readFile(fullPath, "utf-8");
+      const currentContent = await fs.readFile(fullPath);
       candidates.push({
         relativePath: localPath,
         fileId: change.fileId,
@@ -619,13 +635,14 @@ export async function pullTextFilesForSubmit(
   }
 
   if (candidates.length === 0) {
-    return { cleanMerges: [], conflictMerges: [] };
+    return { cleanMerges: [], conflictMerges: [], localChangesSetAside: [] };
   }
 
   // Perform 3-way merge for each candidate
   const mergeResult: PullMergeResult = {
     cleanMerges: [],
     conflictMerges: [],
+    localChangesSetAside: [],
   };
 
   for (const candidate of candidates) {
@@ -636,7 +653,7 @@ export async function pullTextFilesForSubmit(
         filePath: candidate.relativePath,
         changelistNumber: candidate.baseCl,
       });
-      const baseContent = await fs.readFile(baseResult.cachePath, "utf-8");
+      const baseContent = await fs.readFile(baseResult.cachePath);
 
       // Read incoming version (remote head)
       const incomingResult = await readFileFromChangelist({
@@ -644,16 +661,25 @@ export async function pullTextFilesForSubmit(
         filePath: candidate.relativePath,
         changelistNumber: candidate.remoteCl,
       });
-      const incomingContent = await fs.readFile(
-        incomingResult.cachePath,
-        "utf-8",
-      );
+      const incomingContent = await fs.readFile(incomingResult.cachePath);
+
+      // Decoding bytes that are not UTF-8 and writing the result back would
+      // corrupt the file. Leave it alone and block the submit instead: the
+      // local copy is out of date and cannot be merged here.
+      if (
+        !isMergeableText(baseContent) ||
+        !isMergeableText(candidate.currentContent) ||
+        !isMergeableText(incomingContent)
+      ) {
+        mergeResult.conflictMerges.push(candidate.relativePath);
+        continue;
+      }
 
       // 3-way merge
       const merged = autoMergeText(
-        baseContent,
-        candidate.currentContent,
-        incomingContent,
+        baseContent.toString("utf8"),
+        candidate.currentContent.toString("utf8"),
+        incomingContent.toString("utf8"),
       );
 
       // Write merged content back to disk
@@ -666,22 +692,29 @@ export async function pullTextFilesForSubmit(
         mergeResult.conflictMerges.push(candidate.relativePath);
       }
 
-      // Patch just this file's entry in workspace state (advance its CL, update hash)
-      const stat = await fs.stat(fullPath);
-      const hash = await hashFileMD5(fullPath);
-
+      // Patch just this file's entry in workspace state: it is now based on
+      // the incoming changelist. The baseline is the incoming version, not the
+      // merged file. Recording the merged file as the baseline would make the
+      // local edits in it look like no change at all, and they would drop out
+      // of the pending list if this submit did not go through.
+      const incomingStat = await fs.stat(incomingResult.cachePath);
       workspaceState.files[candidate.relativePath] = {
         fileId: candidate.fileId,
         changelist: candidate.remoteCl,
-        md5: hash,
-        size: stat.size,
-        mtime: stat.mtimeMs,
+        md5: await hashFileMD5(incomingResult.cachePath),
+        size: incomingStat.size,
+        // No file on disk has the incoming content, so there is no mtime that
+        // means "unchanged"; zero forces a hash comparison.
+        mtime: 0,
       };
     } catch (err) {
       console.error(
         `Pre-submit auto-merge failed for ${candidate.relativePath}:`,
         err,
       );
+      // The file on disk is still the local version, which is still based on
+      // an old changelist. Do not let it be submitted as if it were current.
+      mergeResult.conflictMerges.push(candidate.relativePath);
     }
   }
 

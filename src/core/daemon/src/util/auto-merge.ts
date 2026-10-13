@@ -53,9 +53,16 @@ export function autoMergeText(
     }
   }
 
+  // The split above drops line endings, so put back the ones the working
+  // copy uses. Joining with a bare newline turned every CRLF file into an LF
+  // file on its first merge, which rewrites every line of it.
+  const crlf = (current.match(/\r\n/g) ?? []).length;
+  const lf = (current.match(/\n/g) ?? []).length - crlf;
+  const eol = crlf > lf ? "\r\n" : "\n";
+
   return {
     clean: !hasConflict,
-    content: lines.join("\n"),
+    content: lines.join(eol),
   };
 }
 
