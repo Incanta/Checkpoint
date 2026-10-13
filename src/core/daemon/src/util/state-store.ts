@@ -70,22 +70,47 @@ class JsonStateStore implements StateStore {
   }
 
   public async load(): Promise<WorkspaceState> {
+    let raw: string;
     try {
-      const raw = await fs.readFile(this.statePath, "utf-8");
+      raw = await fs.readFile(this.statePath, "utf-8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        // A workspace that has never saved state.
+        return { changelistNumber: 0, files: {}, markedForAdd: [], staged: [] };
+      }
+      throw err;
+    }
+    try {
       // v1 files simply lack the optional v2 fields (version, teamSync,
       // artifactType); no structural migration is needed for JSON.
       return JSON.parse(raw) as WorkspaceState;
-    } catch {
-      return { changelistNumber: 0, files: {}, markedForAdd: [], staged: [] };
+    } catch (err) {
+      // Not "no state": a state that cannot be read. Answering with an empty
+      // one would tell the daemon the workspace tracks nothing and has synced
+      // nothing, and everything it did next would be built on that.
+      throw new Error(
+        `Workspace state at ${this.statePath} is unreadable (${
+          (err as Error).message
+        }). Restore the file or re-sync the workspace.`,
+      );
     }
   }
 
   public async save(state: WorkspaceState): Promise<void> {
     await fs.mkdir(path.dirname(this.statePath), { recursive: true });
-    await fs.writeFile(
-      this.statePath,
-      JSON.stringify({ ...state, version: WORKSPACE_STATE_VERSION }, null, 2),
-    );
+    // Write beside the file and rename over it, so a crash or a full disk
+    // partway through leaves the previous state, not half of the new one.
+    const tmpPath = `${this.statePath}.tmp-${process.pid}`;
+    try {
+      await fs.writeFile(
+        tmpPath,
+        JSON.stringify({ ...state, version: WORKSPACE_STATE_VERSION }, null, 2),
+      );
+      await fs.rename(tmpPath, this.statePath);
+    } catch (err) {
+      await fs.rm(tmpPath, { force: true });
+      throw err;
+    }
   }
 
   public close(): void {

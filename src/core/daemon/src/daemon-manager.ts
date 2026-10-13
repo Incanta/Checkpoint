@@ -35,6 +35,7 @@ import {
   type ScheduledWorkspace,
 } from "./util/team-sync/scheduler.js";
 import { runSyncPipeline } from "./util/team-sync/sync-pipeline.js";
+import { compareWithBaseline } from "./util/baseline.js";
 import { WORKSPACE_STATE_VERSION } from "./util/util.js";
 import {
   scanWorkspaceIgnoreFiles,
@@ -982,30 +983,19 @@ export class DaemonManager {
     let hasChanged = false;
     let needsHashCheck = false;
 
-    if (!baselineFile) {
-      // File doesn't exist in baseline – it's new / added
-      hasChanged = true;
-    } else if (stat.size !== baselineFile.size) {
-      // Size changed – definitely modified
-      hasChanged = true;
-    } else if (baselineFile.mtime && stat.mtimeMs !== baselineFile.mtime) {
-      // Mtime changed but size identical – verify with hash
-      needsHashCheck = true;
-    }
+    // See util/baseline.ts for the rule and why it is what it is.
+    const verdict = compareWithBaseline(stat, baselineFile, {
+      whenUnknowable: "unchanged",
+    });
+    hasChanged = verdict === "changed";
+    needsHashCheck = verdict === "compare-hash";
 
     if (needsHashCheck && baselineFile) {
       const fullPath = path
         .join(workspace.localPath, relativePath)
         .replace(/\\/g, "/");
-      if (baselineFile.md5 === "") {
-        // Hash was deferred after pull. Compute and cache it as the baseline
-        // so subsequent checks have a real hash to compare against.
-        baselineFile.md5 = await hashFileMD5(fullPath);
-        baselineFile.mtime = stat.mtimeMs;
-      } else {
-        const currentHash = await hashFileMD5(fullPath);
-        hasChanged = currentHash !== baselineFile.md5;
-      }
+      const currentHash = await hashFileMD5(fullPath);
+      hasChanged = currentHash !== baselineFile.md5;
     }
 
     if (!hasChanged) return null;
@@ -1756,6 +1746,45 @@ export class DaemonManager {
     // Invalidate caches so next refresh picks up the new status
     this.workspacePendingChanges.delete(workspace.id);
     this.trackedDirSets.delete(workspace.id);
+  }
+
+  /**
+   * Records that tracked files were just rewritten with their baseline
+   * content (a revert), so their recorded size and mtime describe the file
+   * that is now on disk.
+   *
+   * Change detection treats "same size, written since the baseline, no hash
+   * to compare" as changed, because it cannot prove otherwise. Anything that
+   * rewrites a tracked file with the content it is tracked at has to say so
+   * here, or the file goes on showing as modified.
+   */
+  public async markFilesPristine(
+    workspace: Workspace,
+    relativePaths: string[],
+  ): Promise<void> {
+    const state = this.workspaceStates.get(workspace.id);
+    if (!state || relativePaths.length === 0) return;
+
+    let updated = false;
+    for (const relativePath of relativePaths) {
+      const entry = state.files[relativePath];
+      if (!entry) continue;
+      try {
+        const stat = await fs.stat(
+          path.join(workspace.localPath, relativePath),
+        );
+        entry.size = stat.size;
+        entry.mtime = stat.mtimeMs;
+        entry.md5 = "";
+        updated = true;
+      } catch {
+        // Not on disk; nothing to record.
+      }
+    }
+    if (!updated) return;
+
+    await this.persistState(workspace, state);
+    this.workspacePendingChanges.delete(workspace.id);
   }
 
   /**

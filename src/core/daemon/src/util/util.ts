@@ -265,10 +265,18 @@ export function migrateWorkspaceConfig(
 export async function saveWorkspaceConfig(workspace: Workspace): Promise<void> {
   const workspaceConfigDir = path.join(workspace.localPath, ".checkpoint");
   await fs.mkdir(workspaceConfigDir, { recursive: true });
-  await fs.writeFile(
-    path.join(workspaceConfigDir, "workspace.json"),
-    JSON.stringify(workspace, null, 2),
-  );
+  // Write beside the file and rename over it, so a crash partway through
+  // leaves the previous config rather than a truncated one. A workspace.json
+  // that cannot be parsed reads as "not a workspace".
+  const configPath = path.join(workspaceConfigDir, "workspace.json");
+  const tmpPath = `${configPath}.tmp-${process.pid}`;
+  try {
+    await fs.writeFile(tmpPath, JSON.stringify(workspace, null, 2));
+    await fs.rename(tmpPath, configPath);
+  } catch (err) {
+    await fs.rm(tmpPath, { force: true });
+    throw err;
+  }
 }
 
 export async function getWorkspaceState(
@@ -294,7 +302,9 @@ export async function saveWorkspaceState(
     await saveWorkspaceConfig(workspace);
   } catch (e) {
     throw new Error(
-      "Could not write workspace state, did you initialize this workspace properly?",
+      `Could not write workspace state, did you initialize this workspace properly? (${
+        (e as Error)?.message ?? e
+      })`,
     );
   }
 }

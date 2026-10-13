@@ -350,6 +350,51 @@ describe.skipIf(!enabled)("daemon: submit and pull between two workspaces", () =
     expect(await headChangelistNumber(ctx)).toBe(head);
   });
 
+  describe("what a workspace believes it has after a submit", () => {
+    it("moves to the new changelist when nothing else landed in between", async () => {
+      const alice = await seat("alice");
+      await sync(alice);
+      const text = name("solo", ".txt");
+      await put(alice, text, "v1\n");
+
+      await send(alice, { [text]: "write" });
+
+      const head = await headChangelistNumber(ctx);
+      expect((await stateOf(alice)).changelistNumber).toBe(head);
+      expect((await stateOf(alice)).files[text]!.changelist).toBe(head);
+    });
+
+    it("does not skip a changelist that landed while the workspace was behind", async () => {
+      const alice = await seat("alice");
+      const bob = await seat("bob");
+      await sync(bob);
+      const bobBefore = (await stateOf(bob)).changelistNumber;
+
+      // Alice lands a file Bob does not have.
+      const alices = name("from-alice", ".txt");
+      await put(alice, alices, "bob needs this\n");
+      await send(alice, { [alices]: "write" });
+
+      // Bob, still behind, submits something unrelated.
+      const bobs = name("from-bob", ".txt");
+      await put(bob, bobs, "unrelated\n");
+      await send(bob, { [bobs]: "write" });
+
+      // His workspace must not claim to be at his new changelist: it does not
+      // have Alice's.
+      const after = await stateOf(bob);
+      expect(after.changelistNumber).toBe(bobBefore);
+      expect(after.files[bobs]!.changelist).toBe(await headChangelistNumber(ctx));
+
+      // So the next pull brings it in.
+      await sync(bob);
+      expect((await read(bob, alices)).toString()).toBe("bob needs this\n");
+      expect((await read(bob, bobs)).toString()).toBe("unrelated\n");
+      expect(await changedLocally(bob, bobs)).toBe(false);
+      expect((await stateOf(bob)).changelistNumber).toBe(await headChangelistNumber(ctx));
+    });
+  });
+
   it("does not leave behind a file that was added and then deleted upstream", async () => {
     // Pulling keep.txt means applying the index of the changelist that added
     // it, and that index also holds gone.txt, which was deleted later. It used

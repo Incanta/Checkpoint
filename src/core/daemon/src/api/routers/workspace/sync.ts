@@ -220,6 +220,7 @@ export const syncRouter = router({
 
           let deletedFiles = 0;
           let restoredFiles = 0;
+          const restoredToBaseline: string[] = [];
           const errors: Array<{ path: string; error: string }> = [];
 
           const entries = Object.values(pending.files);
@@ -251,6 +252,7 @@ export const syncRouter = router({
                       recursive: true,
                     });
                     await fs.copyFile(result.cachePath, localFilePath);
+                    restoredToBaseline.push(file.path);
                     restoredFiles++;
                   }
                 } else {
@@ -292,6 +294,9 @@ export const syncRouter = router({
               jobManager.updateProgress(job.id, done, entries.length);
             }
           }
+
+          // The restored files now hold exactly what they are tracked at.
+          await manager.markFilesPristine(workspace, restoredToBaseline);
 
           // Clear all marks-for-add
           const markedForAdd = manager.getMarkedForAdd(workspace.id);

@@ -3,6 +3,7 @@ import { existsSync, promises as fs } from "fs";
 import path from "path";
 import type { WorkspaceStateFile } from "@checkpointvcs/common";
 import { autoMergeText } from "./auto-merge.js";
+import { compareWithBaseline } from "./baseline.js";
 
 // Keeping local work safe across a pull.
 //
@@ -110,21 +111,13 @@ export async function hasLocalChanges(
   if (!stat.isFile()) {
     return false;
   }
-  if (!entry) {
-    return true; // Untracked: all of it is local work.
+  const verdict = compareWithBaseline(stat, entry, {
+    whenUnknowable: "changed",
+  });
+  if (verdict !== "compare-hash") {
+    return verdict === "changed";
   }
-  if (stat.size !== entry.size) {
-    return true;
-  }
-  if (entry.md5) {
-    if (entry.mtime && stat.mtimeMs === entry.mtime) {
-      return false; // Not written since the hash was taken.
-    }
-    return md5(await fs.readFile(fullPath)) !== entry.md5;
-  }
-  // No hash was recorded (it is deferred after a pull). Same size and same
-  // mtime is the same file; a different mtime may be a same-size edit.
-  return !entry.mtime || stat.mtimeMs !== entry.mtime;
+  return md5(await fs.readFile(fullPath)) !== entry!.md5;
 }
 
 /**

@@ -1,0 +1,13 @@
+{
+  "storage": {
+    "mode": "s3",
+    "s3": {
+      "endpoint": "http://127.0.0.1:18333",
+      "region": "us-east-1",
+      "bucket": "checkpoint-ci",
+      "force-path-style": true,
+      "access-key-id": "checkpoint-ci",
+      "secret-access-key": "checkpoint-ci-secret-key"
+    }
+  }
+}

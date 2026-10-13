@@ -4,7 +4,7 @@
 // YAML test script at .github/workflows/test.yaml to keep them in sync.
 
 /**
- * CLI Integration Test — Node.js equivalent of test.yaml
+ * CLI Integration Test: Node.js equivalent of test.yaml
  *
  * Mirrors the GitHub Actions workflow step-by-step so the same scenarios
  * can be exercised locally without CI.  Assumes services are already
@@ -20,6 +20,11 @@
  * the published one, before starting the services:
  *   node scripts/ci/build-longtail-addon.mjs
  *   node scripts/ci/install-local-addon.mjs
+ *
+ * CI runs the workflow once per storage mode. To run against S3 here, as its
+ * "s3" leg does, start a local S3 store and point the core server at it before
+ * starting the services (and undo it afterwards with --stop):
+ *   node scripts/ci/start-s3-store.mjs
  */
 
 import { execSync } from "node:child_process";
@@ -349,7 +354,7 @@ async function main() {
   run(`"${CHK}" checkout readme.txt`, { cwd: WS2 });
   fs.writeFileSync(
     path.join(WS2, "readme.txt"),
-    "Hello from workspace 2 — modified!\n",
+    "Hello from workspace 2: modifié!\n",
   );
   console.log("  Wrote updated readme.txt");
 
@@ -369,7 +374,7 @@ async function main() {
   const ws2Readme = fs.readFileSync(path.join(WS2, "readme.txt"), "utf-8");
   assert(ws1Readme === ws2Readme, "readme.txt matches after round-trip modify");
   assert(
-    ws1Readme.trim() === "Hello from workspace 2 — modified!",
+    ws1Readme.trim() === "Hello from workspace 2: modifié!",
     "readme.txt has expected content",
   );
 

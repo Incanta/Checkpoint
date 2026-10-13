@@ -176,6 +176,22 @@ export async function submit(
     submitOptions.artifactForChangelistNum = artifactForChangelistNum;
   }
 
+  // What each file looked like before the submit read it. This, not a stat
+  // taken when the submit returns, is what gets recorded as "the submitted
+  // version": a file edited while a long submit was running would otherwise
+  // have its newer, unsubmitted content recorded as the baseline, and that
+  // edit would never show as pending.
+  const statBeforeSubmit = new Map<string, { size: number; mtimeMs: number }>();
+  for (const mod of uniqueModifications) {
+    if (mod.delete) continue;
+    try {
+      const stat = await fs.stat(path.join(workspace.localPath, mod.path));
+      statBeforeSubmit.set(mod.path, { size: stat.size, mtimeMs: stat.mtimeMs });
+    } catch {
+      // The addon reports a missing file itself.
+    }
+  }
+
   const handle = submitAsync(submitOptions);
   if (!handle) {
     throw new Error("Failed to create longtail handle");
@@ -269,7 +285,29 @@ export async function submit(
       stateBackend,
     );
 
-    workspaceState.changelistNumber = result.changelistNumber;
+    // The workspace's changelist number says "this workspace has everything up
+    // to here", and the next pull only fetches what came after it. So it may
+    // move to the new changelist only if that changelist sits directly on top
+    // of what the workspace already had. If other people's changelists landed
+    // in between, the workspace does not have them, and claiming otherwise
+    // would make every later pull skip them for good. The files just submitted
+    // are recorded at the new changelist individually, below, either way.
+    try {
+      const created = await client.changelist.getChangelist.query({
+        repoId: workspace.repoId,
+        changelistNumber: result.changelistNumber,
+      });
+      if (
+        created &&
+        created.parentNumber === workspaceState.changelistNumber &&
+        !isArtifactSubmit
+      ) {
+        workspaceState.changelistNumber = result.changelistNumber;
+      }
+    } catch {
+      // Could not check. Staying where it is only means the next pull looks at
+      // a few changelists it did not need to.
+    }
 
     const fileIds = await client.file.getFileIds.mutate({
       repoId: workspace.repoId,
@@ -301,7 +339,8 @@ export async function submit(
       } else {
         // Add/update the file entry: hash deferred until change detection
         const fullPath = path.join(workspace.localPath, modification.path);
-        const stat = await fs.stat(fullPath);
+        const stat =
+          statBeforeSubmit.get(modification.path) ?? (await fs.stat(fullPath));
 
         const stateFile: WorkspaceStateFile = {
           fileId: fileId,
@@ -317,10 +356,6 @@ export async function submit(
       processed++;
       onProgress?.("Updating workspace state", processed, total);
     }
-
-    // we do not update the workspace state changelist number here
-    // because they may need to sync other changes. we don't
-    // auto pull during a push.
 
     await saveWorkspaceState(workspace, workspaceState, stateBackend);
   }

@@ -12,9 +12,20 @@ on:
 
 jobs:
   test:
+    name: test (${{ matrix.storage }} storage)
     runs-on: ubuntu-latest
     # A cold longtail addon build (cache miss below) adds several minutes.
-    timeout-minutes: 40
+    timeout-minutes: 45
+
+    # The whole job runs once per storage mode. "local" is the core server's
+    # own disk. "s3" puts a real S3 API behind the same gateway, which is the
+    # only way the server's S3 backend, the store index lock's conditional
+    # write, and the addon's S3 adapter (used by the server-side store index
+    # merge) get exercised at all. See scripts/ci/start-s3-store.mjs.
+    strategy:
+      fail-fast: false
+      matrix:
+        storage: [local, s3]
 
     steps:
       # ----------------------------------------------------------------
@@ -140,6 +151,14 @@ jobs:
           ls -la src/clients/cli/build/checkpoint
           ls -la src/clients/cli/build/chk
           src/clients/cli/build/chk --help
+
+      # ----------------------------------------------------------------
+      # S3 leg only: start an S3-compatible store and point the core server
+      # at it, before the services start and read their config.
+      # ----------------------------------------------------------------
+      - name: Start an S3 store and configure the server for it
+        if: matrix.storage == 's3'
+        run: node scripts/ci/start-s3-store.mjs
 
       # ----------------------------------------------------------------
       # Start services in background
@@ -488,7 +507,7 @@ jobs:
           echo "=== chk checkout readme.txt ==="
           $GITHUB_WORKSPACE/src/clients/cli/build/chk checkout readme.txt
 
-          echo "Hello from workspace 2 — modified!" > "$WS_PATH/readme.txt"
+          echo "Hello from workspace 2: modifié!" > "$WS_PATH/readme.txt"
           echo "Wrote updated readme.txt:"
           cat "$WS_PATH/readme.txt"
 
@@ -545,7 +564,7 @@ jobs:
             exit 1
           fi
 
-          EXPECTED="Hello from workspace 2 — modified!"
+          EXPECTED="Hello from workspace 2: modifié!"
           ACTUAL=$(cat "$WS1/readme.txt")
           if [ "$ACTUAL" != "$EXPECTED" ]; then
             echo "FAIL: readme.txt does not contain the expected content"
@@ -612,6 +631,120 @@ jobs:
           echo ""
           echo "=== daemon.json ==="
           cat ~/.checkpoint/daemon.json 2>/dev/null || echo "(not found)"
+
+          echo ""
+          echo "=== S3 store log (s3 leg only) ==="
+          tail -n 200 .ci/seaweedfs/weed.log 2>/dev/null || echo "(not found)"
+
+  # ==================================================================
+  # The same tests on Windows.
+  #
+  # Checkpoint's users are mostly on Windows, and a good share of what can go
+  # wrong with a version control system there cannot go wrong on Linux at all:
+  # replacing a file that someone has open, case-insensitive paths that alias
+  # one another, backslashes and drive letters in keys, hard links, file times.
+  # The Linux job proves none of that.
+  #
+  # This runs the fast suite, then builds the addon with MSVC and runs the
+  # integration suite against real services. It skips the CLI round trip, which
+  # the Linux job covers and which adds a second native build.
+  # ==================================================================
+  test-windows:
+    name: test (windows)
+    runs-on: windows-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: |
+          # See the note on the same step in the Linux job.
+          yarn_path=$(command -v yarn || true)
+          if [ -n "$yarn_path" ]; then
+            corepack enable --install-directory "$(dirname "$yarn_path")"
+          else
+            corepack enable
+          fi
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Build services
+        run: yarn build
+
+      - name: Run fast tests
+        run: yarn test
+
+      - name: Fingerprint the addon sources
+        id: addon-fp
+        run: |
+          fingerprint=$(node scripts/addon-source-fingerprint.js)
+          echo "Addon source fingerprint: ${fingerprint}"
+
+      - name: Restore source-built longtail addon
+        id: addon-cache
+        uses: actions/cache@v6
+        with:
+          path: .ci/longtail-addon
+          key: longtail-addon-${{ runner.os }}-${{ runner.arch }}-node24-build1-${{ steps.addon-fp.outputs.fingerprint }}
+
+      - name: Build longtail addon from source
+        if: steps.addon-cache.outputs.cache-hit != 'true'
+        run: node scripts/ci/build-longtail-addon.mjs
+
+      - name: Use the source-built longtail addon
+        run: node scripts/ci/install-local-addon.mjs
+
+      - name: Start services
+        run: yarn dev --background
+
+      - name: Wait for the app and the server
+        run: |
+          for port in 13000 13001; do
+            for i in $(seq 1 90); do
+              if curl -sf "http://localhost:$port" > /dev/null 2>&1; then
+                echo "Port $port is reachable"
+                break
+              fi
+              echo "  Waiting for port $port... ($i/90)"
+              sleep 2
+            done
+          done
+
+      - name: Create dev user and authenticate
+        id: auth
+        run: node scripts/ci/dev-login.mjs
+
+      - name: Integration tests (real addon, running services)
+        working-directory: src/tests
+        env:
+          CHECKPOINT_TEST_DAEMON_ID: ${{ steps.auth.outputs.DAEMON_ID }}
+        run: yarn test:integration
+
+      - name: Stop services
+        if: always()
+        run: yarn dev stop || true
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          for log in logs/*.log; do
+            if [ -f "$log" ]; then
+              echo ""
+              echo "============================================================"
+              echo "  $log"
+              echo "============================================================"
+              cat "$log"
+            fi
+          done
 
   # ==================================================================
   # Is the addon everyone installs built from the sources we just tested?

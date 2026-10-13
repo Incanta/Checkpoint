@@ -1269,6 +1269,8 @@ export const pendingRouter = router({
         error?: string;
       }[] = [];
 
+      const restoredToBaseline: string[] = [];
+
       for (const rawPath of input.filePaths) {
         const normalizedPath = rawPath
           .replace(/^[/\\]/, "")
@@ -1296,6 +1298,7 @@ export const pendingRouter = router({
               normalizedPath,
             );
             await fs.copyFile(result.cachePath, localFilePath);
+            restoredToBaseline.push(normalizedPath);
           } else {
             // File is not in any head version (locally added file).
             // Delete it from disk so it reverts to "not existing".
@@ -1330,6 +1333,9 @@ export const pendingRouter = router({
           });
         }
       }
+
+      // The reverted files now hold exactly what they are tracked at.
+      await manager.markFilesPristine(workspace, restoredToBaseline);
 
       // Remove any reverted files from the marked-for-add list
       const revertedPaths = results
