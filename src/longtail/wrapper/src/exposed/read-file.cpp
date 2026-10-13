@@ -110,7 +110,6 @@ static int ReadFileFromVersionSync(
   if (err) {
     SetHandleStep(handle, "Failed to read version index");
     handle->error = err;
-    handle->completed = 1;
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
@@ -129,7 +128,6 @@ static int ReadFileFromVersionSync(
   if (err) {
     SetHandleStep(handle, "Failed to get hash API");
     handle->error = err;
-    handle->completed = 1;
     Longtail_Free(version_index);
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
@@ -155,7 +153,6 @@ static int ReadFileFromVersionSync(
   if (err) {
     SetHandleStep(handle, "File not found in version");
     handle->error = err;
-    handle->completed = 1;
     Longtail_Free(version_index);
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
@@ -177,7 +174,6 @@ static int ReadFileFromVersionSync(
     *out_size = 0;
     SetHandleStep(handle, "Completed");
     handle->error = 0;
-    handle->completed = 1;
     Longtail_Free(version_index);
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
@@ -199,7 +195,6 @@ static int ReadFileFromVersionSync(
   if (!chunk_hashes) {
     SetHandleStep(handle, "Memory allocation failed");
     handle->error = ENOMEM;
-    handle->completed = 1;
     Longtail_Free(version_index);
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
@@ -224,7 +219,6 @@ static int ReadFileFromVersionSync(
   if (err) {
     SetHandleStep(handle, "Failed to get store index");
     handle->error = err;
-    handle->completed = 1;
     Longtail_Free(chunk_hashes);
     Longtail_Free(version_index);
     SAFE_DISPOSE_API(store_block_store_api);
@@ -257,7 +251,6 @@ static int ReadFileFromVersionSync(
   if (!file_data) {
     SetHandleStep(handle, "Memory allocation failed");
     handle->error = ENOMEM;
-    handle->completed = 1;
     Longtail_Free(store_index);
     Longtail_Free(chunk_hashes);
     Longtail_Free(version_index);
@@ -286,7 +279,6 @@ static int ReadFileFromVersionSync(
     if (chunk_it == chunk_hash_to_index.end()) {
       SetHandleStep(handle, "Chunk not found in store");
       handle->error = ENOENT;
-      handle->completed = 1;
       Longtail_Free(file_data);
       Longtail_Free(store_index);
       Longtail_Free(chunk_hashes);
@@ -366,7 +358,6 @@ static int ReadFileFromVersionSync(
       Longtail_Free(block_complete.m_NotifySema);
       SetHandleStep(handle, "Failed to fetch block");
       handle->error = err;
-      handle->completed = 1;
       Longtail_Free(file_data);
       Longtail_Free(store_index);
       Longtail_Free(chunk_hashes);
@@ -389,7 +380,6 @@ static int ReadFileFromVersionSync(
     if (block_complete.m_Err) {
       SetHandleStep(handle, "Failed to read block");
       handle->error = block_complete.m_Err;
-      handle->completed = 1;
       Longtail_Free(file_data);
       Longtail_Free(store_index);
       Longtail_Free(chunk_hashes);
@@ -425,8 +415,7 @@ static int ReadFileFromVersionSync(
         stored_block->Dispose(stored_block);
         SetHandleStep(handle, "Chunk not found in block");
         handle->error = ENOENT;
-        handle->completed = 1;
-        Longtail_Free(file_data);
+          Longtail_Free(file_data);
         Longtail_Free(store_index);
         Longtail_Free(chunk_hashes);
         Longtail_Free(version_index);
@@ -466,7 +455,6 @@ static int ReadFileFromVersionSync(
 
   SetHandleStep(handle, "Completed");
   handle->error = 0;
-  handle->completed = 1;
 
   Longtail_Free(store_index);
   Longtail_Free(chunk_hashes);
@@ -532,12 +520,23 @@ DLL_EXPORT ReadFileAsyncHandle* ReadFileFromVersionAsync(
         &data,
         &size);
 
+    if (err) {
+      std::cerr << "Failed to read file from version, " << err << ": " << handle->base.currentStep << std::endl;
+      // The cancel paths return without recording the error.
+      if (handle->base.error == 0) {
+        handle->base.error = err;
+      }
+    }
+
     handle->data = data;
     handle->size = size;
 
-    if (err) {
-      std::cerr << "Failed to read file from version, " << err << ": " << handle->base.currentStep << std::endl;
-    }
+    // `completed` is the poller's cue to read data/size and then free the
+    // handle, so it has to be the last thing this thread does to it.
+    // ReadFileFromVersionSync used to set it itself, before returning, which
+    // left a window (the whole API teardown) where a poll saw a finished read
+    // with data == nullptr and size == 0 and reported a real file as empty.
+    handle->base.completed = 1;
   });
 
   read_thread.detach();

@@ -228,6 +228,7 @@ export async function readCommitted(
   ctx: IntegrationContext,
   changelistNumber: number,
   filePath: string,
+  pollIntervalMs = 20,
 ): Promise<Buffer> {
   const changelist = await ctx.client.changelist.getChangelist.query({
     repoId: ctx.repoId,
@@ -257,7 +258,9 @@ export async function readCommitted(
     throw new Error("readFileFromVersionAsync returned no handle");
   }
   try {
-    const { data, size } = await pollReadFileHandle(handle, { intervalMs: 20 });
+    const { data, size } = await pollReadFileHandle(handle, {
+      intervalMs: pollIntervalMs,
+    });
     if (!data || size === 0) {
       return Buffer.alloc(0);
     }

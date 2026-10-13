@@ -252,17 +252,21 @@ int32_t SubmitSync(
   //      the submit rather than committing a lie.
   //
   //   2. The scan reported 0 (found == true, size == 0). A zero is only
-  //      legitimate if the file really is empty, and CI has caught the scan
-  //      reporting 0 for a 276 byte file: once, on one file out of 44, with the
-  //      same binary that had passed the same test on the previous run. The
-  //      root cause is NOT established. Until it is, every zero the scan
+  //      legitimate if the file really is empty, so every zero the scan
   //      produces is re-read here and the direct answer wins, because
   //      committing an empty file over real content is the worst thing this
   //      codebase can do and one extra open per genuinely empty file costs
   //      nothing. A disagreement is reported on stderr rather than failing the
   //      submit: the direct read is authoritative, so the data is already
   //      correct, and a hard failure would turn a transient into a broken
-  //      submit. If those lines ever show up, they are the lead to follow.
+  //      submit.
+  //
+  //      This was added when CI read a 276 byte file back as 0 bytes and the
+  //      scan was the suspect. The scan has never been caught disagreeing: that
+  //      failure, and a later one like it, came from the READ side reporting a
+  //      finished read before its data was attached (see the completion
+  //      ordering in ReadFileFromVersionAsync). The check stays as defence in
+  //      depth, not because the scan is known to be wrong.
   for (auto& [dir, entries] : dir_to_files) {
     for (auto& entry : entries) {
       const bool verify_zero = entry.found && entry.size == 0;

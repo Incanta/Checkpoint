@@ -255,6 +255,42 @@ describe.skipIf(!enabled)(
       );
     });
 
+    it("never reports a committed file as empty, however the read is polled", async () => {
+      // The read handle used to be marked completed before its data and size
+      // were attached, so a poll landing in that window returned 0 bytes for a
+      // file that was committed intact. It showed up here as a sizing failure
+      // on a different file each time. Tight polling and many reads in flight
+      // make that window easy to hit if it ever reopens.
+      ws = await createWorkspace(ctx, "readrace");
+      const large = randomBytes(2 * 1024 * 1024);
+      await write(ws, "Small.txt", "small\n");
+      await write(ws, "Large.bin", large);
+
+      const outcome = await nativeSubmit(ctx, ws, [
+        add("Small.txt"),
+        add("Large.bin"),
+      ]);
+      expect(outcome.error, outcome.step).toBe(0);
+      const cl = outcome.changelistNumber!;
+
+      for (let round = 0; round < 3; round++) {
+        const reads = await Promise.all(
+          Array.from({ length: 16 }, (_, i) =>
+            readCommitted(ctx, cl, i % 2 === 0 ? "Small.txt" : "Large.bin", 1),
+          ),
+        );
+        reads.forEach((actual, i) => {
+          const expected = i % 2 === 0 ? Buffer.from("small\n") : large;
+          expect(actual.length, `round ${round}, read ${i}`).toBe(
+            expected.length,
+          );
+          expect(sha256(actual), `round ${round}, read ${i}`).toBe(
+            sha256(expected),
+          );
+        });
+      }
+    });
+
     it("commits names with unicode and spaces intact", async () => {
       ws = await createWorkspace(ctx, "unicode");
       const contents: Record<string, string> = {
