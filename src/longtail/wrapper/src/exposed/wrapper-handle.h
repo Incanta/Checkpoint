@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // Shared async handle between C++ worker threads and the JS polling thread.
-// Fields are read/written from multiple threads — use volatile for flags.
+// Fields are read/written from multiple threads: use volatile for flags.
 struct WrapperAsyncHandle {
   char currentStep[256];
   uint32_t changingStep;
@@ -31,4 +31,16 @@ struct WrapperAsyncHandle {
   char refreshedS3SecretAccessKey[256];
   char refreshedS3SessionToken[2048];
   uint64_t refreshedExpirationMs;
+
+  // Set by the worker once the outcome (error, currentStep, result) is final,
+  // while it may still be tearing down the APIs it built. Internal to the
+  // wrapper: nothing outside the worker reads it.
+  //
+  // `completed` above is different, and is the only thing a poller may act on.
+  // The poller frees this handle as soon as it sees `completed`, and the
+  // storage adapters and job threads keep a pointer to it until they are
+  // disposed, so `completed` is set exactly once, by the thread lambda in each
+  // *Async function, as the last thing the worker ever does with the handle.
+  // Setting it any earlier is a use-after-free.
+  uint32_t settled;
 };

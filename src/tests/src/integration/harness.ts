@@ -14,7 +14,11 @@
  * interleave with its changelists.
  */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer, request as httpRequest } from "node:http";
+import {
+  createServer,
+  request as httpRequest,
+  type RequestOptions,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -317,23 +321,59 @@ export async function startFaultProxy(
           if (typeof value === "string") headers[name] = value;
         }
         const hasBody = method !== "GET" && method !== "HEAD";
-        const upstream = await fetch(`${target.origin}${req.url ?? "/"}`, {
-          method,
-          headers,
-          ...(hasBody && { body: new Uint8Array(Buffer.concat(chunks)) }),
+        const requestBody = hasBody ? Buffer.concat(chunks) : undefined;
+        if (requestBody) {
+          headers["content-length"] = String(requestBody.length);
+        }
+        // node:http rather than fetch, with address family selection off. On
+        // Windows, Node 24 intermittently dies with a stack cookie failure
+        // inside libuv's TCP connect (exit 0xC0000409, main thread, no addon
+        // frame anywhere near it) when fetch races IPv6 and IPv4 attempts to
+        // "localhost" while the server is busy. One plain connection per
+        // request avoids that path.
+        const upstream = await new Promise<{
+          status: number;
+          contentLength: string | undefined;
+          body: Buffer;
+        }>((resolve, reject) => {
+          const forward = httpRequest(
+            {
+              host: target.hostname,
+              port: target.port,
+              method,
+              path: req.url ?? "/",
+              headers,
+              agent: false,
+              // Passed through to net.connect; not in http's option types.
+              autoSelectFamily: false,
+            } as RequestOptions,
+            (upstreamRes) => {
+              const parts: Buffer[] = [];
+              upstreamRes.on("data", (part: Buffer) => parts.push(part));
+              upstreamRes.on("end", () =>
+                resolve({
+                  status: upstreamRes.statusCode ?? 502,
+                  contentLength: upstreamRes.headers["content-length"],
+                  body: Buffer.concat(parts),
+                }),
+              );
+              upstreamRes.on("error", reject);
+            },
+          );
+          forward.on("error", reject);
+          forward.end(requestBody);
         });
-        const body = Buffer.from(await upstream.arrayBuffer());
         // A HEAD carries the object's size in Content-Length with no body, and
         // the addon's GetSize reads it, so it has to be relayed as given.
         const contentLength =
           method === "HEAD"
-            ? upstream.headers.get("content-length")
-            : String(body.length);
+            ? upstream.contentLength
+            : String(upstream.body.length);
         res.writeHead(
           upstream.status,
-          contentLength === null ? {} : { "content-length": contentLength },
+          contentLength === undefined ? {} : { "content-length": contentLength },
         );
-        res.end(method === "HEAD" ? undefined : body);
+        res.end(method === "HEAD" ? undefined : upstream.body);
       })().catch(() => {
         if (!res.headersSent) res.writeHead(502);
         res.end();

@@ -171,7 +171,7 @@ int PullSync(
     // recorded, so this is not the index that was submitted.
     SetHandleStep(handle, err == EBADMSG ? "Version index failed verification: its content does not match its name" : "Failed to read version index");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
     SAFE_DISPOSE_API(compress_block_store_api);
@@ -193,7 +193,7 @@ int PullSync(
   if (err) {
     SetHandleStep(handle, "Failed to get hash API");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(remote_version_index);
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
@@ -214,7 +214,7 @@ int PullSync(
   if (!chunker_api) {
     SetHandleStep(handle, "Failed to get chunker API");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(remote_version_index);
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);
@@ -248,7 +248,7 @@ int PullSync(
   if (err) {
     SetHandleStep(handle, "Failed to scan local files for diff");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(remote_version_index);
     SAFE_DISPOSE_API(chunker_api);
     SAFE_DISPOSE_API(store_block_store_api);
@@ -297,7 +297,7 @@ int PullSync(
   if (err) {
     SetHandleStep(handle, "Failed to create local version index");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(remote_version_index);
     SAFE_DISPOSE_API(chunker_api);
     SAFE_DISPOSE_API(store_block_store_api);
@@ -326,7 +326,7 @@ int PullSync(
   if (err) {
     SetHandleStep(handle, "Failed to create diff from local to remote");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(local_version_index);
     Longtail_Free(remote_version_index);
     SAFE_DISPOSE_API(chunker_api);
@@ -361,7 +361,7 @@ int PullSync(
   {
     SetHandleStep(handle, "Completed");
     handle->error = 0;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(version_diff);
     Longtail_Free(local_version_index);
     Longtail_Free(remote_version_index);
@@ -391,7 +391,7 @@ int PullSync(
   if (err) {
     SetHandleStep(handle, "Failed to get required chunks");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(required_chunk_hashes);
     Longtail_Free(version_diff);
     Longtail_Free(local_version_index);
@@ -422,7 +422,7 @@ int PullSync(
   if (err) {
     SetHandleStep(handle, "Failed to retarget the store index to the remote store");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(required_chunk_hashes);
     Longtail_Free(version_diff);
     Longtail_Free(local_version_index);
@@ -469,7 +469,7 @@ int PullSync(
   if (err) {
     SetHandleStep(handle, "Failed to update version");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(version_diff);
     Longtail_Free(local_version_index);
     Longtail_Free(required_version_store_index);
@@ -492,7 +492,7 @@ int PullSync(
 
   SetHandleStep(handle, "Completed");
   handle->error = 0;
-  handle->completed = 1;
+  handle->settled = 1;
 
   Longtail_Free(version_diff);
   Longtail_Free(local_version_index);
@@ -576,6 +576,10 @@ PullAsync(
     if (err) {
       std::cerr << "Failed to pull version, " << err << ": " << handle->currentStep << std::endl;
     }
+
+    // Last touch of the handle: the poller may free it from here on. See
+    // wrapper-handle.h.
+    handle->completed = 1;
   });
 
   merge_thread.detach();

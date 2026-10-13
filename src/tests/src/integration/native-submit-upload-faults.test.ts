@@ -184,6 +184,32 @@ describe.skipIf(!enabled)("native submit: uploads that fail", () => {
     expect(await headChangelistNumber(ctx)).toBe(before);
   });
 
+  it("survives the handle being freed the moment a failed submit completes, repeatedly", async () => {
+    // A failed submit reports its outcome while other blocks are still in
+    // flight and the storage APIs are still being torn down. The caller frees
+    // the handle as soon as it sees "completed", so if that flag goes up
+    // before the worker is done with the handle, the process dies in native
+    // code (it did, intermittently: exit 0xC0000409). There is nothing to
+    // assert on a crash except that this test, and the ones after it, ran.
+    ws = await createWorkspace(ctx, "free-on-complete");
+    let refused: string | undefined;
+    proxy = await startFaultProxy(ctx, (r) => {
+      if (!isBlockPut(r)) return "pass";
+      refused ??= r.path;
+      return r.path === refused ? { status: 403 } : "pass";
+    });
+    const before = await headChangelistNumber(ctx);
+
+    for (let round = 0; round < 6; round++) {
+      refused = undefined;
+      await write(ws, "Large.bin", freshContent(18 * 1024 * 1024));
+      const outcome = await submitThroughProxy([add("Large.bin")]);
+      expect(outcome.error, `round ${round}`).not.toBe(0);
+    }
+
+    expect(await headChangelistNumber(ctx)).toBe(before);
+  }, 240_000);
+
   it("recovers when a block upload fails twice and then goes through", async () => {
     // A blip must not fail the submit, and the retried upload must carry the
     // whole block: the bytes read back are compared, not just the outcome.

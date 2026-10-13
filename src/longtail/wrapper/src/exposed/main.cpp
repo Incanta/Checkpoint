@@ -101,13 +101,13 @@ void SetHandleStep(WrapperAsyncHandle* handle, const char* step) {
 }
 
 bool IsHandleCanceled(WrapperAsyncHandle* handle) {
-  if (handle->completed) {
+  if (handle->settled) {
     return false;
   }
 
   if (handle->canceled) {
     SetHandleStep(handle, "Canceled");
-    handle->completed = 1;
+    handle->settled = 1;
     handle->error = ECANCELED;
     return true;
   }

@@ -78,7 +78,7 @@ int32_t SubmitSync(
   if (err) {
     SetHandleStep(handle, "Failed to get hash API");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(source_version_index);
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
@@ -95,7 +95,7 @@ int32_t SubmitSync(
   if (!chunker_api) {
     SetHandleStep(handle, "Failed to allocate memory for chunker API");
     handle->error = ENOMEM;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(source_version_index);
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
@@ -123,7 +123,7 @@ int32_t SubmitSync(
   if (!file_infos) {
     SetHandleStep(handle, "Failed to allocate memory for file infos");
     handle->error = ENOMEM;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(source_version_index);
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
@@ -330,7 +330,7 @@ int32_t SubmitSync(
       if (size_err != 0) {
         SetHandleStep(handle, message.c_str());
         handle->error = size_err;
-        handle->completed = 1;
+        handle->settled = 1;
         Longtail_Free(file_infos);
         Longtail_Free(source_version_index);
         SAFE_DISPOSE_API(chunker_api);
@@ -418,7 +418,7 @@ int32_t SubmitSync(
   if (err) {
     SetHandleStep(handle, "Failed to create version index");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     SAFE_DISPOSE_API(chunker_api);
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(store_block_fsstore_api);
@@ -443,7 +443,7 @@ int32_t SubmitSync(
   if (err) {
     SetHandleStep(handle, "Failed to get existing content");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(source_version_index);
     SAFE_DISPOSE_API(chunker_api);
     SAFE_DISPOSE_API(store_block_store_api);
@@ -470,7 +470,7 @@ int32_t SubmitSync(
   if (err) {
     SetHandleStep(handle, "Failed to create missing store index");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(source_version_index);
     SAFE_DISPOSE_API(chunker_api);
@@ -507,7 +507,7 @@ int32_t SubmitSync(
   if (err) {
     SetHandleStep(handle, "Failed to create store blocks");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(source_version_index);
     SAFE_DISPOSE_API(chunker_api);
@@ -528,7 +528,7 @@ int32_t SubmitSync(
   if (err) {
     SetHandleStep(handle, "Failed create SyncFlush");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(source_version_index);
     SAFE_DISPOSE_API(&flushCB.m_API);
@@ -547,7 +547,7 @@ int32_t SubmitSync(
   if (err) {
     SetHandleStep(handle, "Failed flush compression block store");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(source_version_index);
     SAFE_DISPOSE_API(&flushCB.m_API);
@@ -565,7 +565,7 @@ int32_t SubmitSync(
     if (flushCB.m_Err != 0) {
       SetHandleStep(handle, "Failed flush compression block store");
       handle->error = flushCB.m_Err;
-      handle->completed = 1;
+      handle->settled = 1;
       Longtail_Free(existing_remote_store_index);
       Longtail_Free(source_version_index);
       SAFE_DISPOSE_API(&flushCB.m_API);
@@ -587,7 +587,7 @@ int32_t SubmitSync(
   if (err) {
     SetHandleStep(handle, "Failed create SyncFlush");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(source_version_index);
     SAFE_DISPOSE_API(&flushCB.m_API);
@@ -606,7 +606,7 @@ int32_t SubmitSync(
   if (err) {
     SetHandleStep(handle, "Failed flush fs block store");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(source_version_index);
     SAFE_DISPOSE_API(&flushCB.m_API);
@@ -624,7 +624,7 @@ int32_t SubmitSync(
     if (flushCB.m_Err != 0) {
       SetHandleStep(handle, "Failed flush fs block store");
       handle->error = flushCB.m_Err;
-      handle->completed = 1;
+      handle->settled = 1;
       Longtail_Free(existing_remote_store_index);
       Longtail_Free(source_version_index);
       SAFE_DISPOSE_API(&flushCB.m_API);
@@ -652,7 +652,7 @@ int32_t SubmitSync(
   if (upload_failures->Any()) {
     SetHandleStep(handle, upload_failures->Describe().c_str());
     handle->error = IsHandleCanceled(handle) ? ECANCELED : EIO;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(remote_missing_store_index);
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(source_version_index);
@@ -700,7 +700,7 @@ int32_t SubmitSync(
   if (err) {
     SetHandleStep(handle, version_index_upload_failed ? upload_failures->Describe().c_str() : "Failed to write version index");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(remote_missing_store_index);
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(source_version_index);
@@ -722,7 +722,7 @@ int32_t SubmitSync(
   if (err) {
     SetHandleStep(handle, "Failed to write missing store index to buffer");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(remote_missing_store_index);
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(source_version_index);
@@ -776,7 +776,7 @@ int32_t SubmitSync(
   if (!curl) {
     SetHandleStep(handle, "Failed to initialize curl");
     handle->error = ENOMEM;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(remote_missing_store_index);
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(source_version_index);
@@ -858,7 +858,7 @@ int32_t SubmitSync(
     std::string errorMessage = "Failed to submit to backend: " + response_body;
     SetHandleStep(handle, errorMessage.c_str());
     handle->error = http_status_code > 0 ? (int)http_status_code : EIO;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(remote_missing_store_index);
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(source_version_index);
@@ -883,7 +883,7 @@ int32_t SubmitSync(
 
   SetHandleStep(handle, "Completed");
   handle->error = 0;
-  handle->completed = 1;
+  handle->settled = 1;
 
   Longtail_Free(remote_missing_store_index);
   Longtail_Free(existing_remote_store_index);
@@ -981,6 +981,10 @@ SubmitAsync(
     if (err) {
       std::cerr << "Failed to commit, " << err << ": " << handle->currentStep << std::endl;
     }
+
+    // Last touch of the handle: the poller may free it from here on. See
+    // wrapper-handle.h.
+    handle->completed = 1;
   });
 
   diff_thread.detach();
