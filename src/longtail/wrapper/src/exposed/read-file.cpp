@@ -4,6 +4,7 @@
 #include <unordered_map>
 
 #include "../util/existing-content.h"
+#include "../util/version-index-io.h"
 #include "main.h"
 
 // Structure to hold the result of reading a file
@@ -106,9 +107,11 @@ static int ReadFileFromVersionSync(
   SetHandleStep(handle, "Reading version index");
 
   struct Longtail_VersionIndex* version_index = nullptr;
-  int err = Longtail_ReadVersionIndex(remote_storage_api, remote_version_index_path.c_str(), &version_index);
+  int err = version_index_io::ReadVerified(remote_storage_api, remote_version_index_path.c_str(), std::string(VersionIndexName), &version_index);
   if (err) {
-    SetHandleStep(handle, "Failed to read version index");
+    // EBADMSG: the bytes in storage do not hash to the name the changelist
+    // recorded, so this is not the index that was submitted.
+    SetHandleStep(handle, err == EBADMSG ? "Version index failed verification: its content does not match its name" : "Failed to read version index");
     handle->error = err;
     SAFE_DISPOSE_API(store_block_store_api);
     SAFE_DISPOSE_API(lru_block_store_api);

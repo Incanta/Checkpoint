@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import config from "@incanta/config";
 import njwt from "njwt";
+import { createHash } from "crypto";
+import { Transform } from "stream";
 import { getStorageBackend } from "../storage/backend.js";
 import { Logger } from "../logging.js";
 
@@ -14,6 +16,9 @@ import { Logger } from "../logging.js";
 // Auth: Authorization: Bearer <Checkpoint JWT>. The request path must be under
 // the token's basePath; mutating methods require mode "write". Streaming, no
 // whole-object buffering. PUT is atomic (overwrite).
+//
+// Version indexes are the exception to "overwrite": they are write-once and
+// content addressed. See versionIndexName below.
 
 interface UserJWTClaims {
   iss: string;
@@ -72,6 +77,18 @@ function verify(req: Request, res: Response): UserJWTClaims | null {
   }
 
   return claims;
+}
+
+// A changelist records the name of its version index and nothing else about
+// it, so whatever sits under that name IS the changelist's content. These keys
+// are therefore write-once: the name must be the SHA-256 of the body, an
+// existing index is never replaced, and clients cannot delete one.
+const VERSION_INDEX_KEY = /^\/[^/]+\/[^/]+\/versions\/([^/]+)$/;
+const CONTENT_NAME = /^([0-9a-f]{64})\.lvi$/;
+
+/** The file name if the key is a repo's version index, otherwise null. */
+function versionIndexName(key: string): string | null {
+  return VERSION_INDEX_KEY.exec(key)?.[1] ?? null;
 }
 
 export function routeGateway(): Router {
@@ -138,8 +155,50 @@ export function routeGateway(): Router {
     }
     try {
       const backend = await getStorageBackend();
+      const key = decodeURIComponent(req.path);
+      const indexName = versionIndexName(key);
+
+      if (indexName !== null) {
+        const expected = CONTENT_NAME.exec(indexName)?.[1];
+        if (!expected) {
+          res
+            .status(400)
+            .send("Bad Request: a version index must be named <sha256>.lvi");
+          return;
+        }
+
+        // Already stored: the name is the hash of the content, so this is the
+        // same index (a retry, or an identical submit). Accept without
+        // rewriting it.
+        if ((await backend.head(key)) !== null) {
+          req.resume();
+          res.status(200).json({ success: true, existing: true });
+          return;
+        }
+
+        const hash = createHash("sha256");
+        const hashing = new Transform({
+          transform(chunk, _encoding, callback) {
+            hash.update(chunk);
+            callback(null, chunk);
+          },
+        });
+        req.on("error", (err) => hashing.destroy(err));
+        await backend.put(key, req.pipe(hashing), contentLength);
+
+        if (hash.digest("hex") !== expected) {
+          await backend.delete(key);
+          res
+            .status(400)
+            .send("Bad Request: version index content does not match its name");
+          return;
+        }
+        res.status(201).json({ success: true });
+        return;
+      }
+
       // req is the raw body stream (express.json only consumes application/json).
-      await backend.put(decodeURIComponent(req.path), req, contentLength);
+      await backend.put(key, req, contentLength);
       res.status(201).json({ success: true });
     } catch (err) {
       Logger.error(`gateway PUT failed: ${err}`);
@@ -150,8 +209,13 @@ export function routeGateway(): Router {
   router.delete("/*splat", async (req, res) => {
     if (!verify(req, res)) return;
     try {
+      const key = decodeURIComponent(req.path);
+      if (versionIndexName(key) !== null) {
+        res.status(403).send("Forbidden: version indexes cannot be deleted");
+        return;
+      }
       const backend = await getStorageBackend();
-      await backend.delete(decodeURIComponent(req.path));
+      await backend.delete(key);
       res.status(204).end();
     } catch (err) {
       Logger.error(`gateway DELETE failed: ${err}`);

@@ -230,7 +230,12 @@ export type FaultAction =
    * upload looks like from the server, so it is how the server-side checks are
    * reached now that the addon no longer ignores a failed upload itself.
    */
-  | "swallow";
+  | "swallow"
+  /**
+   * Answer 200 with these bytes without forwarding: what a reader sees when
+   * the object in storage is not the one that was written.
+   */
+  | { respond: Buffer };
 
 export interface FaultRequest {
   method: string;
@@ -292,6 +297,13 @@ export async function startFaultProxy(
         }
         if (action === "swallow") {
           res.writeHead(200).end();
+          return;
+        }
+        if (action !== "pass" && "respond" in action) {
+          res.writeHead(200, {
+            "content-length": String(action.respond.length),
+          });
+          res.end(method === "HEAD" ? undefined : action.respond);
           return;
         }
         if (action !== "pass") {
@@ -364,6 +376,8 @@ export async function readCommitted(
   changelistNumber: number,
   filePath: string,
   pollIntervalMs = 20,
+  /** Applied last; lets a test route the read through a fault proxy. */
+  overrides: { gatewayUrl?: string } = {},
 ): Promise<Buffer> {
   const changelist = await ctx.client.changelist.getChangelist.query({
     repoId: ctx.repoId,
@@ -388,6 +402,7 @@ export async function readCommitted(
     remoteBasePath: `/${ctx.orgId}/${ctx.repoId}`,
     ...toStorageOptions(token),
     logLevel: GetLogLevel("off"),
+    ...overrides,
   });
   if (!handle) {
     throw new Error("readFileFromVersionAsync returned no handle");
@@ -403,6 +418,48 @@ export async function readCommitted(
   } finally {
     freeReadFileHandle(handle);
   }
+}
+
+/** One request to the storage gateway for an object in the context's repo. */
+export async function gatewayRequest(
+  ctx: IntegrationContext,
+  method: "HEAD" | "GET" | "PUT" | "DELETE",
+  key: string,
+  body?: Buffer,
+): Promise<{ status: number; body: Buffer }> {
+  const rawToken = await ctx.client.storage.getToken.query({
+    repoId: ctx.repoId,
+    write: true,
+  });
+  const token = await resolveStorageEndpoints(rawToken);
+  if (!token.gatewayUrl) {
+    throw new Error("gatewayRequest needs a gateway storage mode (local or s3)");
+  }
+  const base = token.gatewayUrl.replace(/\/$/, "");
+  const response = await fetch(
+    `${base}/${ctx.orgId}/${ctx.repoId}/${key}`,
+    {
+      method,
+      headers: { authorization: `Bearer ${token.token}` },
+      ...(body && { body: new Uint8Array(body) }),
+    },
+  );
+  return {
+    status: response.status,
+    body: Buffer.from(await response.arrayBuffer()),
+  };
+}
+
+/** The version index name a changelist recorded. */
+export async function versionIndexOf(
+  ctx: IntegrationContext,
+  changelistNumber: number,
+): Promise<string> {
+  const changelist = await ctx.client.changelist.getChangelist.query({
+    repoId: ctx.repoId,
+    changelistNumber,
+  });
+  return changelist?.versionIndex ?? "";
 }
 
 /** Highest changelist number on main. */

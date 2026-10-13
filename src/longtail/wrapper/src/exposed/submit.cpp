@@ -3,6 +3,7 @@
 #include "../util/flush.h"
 #include "../util/progress.h"
 #include "../util/upload-status.h"
+#include "../util/version-index-io.h"
 #include "main.h"
 
 #include <iostream>
@@ -666,21 +667,28 @@ int32_t SubmitSync(
     return handle->error;
   }
 
-  std::stringstream version_file_stream;
   void* missing_store_index_buffer = 0;
   size_t missing_store_index_size;
-  version_file_stream << std::string("0x") << std::hex << source_version_index->m_Version << std::string(".lvi");
-
-  std::stringstream version_index_stream;
-  version_index_stream << std::string(RemoteBasePath) << std::string("/versions/") << version_file_stream.str();
-  std::string target_version_index_path = version_index_stream.str().c_str();
 
   SetHandleStep(handle, "Finalizing version data");
 
-  err = Longtail_WriteVersionIndex(
-      remote_storage_api,
-      source_version_index,
-      target_version_index_path.c_str());
+  // The index is named after its own bytes, so this submit cannot land on a
+  // name another submit used for different content. See version-index-io.h.
+  std::string version_file_name;
+  std::string target_version_index_path;
+  void* version_index_buffer = 0;
+  size_t version_index_size = 0;
+  err = Longtail_WriteVersionIndexToBuffer(source_version_index, &version_index_buffer, &version_index_size);
+  if (!err) {
+    version_file_name = version_index_io::NameForContent(version_index_buffer, version_index_size);
+    target_version_index_path = std::string(RemoteBasePath) + "/versions/" + version_file_name;
+    err = version_index_io::WriteBuffer(
+        remote_storage_api,
+        target_version_index_path.c_str(),
+        version_index_buffer,
+        version_index_size);
+    Longtail_Free(version_index_buffer);
+  }
 
   // Longtail_WriteVersionIndex returns 0 even when the PUT failed, for the
   // same reason the block writes do.
@@ -734,7 +742,7 @@ int32_t SubmitSync(
       {"branchName", std::string(BranchName)},
       {"message", std::string(Message)},
       {"modifications", json::array()},
-      {"versionIndex", version_file_stream.str()},
+      {"versionIndex", version_file_name},
       {"keepCheckedOut", KeepCheckedOut},
       {"workspaceId", std::string(WorkspaceId)}};
 

@@ -3,6 +3,7 @@
 #include <cacheblockstore/longtail_cacheblockstore.h>
 
 #include "../util/existing-content.h"
+#include "../util/version-index-io.h"
 #include "../util/path-filter.h"
 #include "../util/progress.h"
 #include "main.h"
@@ -164,9 +165,11 @@ int PullSync(
   SetHandleStep(handle, "Fetching version data");
 
   struct Longtail_VersionIndex* remote_version_index = 0;
-  int err = Longtail_ReadVersionIndex(remote_storage_api, remote_version_index_path.c_str(), &remote_version_index);
+  int err = version_index_io::ReadVerified(remote_storage_api, remote_version_index_path.c_str(), std::string(VersionIndex), &remote_version_index);
   if (err) {
-    SetHandleStep(handle, "Failed to read version index");
+    // EBADMSG: the bytes in storage do not hash to the name the changelist
+    // recorded, so this is not the index that was submitted.
+    SetHandleStep(handle, err == EBADMSG ? "Version index failed verification: its content does not match its name" : "Failed to read version index");
     handle->error = err;
     handle->completed = 1;
     SAFE_DISPOSE_API(store_block_store_api);

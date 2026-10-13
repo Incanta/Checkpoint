@@ -8,6 +8,7 @@ import {
   number,
 } from "yup";
 import jwt from "njwt";
+import { createHash } from "crypto";
 import config from "@incanta/config";
 import { CreateApiClientAuthManual } from "@checkpointvcs/common";
 import {
@@ -68,29 +69,45 @@ async function buildMergeStorageOptions(
   };
 }
 
-// A version index name is a single file name under "{repo}/versions/". It is
-// client-supplied and becomes part of a storage key, so anything that could
-// step outside that directory is refused rather than normalized.
-const VERSION_INDEX_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.lvi$/;
+// A version index is named after the SHA-256 of its bytes. The name is
+// client-supplied and becomes part of a storage key, so anything else is
+// refused rather than normalized, and the hash is recomputed here: a
+// changelist must not record a name whose content is something else.
+const VERSION_INDEX_NAME = /^([0-9a-f]{64})\.lvi$/;
 
 /**
- * Confirms the version index a submit names is really in storage. Returns a
- * message describing the problem, or null if the index is there.
+ * Confirms the version index a submit names is really in storage, intact.
+ * Returns a message describing the problem, or null if the index is there.
  */
 async function checkVersionIndex(
   repoId: string,
   basePath: string,
   versionIndex: string,
 ): Promise<string | null> {
-  if (!VERSION_INDEX_NAME.test(versionIndex)) {
-    return `Invalid version index name: ${versionIndex}`;
+  const expected = VERSION_INDEX_NAME.exec(versionIndex)?.[1];
+  if (!expected) {
+    return `Invalid version index name: ${versionIndex}. Update your Checkpoint client.`;
   }
 
   let size: number | null;
+  let actual = "";
   try {
     // r2 mode keeps each repo in its own bucket; local and s3 ignore the option.
     const backend = await getStorageBackend({ bucket: `checkpoint-${repoId}` });
-    size = await backend.head(`${basePath}/versions/${versionIndex}`);
+    const key = `${basePath}/versions/${versionIndex}`;
+    size = await backend.head(key);
+    if (size) {
+      const stream = await backend.get(key);
+      if (!stream) {
+        size = null;
+      } else {
+        const hash = createHash("sha256");
+        for await (const chunk of stream) {
+          hash.update(chunk as Buffer);
+        }
+        actual = hash.digest("hex");
+      }
+    }
   } catch (e: any) {
     // Not being able to ask is not the same as the index being there.
     return `Could not confirm version index ${versionIndex} is in storage: ${e.message}`;
@@ -101,6 +118,9 @@ async function checkVersionIndex(
   }
   if (size === 0) {
     return `Version index ${versionIndex} is empty in storage. The upload did not complete; submit again.`;
+  }
+  if (actual !== expected) {
+    return `Version index ${versionIndex} does not match its name (content hashes to ${actual}). Refusing to record it.`;
   }
   return null;
 }
