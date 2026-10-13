@@ -1,48 +1,17 @@
 import { Router } from "express";
-import jwt from "njwt";
-import config from "@incanta/config";
 import { getStorageBackend } from "../storage/backend.js";
-
-interface JWTClaims {
-  iss: string;
-  sub: string;
-  userId: string;
-  orgId: string;
-  repoId: string;
-  mode: string;
-  basePath: string;
-}
+import { verifyRepoToken } from "../utils/repo-token.js";
 
 export function routeRepoSize(): Router {
   const router = Router();
 
   router.get("/repo-size", async (req, res) => {
-    const authorizationHeader = req.headers["authorization"];
-    if (!authorizationHeader) {
-      res.status(401).send("Unauthorized");
+    const auth = verifyRepoToken(req.headers["authorization"], false);
+    if (!auth.ok) {
+      res.status(auth.status).send(auth.message);
       return;
     }
-
-    const [type, token] = authorizationHeader.split(" ");
-
-    if (type !== "Bearer") {
-      res.status(401).send("Unauthorized");
-      return;
-    }
-
-    const verifiedToken = jwt.verify(
-      token,
-      config.get("storage.jwt.signing-key"),
-    );
-
-    if (!verifiedToken) {
-      res.status(401).send("Unauthorized");
-      return;
-    }
-
-    const claims: JWTClaims = verifiedToken.body.toJSON() as any;
-
-    const basePath = `/${claims.orgId}/${claims.repoId}`;
+    const { basePath } = auth;
 
     try {
       // Computed on demand from the backend (local disk walk or S3 list). This

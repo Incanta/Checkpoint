@@ -24,6 +24,11 @@ const { spawn, execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
+const {
+  devStorageSigningKey,
+  ENV_NAME: SIGNING_KEY_ENV,
+} = require("./scripts/dev-signing-key.js");
+
 const isCI = process.env.CI === "true";
 
 // PID file location
@@ -178,7 +183,13 @@ function startService(service) {
 
   const proc = spawn(service.command, service.args, {
     cwd: service.cwd,
-    env: { ...process.env, FORCE_COLOR: "1", ...service.env },
+    env: {
+      ...process.env,
+      FORCE_COLOR: "1",
+      // The app and the server will not start without a shared signing key.
+      [SIGNING_KEY_ENV]: devStorageSigningKey(),
+      ...service.env,
+    },
     stdio: ["pipe", "pipe", "pipe"],
     shell: process.platform === "win32",
     windowsHide: true,

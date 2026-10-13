@@ -47,6 +47,17 @@ export async function register() {
     const { initUpdateScheduler } = await import("~/server/updates/scheduler");
     initUpdateScheduler();
 
+    // Refuse to run with a missing or guessable storage signing key: every
+    // storage token this app hands out would be forgeable. Checked before the
+    // "[healthy]" line so nothing treats a misconfigured app as up.
+    const { storageSigningKey } = await import("~/server/storage-signing-key");
+    try {
+      storageSigningKey();
+    } catch (err) {
+      Logger.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
     const { default: config } = await import("@incanta/config");
 
     const { SERVER_API, MIN_SERVER_API, SERVER_VERSION } =

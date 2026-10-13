@@ -1,7 +1,7 @@
 import { Router, raw, type Request, type Response } from "express";
-import config from "@incanta/config";
 import njwt from "njwt";
 import { getStorageBackend } from "../storage/backend.js";
+import { storageSigningKey } from "../utils/signing-key.js";
 
 // Content-addressed state-tree block storage. The app writes/reads tree blocks
 // here over the system-JWT channel; the actual I/O goes through the unified
@@ -37,7 +37,7 @@ function verify(
   try {
     const verified = njwt.verify(
       token,
-      config.get<string>("storage.jwt.signing-key"),
+      storageSigningKey(),
     );
     claims = verified!.body.toJSON() as unknown as SystemJWTClaims;
   } catch {
@@ -58,7 +58,7 @@ function verify(
   if (
     !blockPath ||
     blockPath !== claims.path ||
-    !/^\/[^/]+\/[^/]+\/tree\/[0-9a-f]{64}$/.test(blockPath)
+    !/^\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/tree\/[0-9a-f]{64}$/.test(blockPath)
   ) {
     res.status(403).send("Forbidden: Path mismatch or invalid");
     return null;

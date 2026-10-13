@@ -1,13 +1,26 @@
 import { Router } from "express";
-import config from "@incanta/config";
 import njwt from "njwt";
 import { getStorageBackend, usesGateway } from "../storage/backend.js";
+import { storageSigningKey } from "../utils/signing-key.js";
+import { isSafeSegment } from "../utils/storage-key.js";
 
 interface SystemJWTClaims {
   iss: string;
   system: boolean;
   action: string;
   path: string;
+}
+
+// "/{org}" or "/{org}/{repo}", optionally with a trailing slash. rmdir deletes
+// everything under the path, so "/." (the storage root) and anything with ".."
+// in it must never get through; "[^/]+" allowed both.
+function isPrefixPath(path: string): boolean {
+  const segments = path.replace(/\/$/, "").split("/");
+  return (
+    path.startsWith("/") &&
+    (segments.length === 2 || segments.length === 3) &&
+    segments.slice(1).every(isSafeSegment)
+  );
 }
 
 /**
@@ -34,10 +47,7 @@ export function routeSystem(): Router {
 
     let claims: SystemJWTClaims;
     try {
-      const verifiedToken = njwt.verify(
-        token,
-        config.get<string>("storage.jwt.signing-key"),
-      );
+      const verifiedToken = njwt.verify(token, storageSigningKey());
 
       if (!verifiedToken) {
         res.status(401).send("Unauthorized: Invalid token");
@@ -77,7 +87,7 @@ export function routeSystem(): Router {
     }
 
     // Validate path format (should be /orgId or /orgId/repoId)
-    if (!path.match(/^\/[^/]+\/?$/) && !path.match(/^\/[^/]+\/[^/]+\/?$/)) {
+    if (!isPrefixPath(path)) {
       res.status(400).send("Bad Request: Invalid path format");
       return;
     }
@@ -113,10 +123,7 @@ export function routeSystem(): Router {
 
     let claims: SystemJWTClaims;
     try {
-      const verifiedToken = njwt.verify(
-        token,
-        config.get<string>("storage.jwt.signing-key"),
-      );
+      const verifiedToken = njwt.verify(token, storageSigningKey());
 
       if (!verifiedToken) {
         res.status(401).send("Unauthorized: Invalid token");
@@ -152,7 +159,7 @@ export function routeSystem(): Router {
       return;
     }
 
-    if (!path.match(/^\/[^/]+\/?$/) && !path.match(/^\/[^/]+\/[^/]+\/?$/)) {
+    if (!isPrefixPath(path)) {
       res.status(400).send("Bad Request: Invalid path format");
       return;
     }

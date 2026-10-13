@@ -4,7 +4,14 @@
 mode: "local" # local | s3 | r2
 
 jwt:
-  signing-key: "secret"
+  # HS256 key for storage tokens. Must match the core server's value.
+  #
+  # There is no default: anyone who knows this key can mint a write token for
+  # any repo. The app refuses to issue storage tokens without a random value of
+  # at least 32 characters (for example: openssl rand -hex 32). Set it here, in
+  # an environment's storage.yaml, or with the CHECKPOINT_STORAGE_SIGNING_KEY
+  # environment variable, which wins. `yarn dev` generates one for local use.
+  signing-key: ""
 
 token-expiration-seconds: 3600
 

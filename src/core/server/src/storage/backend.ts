@@ -12,6 +12,7 @@ import {
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { getR2Client } from "../utils/r2.js";
+import { isSafeSegment } from "../utils/storage-key.js";
 
 // Unified storage backend used by every server-side data path (the client
 // gateway, the system tree-block channel, repo-size, and store.lsi merge
@@ -46,8 +47,15 @@ export function storageMode(): StorageMode {
   return config.get<StorageMode>("storage.mode");
 }
 
+// The routes validate keys before they get here; this is the backstop, so a
+// route that forgets cannot hand the backend "..", an empty segment, or a
+// Windows alias. See utils/storage-key.ts for what a safe segment is.
 function normalizeKey(key: string): string {
-  return key.replace(/^\/+/, "");
+  const relative = key.replace(/^\/+/, "").replace(/\/$/, "");
+  if (relative.length === 0 || !relative.split("/").every(isSafeSegment)) {
+    throw new Error(`unsafe storage key rejected: ${JSON.stringify(key)}`);
+  }
+  return relative;
 }
 
 // ---------------------------------------------------------------------------

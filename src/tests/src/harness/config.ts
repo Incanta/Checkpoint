@@ -57,7 +57,10 @@ function applyDefaults(): void {
   setConfig("storage.mode", "local");
   setConfig("storage.backend-url.internal", "http://localhost:13001");
   setConfig("storage.backend-url.external", "http://localhost:13001");
-  setConfig("storage.jwt.signing-key", "test-jwt-secret");
+  setConfig(
+    "storage.jwt.signing-key",
+    "fast-suite-only-storage-signing-key-0123456789",
+  );
   setConfig("storage.token-expiration-seconds", 3600);
   // Tree blocks go to the TreeBlock table in tests (no storage server running).
   setConfig("state-tree.block-store", "postgres");

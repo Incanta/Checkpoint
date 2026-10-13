@@ -1,5 +1,6 @@
 import config from "@incanta/config";
 import njwt from "njwt";
+import { storageSigningKey } from "./storage-signing-key";
 
 interface SystemJWTClaims {
   iss: string;
@@ -20,7 +21,7 @@ export function createSystemToken(action: string, path: string): string {
       action,
       path,
     } satisfies SystemJWTClaims,
-    config.get<string>("storage.jwt.signing-key"),
+    storageSigningKey(),
   );
 
   token.setExpiration(

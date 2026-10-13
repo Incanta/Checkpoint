@@ -1,5 +1,6 @@
 import config from "@incanta/config";
 import njwt from "njwt";
+import { storageSigningKey } from "./storage-signing-key";
 import type { StorageOptions } from "@checkpointvcs/longtail-addon";
 import {
   isR2Enabled,
@@ -56,7 +57,7 @@ export async function buildAddonStorageOptions(
       mode: write ? "write" : "read",
       basePath: `/${repo.orgId}/${repo.id}`,
     },
-    config.get<string>("storage.jwt.signing-key"),
+    storageSigningKey(),
   );
   token.setExpiration(expirationMs);
 

@@ -1,9 +1,14 @@
 import { Router, type Request, type Response } from "express";
-import config from "@incanta/config";
 import njwt from "njwt";
 import { createHash } from "crypto";
 import { Transform } from "stream";
 import { getStorageBackend } from "../storage/backend.js";
+import { storageSigningKey } from "../utils/signing-key.js";
+import {
+  isCanonicalKey,
+  isUnder,
+  keyFromRequestPath,
+} from "../utils/storage-key.js";
 import { Logger } from "../logging.js";
 
 // Checkpoint storage gateway: the client-facing blob data plane for the
@@ -29,7 +34,11 @@ interface UserJWTClaims {
   basePath: string;
 }
 
-function verify(req: Request, res: Response): UserJWTClaims | null {
+/**
+ * Authenticates the request and returns the storage key it may act on, or
+ * null after answering with the reason it may not.
+ */
+function verify(req: Request, res: Response): string | null {
   const header = req.headers["authorization"];
   if (!header) {
     res.status(401).send("Unauthorized: Missing authorization header");
@@ -43,10 +52,7 @@ function verify(req: Request, res: Response): UserJWTClaims | null {
 
   let claims: UserJWTClaims;
   try {
-    const verified = njwt.verify(
-      token,
-      config.get<string>("storage.jwt.signing-key"),
-    );
+    const verified = njwt.verify(token, storageSigningKey());
     claims = verified!.body.toJSON() as unknown as UserJWTClaims;
   } catch {
     res.status(401).send("Unauthorized: Token verification failed");
@@ -62,9 +68,24 @@ function verify(req: Request, res: Response): UserJWTClaims | null {
     return null;
   }
 
-  // The request path (relative to this router's mount) must be under basePath.
-  const reqPath = decodeURIComponent(req.path);
-  if (reqPath !== claims.basePath && !reqPath.startsWith(claims.basePath + "/")) {
+  // The key is checked in the exact form the backend will use. Comparing a
+  // prefix of an un-normalized path is not a scope check: "/a/b/../../c/d"
+  // starts with "/a/b/". See utils/storage-key.ts.
+  const key = keyFromRequestPath(req.path);
+  if (key === null) {
+    res.status(400).send("Bad Request: Invalid storage path");
+    return null;
+  }
+  // A repo scope is exactly "/{org}/{repo}".
+  if (
+    typeof claims.basePath !== "string" ||
+    !isCanonicalKey(claims.basePath) ||
+    claims.basePath.split("/").length !== 3
+  ) {
+    res.status(403).send("Forbidden: Invalid token scope");
+    return null;
+  }
+  if (!isUnder(key, claims.basePath)) {
     res.status(403).send("Forbidden: Path outside token scope");
     return null;
   }
@@ -76,14 +97,17 @@ function verify(req: Request, res: Response): UserJWTClaims | null {
     return null;
   }
 
-  return claims;
+  return key;
 }
 
 // A changelist records the name of its version index and nothing else about
 // it, so whatever sits under that name IS the changelist's content. These keys
 // are therefore write-once: the name must be the SHA-256 of the body, an
 // existing index is never replaced, and clients cannot delete one.
-const VERSION_INDEX_KEY = /^\/[^/]+\/[^/]+\/versions\/([^/]+)$/;
+//
+// The directory is matched without regard to case because local storage on
+// Windows and macOS is case-insensitive: "Versions/x.lvi" is the same file.
+const VERSION_INDEX_KEY = /^\/[^/]+\/[^/]+\/versions\/([^/]+)$/i;
 const CONTENT_NAME = /^([0-9a-f]{64})\.lvi$/;
 
 /** The file name if the key is a repo's version index, otherwise null. */
@@ -91,14 +115,20 @@ function versionIndexName(key: string): string | null {
   return VERSION_INDEX_KEY.exec(key)?.[1] ?? null;
 }
 
+/** True when the key is spelled the one way a version index may be. */
+function isVersionIndexSpelling(key: string): boolean {
+  return key.split("/")[3] === "versions";
+}
+
 export function routeGateway(): Router {
   const router = Router();
 
   router.head("/*splat", async (req, res) => {
-    if (!verify(req, res)) return;
+    const key = verify(req, res);
+    if (key === null) return;
     try {
       const backend = await getStorageBackend();
-      const size = await backend.head(decodeURIComponent(req.path));
+      const size = await backend.head(key);
       if (size === null) {
         res.status(404).end();
         return;
@@ -112,10 +142,10 @@ export function routeGateway(): Router {
   });
 
   router.get("/*splat", async (req, res) => {
-    if (!verify(req, res)) return;
+    const key = verify(req, res);
+    if (key === null) return;
     try {
       const backend = await getStorageBackend();
-      const key = decodeURIComponent(req.path);
       const size = await backend.head(key);
       if (size === null) {
         res.status(404).send("Not found");
@@ -142,7 +172,8 @@ export function routeGateway(): Router {
   });
 
   router.put("/*splat", async (req, res) => {
-    if (!verify(req, res)) return;
+    const key = verify(req, res);
+    if (key === null) return;
     const lengthHeader = req.headers["content-length"];
     if (!lengthHeader) {
       res.status(411).send("Length Required");
@@ -155,11 +186,12 @@ export function routeGateway(): Router {
     }
     try {
       const backend = await getStorageBackend();
-      const key = decodeURIComponent(req.path);
       const indexName = versionIndexName(key);
 
       if (indexName !== null) {
-        const expected = CONTENT_NAME.exec(indexName)?.[1];
+        const expected = isVersionIndexSpelling(key)
+          ? CONTENT_NAME.exec(indexName)?.[1]
+          : undefined;
         if (!expected) {
           res
             .status(400)
@@ -207,9 +239,9 @@ export function routeGateway(): Router {
   });
 
   router.delete("/*splat", async (req, res) => {
-    if (!verify(req, res)) return;
+    const key = verify(req, res);
+    if (key === null) return;
     try {
-      const key = decodeURIComponent(req.path);
       if (versionIndexName(key) !== null) {
         res.status(403).send("Forbidden: version indexes cannot be deleted");
         return;

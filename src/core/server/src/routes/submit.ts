@@ -7,7 +7,6 @@ import {
   boolean,
   number,
 } from "yup";
-import jwt from "njwt";
 import { createHash } from "crypto";
 import config from "@incanta/config";
 import { CreateApiClientAuthManual } from "@checkpointvcs/common";
@@ -18,10 +17,11 @@ import {
   GetLogLevel,
   type LongtailLogLevel,
 } from "@checkpointvcs/longtail-addon";
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import multer from "multer";
 import { getR2Endpoint } from "../utils/r2.js";
 import { getStorageBackend } from "../storage/backend.js";
+import { verifyRepoToken, type RepoTokenResult } from "../utils/repo-token.js";
 import { Logger } from "../logging.js";
 
 // Build the backend storage descriptor the addon's server-side store.lsi merge
@@ -125,16 +125,6 @@ async function checkVersionIndex(
   return null;
 }
 
-interface JWTClaims {
-  iss: string;
-  sub: string;
-  userId: string;
-  orgId: string;
-  repoId: string;
-  mode: string;
-  basePath: string;
-}
-
 const RequestSchema = object({
   apiToken: string().required(),
   branchName: string().required(),
@@ -167,214 +157,215 @@ const upload = multer({
 export function routeSubmit(): Router {
   const router = Router();
 
-  router.post("/submit", upload.single("storeIndex"), async (req, res) => {
-    Logger.debug(`[Submit] Received request`);
-
-    const payload: RequestSchema = JSON.parse(req.body.payload);
-
-    try {
-      await RequestSchema.validate(payload);
-    } catch (e: any) {
-      if (e instanceof ValidationError) {
-        Logger.error(`[Submit] Invalid request shape: ${e.errors.join("\n")}`);
-        res.status(500).send(e.errors.join("\n"));
-        return;
-      }
-    }
-
-    const authorizationHeader = req.headers["authorization"];
-    if (!authorizationHeader) {
-      Logger.error("[Submit] Missing Authorization header");
-      res.status(401).send("Unauthorized");
+  // A submit merges into the repo's store index before the app is asked to
+  // create anything, so the storage token has to be a write token for this
+  // repo in its own right. Checked before multer runs, so an unauthenticated
+  // caller cannot make the server buffer an upload.
+  const authenticate: RequestHandler = (req, res, next) => {
+    const auth = verifyRepoToken(req.headers["authorization"], true);
+    if (!auth.ok) {
+      Logger.error(`[Submit] ${auth.message}`);
+      res.status(auth.status).send(auth.message);
       return;
     }
+    res.locals["repoToken"] = auth;
+    next();
+  };
 
-    const [type, token] = authorizationHeader.split(" ");
+  router.post(
+    "/submit",
+    authenticate,
+    upload.single("storeIndex"),
+    async (req, res) => {
+      Logger.debug(`[Submit] Received request`);
 
-    if (type !== "Bearer") {
-      Logger.error("[Submit] Invalid Authorization header type");
-      res.status(401).send("Unauthorized");
-      return;
-    }
+      const { claims, basePath } = res.locals["repoToken"] as Extract<
+        RepoTokenResult,
+        { ok: true }
+      >;
 
-    const verifiedToken = jwt.verify(
-      token,
-      config.get("storage.jwt.signing-key"),
-    );
-
-    if (!verifiedToken) {
-      Logger.error("[Submit] Invalid token");
-      res.status(401).send("Unauthorized");
-      return;
-    }
-
-    const claims: JWTClaims = verifiedToken.body.toJSON() as any;
-
-    const basePath = `/${claims.orgId}/${claims.repoId}`;
-
-    // New content bytes from this submit (set from the merge result below), used
-    // to maintain the repo's cached storage size incrementally.
-    let addedBytes = 0;
-
-    // The client uploads the version index to storage itself and only tells us
-    // its name. Prove it arrived before anything records that name: a
-    // changelist pointing at an index that is not there cannot be pulled, and
-    // nothing downstream would notice until someone tried.
-    if (payload.versionIndex) {
-      const problem = await checkVersionIndex(
-        claims.repoId,
-        basePath,
-        payload.versionIndex,
-      );
-      if (problem) {
-        Logger.error(`[Submit] ${problem}`);
-        res.status(400).send(problem);
-        return;
-      }
-    }
-
-    if (req.file) {
-      const storeIndexBuffer = req.file.buffer;
-
-      if (!storeIndexBuffer) {
-        res.status(400).send("Store index required");
+      let payload: RequestSchema;
+      try {
+        payload = JSON.parse(req.body.payload);
+        await RequestSchema.validate(payload);
+      } catch (e: any) {
+        const reason =
+          e instanceof ValidationError
+            ? e.errors.join("\n")
+            : "Invalid payload";
+        Logger.error(`[Submit] Invalid request shape: ${reason}`);
+        res.status(400).send(reason);
         return;
       }
 
-      if (!payload.versionIndex) {
+      // New content bytes from this submit (set from the merge result below), used
+      // to maintain the repo's cached storage size incrementally.
+      let addedBytes = 0;
+
+      // The client uploads the version index to storage itself and only tells us
+      // its name. Prove it arrived before anything records that name: a
+      // changelist pointing at an index that is not there cannot be pulled, and
+      // nothing downstream would notice until someone tried.
+      if (payload.versionIndex) {
+        const problem = await checkVersionIndex(
+          claims.repoId,
+          basePath,
+          payload.versionIndex,
+        );
+        if (problem) {
+          Logger.error(`[Submit] ${problem}`);
+          res.status(400).send(problem);
+          return;
+        }
+      }
+
+      if (req.file) {
+        const storeIndexBuffer = req.file.buffer;
+
+        if (!storeIndexBuffer) {
+          res.status(400).send("Store index required");
+          return;
+        }
+
+        if (!payload.versionIndex) {
+          res
+            .status(400)
+            .send(
+              "Version index is required if you are uploading a store index",
+            );
+          return;
+        }
+
+        const logLevel = GetLogLevel(
+          config.get<LongtailLogLevel>("longtail.log-level"),
+        );
+
+        const mergeOptions = {
+          remoteBasePath: basePath,
+          storeIndexBuffer: Buffer.from(storeIndexBuffer),
+          logLevel,
+          ...(await buildMergeStorageOptions(claims.repoId)),
+        } as Parameters<typeof mergeAsync>[0];
+
+        Logger.debug(
+          `[Submit] Merging store index (mode ${config.get<string>("storage.mode")})`,
+        );
+
+        const handle = mergeAsync(mergeOptions);
+
+        if (!handle) {
+          throw new Error("Failed to create longtail handle");
+        }
+
+        const { status, result } = await pollHandle(handle, {
+          onStep: (step) => Logger.debug(`[Submit] Current step: ${step}`),
+        });
+
+        Logger.debug(
+          `[Submit] Completed with exit code: ${status.error} and last step ${status.currentStep}`,
+        );
+
+        freeHandle(handle);
+
+        if (status.error !== 0) {
+          res
+            .status(500)
+            .send(
+              `Failed to merge store indexes: ${status.currentStep} (error ${status.error})`,
+            );
+          return;
+        }
+
+        // The merge reports the new content bytes from this submit's store index.
+        addedBytes = Number(
+          (result as { addedBytes?: number })?.addedBytes ?? 0,
+        );
+      } else if (
+        payload.modifications.some((m) => !m.delete) ||
+        payload.versionIndex
+      ) {
         res
           .status(400)
-          .send("Version index is required if you are uploading a store index");
-        return;
-      }
-
-      const logLevel = GetLogLevel(
-        config.get<LongtailLogLevel>("longtail.log-level"),
-      );
-
-      const mergeOptions = {
-        remoteBasePath: basePath,
-        storeIndexBuffer: Buffer.from(storeIndexBuffer),
-        logLevel,
-        ...(await buildMergeStorageOptions(claims.repoId)),
-      } as Parameters<typeof mergeAsync>[0];
-
-      Logger.debug(
-        `[Submit] Merging store index (mode ${config.get<string>("storage.mode")})`,
-      );
-
-      const handle = mergeAsync(mergeOptions);
-
-      if (!handle) {
-        throw new Error("Failed to create longtail handle");
-      }
-
-      const { status, result } = await pollHandle(handle, {
-        onStep: (step) => Logger.debug(`[Submit] Current step: ${step}`),
-      });
-
-      Logger.debug(
-        `[Submit] Completed with exit code: ${status.error} and last step ${status.currentStep}`,
-      );
-
-      freeHandle(handle);
-
-      if (status.error !== 0) {
-        res
-          .status(500)
           .send(
-            `Failed to merge store indexes: ${status.currentStep} (error ${status.error})`,
+            "The storeIndex multipart is required if you have any new/modified files.",
           );
         return;
       }
 
-      // The merge reports the new content bytes from this submit's store index.
-      addedBytes = Number((result as { addedBytes?: number })?.addedBytes ?? 0);
-    } else if (
-      payload.modifications.some((m) => !m.delete) ||
-      payload.versionIndex
-    ) {
-      res
-        .status(400)
-        .send(
-          "The storeIndex multipart is required if you have any new/modified files.",
-        );
-      return;
-    }
-
-    const client = await CreateApiClientAuthManual(
-      config.get<string>("checkpoint.api.url.internal"),
-      payload.apiToken,
-    );
-
-    try {
-      let responseMessage: RequestResponse;
-
-      if (
-        payload.artifactForChangelistNum != null &&
-        payload.artifactForChangelistNum >= 0
-      ) {
-        Logger.debug(
-          `[Submit] Routing to artifact attachment for changelist ${payload.artifactForChangelistNum}`,
-        );
-
-        // Route to artifact attachment on existing CL
-        const artifactResponse =
-          await client.artifact.attachToChangelist.mutate({
-            repoId: claims.repoId,
-            changelistNumber: payload.artifactForChangelistNum,
-            versionIndex: payload.versionIndex,
-            modifications: payload.modifications,
-          });
-
-        responseMessage = {
-          id: String(artifactResponse.changelistNumber),
-          number: artifactResponse.changelistNumber,
-        };
-      } else {
-        Logger.debug(`[Submit] Routing to regular changelist creation`);
-
-        const createChangelistResponse =
-          await client.changelist.createChangelist.mutate({
-            message: payload.message,
-            repoId: claims.repoId,
-            versionIndex: payload.versionIndex,
-            branchName: payload.branchName,
-            modifications: payload.modifications,
-            keepCheckedOut: payload.keepCheckedOut,
-            workspaceId: payload.workspaceId,
-          });
-
-        responseMessage = {
-          id: createChangelistResponse.id,
-          number: createChangelistResponse.number,
-        };
-      }
-
-      Logger.debug(
-        `[Submit] Successfully processed submit request, responding with ${JSON.stringify(responseMessage)}`,
+      const client = await CreateApiClientAuthManual(
+        config.get<string>("checkpoint.api.url.internal"),
+        payload.apiToken,
       );
 
-      Logger.debug(
-        `[Submit] Successfully processed submit request, responding with ${JSON.stringify(responseMessage)}`,
-      );
+      try {
+        let responseMessage: RequestResponse;
 
-      res.status(200).json(responseMessage);
-
-      // Maintain the repo's cached storage size incrementally
-      // Fire-and-forget so it never delays the submit response.
-      if (addedBytes > 0) {
-        client.storage.incrementRepoStorageBytes
-          .mutate({ repoId: claims.repoId, bytes: addedBytes })
-          .catch((e: any) =>
-            Logger.error(`[Submit] Failed to update repo size: ${e.message}`),
+        if (
+          payload.artifactForChangelistNum != null &&
+          payload.artifactForChangelistNum >= 0
+        ) {
+          Logger.debug(
+            `[Submit] Routing to artifact attachment for changelist ${payload.artifactForChangelistNum}`,
           );
+
+          // Route to artifact attachment on existing CL
+          const artifactResponse =
+            await client.artifact.attachToChangelist.mutate({
+              repoId: claims.repoId,
+              changelistNumber: payload.artifactForChangelistNum,
+              versionIndex: payload.versionIndex,
+              modifications: payload.modifications,
+            });
+
+          responseMessage = {
+            id: String(artifactResponse.changelistNumber),
+            number: artifactResponse.changelistNumber,
+          };
+        } else {
+          Logger.debug(`[Submit] Routing to regular changelist creation`);
+
+          const createChangelistResponse =
+            await client.changelist.createChangelist.mutate({
+              message: payload.message,
+              repoId: claims.repoId,
+              versionIndex: payload.versionIndex,
+              branchName: payload.branchName,
+              modifications: payload.modifications,
+              keepCheckedOut: payload.keepCheckedOut,
+              workspaceId: payload.workspaceId,
+            });
+
+          responseMessage = {
+            id: createChangelistResponse.id,
+            number: createChangelistResponse.number,
+          };
+        }
+
+        Logger.debug(
+          `[Submit] Successfully processed submit request, responding with ${JSON.stringify(responseMessage)}`,
+        );
+
+        Logger.debug(
+          `[Submit] Successfully processed submit request, responding with ${JSON.stringify(responseMessage)}`,
+        );
+
+        res.status(200).json(responseMessage);
+
+        // Maintain the repo's cached storage size incrementally
+        // Fire-and-forget so it never delays the submit response.
+        if (addedBytes > 0) {
+          client.storage.incrementRepoStorageBytes
+            .mutate({ repoId: claims.repoId, bytes: addedBytes })
+            .catch((e: any) =>
+              Logger.error(`[Submit] Failed to update repo size: ${e.message}`),
+            );
+        }
+      } catch (e: any) {
+        Logger.error(`[Submit] ${e.message}`);
+        res.status(500).send(e.message);
       }
-    } catch (e: any) {
-      Logger.error(`[Submit] ${e.message}`);
-      res.status(500).send(e.message);
-    }
-  });
+    },
+  );
 
   return router;
 }

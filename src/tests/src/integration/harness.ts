@@ -14,7 +14,7 @@
  * interleave with its changelists.
  */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -448,6 +448,75 @@ export async function gatewayRequest(
     status: response.status,
     body: Buffer.from(await response.arrayBuffer()),
   };
+}
+
+/**
+ * One request to the storage gateway with the path sent exactly as given.
+ * `fetch` and `new URL` both collapse "." and ".." segments before anything
+ * leaves the process, which makes them useless for testing how the server
+ * handles such a path; node:http sends it verbatim.
+ *
+ * `rawPath` is everything after the gateway base, starting with "/".
+ */
+export async function rawGatewayRequest(
+  ctx: IntegrationContext,
+  method: "HEAD" | "GET" | "PUT" | "DELETE",
+  rawPath: string,
+  options: { body?: Buffer; write?: boolean; bearer?: string } = {},
+): Promise<{ status: number; body: Buffer }> {
+  const rawToken = await ctx.client.storage.getToken.query({
+    repoId: ctx.repoId,
+    write: options.write ?? true,
+  });
+  const token = await resolveStorageEndpoints(rawToken);
+  if (!token.gatewayUrl) {
+    throw new Error(
+      "rawGatewayRequest needs a gateway storage mode (local or s3)",
+    );
+  }
+  const base = new URL(token.gatewayUrl);
+  const prefix = base.pathname.replace(/\/$/, "");
+
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        host: base.hostname,
+        port: base.port,
+        method,
+        path: `${prefix}${rawPath}`,
+        headers: {
+          authorization: `Bearer ${options.bearer ?? token.token}`,
+          ...(options.body && { "content-length": options.body.length }),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks),
+          }),
+        );
+        res.on("error", reject);
+      },
+    );
+    req.on("error", reject);
+    req.end(options.body);
+  });
+}
+
+/** The server URL and a storage token for the context's repo. */
+export async function storageToken(
+  ctx: IntegrationContext,
+  write: boolean,
+): Promise<{ serverUrl: string; token: string }> {
+  const rawToken = await ctx.client.storage.getToken.query({
+    repoId: ctx.repoId,
+    write,
+  });
+  const token = await resolveStorageEndpoints(rawToken);
+  return { serverUrl: token.serverUrl, token: token.token };
 }
 
 /** The version index name a changelist recorded. */

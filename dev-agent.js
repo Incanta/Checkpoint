@@ -23,6 +23,10 @@ const fs = require("fs");
 const path = require("path");
 const net = require("net");
 const os = require("os");
+const {
+  devStorageSigningKey,
+  ENV_NAME: SIGNING_KEY_ENV,
+} = require("./scripts/dev-signing-key.js");
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -225,12 +229,14 @@ function spawnService(service) {
   const logFile = path.join(LOGS_DIR, `${service.name}.log`);
 
   // Add root node_modules/.bin to PATH so workspace-hoisted binaries
-  // (like config-env, next, etc.) are found — mimics what `yarn run` does.
+  // (like config-env, next, etc.) are found: mimics what `yarn run` does.
   const binDir = path.join(ROOT, "node_modules", ".bin");
   const sep = IS_WIN ? ";" : ":";
   const env = {
     ...process.env,
     FORCE_COLOR: "0",
+    // The app and the server will not start without a shared signing key.
+    [SIGNING_KEY_ENV]: devStorageSigningKey(),
     PATH: binDir + sep + (process.env.PATH || ""),
   };
 
@@ -281,7 +287,7 @@ async function stopService(service) {
   const state = readState();
   const savedPid = state[service.name]?.pid;
 
-  // Step 1: Kill by saved PID (always safe — we started it)
+  // Step 1: Kill by saved PID (always safe: we started it)
   if (savedPid && isPidAlive(savedPid)) {
     killPid(savedPid);
   }
@@ -320,7 +326,7 @@ async function stopService(service) {
     }
   }
 
-  // Port still in use — is it a foreign process?
+  // Port still in use: is it a foreign process?
   if (foreignProcess) {
     return {
       stopped: false,

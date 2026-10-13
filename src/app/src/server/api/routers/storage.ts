@@ -1,6 +1,7 @@
 import config from "@incanta/config";
 import { z } from "zod";
 import njwt from "njwt";
+import { storageSigningKey } from "~/server/storage-signing-key";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
@@ -45,7 +46,7 @@ export const storageRouter = createTRPCRouter({
           mode: input.write ? "write" : "read",
           basePath: `/${repo.orgId}/${repo.id}`,
         },
-        config.get<string>("storage.jwt.signing-key"),
+        storageSigningKey(),
       );
 
       const expirationSeconds = config.get<number>(
