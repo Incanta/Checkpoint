@@ -9,17 +9,97 @@ import {
 import { FileChangeType, type PrismaClient } from "@prisma/client";
 
 import { buildAddonStorageOptions } from "~/server/storage-options";
+import { getStateTreePaths } from "~/server/state-tree";
+
+export interface FileSource {
+  /** The changelist that wrote the file's content as of the requested one. */
+  sourceChangelistNumber: number;
+  /** That changelist's version index, which is where the content lives. */
+  versionIndex: string;
+}
+
+/**
+ * Finds which changelist holds `filePath`'s content as of `changelistNumber`.
+ * Returns null when the file does not exist there.
+ *
+ * The answer comes from the changelist's state tree, which maps each path to
+ * the changelist that last wrote it along that changelist's own history.
+ *
+ * It used to come from "the newest FileChange for this path numbered at or
+ * below the requested changelist". Numbers are shared by every branch in the
+ * repo, so that picked up changes from branches the requested changelist does
+ * not descend from, and served their content as if it were its own. It also
+ * landed on merge changelists, which record a FileChange for each path they
+ * carry but upload nothing themselves.
+ *
+ * Changelists from before state trees have no tree to ask; for those the old
+ * lookup is all there is.
+ */
+export async function resolveFileSource(
+  db: PrismaClient,
+  repoId: string,
+  filePath: string,
+  changelistNumber: number,
+): Promise<FileSource | null> {
+  const normalized = filePath.replaceAll("\\", "/").replace(/^\/+/, "");
+
+  const changelist = await db.changelist.findUnique({
+    where: { repoId_number: { repoId, number: changelistNumber } },
+    select: { stateRootHash: true },
+  });
+
+  if (changelist?.stateRootHash) {
+    const tree = await getStateTreePaths(db, repoId, changelistNumber);
+    const sourceNumber = tree.get(normalized);
+    if (sourceNumber === undefined) {
+      return null;
+    }
+    const source = await db.changelist.findUnique({
+      where: { repoId_number: { repoId, number: sourceNumber } },
+      select: { versionIndex: true },
+    });
+    if (!source?.versionIndex) {
+      return null;
+    }
+    return {
+      sourceChangelistNumber: sourceNumber,
+      versionIndex: source.versionIndex,
+    };
+  }
+
+  const fileChange = await db.fileChange.findFirst({
+    where: {
+      repoId,
+      changelistNumber: { lte: changelistNumber },
+      file: { path: normalized },
+    },
+    orderBy: { changelistNumber: "desc" },
+    include: { changelist: { select: { versionIndex: true } } },
+  });
+  if (
+    !fileChange ||
+    fileChange.type === FileChangeType.DELETE ||
+    !fileChange.changelist?.versionIndex
+  ) {
+    return null;
+  }
+  return {
+    sourceChangelistNumber: fileChange.changelistNumber,
+    versionIndex: fileChange.changelist.versionIndex,
+  };
+}
 
 export interface FileAtChangelist {
   content: Buffer;
-  /** The changelist that last touched the file at or before the requested CL. */
+  /** The changelist that wrote the content the requested changelist sees. */
   sourceChangelistNumber: number;
 }
 
 /**
- * Reads a file's content as it existed at `changelistNumber` (the latest
- * FileChange at or before it), without a workspace. Returns null when the
- * file does not exist at that changelist (never changed, or deleted).
+ * Reads a file's content as it existed at `changelistNumber`, without a
+ * workspace. Returns null when the file does not exist at that changelist
+ * (never added, or deleted). See resolveFileSource for how "as it existed" is
+ * decided.
  *
  * Extracted from file.readFileContent so config readers (Team Sync) share
  * the same resolve-then-longtail-read path.
@@ -31,29 +111,13 @@ export async function readFileAtChangelist(
   filePath: string,
   changelistNumber: number,
 ): Promise<FileAtChangelist | null> {
-  const fileChange = await db.fileChange.findFirst({
-    where: {
-      repoId: repo.id,
-      changelistNumber: {
-        lte: changelistNumber,
-      },
-      file: {
-        path: filePath,
-      },
-    },
-    orderBy: {
-      changelistNumber: "desc",
-    },
-    include: {
-      changelist: true,
-    },
-  });
-
-  if (
-    !fileChange ||
-    fileChange.type === FileChangeType.DELETE ||
-    !fileChange.changelist?.versionIndex
-  ) {
+  const source = await resolveFileSource(
+    db,
+    repo.id,
+    filePath,
+    changelistNumber,
+  );
+  if (!source) {
     return null;
   }
 
@@ -65,7 +129,7 @@ export async function readFileAtChangelist(
 
   const handle = readFileFromVersionAsync({
     filePath,
-    versionIndexName: fileChange.changelist.versionIndex,
+    versionIndexName: source.versionIndex,
     remoteBasePath,
     ...storageOptions,
     logLevel,
@@ -79,7 +143,7 @@ export async function readFileAtChangelist(
     const { data, size } = await pollReadFileHandle(handle);
     return {
       content: data && size > 0 ? data : Buffer.alloc(0),
-      sourceChangelistNumber: fileChange.changelistNumber,
+      sourceChangelistNumber: source.sourceChangelistNumber,
     };
   } finally {
     freeReadFileHandle(handle);
@@ -98,28 +162,11 @@ export async function findFileSourceChangelist(
   filePath: string,
   changelistNumber: number,
 ): Promise<number | null> {
-  const fileChange = await db.fileChange.findFirst({
-    where: {
-      repoId,
-      changelistNumber: {
-        lte: changelistNumber,
-      },
-      file: {
-        path: filePath,
-      },
-    },
-    orderBy: {
-      changelistNumber: "desc",
-    },
-    select: {
-      changelistNumber: true,
-      type: true,
-    },
-  });
-
-  if (!fileChange || fileChange.type === FileChangeType.DELETE) {
-    return null;
-  }
-
-  return fileChange.changelistNumber;
+  const source = await resolveFileSource(
+    db,
+    repoId,
+    filePath,
+    changelistNumber,
+  );
+  return source?.sourceChangelistNumber ?? null;
 }

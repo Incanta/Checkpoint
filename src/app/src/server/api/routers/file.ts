@@ -8,6 +8,7 @@ import {
   GetLogLevel,
 } from "@checkpointvcs/longtail-addon";
 
+import { resolveFileSource } from "~/server/read-file-at-changelist";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { ClaimEventType, ClaimStrength, RepoAccess } from "@prisma/client";
 import {
@@ -642,36 +643,18 @@ export const fileRouter = createTRPCRouter({
         RepoAccess.READ,
       );
 
-      // find the most recent FileChange prior to the requested CL for this file to get the file ID
-      const fileChange = await ctx.db.fileChange.findFirst({
-        where: {
-          repoId: input.repoId,
-          changelistNumber: {
-            lte: input.changelistNumber,
-          },
-          file: {
-            path: input.filePath,
-          },
-        },
-        orderBy: {
-          changelistNumber: "desc",
-        },
-        include: {
-          changelist: true,
-        },
-      });
+      // Which changelist holds this file's content as of the requested one.
+      const source = await resolveFileSource(
+        ctx.db,
+        input.repoId,
+        input.filePath,
+        input.changelistNumber,
+      );
 
-      if (!fileChange) {
+      if (!source) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "File not found in changelist history",
-        });
-      }
-
-      if (!fileChange.changelist?.versionIndex) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Changelist or version index not found",
         });
       }
 
@@ -699,7 +682,7 @@ export const fileRouter = createTRPCRouter({
 
       const handle = readFileFromVersionAsync({
         filePath: input.filePath,
-        versionIndexName: fileChange.changelist.versionIndex,
+        versionIndexName: source.versionIndex,
         remoteBasePath,
         ...storageOptions,
         logLevel,

@@ -5,16 +5,9 @@ import type { Changelist } from "@prisma/client";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { FileChangeType, RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
+import { findMergeBase, mergeBranch } from "~/server/branch-merge";
 import { recordActivity } from "../activity";
 import { subscribeToMR, notifyMRSubscribers } from "~/server/notifications";
-import { releaseClaimsForBranch } from "~/server/claims/claims";
-import { settleClaimsForMerge } from "~/server/claims/landing";
-import { restackChildren } from "~/server/claims/domain";
-import {
-  getStateTreePaths,
-  buildStateTreeBlocks,
-  primeStateTreePaths,
-} from "~/server/state-tree";
 import { compareTreePaths } from "~/lib/file-tree-sort";
 
 function mrLink(orgName: string, repoName: string, number: number) {
@@ -467,186 +460,27 @@ export const mergeRequestRouter = createTRPCRouter({
         });
       }
 
-      // Execute merge (replicated from branch.mergeBranch logic)
-      // Collect all CLs on the incoming branch
-      const incomingCls: (Changelist & { user: { email: string } | null })[] =
-        [];
-      let currentNumber: number | null = sourceBranch.headNumber;
-      while (currentNumber !== null) {
-        const cl: (Changelist & { user: { email: string } | null }) | null =
-          await ctx.db.changelist.findUnique({
-            where: {
-              repoId_number: { repoId: input.repoId, number: currentNumber },
-            },
-            include: { user: { select: { email: true } } },
-          });
-        if (!cl) break;
-        incomingCls.push(cl);
-        currentNumber = cl.parentNumber;
-        if (
-          cl.parentNumber !== null &&
-          cl.parentNumber <= targetBranch.headNumber
-        )
-          break;
-      }
-
-      if (incomingCls.length === 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "No changelists to merge",
-        });
-      }
-
-      const firstLine = `Merged ${mr.sourceBranchName} into ${mr.targetBranchName}`;
-      const clMessages = incomingCls
-        .map((cl) => `#${cl.number} ${cl.message}`)
-        .join("\n");
-      const mergeMessage = `${firstLine}\n\n${clMessages}`;
-
-      const incomingHead = await ctx.db.changelist.findUnique({
-        where: {
-          repoId_number: {
-            repoId: input.repoId,
-            number: sourceBranch.headNumber,
-          },
-        },
-      });
-      const targetHead = await ctx.db.changelist.findUnique({
-        where: {
-          repoId_number: {
-            repoId: input.repoId,
-            number: targetBranch.headNumber,
-          },
-        },
-      });
-
-      if (!incomingHead || !targetHead) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Could not find branch head changelists",
-        });
-      }
-
-      const targetPaths = new Map(
-        await getStateTreePaths(ctx.db, input.repoId, targetHead.number),
-      );
-      const incomingPaths = await getStateTreePaths(
-        ctx.db,
-        input.repoId,
-        incomingHead.number,
-      );
-      for (const [path, clNum] of incomingPaths) {
-        targetPaths.set(path, clNum);
-      }
-
-      const incomingClNumbers = incomingCls.map((cl) => cl.number);
-      const fileChanges = await ctx.db.fileChange.findMany({
-        where: {
-          repoId: input.repoId,
-          changelistNumber: { in: incomingClNumbers },
-        },
-        include: { file: true },
-      });
-
-      for (const fc of fileChanges) {
-        if (fc.type === FileChangeType.DELETE) {
-          targetPaths.delete(fc.file.path);
-        }
-      }
-
-      const lastCl = await ctx.db.changelist.findFirst({
-        where: { repoId: input.repoId },
-        orderBy: { number: "desc" },
-      });
-      const nextNumber = (lastCl?.number ?? -1) + 1;
-
-      const stateRootHash = await buildStateTreeBlocks(
-        ctx.db,
-        input.repoId,
-        targetPaths.entries(),
-      );
-
-      const mergeCl = await ctx.db.changelist.create({
-        data: {
-          number: nextNumber,
-          message: mergeMessage,
-          versionIndex: incomingHead.versionIndex,
-          parentNumber: targetBranch.headNumber,
-          stateRootHash,
-          repoId: input.repoId,
-          userId: ctx.session.user.id,
-        },
-      });
-
-      // Create de-duplicated file change records
-      const latestFileChanges = new Map<
-        string,
-        { type: FileChangeType; oldPath: string | null }
-      >();
-      for (const fc of fileChanges.sort(
-        (a, b) => a.changelistNumber - b.changelistNumber,
-      )) {
-        latestFileChanges.set(fc.fileId, {
-          type: fc.type,
-          oldPath: fc.oldPath,
-        });
-      }
-      if (latestFileChanges.size > 0) {
-        await ctx.db.fileChange.createMany({
-          data: Array.from(latestFileChanges.entries()).map(
-            ([fileId, change]) => ({
-              repoId: input.repoId,
-              fileId,
-              changelistNumber: nextNumber,
-              type: change.type,
-              oldPath: change.oldPath,
-            }),
-          ),
-        });
-      }
-
-      primeStateTreePaths(input.repoId, stateRootHash, targetPaths);
-
-      // Update target branch head
-      await ctx.db.branch.update({
-        where: { id: targetBranch.id },
-        data: { headNumber: nextNumber },
-      });
-
-      // Settle claims the merge carried: release when the target anchors its
-      // own domain, advance onto the target when this was a stacked branch
-      // merging one rung up.
-      await settleClaimsForMerge(ctx.db, {
+      // The merge itself, shared with branch.mergeBranch. Marking the request
+      // merged is part of the same commit, so a merge that does not land
+      // cannot leave it marked.
+      const mergeCl = await mergeBranch(ctx.db, {
         repoId: input.repoId,
         incomingBranchName: mr.sourceBranchName,
         targetBranchName: mr.targetBranchName,
-        mergeChangelistNumber: nextNumber,
-        paths: fileChanges.map((fc) => fc.file.path),
-        actor: { userId: ctx.session.user.id },
-      });
-
-      // Anything stacked on the merged branch re-parents to its parent, or the
-      // stack deadlocks: a branch can only merge into its own parent.
-      await restackChildren(ctx.db, {
-        repoId: input.repoId,
-        mergedBranchName: mr.sourceBranchName,
-        newParentBranchName: mr.targetBranchName,
-      });
-
-      // Release claims taken on the source branch but never submitted.
-      await releaseClaimsForBranch(ctx.db, input.repoId, mr.sourceBranchName, {
         userId: ctx.session.user.id,
-      });
-
-      // Delete source branch
-      await ctx.db.branch.delete({
-        where: { id: sourceBranch.id },
-      });
-
-      // Update MR status
-      await ctx.db.mergeRequest.update({
-        where: { id: mr.id },
-        data: { status: "MERGED", mergedAt: new Date() },
+        requireParentRelation: false,
+        alsoInTransaction: async (tx) => {
+          const marked = await tx.mergeRequest.updateMany({
+            where: { id: mr.id, status: "OPEN" },
+            data: { status: "MERGED", mergedAt: new Date() },
+          });
+          if (marked.count !== 1) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Only open merge requests can be merged",
+            });
+          }
+        },
       });
 
       void recordActivity(ctx.db, {
@@ -819,7 +653,8 @@ export const mergeRequestRouter = createTRPCRouter({
       if (input.reviewerId === mr.authorId && input.state !== "PENDING") {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Cannot approve or request changes on your own merge request",
+          message:
+            "Cannot approve or request changes on your own merge request",
         });
       }
 
@@ -934,27 +769,25 @@ export const mergeRequestRouter = createTRPCRouter({
 
       if (!sourceBranch || !targetBranch) return [];
 
-      // Walk source branch from head back to common ancestor
+      // The branch's own changelists: everything from its head back to the
+      // last changelist it shares with the target.
+      const mergeBase = await findMergeBase(
+        ctx.db,
+        input.repoId,
+        targetBranch.headNumber,
+        sourceBranch.headNumber,
+      );
+      if (!mergeBase || mergeBase.incomingNumbers.length === 0) return [];
+
       const changelists: (Changelist & { user: { email: string } | null })[] =
-        [];
-      let currentNumber: number | null = sourceBranch.headNumber;
-      while (currentNumber !== null) {
-        const cl: (Changelist & { user: { email: string } | null }) | null =
-          await ctx.db.changelist.findUnique({
-            where: {
-              repoId_number: { repoId: input.repoId, number: currentNumber },
-            },
-            include: { user: { select: { email: true } } },
-          });
-        if (!cl) break;
-        changelists.push(cl);
-        currentNumber = cl.parentNumber;
-        if (
-          cl.parentNumber !== null &&
-          cl.parentNumber <= targetBranch.headNumber
-        )
-          break;
-      }
+        await ctx.db.changelist.findMany({
+          where: {
+            repoId: input.repoId,
+            number: { in: mergeBase.incomingNumbers },
+          },
+          include: { user: { select: { email: true } } },
+          orderBy: { number: "desc" },
+        });
 
       return changelists;
     }),
@@ -995,26 +828,15 @@ export const mergeRequestRouter = createTRPCRouter({
       if (!sourceBranch || !targetBranch)
         return { files: [], sourceHead: 0, targetHead: 0 };
 
-      // Collect CL numbers on source branch
-      const clNumbers: number[] = [];
-      let currentNumber: number | null = sourceBranch.headNumber;
-      while (currentNumber !== null) {
-        clNumbers.push(currentNumber);
-        const cl: { parentNumber: number | null } | null =
-          await ctx.db.changelist.findUnique({
-            where: {
-              repoId_number: { repoId: input.repoId, number: currentNumber },
-            },
-            select: { parentNumber: true },
-          });
-        if (!cl) break;
-        currentNumber = cl.parentNumber;
-        if (
-          cl.parentNumber !== null &&
-          cl.parentNumber <= targetBranch.headNumber
-        )
-          break;
-      }
+      // Collect CL numbers on source branch: everything from its head back
+      // to the last changelist it shares with the target.
+      const mergeBase = await findMergeBase(
+        ctx.db,
+        input.repoId,
+        targetBranch.headNumber,
+        sourceBranch.headNumber,
+      );
+      const clNumbers: number[] = mergeBase?.incomingNumbers ?? [];
 
       if (clNumbers.length === 0)
         return {
