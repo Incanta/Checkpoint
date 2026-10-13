@@ -13,6 +13,7 @@
 #include <thread>
 
 #include "token-refresh.h"
+#include "upload-status.h"
 
 // Checkpoint storage gateway adapter (HTTP + Bearer JWT to the core server).
 // Structurally identical to the S3 adapter (object storage: buffered writes,
@@ -274,7 +275,12 @@ static void GatewayStorageAPI_Dispose(struct Longtail_API* storage_api) {
   struct GatewayStorageAPI* api = (struct GatewayStorageAPI*)storage_api;
   free(api->m_GatewayUrl);
   free(api->m_JWT);
+  delete api->m_UploadFailures;
   Longtail_Free(storage_api);
+}
+
+struct UploadFailures* GatewayStorageAPI_GetUploadFailures(struct Longtail_StorageAPI* storage_api) {
+  return ((struct GatewayStorageAPI*)storage_api)->m_UploadFailures;
 }
 
 static int GatewayStorageAPI_OpenReadFile(
@@ -425,13 +431,28 @@ static void GatewayStorageAPI_CloseFile(struct Longtail_StorageAPI* storage_api,
 
   if (open_file->m_IsWriteMode && !open_file->m_WriteBuffer.empty()) {
     struct GatewayStorageAPI* api = (struct GatewayStorageAPI*)storage_api;
-    Gateway_RefreshTokenIfNeeded(api);
     std::string url = GatewayBuildUrl(api->m_GatewayUrl, open_file->m_Path);
-    CurlResponse r = GatewayHttpPut(url, api->m_JWT,
-                                    open_file->m_WriteBuffer.data(), open_file->m_WriteBuffer.size());
+    // This function cannot return an error, so a PUT that fails for good is
+    // recorded on the adapter for the caller to check. See upload-status.h.
+    int refresh_err = 0;
+    CurlResponse r = UploadWithRetry(api->m_Handle, [&]() {
+      // Inside the retry so an attempt that outlives the token gets a new one.
+      refresh_err = Gateway_RefreshTokenIfNeeded(api);
+      if (refresh_err) {
+        CurlResponse failed;
+        failed.status_code = 401;  // not retryable
+        failed.error = "token refresh failed";
+        return failed;
+      }
+      return GatewayHttpPut(url, api->m_JWT,
+                            open_file->m_WriteBuffer.data(), open_file->m_WriteBuffer.size());
+    });
     if (r.status_code < 200 || r.status_code >= 300) {
       LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "GatewayStorageAPI_CloseFile: PUT failed HTTP %ld, curl_error: %s, path: %s",
                    r.status_code, r.error.c_str(), open_file->m_Path)
+      api->m_UploadFailures->Record(
+          open_file->m_Path,
+          refresh_err ? std::string("token refresh failed") : DescribeUploadResult(r.status_code, r.error));
     }
   }
 
@@ -663,6 +684,7 @@ struct Longtail_StorageAPI* CreateGatewayStorageAPI(
   api->m_GatewayUrl = strdup(gatewayUrl);
   api->m_JWT = strdup(jwt ? jwt : "");
   api->m_Handle = handle;
+  api->m_UploadFailures = new UploadFailures();
   if (handle) {
     handle->tokenExpirationMs = tokenExpirationMs;
   }

@@ -14,6 +14,8 @@
  * interleave with its changelists.
  */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -150,6 +152,11 @@ export async function nativeSubmit(
   ws: LocalWorkspace,
   modifications: Modification[],
   message = "native submit test",
+  /**
+   * Applied last, over everything the harness derives. The fault tests use it
+   * to point the addon's storage traffic at a proxy.
+   */
+  overrides: Partial<SubmitAsyncOptions> = {},
 ): Promise<SubmitOutcome> {
   const rawToken = await ctx.client.storage.getToken.query({
     repoId: ctx.repoId,
@@ -173,6 +180,7 @@ export async function nativeSubmit(
     workspaceId: ws.workspaceId,
     modifications,
     logLevel: GetLogLevel("off"),
+    ...overrides,
   };
 
   const handle = submitAsync(options);
@@ -206,6 +214,133 @@ export async function nativeSubmit(
   } finally {
     freeHandle(handle);
   }
+}
+
+/** What a fault proxy does with one request. */
+export type FaultAction =
+  /** Forward it to the real gateway and relay the answer. */
+  | "pass"
+  /** Answer with this status without forwarding. */
+  | { status: number }
+  /** Drop the connection without answering, as a network failure would. */
+  | "reset"
+  /**
+   * Answer 200 without forwarding: the client is told the upload worked and
+   * the store never sees it. This is what a client that skips or botches an
+   * upload looks like from the server, so it is how the server-side checks are
+   * reached now that the addon no longer ignores a failed upload itself.
+   */
+  | "swallow";
+
+export interface FaultRequest {
+  method: string;
+  /** Request path, e.g. "/storage/{org}/{repo}/chunks/ab12/0x....lrb". */
+  path: string;
+  /** 1 for the first time this method and path were seen, 2 for the next. */
+  attempt: number;
+}
+
+export interface FaultProxy {
+  /** Pass as `gatewayUrl` to route the addon's storage traffic through here. */
+  gatewayUrl: string;
+  /** Every request seen, in arrival order. */
+  requests: FaultRequest[];
+  close(): Promise<void>;
+}
+
+/**
+ * An HTTP proxy in front of the storage gateway that can fail chosen requests.
+ * Only storage traffic goes through it: the /submit POST uses `backendUrl`,
+ * which the tests leave pointing at the real server.
+ */
+export async function startFaultProxy(
+  ctx: IntegrationContext,
+  decide: (request: FaultRequest) => FaultAction,
+): Promise<FaultProxy> {
+  const rawToken = await ctx.client.storage.getToken.query({
+    repoId: ctx.repoId,
+    write: true,
+  });
+  const token = await resolveStorageEndpoints(rawToken);
+  if (!token.gatewayUrl) {
+    throw new Error(
+      "The fault proxy needs a gateway storage mode (local or s3)",
+    );
+  }
+  const target = new URL(token.gatewayUrl);
+
+  const requests: FaultRequest[] = [];
+  const attempts = new Map<string, number>();
+
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      void (async () => {
+        const method = req.method ?? "GET";
+        const requestPath = (req.url ?? "/").split("?")[0]!;
+        const key = `${method} ${requestPath}`;
+        const attempt = (attempts.get(key) ?? 0) + 1;
+        attempts.set(key, attempt);
+        const request: FaultRequest = { method, path: requestPath, attempt };
+        requests.push(request);
+
+        const action = decide(request);
+        if (action === "reset") {
+          req.socket.destroy();
+          return;
+        }
+        if (action === "swallow") {
+          res.writeHead(200).end();
+          return;
+        }
+        if (action !== "pass") {
+          res.writeHead(action.status).end("injected fault");
+          return;
+        }
+
+        const headers: Record<string, string> = {};
+        for (const name of ["authorization", "content-type"]) {
+          const value = req.headers[name];
+          if (typeof value === "string") headers[name] = value;
+        }
+        const hasBody = method !== "GET" && method !== "HEAD";
+        const upstream = await fetch(`${target.origin}${req.url ?? "/"}`, {
+          method,
+          headers,
+          ...(hasBody && { body: new Uint8Array(Buffer.concat(chunks)) }),
+        });
+        const body = Buffer.from(await upstream.arrayBuffer());
+        // A HEAD carries the object's size in Content-Length with no body, and
+        // the addon's GetSize reads it, so it has to be relayed as given.
+        const contentLength =
+          method === "HEAD"
+            ? upstream.headers.get("content-length")
+            : String(body.length);
+        res.writeHead(
+          upstream.status,
+          contentLength === null ? {} : { "content-length": contentLength },
+        );
+        res.end(method === "HEAD" ? undefined : body);
+      })().catch(() => {
+        if (!res.headersSent) res.writeHead(502);
+        res.end();
+      });
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+
+  return {
+    gatewayUrl: `http://127.0.0.1:${port}${target.pathname.replace(/\/$/, "")}`,
+    requests,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
 }
 
 /**

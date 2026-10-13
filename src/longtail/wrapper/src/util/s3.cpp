@@ -1,5 +1,6 @@
 #include "s3.h"
 #include "token-refresh.h"
+#include "upload-status.h"
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -349,7 +350,7 @@ static CurlResponse S3HttpDelete(const std::string& url,
 }
 
 // HTTP server-side COPY (S3 CopyObject) with SigV4 auth.
-// Uses PUT with x-amz-copy-source header — no data transfer to/from client.
+// Uses PUT with x-amz-copy-source header: no data transfer to/from client.
 static CurlResponse S3HttpCopy(const std::string& targetUrl,
                                 const std::string& bucket,
                                 const std::string& sourceKey,
@@ -426,8 +427,13 @@ static void S3StorageAPI_Dispose(struct Longtail_API* storage_api) {
   free(s3_api->m_AccessKeyId);
   free(s3_api->m_SecretAccessKey);
   free(s3_api->m_SessionToken);
+  delete s3_api->m_UploadFailures;
 
   Longtail_Free(storage_api);
+}
+
+struct UploadFailures* S3StorageAPI_GetUploadFailures(struct Longtail_StorageAPI* storage_api) {
+  return ((struct S3StorageAPI*)storage_api)->m_UploadFailures;
 }
 
 static int S3StorageAPI_OpenReadFile(
@@ -644,17 +650,33 @@ static void S3StorageAPI_CloseFile(struct Longtail_StorageAPI* storage_api, Long
   // calls (e.g., block index + block data) are coalesced into one request.
   if (open_file->m_IsWriteMode && !open_file->m_WriteBuffer.empty()) {
     struct S3StorageAPI* s3_api = (struct S3StorageAPI*)storage_api;
-    S3_RefreshCredentialsIfNeeded(s3_api);
     std::string url = S3BuildUrl(s3_api->m_Endpoint, s3_api->m_BucketName, open_file->m_Path);
 
     LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_DEBUG, "S3StorageAPI_CloseFile: uploading %zu bytes to %s",
                  open_file->m_WriteBuffer.size(), open_file->m_Path)
 
-    CurlResponse r = S3HttpPut(url, s3_api->m_Region, s3_api->m_AccessKeyId, s3_api->m_SecretAccessKey, s3_api->m_SessionToken,
-                               open_file->m_WriteBuffer.data(), open_file->m_WriteBuffer.size());
+    // This function cannot return an error, so a PUT that fails for good is
+    // recorded on the adapter for the caller to check. See upload-status.h.
+    int refresh_err = 0;
+    CurlResponse r = UploadWithRetry(s3_api->m_Handle, [&]() {
+      // Inside the retry so an attempt that outlives the credentials gets new
+      // ones.
+      refresh_err = S3_RefreshCredentialsIfNeeded(s3_api);
+      if (refresh_err) {
+        CurlResponse failed;
+        failed.status_code = 401;  // not retryable
+        failed.error = "credential refresh failed";
+        return failed;
+      }
+      return S3HttpPut(url, s3_api->m_Region, s3_api->m_AccessKeyId, s3_api->m_SecretAccessKey, s3_api->m_SessionToken,
+                       open_file->m_WriteBuffer.data(), open_file->m_WriteBuffer.size());
+    });
     if (r.status_code < 200 || r.status_code >= 300) {
       LONGTAIL_LOG(ctx, LONGTAIL_LOG_LEVEL_ERROR, "S3StorageAPI_CloseFile: PUT failed HTTP %ld, curl_error: %s, path: %s",
                    r.status_code, r.error.c_str(), open_file->m_Path)
+      s3_api->m_UploadFailures->Record(
+          open_file->m_Path,
+          refresh_err ? std::string("credential refresh failed") : DescribeUploadResult(r.status_code, r.error));
     }
   }
 
@@ -744,7 +766,7 @@ static int S3StorageAPI_IsFile(struct Longtail_StorageAPI* storage_api, const ch
 }
 
 static int S3StorageAPI_RemoveDir(struct Longtail_StorageAPI* storage_api, const char* path) {
-  // Object storage has no directories — no-op
+  // Object storage has no directories: no-op
   return 0;
 }
 
@@ -767,7 +789,7 @@ static int S3StorageAPI_RemoveFile(struct Longtail_StorageAPI* storage_api, cons
   return EIO;
 }
 
-// Directory iteration — not implemented (same as SeaweedFS)
+// Directory iteration: not implemented (same as SeaweedFS)
 static int S3StorageAPI_StartFind(struct Longtail_StorageAPI* storage_api, const char* path, Longtail_StorageAPI_HIterator* out_iterator) {
   return ENOENT;
 }
@@ -862,7 +884,7 @@ static int S3StorageAPI_UnlockFile(struct Longtail_StorageAPI* storage_api, Long
   Longtail_Free(open_file->m_Path);
   Longtail_Free(open_file);
 
-  // 404 is OK — lock file might have been deleted already
+  // 404 is OK: lock file might have been deleted already
   return (r.status_code == 404 || (r.status_code >= 200 && r.status_code < 300)) ? 0 : EIO;
 }
 
@@ -974,6 +996,7 @@ struct Longtail_StorageAPI* CreateS3StorageAPI(
   s3_api->m_SessionToken = sessionToken ? strdup(sessionToken) : strdup("");
   s3_api->m_NumAddedBlocks = 0;
   s3_api->m_Handle = handle;
+  s3_api->m_UploadFailures = new UploadFailures();
   if (handle) {
     handle->tokenExpirationMs = tokenExpirationMs;
   }

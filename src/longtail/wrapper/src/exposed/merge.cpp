@@ -1,4 +1,89 @@
+#include "../util/upload-status.h"
 #include "main.h"
+
+#include <atomic>
+#include <mutex>
+#include <vector>
+
+// Where FSBlockStore keeps a block, relative to the store root:
+// chunks/<first 4 hex digits>/0x<16 hex digits>.lrb. This has to match
+// GetBlockPath in longtail_fsblockstore.c (which is static, hence the copy)
+// and the default extension Longtail_CreateFSBlockStoreAPI uses when SubmitSync
+// passes none.
+static std::string BlockPath(const std::string& basePath, TLongtail_Hash block_hash) {
+  static const char* lut = "0123456789abcdef";
+  char hex[17];
+  for (int i = 0; i < 16; ++i) {
+    hex[i] = lut[(block_hash >> (60 - 4 * i)) & 0xf];
+  }
+  hex[16] = 0;
+  return basePath + "/chunks/" + std::string(hex, 4) + "/0x" + hex + ".lrb";
+}
+
+// Checks that every block in `store_index` exists under `basePath`. Returns 0
+// if they all do, otherwise ENOENT with one missing path in `out_missing_path`.
+//
+// A block that cannot be confirmed counts as missing. On object storage IsFile
+// is a HEAD that also reads a timeout or a 5xx as "no", so a "no" there is
+// asked again before it is believed: rejecting a good submit over one bad HEAD
+// would make the client upload everything a second time.
+static int VerifyBlocksExist(
+    struct Longtail_StorageAPI* storage_api,
+    const std::string& basePath,
+    const struct Longtail_StoreIndex* store_index,
+    std::string* out_missing_path) {
+  const uint32_t block_count = *store_index->m_BlockCount;
+  if (block_count == 0) {
+    return 0;
+  }
+
+  const bool is_object_storage = (storage_api->m_StorageFlags & LONGTAIL_STORAGE_FLAG_OBJECT_STORAGE) != 0;
+  const int max_checks = is_object_storage ? 3 : 1;
+
+  std::atomic<uint32_t> next_block{0};
+  std::atomic<bool> found_missing{false};
+  std::mutex missing_mutex;
+
+  auto worker = [&]() {
+    for (;;) {
+      const uint32_t i = next_block.fetch_add(1);
+      if (i >= block_count || found_missing.load()) {
+        return;
+      }
+      const std::string path = BlockPath(basePath, store_index->m_BlockHashes[i]);
+      bool exists = false;
+      for (int check = 0; check < max_checks && !exists; ++check) {
+        if (check > 0) {
+          Longtail_Sleep(250000);  // 250ms
+        }
+        exists = storage_api->IsFile(storage_api, path.c_str()) != 0;
+      }
+      if (!exists) {
+        std::lock_guard<std::mutex> lock(missing_mutex);
+        if (!found_missing.exchange(true)) {
+          *out_missing_path = path;
+        }
+        return;
+      }
+    }
+  };
+
+  // One HEAD per block is a network round trip on object storage, and a large
+  // submit has thousands of blocks, so they are checked concurrently. The
+  // adapters keep a curl handle per thread.
+  const uint32_t thread_count = block_count < 16 ? block_count : 16;
+  std::vector<std::thread> threads;
+  threads.reserve(thread_count - 1);
+  for (uint32_t t = 1; t < thread_count; ++t) {
+    threads.emplace_back(worker);
+  }
+  worker();
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  return found_missing.load() ? ENOENT : 0;
+}
 
 int Merge(
     const char* RemoteBasePath,
@@ -18,7 +103,8 @@ int Merge(
   // r2 modes) uses the S3 adapter with the server's full credentials.
   struct Longtail_StorageAPI* remote_storage_api;
   std::string basePath = RemoteBasePath;
-  if (StorageType && strcmp(StorageType, "local") == 0) {
+  const bool is_local = StorageType && strcmp(StorageType, "local") == 0;
+  if (is_local) {
     remote_storage_api = Longtail_CreateFSStorageAPI();
     basePath = std::string(LocalStoragePath) + RemoteBasePath;
   } else {
@@ -32,11 +118,38 @@ int Merge(
     return ENOMEM;
   }
 
-  struct Longtail_StoreIndex* additional_store_index;
+  struct Longtail_StoreIndex* additional_store_index = 0;
   int err = Longtail_ReadStoreIndexFromBuffer(
       additional_store_index_buffer,
       additional_store_index_size,
       &additional_store_index);
+
+  if (err) {
+    SetHandleStep(handle, "The uploaded store index could not be read");
+    handle->error = err;
+    handle->completed = 1;
+    SAFE_DISPOSE_API(remote_storage_api);
+    return err;
+  }
+
+  // Before this submit's blocks are merged into the repo's store index, prove
+  // they are in the store. The index is what every later submit deduplicates
+  // against, so listing a block that is not there does more than break this
+  // changelist: later submits skip uploading those chunks because the index
+  // says the store has them, and their changelists come out unreadable too.
+  {
+    std::string missing_block_path;
+    err = VerifyBlocksExist(remote_storage_api, basePath, additional_store_index, &missing_block_path);
+    if (err) {
+      std::string message = "A block listed in the uploaded store index is not in storage: " + missing_block_path;
+      SetHandleStep(handle, message.c_str());
+      handle->error = err;
+      handle->completed = 1;
+      Longtail_Free(additional_store_index);
+      SAFE_DISPOSE_API(remote_storage_api);
+      return err;
+    }
+  }
 
   std::string LockFilePath = basePath + std::string("/store.lsi.sync");
   std::string StoreFilePath = basePath + std::string("/store.lsi");
@@ -136,6 +249,14 @@ int Merge(
       remote_storage_api,
       merged_store_index,
       StoreFilePath.c_str());
+
+  // On object storage the PUT happens in CloseFile, which cannot return an
+  // error, so Longtail_WriteStoreIndex reports success either way. Without
+  // this the submit would go on to create a changelist whose blocks the store
+  // index does not list. See upload-status.h.
+  if (!err && !is_local && S3StorageAPI_GetUploadFailures(remote_storage_api)->Any()) {
+    err = EIO;
+  }
 
   if (err) {
     SetHandleStep(handle, "Failed to write merged store index");

@@ -2,6 +2,7 @@
 #include "../util/existing-content.h"
 #include "../util/flush.h"
 #include "../util/progress.h"
+#include "../util/upload-status.h"
 #include "main.h"
 
 #include <iostream>
@@ -146,7 +147,7 @@ int32_t SubmitSync(
 
   // Collect file sizes via directory enumeration instead of per-file
   // OpenReadFile. On Windows, FindFirstFile/FindNextFile returns sizes
-  // from cached WIN32_FIND_DATAW — zero extra syscalls and no CreateFileW
+  // from cached WIN32_FIND_DATAW: zero extra syscalls and no CreateFileW
   // retry loops (Sleep(1)×10) that made the old approach extremely slow.
 
   // Group non-delete modifications by parent directory
@@ -579,7 +580,7 @@ int32_t SubmitSync(
     }
   }
 
-  // Continue flushing — fs block store (same logical phase)
+  // Continue flushing: fs block store (same logical phase)
 
   err = SyncFlush_Init(&flushCB);
   if (err) {
@@ -638,6 +639,33 @@ int32_t SubmitSync(
     }
   }
 
+  // The storage adapters upload from CloseFile, which cannot return an error,
+  // so Longtail reports success for a block that never reached the store. The
+  // adapter keeps the truth; nothing below may run if any upload failed, least
+  // of all the /submit POST that creates the changelist. See upload-status.h.
+  struct UploadFailures* upload_failures =
+      (StorageType && strcmp(StorageType, "gateway") == 0)
+          ? GatewayStorageAPI_GetUploadFailures(remote_storage_api)
+          : S3StorageAPI_GetUploadFailures(remote_storage_api);
+
+  if (upload_failures->Any()) {
+    SetHandleStep(handle, upload_failures->Describe().c_str());
+    handle->error = IsHandleCanceled(handle) ? ECANCELED : EIO;
+    handle->completed = 1;
+    Longtail_Free(remote_missing_store_index);
+    Longtail_Free(existing_remote_store_index);
+    Longtail_Free(source_version_index);
+    SAFE_DISPOSE_API(chunker_api);
+    SAFE_DISPOSE_API(store_block_store_api);
+    SAFE_DISPOSE_API(store_block_fsstore_api);
+    SAFE_DISPOSE_API(file_storage_api);
+    SAFE_DISPOSE_API(remote_storage_api);
+    SAFE_DISPOSE_API(compression_registry);
+    SAFE_DISPOSE_API(hash_registry);
+    SAFE_DISPOSE_API(job_api);
+    return handle->error;
+  }
+
   std::stringstream version_file_stream;
   void* missing_store_index_buffer = 0;
   size_t missing_store_index_size;
@@ -654,8 +682,15 @@ int32_t SubmitSync(
       source_version_index,
       target_version_index_path.c_str());
 
+  // Longtail_WriteVersionIndex returns 0 even when the PUT failed, for the
+  // same reason the block writes do.
+  const bool version_index_upload_failed = !err && upload_failures->Any();
+  if (version_index_upload_failed) {
+    err = IsHandleCanceled(handle) ? ECANCELED : EIO;
+  }
+
   if (err) {
-    SetHandleStep(handle, "Failed to write version index");
+    SetHandleStep(handle, version_index_upload_failed ? upload_failures->Describe().c_str() : "Failed to write version index");
     handle->error = err;
     handle->completed = 1;
     Longtail_Free(remote_missing_store_index);
@@ -756,7 +791,7 @@ int32_t SubmitSync(
     return realsize;
   };
 
-  // Curl upload progress callback — reports bytes uploaded to the handle
+  // Curl upload progress callback: reports bytes uploaded to the handle
   auto progress_callback = [](void* clientp, curl_off_t dltotal, curl_off_t dlnow,
                                curl_off_t ultotal, curl_off_t ulnow) -> int {
     WrapperAsyncHandle* h = static_cast<WrapperAsyncHandle*>(clientp);

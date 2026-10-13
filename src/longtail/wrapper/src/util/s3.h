@@ -3,6 +3,7 @@
 #include <longtail.h>
 
 struct WrapperAsyncHandle;
+struct UploadFailures;
 
 // Generic S3-compatible storage API (Cloudflare R2, AWS S3, MinIO, SeaweedFS
 // S3 gateway, etc.) using AWS SigV4. Used by the client for R2-direct mode and
@@ -18,7 +19,13 @@ struct S3StorageAPI {
   char* m_SessionToken;
   uint32_t m_NumAddedBlocks;
   struct WrapperAsyncHandle* m_Handle;
+  struct UploadFailures* m_UploadFailures;
 };
+
+// The sticky record of PUTs that failed for good on this adapter. CloseFile
+// cannot return an error, so anything that writes through the adapter must
+// check this before treating the write as done. See upload-status.h.
+struct UploadFailures* S3StorageAPI_GetUploadFailures(struct Longtail_StorageAPI* storage_api);
 
 struct Longtail_StorageAPI* CreateS3StorageAPI(
     const char* endpoint,

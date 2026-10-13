@@ -20,6 +20,7 @@ import {
 import { Router } from "express";
 import multer from "multer";
 import { getR2Endpoint } from "../utils/r2.js";
+import { getStorageBackend } from "../storage/backend.js";
 import { Logger } from "../logging.js";
 
 // Build the backend storage descriptor the addon's server-side store.lsi merge
@@ -65,6 +66,43 @@ async function buildMergeStorageOptions(
       "storage.r2.secret-access-key",
     ),
   };
+}
+
+// A version index name is a single file name under "{repo}/versions/". It is
+// client-supplied and becomes part of a storage key, so anything that could
+// step outside that directory is refused rather than normalized.
+const VERSION_INDEX_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.lvi$/;
+
+/**
+ * Confirms the version index a submit names is really in storage. Returns a
+ * message describing the problem, or null if the index is there.
+ */
+async function checkVersionIndex(
+  repoId: string,
+  basePath: string,
+  versionIndex: string,
+): Promise<string | null> {
+  if (!VERSION_INDEX_NAME.test(versionIndex)) {
+    return `Invalid version index name: ${versionIndex}`;
+  }
+
+  let size: number | null;
+  try {
+    // r2 mode keeps each repo in its own bucket; local and s3 ignore the option.
+    const backend = await getStorageBackend({ bucket: `checkpoint-${repoId}` });
+    size = await backend.head(`${basePath}/versions/${versionIndex}`);
+  } catch (e: any) {
+    // Not being able to ask is not the same as the index being there.
+    return `Could not confirm version index ${versionIndex} is in storage: ${e.message}`;
+  }
+
+  if (size === null) {
+    return `Version index ${versionIndex} is not in storage. The upload did not complete; submit again.`;
+  }
+  if (size === 0) {
+    return `Version index ${versionIndex} is empty in storage. The upload did not complete; submit again.`;
+  }
+  return null;
 }
 
 interface JWTClaims {
@@ -157,6 +195,23 @@ export function routeSubmit(): Router {
     // New content bytes from this submit (set from the merge result below), used
     // to maintain the repo's cached storage size incrementally.
     let addedBytes = 0;
+
+    // The client uploads the version index to storage itself and only tells us
+    // its name. Prove it arrived before anything records that name: a
+    // changelist pointing at an index that is not there cannot be pulled, and
+    // nothing downstream would notice until someone tried.
+    if (payload.versionIndex) {
+      const problem = await checkVersionIndex(
+        claims.repoId,
+        basePath,
+        payload.versionIndex,
+      );
+      if (problem) {
+        Logger.error(`[Submit] ${problem}`);
+        res.status(400).send(problem);
+        return;
+      }
+    }
 
     if (req.file) {
       const storeIndexBuffer = req.file.buffer;
