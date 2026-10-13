@@ -32,7 +32,6 @@
     "source.fixAll.eslint": "explicit"
   },
   "git.autoRepositoryDetection": "openEditors",
-
   // C/C++ (src/longtail)
   "C_Cpp.intelliSenseEngine": "default",
   "C_Cpp.default.includePath": [
@@ -41,8 +40,10 @@
     "${workspaceFolder}/src/longtail/wrapper/longtail/include/**"
   ],
   "cmake.sourceDirectory": "${workspaceFolder}/src/longtail/wrapper",
-
-  "cSpell.words": ["koffi", "longtail"],
+  "cSpell.words": [
+    "koffi",
+    "longtail"
+  ],
   "yaml.schemas": {
     "https://www.artillery.io/schema.json": []
   },
@@ -152,5 +153,6 @@
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "prisma.pinToPrisma6": true,
-  "dotnet.defaultSolution": "disable"
+  "dotnet.defaultSolution": "disable",
+  "cmake.ignoreCMakeListsMissing": true
 }
