@@ -408,11 +408,17 @@ export async function mergeBranch(
     });
     const nextNumber = (lastCl?.number ?? -1) + 1;
 
-    const stateRootHash = await buildStateTreeBlocks(
-      db,
-      repoId,
-      merged.entries(),
-    );
+    // Writes outside the transaction, so with a single-writer database it can
+    // lose the wait to another commit. Same contention, same answer.
+    let stateRootHash: string;
+    try {
+      stateRootHash = await buildStateTreeBlocks(db, repoId, merged.entries());
+    } catch (error) {
+      if (!isSubmitContention(error)) {
+        throw error;
+      }
+      continue;
+    }
 
     try {
       const mergeCl = await db.$transaction(

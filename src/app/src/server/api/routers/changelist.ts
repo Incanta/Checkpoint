@@ -580,11 +580,22 @@ export const changelistRouter = createTRPCRouter({
         // Build the content-addressed state tree and store its blocks. Blocks
         // are keyed by their content, so one written by an attempt that is
         // later thrown away is harmless.
-        const stateRootHash = await buildStateTreeBlocks(
-          ctx.db,
-          input.repoId,
-          paths.entries(),
-        );
+        // This writes too, outside the transaction, so on a database with a
+        // single writer it can lose the wait to another submit's commit. That
+        // is the same contention as losing the race inside the transaction.
+        let stateRootHash: string;
+        try {
+          stateRootHash = await buildStateTreeBlocks(
+            ctx.db,
+            input.repoId,
+            paths.entries(),
+          );
+        } catch (error) {
+          if (!isSubmitContention(error)) {
+            throw error;
+          }
+          continue;
+        }
 
         try {
           const created = await ctx.db.$transaction(

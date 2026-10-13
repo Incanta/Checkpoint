@@ -53,8 +53,12 @@ export function isSubmitContention(error: unknown): boolean {
     return true;
   }
 
-  // SQLite reports a busy writer as a message, not a code.
-  return /database is locked|SQLITE_BUSY/i.test(message);
+  // SQLite has one writer. A statement that waits on it for too long fails
+  // with a message rather than a code, either from SQLite itself or from
+  // Prisma giving up on the wait ("Socket timeout").
+  return /database is locked|SQLITE_BUSY|Socket timeout|failed to respond to a query within the configured timeout/i.test(
+    message,
+  );
 }
 
 export interface BaseConflict {
