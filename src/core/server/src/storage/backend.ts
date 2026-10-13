@@ -32,7 +32,17 @@ export interface StorageBackend {
   /** The whole object as a Buffer, or null if it does not exist. */
   getBuffer(key: string): Promise<Buffer | null>;
   /** Write an object atomically (overwrite). contentLength must be accurate. */
-  put(key: string, body: Readable | Buffer, contentLength: number): Promise<void>;
+  put(
+    key: string,
+    body: Readable | Buffer,
+    contentLength: number,
+  ): Promise<void>;
+  /**
+   * Create an object only if nothing exists at the key. Returns false, leaving
+   * the existing object alone, when something does. Used for locks, so of
+   * several callers racing for the same key at most one gets true.
+   */
+  putIfAbsent(key: string, body: Buffer): Promise<boolean>;
   /** Remove an object. Missing is not an error. */
   delete(key: string): Promise<void>;
   /** Total bytes stored under a "/{org}/{repo}" prefix. */
@@ -110,6 +120,27 @@ class LocalBackend implements StorageBackend {
       await pipeline(body, createWriteStream(tmp));
     }
     await fs.rename(tmp, full);
+  }
+
+  async putIfAbsent(key: string, body: Buffer): Promise<boolean> {
+    const full = this.resolve(key);
+    await fs.mkdir(path.dirname(full), { recursive: true });
+    // Write the whole object somewhere private, then hard-link it into place.
+    // link() fails if the name is taken, so the object appears complete and
+    // exactly once; an exclusive open would let a reader see it empty.
+    const tmp = `${full}.tmp-${process.pid}-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}`;
+    await fs.writeFile(tmp, body);
+    try {
+      await fs.link(tmp, full);
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw err;
+    } finally {
+      await fs.rm(tmp, { force: true });
+    }
   }
 
   async delete(key: string): Promise<void> {
@@ -207,6 +238,38 @@ class S3Backend implements StorageBackend {
         ContentLength: contentLength,
       }),
     );
+  }
+
+  async putIfAbsent(key: string, body: Buffer): Promise<boolean> {
+    if ((await this.head(key)) !== null) {
+      return false;
+    }
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: normalizeKey(key),
+          Body: body,
+          ContentLength: body.length,
+          // Atomic create on stores that implement conditional writes (AWS
+          // S3, R2, current MinIO).
+          IfNoneMatch: "*",
+        }),
+      );
+    } catch (err) {
+      const status = (err as { $metadata?: { httpStatusCode?: number } })
+        .$metadata?.httpStatusCode;
+      // 412: someone else created it first. 409: a conflicting write is in
+      // flight. Either way it is not ours.
+      if (status === 412 || status === 409) return false;
+      throw err;
+    }
+    // Some S3-compatible stores ignore the condition and simply overwrite. To
+    // stay safe on those, give a competing write a moment to land and check
+    // that the object is still the one written here.
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    const stored = await this.getBuffer(key);
+    return stored !== null && stored.equals(body);
   }
 
   async delete(key: string): Promise<void> {

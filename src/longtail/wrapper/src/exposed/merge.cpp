@@ -2,8 +2,90 @@
 #include "main.h"
 
 #include <atomic>
+#include <chrono>
 #include <mutex>
+#include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
+#endif
+
+// Replaces `target` with `source` in one step: anything reading `target` gets
+// the old file or the new one, whole. Longtail's own rename refuses to replace
+// an existing file on Windows, and its callers work around that by deleting
+// the target first, which leaves a moment (or, after a crash, forever) with no
+// file at all.
+//
+// The data is flushed to disk before the rename, so the name never points at
+// a file whose contents are still only in a cache.
+static int ReplaceFileAtomically(const std::string& source, const std::string& target) {
+#ifdef _WIN32
+  auto widen = [](const std::string& utf8) {
+    int length = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
+    std::wstring wide(length > 0 ? length : 1, L'\0');
+    if (length > 0) {
+      MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &wide[0], length);
+    }
+    for (wchar_t& c : wide) {
+      if (c == L'/') c = L'\\';
+    }
+    return wide;
+  };
+  std::wstring wide_source = widen(source);
+  std::wstring wide_target = widen(target);
+
+  HANDLE file = CreateFileW(wide_source.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return EIO;
+  }
+  BOOL flushed = FlushFileBuffers(file);
+  CloseHandle(file);
+  if (!flushed) {
+    return EIO;
+  }
+
+  // A reader that holds the old index open without delete sharing makes the
+  // replace fail for as long as it reads. That is brief, so wait it out.
+  for (int attempt = 0; attempt < 50; ++attempt) {
+    if (MoveFileExW(wide_source.c_str(), wide_target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+      return 0;
+    }
+    DWORD error = GetLastError();
+    if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED && error != ERROR_LOCK_VIOLATION) {
+      return EIO;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+  return EBUSY;
+#else
+  int fd = open(source.c_str(), O_RDONLY);
+  if (fd < 0) {
+    return errno;
+  }
+  int sync_err = fsync(fd) == 0 ? 0 : errno;
+  close(fd);
+  if (sync_err) {
+    return sync_err;
+  }
+  if (rename(source.c_str(), target.c_str()) != 0) {
+    return errno;
+  }
+  // Make the rename itself durable. Not being able to is not a failed write.
+  std::string dir = target.substr(0, target.find_last_of('/'));
+  int dir_fd = open(dir.empty() ? "/" : dir.c_str(), O_RDONLY);
+  if (dir_fd >= 0) {
+    fsync(dir_fd);
+    close(dir_fd);
+  }
+  return 0;
+#endif
+}
 
 // Where FSBlockStore keeps a block, relative to the store root:
 // chunks/<first 4 hex digits>/0x<16 hex digits>.lrb. This has to match
@@ -114,7 +196,7 @@ int Merge(
   if (!remote_storage_api) {
     SetHandleStep(handle, "Failed to create storage api");
     handle->error = ENOMEM;
-    handle->completed = 1;
+    handle->settled = 1;
     return ENOMEM;
   }
 
@@ -127,7 +209,7 @@ int Merge(
   if (err) {
     SetHandleStep(handle, "The uploaded store index could not be read");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     SAFE_DISPOSE_API(remote_storage_api);
     return err;
   }
@@ -144,45 +226,19 @@ int Merge(
       std::string message = "A block listed in the uploaded store index is not in storage: " + missing_block_path;
       SetHandleStep(handle, message.c_str());
       handle->error = err;
-      handle->completed = 1;
+      handle->settled = 1;
       Longtail_Free(additional_store_index);
       SAFE_DISPOSE_API(remote_storage_api);
       return err;
     }
   }
 
-  std::string LockFilePath = basePath + std::string("/store.lsi.sync");
+  // No locking here. The caller holds the repo's store index lock for the
+  // whole read, merge, and write below (see the core server's
+  // storage/index-lock.ts). This function used to take a lock file itself by
+  // checking for it and then creating it, which two merges could both do, and
+  // which a merge that died left behind for every later one to wait on.
   std::string StoreFilePath = basePath + std::string("/store.lsi");
-
-  while (remote_storage_api->IsFile(remote_storage_api, LockFilePath.c_str())) {
-    Longtail_Sleep(100000);  // sleep for 100ms
-  }
-
-  Longtail_StorageAPI_HOpenFile out_open_file;
-  err = Longtail_Storage_OpenWriteFile(remote_storage_api, LockFilePath.c_str(), 0, &out_open_file);
-
-  if (err) {
-    SetHandleStep(handle, "Failed to open lock file for writing");
-    handle->error = err;
-    handle->completed = 1;
-    Longtail_Free(additional_store_index);
-    SAFE_DISPOSE_API(remote_storage_api);
-    return err;
-  }
-
-  err = Longtail_Storage_Write(remote_storage_api, out_open_file, 0, 4, "lock");
-
-  if (err) {
-    SetHandleStep(handle, "Failed to write lock file");
-    handle->error = err;
-    handle->completed = 1;
-    Longtail_Storage_CloseFile(remote_storage_api, out_open_file);
-    Longtail_Free(additional_store_index);
-    SAFE_DISPOSE_API(remote_storage_api);
-    return err;
-  }
-
-  Longtail_Storage_CloseFile(remote_storage_api, out_open_file);
 
   struct Longtail_StoreIndex* existing_remote_store_index;
 
@@ -196,11 +252,7 @@ int Merge(
     if (err) {
       SetHandleStep(handle, "Failed to create new store index");
       handle->error = err;
-      handle->completed = 1;
-      int removeError = Longtail_Storage_RemoveFile(remote_storage_api, LockFilePath.c_str());
-      if (removeError) {
-        SetHandleStep(handle, "Failed to create new store index AND failed to remove lock file");
-      }
+      handle->settled = 1;
       Longtail_Free(additional_store_index);
       SAFE_DISPOSE_API(remote_storage_api);
       return err;
@@ -214,11 +266,7 @@ int Merge(
     if (err) {
       SetHandleStep(handle, "Failed to read the existing store index");
       handle->error = err;
-      handle->completed = 1;
-      int removeError = Longtail_Storage_RemoveFile(remote_storage_api, LockFilePath.c_str());
-      if (removeError) {
-        SetHandleStep(handle, "Failed to read the existing store index AND failed to remove lock file");
-      }
+      handle->settled = 1;
       Longtail_Free(additional_store_index);
       SAFE_DISPOSE_API(remote_storage_api);
       return err;
@@ -234,21 +282,35 @@ int Merge(
   if (err) {
     SetHandleStep(handle, "Failed to merge store indexes");
     handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(existing_remote_store_index);
-    int removeError = Longtail_Storage_RemoveFile(remote_storage_api, LockFilePath.c_str());
-    if (removeError) {
-      SetHandleStep(handle, "Failed to merge store indexes AND failed to remove lock file");
-    }
     Longtail_Free(additional_store_index);
     SAFE_DISPOSE_API(remote_storage_api);
     return err;
   }
 
-  err = Longtail_WriteStoreIndex(
-      remote_storage_api,
-      merged_store_index,
-      StoreFilePath.c_str());
+  if (is_local) {
+    // Write beside the index and move it into place, so a reader sees the old
+    // index or the new one and never part of either, and a crash mid-write
+    // leaves the old one intact.
+    std::string TempFilePath = StoreFilePath + ".next";
+    err = Longtail_WriteStoreIndex(
+        remote_storage_api,
+        merged_store_index,
+        TempFilePath.c_str());
+    if (!err) {
+      err = ReplaceFileAtomically(TempFilePath, StoreFilePath);
+    }
+    if (err) {
+      Longtail_Storage_RemoveFile(remote_storage_api, TempFilePath.c_str());
+    }
+  } else {
+    // A PUT to object storage replaces the object atomically already.
+    err = Longtail_WriteStoreIndex(
+        remote_storage_api,
+        merged_store_index,
+        StoreFilePath.c_str());
+  }
 
   // On object storage the PUT happens in CloseFile, which cannot return an
   // error, so Longtail_WriteStoreIndex reports success either way. Without
@@ -261,23 +323,7 @@ int Merge(
   if (err) {
     SetHandleStep(handle, "Failed to write merged store index");
     handle->error = err;
-    handle->completed = 1;
-    Longtail_Free(existing_remote_store_index);
-    int removeError = Longtail_Storage_RemoveFile(remote_storage_api, LockFilePath.c_str());
-    if (removeError) {
-      SetHandleStep(handle, "Failed to write merged store index AND failed to remove lock file");
-    }
-    Longtail_Free(additional_store_index);
-    SAFE_DISPOSE_API(remote_storage_api);
-    return err;
-  }
-
-  err = Longtail_Storage_RemoveFile(remote_storage_api, LockFilePath.c_str());
-
-  if (err) {
-    SetHandleStep(handle, "Failed to remove lock file");
-    handle->error = err;
-    handle->completed = 1;
+    handle->settled = 1;
     Longtail_Free(existing_remote_store_index);
     Longtail_Free(additional_store_index);
     SAFE_DISPOSE_API(remote_storage_api);
@@ -305,7 +351,7 @@ int Merge(
 
   SetHandleStep(handle, "Completed");
   handle->error = 0;
-  handle->completed = 1;
+  handle->settled = 1;
 
   return 0;
 }
@@ -352,6 +398,10 @@ MergeAsync(
     if (err) {
       std::cerr << "Failed to merge store indexes, " << err << ": " << handle->currentStep << std::endl;
     }
+
+    // Last touch of the handle: the poller may free it from here on. See
+    // wrapper-handle.h.
+    handle->completed = 1;
   });
 
   merge_thread.detach();

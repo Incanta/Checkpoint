@@ -21,6 +21,7 @@ import { Router, type RequestHandler } from "express";
 import multer from "multer";
 import { getR2Endpoint } from "../utils/r2.js";
 import { getStorageBackend } from "../storage/backend.js";
+import { withStoreIndexLock } from "../storage/index-lock.js";
 import { verifyRepoToken, type RepoTokenResult } from "../utils/repo-token.js";
 import { Logger } from "../logging.js";
 
@@ -254,21 +255,42 @@ export function routeSubmit(): Router {
           `[Submit] Merging store index (mode ${config.get<string>("storage.mode")})`,
         );
 
-        const handle = mergeAsync(mergeOptions);
+        // The merge reads the repo's store index, adds this submit's blocks,
+        // and writes it back. Two of those interleaved would drop one side's
+        // blocks from the index, so it runs under the repo's index lock.
+        let merged: Awaited<ReturnType<typeof pollHandle>>;
+        try {
+          const lockBackend = await getStorageBackend({
+            bucket: `checkpoint-${claims.repoId}`,
+          });
+          merged = await withStoreIndexLock(lockBackend, basePath, async () => {
+            const handle = mergeAsync(mergeOptions);
 
-        if (!handle) {
-          throw new Error("Failed to create longtail handle");
+            if (!handle) {
+              throw new Error("Failed to create longtail handle");
+            }
+
+            try {
+              return await pollHandle(handle, {
+                onStep: (step) =>
+                  Logger.debug(`[Submit] Current step: ${step}`),
+              });
+            } finally {
+              freeHandle(handle);
+            }
+          });
+        } catch (e: any) {
+          Logger.error(`[Submit] Store index merge did not run: ${e.message}`);
+          res
+            .status(503)
+            .send(`Could not update the store index: ${e.message}`);
+          return;
         }
-
-        const { status, result } = await pollHandle(handle, {
-          onStep: (step) => Logger.debug(`[Submit] Current step: ${step}`),
-        });
+        const { status, result } = merged;
 
         Logger.debug(
           `[Submit] Completed with exit code: ${status.error} and last step ${status.currentStep}`,
         );
-
-        freeHandle(handle);
 
         if (status.error !== 0) {
           res

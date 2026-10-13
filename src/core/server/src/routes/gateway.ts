@@ -115,6 +115,18 @@ function versionIndexName(key: string): string | null {
   return VERSION_INDEX_KEY.exec(key)?.[1] ?? null;
 }
 
+/**
+ * True for a repo's store index and the files that live beside it (its lock
+ * and its staging copy). Only the server writes these, under a lock, during a
+ * submit: a client that could replace the index could make every other client
+ * believe blocks exist that do not, and one that could delete the lock could
+ * let two merges run at once. Clients only ever read the index.
+ */
+function isStoreIndexKey(key: string): boolean {
+  const name = key.split("/")[3];
+  return key.split("/").length === 4 && !!name && /^store[.]lsi/i.test(name);
+}
+
 /** True when the key is spelled the one way a version index may be. */
 function isVersionIndexSpelling(key: string): boolean {
   return key.split("/")[3] === "versions";
@@ -184,6 +196,12 @@ export function routeGateway(): Router {
       res.status(400).send("Bad Request: invalid Content-Length");
       return;
     }
+    if (isStoreIndexKey(key)) {
+      res
+        .status(403)
+        .send("Forbidden: the store index is written by the server");
+      return;
+    }
     try {
       const backend = await getStorageBackend();
       const indexName = versionIndexName(key);
@@ -244,6 +262,12 @@ export function routeGateway(): Router {
     try {
       if (versionIndexName(key) !== null) {
         res.status(403).send("Forbidden: version indexes cannot be deleted");
+        return;
+      }
+      if (isStoreIndexKey(key)) {
+        res
+          .status(403)
+          .send("Forbidden: the store index is written by the server");
         return;
       }
       const backend = await getStorageBackend();
