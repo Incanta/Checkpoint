@@ -5,7 +5,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 
-import { getStateTreePaths } from "~/server/state-tree";
+import { lookupStateTreePaths, stateRootOf } from "~/server/state-tree";
 import { resolveDomainBranchName } from "./domain";
 import type { ClaimActor } from "./claims";
 
@@ -162,10 +162,14 @@ export async function reconcileClaims(
       continue;
     }
 
+    // Only the claimed paths matter: read just those from the head's tree.
     let headState: Map<string, number>;
     try {
-      headState = new Map(
-        await getStateTreePaths(db as PrismaClient, repoId, domainBranch.headNumber),
+      headState = await lookupStateTreePaths(
+        db as PrismaClient,
+        repoId,
+        await stateRootOf(db as PrismaClient, repoId, domainBranch.headNumber),
+        domainClaims.map((c) => c.file.path),
       );
     } catch {
       // A repo with no state tree yet (test fixtures, fresh repos) simply has

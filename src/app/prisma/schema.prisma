@@ -343,6 +343,11 @@ model Changelist {
   // blob. Null only for test-seeded changelists with no tree.
   stateRootHash String?
 
+  // Number of files in this changelist's state tree, maintained per submit
+  // and merge from the parent's count so it never needs a full tree walk.
+  // Null for changelists from before it existed; filled in lazily.
+  fileCount Int?
+
   // Artifact overlay (populated by CI after submit)
   artifactVersionIndex String?
   artifactStateTree    Json?
@@ -382,6 +387,20 @@ model TreeBlock {
   repoId String
   hash   String
   data   Bytes
+
+  @@id([repoId, hash])
+}
+
+// Payload length of a stored state-tree block, by hash. An incremental tree
+// update needs the lengths of a changed directory's untouched subdirectories
+// to repack it exactly as a full build would, and asking here avoids fetching
+// each of those blocks. A length is a function of the block's content, so a
+// row can never be stale; a missing row only means "fetch the block". Rows
+// are written after their block is stored.
+model TreeBlockLength {
+  repoId String
+  hash   String
+  length Int
 
   @@id([repoId, hash])
 }
@@ -559,6 +578,10 @@ model File {
   artifactFiles ArtifactFile[]
 
   @@index([repoId])
+  // Submits and claim checks look files up by path; without this every lookup
+  // filtered all of the repo's File rows. Not unique: rows created before
+  // submits were serialized may hold the same path twice.
+  @@index([repoId, path])
 }
 
 // How strongly a claim binds. Derived from the org's binary-extensions set:

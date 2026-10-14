@@ -9,11 +9,12 @@ import {
 } from "../auth-utils";
 import { recordActivity } from "../activity";
 import {
-  getStateTreePaths,
-  buildStateTreeBlocks,
-  primeStateTreePaths,
   diffStateTrees,
+  lookupStateTreePaths,
+  stateRootOf,
+  submitStateTree,
 } from "~/server/state-tree";
+import { TreeCollisionError, type TreeEdit } from "~/server/tree/tree";
 import type { InputJsonValue } from "@prisma/client/runtime/library";
 import { walkChangelistAncestry } from "~/server/changelist-walk";
 import { compareTreePaths } from "~/lib/file-tree-sort";
@@ -273,11 +274,6 @@ export const changelistRouter = createTRPCRouter({
         return { stray, stale };
       }
 
-      const target = await getStateTreePaths(
-        ctx.db,
-        input.repoId,
-        input.toNumber,
-      );
 
       // The last changelist in the set to write each path. Indexes are
       // applied in ascending order, so that is what ends up on disk.
@@ -303,6 +299,14 @@ export const changelistRouter = createTRPCRouter({
         }
       }
 
+      // Only the paths the indexes write matter, so read just those from the
+      // target's tree rather than its whole path map.
+      const target = await lookupStateTreePaths(
+        ctx.db,
+        input.repoId,
+        await stateRootOf(ctx.db, input.repoId, input.toNumber),
+        lastWriter.keys(),
+      );
       for (const [path, writer] of lastWriter) {
         const expected = target.get(path);
         if (expected === undefined) {
@@ -493,7 +497,6 @@ export const changelistRouter = createTRPCRouter({
         id: string;
         number: number;
         stateRootHash: string;
-        paths: Map<string, number>;
       } | null = null;
 
       for (
@@ -542,11 +545,14 @@ export const changelistRouter = createTRPCRouter({
           });
         }
 
-        // Parent head's materialized path tree (cached); clone before mutating.
-        const headPaths = await getStateTreePaths(
+        // What the head holds at the submitted paths: read from the tree
+        // along just those paths, not the whole path map.
+        const headRoot = parentChangelist.stateRootHash ?? null;
+        const headPaths = await lookupStateTreePaths(
           ctx.db,
           input.repoId,
-          branch.headNumber,
+          headRoot,
+          normalizedPaths,
         );
 
         const conflicts = findBaseConflicts(input.modifications, headPaths);
@@ -567,30 +573,46 @@ export const changelistRouter = createTRPCRouter({
 
         const nextNumber = (lastChangelist?.number ?? -1) + 1;
 
-        const paths = new Map(headPaths);
-        for (const mod of input.modifications) {
-          const modPath = mod.path.replaceAll("\\", "/");
-          if (mod.delete) {
-            paths.delete(modPath);
-          } else {
-            paths.set(modPath, nextNumber);
+        const edits: TreeEdit[] = input.modifications.map((mod) => {
+          const path = mod.path.replaceAll("\\", "/");
+          return mod.delete
+            ? { path, delete: true as const }
+            : { path, cl: nextNumber };
+        });
+
+        // The new file count follows from the parent's: the paths this submit
+        // adds that the head lacks, less the ones it deletes that the head
+        // has. Later modifications of the same path win, as in the tree.
+        const finalOp = new Map<string, boolean>();
+        for (const e of edits) finalOp.set(e.path, !e.delete);
+        let fileCount = parentChangelist.fileCount;
+        if (fileCount !== null) {
+          for (const [path, present] of finalOp) {
+            const atHead = headPaths.has(path);
+            if (present && !atHead) fileCount++;
+            if (!present && atHead) fileCount--;
           }
         }
 
-        // Build the content-addressed state tree and store its blocks. Blocks
-        // are keyed by their content, so one written by an attempt that is
-        // later thrown away is harmless.
+        // Update the content-addressed state tree along the edited paths and
+        // store the new blocks. Blocks are keyed by their content, so one
+        // written by an attempt that is later thrown away is harmless.
         // This writes too, outside the transaction, so on a database with a
         // single writer it can lose the wait to another submit's commit. That
         // is the same contention as losing the race inside the transaction.
         let stateRootHash: string;
         try {
-          stateRootHash = await buildStateTreeBlocks(
+          stateRootHash = await submitStateTree(
             ctx.db,
             input.repoId,
-            paths.entries(),
+            branch.headNumber,
+            headRoot,
+            edits,
           );
         } catch (error) {
+          if (error instanceof TreeCollisionError) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+          }
           if (!isSubmitContention(error)) {
             throw error;
           }
@@ -608,6 +630,7 @@ export const changelistRouter = createTRPCRouter({
                   versionIndex: input.versionIndex,
                   parentNumber: branch.headNumber,
                   stateRootHash,
+                  fileCount,
                   artifactVersionIndex: parentChangelist.artifactVersionIndex,
                   artifactStateTree:
                     parentChangelist.artifactStateTree as InputJsonValue,
@@ -755,7 +778,7 @@ export const changelistRouter = createTRPCRouter({
             { maxWait: 60_000, timeout: 15 * 60_000 },
           );
 
-          committed = { ...created, stateRootHash, paths };
+          committed = { ...created, stateRootHash };
         } catch (error) {
           if (!isSubmitContention(error)) {
             throw error;
@@ -771,12 +794,6 @@ export const changelistRouter = createTRPCRouter({
       }
 
       const changelist = committed;
-
-      primeStateTreePaths(
-        input.repoId,
-        committed.stateRootHash,
-        committed.paths,
-      );
 
       // Record write activity for billing (fire-and-forget)
       void recordActivity(ctx.db, {

@@ -10,7 +10,7 @@ import { isR2Enabled, createR2Bucket } from "~/server/r2-service";
 import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { Logger } from "~/server/logging";
-import { buildStateTreeBlocks, primeStateTreePaths } from "~/server/state-tree";
+import { buildStateTreeBlocks } from "~/server/state-tree";
 import { snapshotStoragePeak } from "~/server/billing/storage-usage";
 
 export const repoRouter = createTRPCRouter({
@@ -118,11 +118,11 @@ export const repoRouter = createTRPCRouter({
           message: "Repo Creation",
           versionIndex: "",
           stateRootHash: initRootHash,
+          fileCount: 0,
           repoId: repo.id,
           userId: ctx.session.user.id,
         },
       });
-      primeStateTreePaths(repo.id, initRootHash, new Map());
 
       // Create main branch
       await ctx.db.branch.create({

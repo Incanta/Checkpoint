@@ -4,3 +4,15 @@
 #   "postgres" - the TreeBlock table (no storage backend needed). Used by tests
 #                and local setups without a running storage server.
 block-store: "storage"
+
+# Byte limit of the in-process cache of state-tree blocks. Blocks are
+# immutable, so cached ones never go stale; a whole large repo's tree is
+# about 10 MB.
+block-cache-bytes: 134217728
+
+# How a submit computes its changelist's state tree:
+#   "on"     - update only the edited paths (reads and writes what changed).
+#   "verify" - do that, also rebuild the whole tree, log any mismatch as
+#              "[state-tree] MISMATCH", and use the rebuild's root. For rollout.
+#   "off"    - rebuild the whole tree from the parent's full path map.
+incremental: "verify"

@@ -22,10 +22,10 @@ Decisions already made: a breaking change behind a version gate is fine; design 
 | D1 | `StateStore.apply(delta)` with cached statements, `dataVersion()` | Done |
 | D2 | One shared in-memory state per workspace; every call site writes deltas; sync filter re-checks only pulled paths | Done |
 | D3 | Path index replacing O(dirty x tracked) scans; pending cache kept across stage, revert, resolve, and submit/pull that only edit tracked files | Done |
-| D4 | Remove `json` as a configurable backend | To do |
-| S0 | Tree stats and test seams | To do |
-| S1 | Block cache, batched reads, `lookup`/`listDir`, consumer switch-over, migration (`File(repoId, path)` index, `Changelist.fileCount`, `TreeBlockLength`) | To do |
-| S2 | Incremental `applyChanges` (byte-identical to a full build), collision guard, `verify` rollout flag | To do |
+| D4 | Remove `json` as a configurable backend | Waiting on your call (see below) |
+| S0 | Tree stats (`TreeOpStats`, `[state-tree]` log line) | Done |
+| S1 | Byte-bounded block cache, `lookup`/`listDir`, consumers switched (conflict check, file reads, claims, folder listing, pull anomalies), migration (`File(repoId, path)` index, `Changelist.fileCount`, `TreeBlockLength`) | Done |
+| S2 | Incremental `applyChanges` (byte-identical to a full build), collision guard, `state-tree.incremental` rollout flag (default `verify`) | Done |
 | S3 | Sparse three-way merge, remove the full-map LRU | To do |
 | N1 | Submit writes per-version block maps (`versions/<stem>.lsi`) | To do |
 | N2 | Single-pass pull and file reads from block maps | To do |
@@ -50,6 +50,10 @@ At this size the submit cost is dominated by fixed overhead, so it does not yet 
 ## Needs you
 
 Items only you can decide or do. Each is also noted where it comes up.
+
+- **Actions**
+  - Apply migration `20261013220000_state-tree-incremental` to every deployed database (`yarn --cwd src/app db:migrate:deploy`). It is additive. On Postgres, the `File(repoId, path)` index build locks writes to `File` while it runs; on a very large table, create it beforehand with `CREATE INDEX CONCURRENTLY "File_repoId_path_idx" ON "File"("repoId","path")` and skip that statement.
+  - `state-tree.incremental` ships as `verify`: each submit updates the tree incrementally, also rebuilds it, and logs `[state-tree] MISMATCH` on any difference (using the rebuild). Watch production logs for that line; after a clean period, set it to `on` so submits stop paying for the rebuild. Locally: 0 mismatches over 125 submits; the test suite runs in `strict` mode (a mismatch fails the test).
 
 - **Open decisions**
   - Unique `(repoId, path)` index on `File` after a duplicate audit, or keep it non-unique?

@@ -20,7 +20,11 @@ import {
   resolveBinaryExtensions,
   isBinaryFile,
 } from "~/server/binary-extensions";
-import { getStateTreePaths } from "~/server/state-tree";
+import {
+  listStateTreeDir,
+  lookupStateTreePaths,
+  stateTreeFileCount,
+} from "~/server/state-tree";
 import { buildAddonStorageOptions } from "~/server/storage-options";
 import {
   acquireClaim,
@@ -536,7 +540,7 @@ export const fileRouter = createTRPCRouter({
             number: input.changelistNumber,
           },
         },
-        select: { artifactStateTree: true },
+        select: { artifactStateTree: true, stateRootHash: true },
       });
 
       if (!changelist) {
@@ -546,78 +550,78 @@ export const fileRouter = createTRPCRouter({
         });
       }
 
-      // Main state is path-keyed straight from the tree.
-      const mainPaths = await getStateTreePaths(
+      const folderPath = input.folderPath.replace(/\/+$/, "");
+      const prefix = folderPath === "" ? "" : `${folderPath}/`;
+
+      // The requested folder straight from the tree: only the blocks on the
+      // way to it and the folder itself are read.
+      const listing = await listStateTreeDir(
         ctx.db,
         input.repoId,
-        input.changelistNumber,
+        changelist.stateRootHash,
+        folderPath,
       );
-
-      // The artifact overlay is still a fileId-keyed blob; convert it to paths
-      // via the File table (only when artifacts are requested).
-      const artifactRaw = input.includeArtifacts
-        ? ((changelist.artifactStateTree as Record<string, number> | null) ??
-          {})
-        : {};
-      const artifactPaths = new Map<string, number>();
-      if (Object.keys(artifactRaw).length > 0) {
-        const allFiles = await ctx.db.file.findMany({
-          where: { repoId: input.repoId },
-          select: { id: true, path: true },
-        });
-        const idToPath = new Map(allFiles.map((f) => [f.id, f.path]));
-        for (const [fileId, cl] of Object.entries(artifactRaw)) {
-          const p = idToPath.get(fileId);
-          if (p) artifactPaths.set(p, cl);
-        }
-      }
-
-      const alivePaths = new Set<string>([
-        ...mainPaths.keys(),
-        ...artifactPaths.keys(),
-      ]);
-
-      // Normalize folderPath: ensure it ends with "/" if non-empty
-      const prefix =
-        input.folderPath === ""
-          ? ""
-          : input.folderPath.endsWith("/")
-            ? input.folderPath
-            : input.folderPath + "/";
-
-      const folders = new Set<string>();
+      const folders = new Set<string>(listing?.dirs ?? []);
       const files: {
         name: string;
         path: string;
         lastCl: number;
         isArtifact: boolean;
-      }[] = [];
-      let totalFileCount = 0;
+      }[] = (listing?.files ?? []).map((f) => ({
+        name: f.name,
+        path: prefix + f.name,
+        lastCl: f.cl,
+        isArtifact: false,
+      }));
 
-      for (const filePath of alivePaths) {
-        totalFileCount++;
+      // The artifact overlay is still a fileId-keyed blob; convert it to paths
+      // via the File table (only when artifacts are requested), loading just
+      // the rows it names.
+      const artifactRaw = input.includeArtifacts
+        ? ((changelist.artifactStateTree as Record<string, number> | null) ??
+          {})
+        : {};
+      const artifactPaths = new Map<string, number>();
+      const artifactIds = Object.keys(artifactRaw);
+      for (let i = 0; i < artifactIds.length; i += 500) {
+        const rows = await ctx.db.file.findMany({
+          where: { repoId: input.repoId, id: { in: artifactIds.slice(i, i + 500) } },
+          select: { id: true, path: true },
+        });
+        for (const row of rows) artifactPaths.set(row.path, artifactRaw[row.id]!);
+      }
 
-        // Check if this file is under the requested folder
+      // Artifact paths that main does not also have add to the listing and
+      // to the total; main's own entries win where both exist.
+      const mainHasArtifactPath = await lookupStateTreePaths(
+        ctx.db,
+        input.repoId,
+        changelist.stateRootHash,
+        artifactPaths.keys(),
+      );
+      let artifactOnly = 0;
+      const listed = new Set(files.map((f) => f.path));
+      for (const [filePath, cl] of artifactPaths) {
+        if (mainHasArtifactPath.has(filePath)) continue;
+        artifactOnly++;
         if (!filePath.startsWith(prefix)) continue;
-
         const remainder = filePath.slice(prefix.length);
         const slashIndex = remainder.indexOf("/");
-
         if (slashIndex === -1) {
-          // Direct child file
-          const lastCl =
-            mainPaths.get(filePath) ?? artifactPaths.get(filePath)!;
-          files.push({
-            name: remainder,
-            path: filePath,
-            lastCl,
-            isArtifact: artifactPaths.has(filePath),
-          });
+          if (!listed.has(filePath)) {
+            files.push({ name: remainder, path: filePath, lastCl: cl, isArtifact: true });
+          }
         } else {
-          // Subfolder: collect unique folder name
           folders.add(remainder.slice(0, slashIndex));
         }
       }
+      for (const f of files) {
+        if (artifactPaths.has(f.path)) f.isArtifact = true;
+      }
+
+      const totalFileCount =
+        (await stateTreeFileCount(ctx.db, input.repoId, input.changelistNumber)) +
+        artifactOnly;
 
       // Folders and files are returned as separate lists, so the browse UI
       // already renders directories first; this only settles name order.

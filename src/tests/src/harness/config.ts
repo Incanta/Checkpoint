@@ -64,6 +64,10 @@ function applyDefaults(): void {
   setConfig("storage.token-expiration-seconds", 3600);
   // Tree blocks go to the TreeBlock table in tests (no storage server running).
   setConfig("state-tree.block-store", "postgres");
+  setConfig("state-tree.block-cache-bytes", 64 * 1024 * 1024);
+  // Every submit in the tests also rebuilds the tree and fails loudly on a
+  // mismatch (see createChangelist), so the suite checks the incremental path.
+  setConfig("state-tree.incremental", "strict");
 
   // Unmergeable content types. This list is also what resolves a file claim's
   // strength: binary means EXCLUSIVE, everything else ADVISORY. Kept to a

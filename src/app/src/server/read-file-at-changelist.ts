@@ -9,7 +9,7 @@ import {
 import { FileChangeType, type PrismaClient } from "@prisma/client";
 
 import { buildAddonStorageOptions } from "~/server/storage-options";
-import { getStateTreePaths } from "~/server/state-tree";
+import { lookupStateTreePaths } from "~/server/state-tree";
 
 export interface FileSource {
   /** The changelist that wrote the file's content as of the requested one. */
@@ -49,7 +49,13 @@ export async function resolveFileSource(
   });
 
   if (changelist?.stateRootHash) {
-    const tree = await getStateTreePaths(db, repoId, changelistNumber);
+    // One path: read only the blocks on the way to it.
+    const tree = await lookupStateTreePaths(
+      db,
+      repoId,
+      changelist.stateRootHash,
+      [normalized],
+    );
     const sourceNumber = tree.get(normalized);
     if (sourceNumber === undefined) {
       return null;

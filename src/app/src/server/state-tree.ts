@@ -4,16 +4,25 @@
 // by the routers. State is keyed by PATH -> sourceChangelistNumber.
 
 import config from "@incanta/config";
-import { type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import {
+  applyChanges,
   buildTree,
+  listDir,
+  lookup,
   materialize as materializeTree,
   diff as diffTrees,
+  newTreeOpStats,
   BLOCK_BUDGET,
   type BlockStore,
+  type DirListing,
+  type Hash,
   type StateMap,
   type TreeChange,
+  type TreeEdit,
+  type TreeOpStats,
 } from "./tree/tree";
+import { BlockCache, CachingBlockStore } from "./tree/cache";
 import { PrismaBlockStore } from "./tree/prisma-store";
 import { StorageBlockStore } from "./tree/storage-store";
 
@@ -22,16 +31,84 @@ export type PathStateMap = StateMap;
 
 export type BlockStoreType = "storage" | "postgres";
 
+// One cache for the process. Blocks are immutable, so it never goes stale.
+let blockCache: BlockCache | null = null;
+function sharedBlockCache(): BlockCache {
+  if (!blockCache) {
+    const configured = config.get<number | undefined>(
+      "state-tree.block-cache-bytes",
+    );
+    blockCache = new BlockCache(configured ?? 128 * 1024 * 1024);
+  }
+  return blockCache;
+}
+
 /**
  * Select the block store backend. "storage" uses the configured storage server
  * (R2 / SeaweedFS / stub); "postgres" uses the TreeBlock table (tests, and
- * setups with no storage server). See config/default/state-tree.yaml.
+ * setups with no storage server). See config/default/state-tree.yaml. Either
+ * way it is read and written through the shared block cache.
  */
-function blockStoreFor(db: PrismaClient, repoId: string): BlockStore {
+function blockStoreFor(db: PrismaClient, repoId: string): CachingBlockStore {
   const backend = config.get<BlockStoreType>("state-tree.block-store");
-  return backend === "postgres"
-    ? new PrismaBlockStore(db, repoId)
-    : new StorageBlockStore(db, repoId);
+  const inner: BlockStore =
+    backend === "postgres"
+      ? new PrismaBlockStore(db, repoId)
+      : new StorageBlockStore(db, repoId);
+  return new CachingBlockStore(inner, repoId, sharedBlockCache(), (hashes) =>
+    storedLengths(db, repoId, hashes),
+  );
+}
+
+/** Lengths recorded for stored blocks (see TreeBlockLength). */
+async function storedLengths(
+  db: PrismaClient,
+  repoId: string,
+  hashes: Hash[],
+): Promise<Map<Hash, number>> {
+  const out = new Map<Hash, number>();
+  const CHUNK = 500;
+  for (let i = 0; i < hashes.length; i += CHUNK) {
+    const rows = await db.treeBlockLength.findMany({
+      where: { repoId, hash: { in: hashes.slice(i, i + CHUNK) } },
+      select: { hash: true, length: true },
+    });
+    for (const row of rows) out.set(row.hash, row.length);
+  }
+  return out;
+}
+
+/**
+ * Records the lengths of blocks the store wrote. Called after the blocks are
+ * stored, so a row always describes a block that exists. Losing this write
+ * costs only fetches later, never correctness.
+ */
+async function persistNewLengths(
+  db: PrismaClient,
+  repoId: string,
+  store: CachingBlockStore,
+): Promise<void> {
+  const rows = [...store.takeNewLengths()];
+  const CHUNK = 300;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const values = rows
+      .slice(i, i + CHUNK)
+      .map(([hash, length]) => Prisma.sql`(${repoId}, ${hash}, ${length})`);
+    await db.$executeRaw`INSERT INTO "TreeBlockLength" ("repoId", "hash", "length") VALUES ${Prisma.join(values)} ON CONFLICT DO NOTHING`;
+  }
+}
+
+function logTreeOp(
+  op: string,
+  repoId: string,
+  stats: TreeOpStats,
+  extra: Record<string, unknown> = {},
+): void {
+  // The server's logger lives in the app; plain console keeps this module
+  // usable from scripts and tests.
+  console.debug(
+    `[state-tree] ${JSON.stringify({ op, repoId, ...extra, ...stats })}`,
+  );
 }
 
 /** Build a state tree from path -> CL entries; returns the root block hash. */
@@ -40,7 +117,147 @@ export async function buildStateTreeBlocks(
   repoId: string,
   entries: Iterable<[string, number]>,
 ): Promise<string> {
-  return buildTree(entries, blockStoreFor(db, repoId), BLOCK_BUDGET);
+  const store = blockStoreFor(db, repoId);
+  const stats = newTreeOpStats();
+  const root = await buildTree(entries, store, BLOCK_BUDGET, stats);
+  await persistNewLengths(db, repoId, store);
+  logTreeOp("build", repoId, stats);
+  return root;
+}
+
+/**
+ * Apply edits to the tree rooted at `parentRoot` (null for none) and store
+ * the new blocks; returns the new root hash. Reads and writes only what the
+ * edits touch. Throws TreeCollisionError for an edit that would make a path
+ * both a file and a directory.
+ */
+export async function applyStateTreeChanges(
+  db: PrismaClient,
+  repoId: string,
+  parentRoot: string | null,
+  edits: TreeEdit[],
+): Promise<string> {
+  const store = blockStoreFor(db, repoId);
+  const stats = newTreeOpStats();
+  const started = Date.now();
+  const root = await applyChanges(parentRoot, edits, store, BLOCK_BUDGET, stats);
+  await persistNewLengths(db, repoId, store);
+  logTreeOp("apply", repoId, stats, {
+    edits: edits.length,
+    ms: Date.now() - started,
+    cacheHits: store.stats.hits,
+    cacheMisses: store.stats.misses,
+  });
+  return root;
+}
+
+export type IncrementalMode = "on" | "verify" | "strict" | "off";
+
+/**
+ * The state tree for a submit: the head's tree with `edits` applied. How it
+ * is computed follows `state-tree.incremental`:
+ *
+ *   on      update only the edited paths.
+ *   verify  update, also rebuild from the parent's full path map, log a
+ *           mismatch as "[state-tree] MISMATCH" and use the rebuild's root.
+ *   strict  like verify, but a mismatch throws (tests).
+ *   off     rebuild from the parent's full path map.
+ */
+export async function submitStateTree(
+  db: PrismaClient,
+  repoId: string,
+  parentNumber: number,
+  parentRoot: string | null,
+  edits: TreeEdit[],
+): Promise<string> {
+  const mode = config.get<IncrementalMode | undefined>("state-tree.incremental") ?? "on";
+
+  const rebuild = async (): Promise<string> => {
+    const paths = new Map(await getStateTreePaths(db, repoId, parentNumber));
+    for (const e of edits) {
+      if (e.delete) paths.delete(e.path);
+      else paths.set(e.path, e.cl);
+    }
+    return buildStateTreeBlocks(db, repoId, paths.entries());
+  };
+
+  if (mode === "off") return rebuild();
+
+  const incremental = await applyStateTreeChanges(db, repoId, parentRoot, edits);
+  if (mode === "on") return incremental;
+
+  const rebuilt = await rebuild();
+  if (rebuilt !== incremental) {
+    const message = `[state-tree] MISMATCH ${JSON.stringify({
+      repoId,
+      parentNumber,
+      parentRoot,
+      edits: edits.length,
+      sample: edits.slice(0, 20),
+      incremental,
+      rebuilt,
+    })}`;
+    if (mode === "strict") throw new Error(message);
+    console.error(message);
+  }
+  return rebuilt;
+}
+
+/** Source changelists of `paths` in the tree rooted at `rootHash`. */
+export async function lookupStateTreePaths(
+  db: PrismaClient,
+  repoId: string,
+  rootHash: string | null,
+  paths: Iterable<string>,
+): Promise<StateMap> {
+  if (!rootHash) return new Map();
+  return lookup(rootHash, paths, blockStoreFor(db, repoId));
+}
+
+/** The direct children of `dir` in the tree rooted at `rootHash`. */
+export async function listStateTreeDir(
+  db: PrismaClient,
+  repoId: string,
+  rootHash: string | null,
+  dir: string,
+): Promise<DirListing | null> {
+  if (!rootHash) return dir ? null : { files: [], dirs: [] };
+  return listDir(rootHash, dir, blockStoreFor(db, repoId));
+}
+
+/**
+ * The number of files in a changelist's state. Submits and merges keep it
+ * from the parent's count; a changelist from before that has none, so it is
+ * counted from the tree once and recorded.
+ */
+export async function stateTreeFileCount(
+  db: PrismaClient,
+  repoId: string,
+  changelistNumber: number,
+): Promise<number> {
+  const cl = await db.changelist.findUnique({
+    where: { repoId_number: { repoId, number: changelistNumber } },
+    select: { fileCount: true, stateRootHash: true },
+  });
+  if (!cl) return 0;
+  if (cl.fileCount !== null) return cl.fileCount;
+  const count = cl.stateRootHash
+    ? (await materializeStateTreeBlocks(db, repoId, cl.stateRootHash)).size
+    : 0;
+  await db.changelist.update({
+    where: { repoId_number: { repoId, number: changelistNumber } },
+    data: { fileCount: count },
+  });
+  return count;
+}
+
+/** The state-tree root hash of a changelist, or null if it has none. */
+export async function stateRootOf(
+  db: PrismaClient,
+  repoId: string,
+  changelistNumber: number,
+): Promise<string | null> {
+  return rootHashOf(db, repoId, changelistNumber);
 }
 
 /** Materialize a state tree (by root hash) into a path -> CL map. */
@@ -77,9 +294,10 @@ function pathCacheSet(key: string, map: StateMap): void {
   }
 }
 
-/** Clear the cache (test isolation; not needed for correctness). */
+/** Clear the caches (test isolation; not needed for correctness). */
 export function clearStateTreeCache(): void {
   pathTreeCache.clear();
+  blockCache?.clear();
 }
 
 /** The materialized path -> CL state of a changelist (empty if it has no tree). */

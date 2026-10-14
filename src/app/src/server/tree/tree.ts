@@ -36,6 +36,75 @@ export const BLOCK_BUDGET = 128 * 1024;
 export interface BlockStore {
   put(bytes: Uint8Array): Promise<Hash>;
   get(hash: Hash): Promise<Uint8Array>;
+  /**
+   * Payload lengths of stored blocks, where known without fetching them.
+   * Partial: a hash missing from the result is simply unknown. A block's
+   * length is a function of its content, so an answer can never be stale.
+   */
+  lengths?(hashes: Hash[]): Promise<Map<Hash, number>>;
+}
+
+/** What a tree operation did to the store, for logs and scaling tests. */
+export interface TreeOpStats {
+  blocksFetched: number;
+  bytesFetched: number;
+  blocksPut: number;
+  bytesPut: number;
+  /** Writes skipped because the block was known to be stored already. */
+  putsSkipped: number;
+  /** Directories re-encoded because something beneath them changed. */
+  dirsRepacked: number;
+  /** Sibling lengths answered without fetching the block. */
+  lengthsKnown: number;
+  /** Sibling blocks fetched only to learn their length or inline them. */
+  siblingFetches: number;
+}
+
+export function newTreeOpStats(): TreeOpStats {
+  return {
+    blocksFetched: 0,
+    bytesFetched: 0,
+    blocksPut: 0,
+    bytesPut: 0,
+    putsSkipped: 0,
+    dirsRepacked: 0,
+    lengthsKnown: 0,
+    siblingFetches: 0,
+  };
+}
+
+/** State shared by one build or update. */
+interface PackCtx {
+  store: BlockStore;
+  budget: number;
+  /** Blocks known to be in the store, so writing them again is skipped. */
+  existing: Set<Hash>;
+  stats: TreeOpStats;
+}
+
+function newCtx(store: BlockStore, budget: number, stats?: TreeOpStats): PackCtx {
+  return { store, budget, existing: new Set(), stats: stats ?? newTreeOpStats() };
+}
+
+async function ctxPut(ctx: PackCtx, bytes: Uint8Array): Promise<Hash> {
+  const hash = toHex(hashBytes(bytes));
+  if (ctx.existing.has(hash)) {
+    ctx.stats.putsSkipped++;
+    return hash;
+  }
+  await ctx.store.put(bytes);
+  ctx.existing.add(hash);
+  ctx.stats.blocksPut++;
+  ctx.stats.bytesPut += bytes.length;
+  return hash;
+}
+
+async function ctxGet(ctx: PackCtx, hash: Hash): Promise<Uint8Array> {
+  const bytes = await ctx.store.get(hash);
+  ctx.existing.add(hash);
+  ctx.stats.blocksFetched++;
+  ctx.stats.bytesFetched += bytes.length;
+  return bytes;
 }
 
 /** A path -> sourceChangelistNumber map (the materialized state tree). */
@@ -85,73 +154,119 @@ function inlineCost(name: string, payloadLen: number): number {
   return name.length + payloadLen + 8;
 }
 
+/** A child of a directory being packed. */
+type PackChild =
+  | { name: string; kind: "file"; cl: number }
+  /** A subdirectory whose encoded payload is in hand. */
+  | { name: string; kind: "dir"; payload: Uint8Array; hash?: Hash }
+  /**
+   * An unchanged subdirectory stored as its own block, known only by hash.
+   * Its length decides whether it gets inlined; `len` is filled in when known.
+   */
+  | { name: string; kind: "ref"; hash: Hash; len?: number };
+
 /**
  * Pack a directory subtree into the store and return its node payload bytes.
- * Children whose subtree fits the remaining budget are inlined (their payload
- * embedded); children that don't fit are stored as their own block and
- * referenced by hash. Files are always inline. The returned payload is < budget
- * for any directory whose own entry list fits a block (true for all real UE /
- * World-Partition data; a single directory with a multi-block entry list is an
- * R1 limitation that throws, to be handled by entry chunking later).
+ * Children are packed bottom-up, then {@link packEntries} decides which are
+ * inlined and which are stored as their own block.
+ *
+ * A name that is both a file and a directory (a path "a" and a path "a/b")
+ * comes out as two file entries, which is how such trees were always built;
+ * new submits refuse that shape (see {@link TreeCollisionError}).
  */
-async function packDir(
-  node: DirNode,
-  store: BlockStore,
-  budget: number,
-): Promise<Uint8Array> {
+async function packDir(node: DirNode, ctx: PackCtx): Promise<Uint8Array> {
   // Pre-pack subdirectories (bottom-up) so we know each child's payload size.
   const childPayloads = new Map<string, Uint8Array>();
   for (const [name, child] of node.dirs) {
-    childPayloads.set(name, await packDir(child, store, budget));
+    childPayloads.set(name, await packDir(child, ctx));
   }
-
-  // Subtrees larger than this are always their own block (better sharing: an
-  // edit inside a large subtree must not re-version the parent's other
-  // content). Smaller subtrees are inline candidates that collapse the thin
-  // single-child scaffold; some are demoted to refs below if the node overflows.
-  const inlineMax = Math.max(256, Math.floor(budget / 4));
-
-  interface Item {
-    name: string;
-    isFile: boolean;
-    cl?: number;
-    payload?: Uint8Array;
-    ref: boolean; // current decision
-  }
-  const items: Item[] = [];
   const names = [
     ...[...node.files.keys()],
     ...[...node.dirs.keys()],
   ].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  for (const name of names) {
-    if (node.files.has(name)) {
-      items.push({ name, isFile: true, cl: node.files.get(name)!, ref: false });
-    } else {
-      const payload = childPayloads.get(name)!;
-      items.push({ name, isFile: false, payload, ref: payload.length > inlineMax });
+  const children: PackChild[] = names.map((name) =>
+    node.files.has(name)
+      ? { name, kind: "file", cl: node.files.get(name)! }
+      : { name, kind: "dir", payload: childPayloads.get(name)! },
+  );
+  return packEntries(children, ctx);
+}
+
+/**
+ * Encode one directory from its children (sorted by name), storing the
+ * children that become their own blocks. This is the single packing rule:
+ * a full build and an incremental update both come through here, which is
+ * what makes an update's root identical to a rebuild's.
+ *
+ * Children whose subtree is small are inline candidates that collapse the thin
+ * single-child scaffold; larger subtrees are always their own block (better
+ * sharing: an edit inside a large subtree must not re-version the parent's
+ * other content). If the node overflows, the largest inline subtrees are
+ * demoted to refs until it fits; a dense directory whose all-ref entry list
+ * still overflows is chunked by {@link finalizeDir}.
+ */
+async function packEntries(
+  children: PackChild[],
+  ctx: PackCtx,
+): Promise<Uint8Array> {
+  const { budget } = ctx;
+  const inlineMax = Math.max(256, Math.floor(budget / 4));
+  ctx.stats.dirsRepacked++;
+
+  // Unchanged subdirectories known only by hash need their payload length.
+  // Skip the lookup when every subdirectory must end up a ref anyway: when
+  // even the cheapest possible encoding (each one inline with the smallest
+  // payload a non-empty node can have, or a ref, whichever is smaller)
+  // overflows, the demotion below turns every one of them into a ref.
+  const unknown = children.filter(
+    (c): c is Extract<PackChild, { kind: "ref" }> =>
+      c.kind === "ref" && c.len === undefined,
+  );
+  if (unknown.length > 0) {
+    let lowerBound = 16;
+    for (const c of children) {
+      lowerBound +=
+        c.kind === "file"
+          ? fileCost(c.name)
+          : Math.min(refCost(c.name), inlineCost(c.name, MIN_NODE_BYTES));
+    }
+    if (lowerBound <= budget) {
+      await resolveLengths(unknown, ctx);
     }
   }
 
+  interface Item {
+    child: PackChild;
+    len: number; // payload length of a subdirectory (unused for files)
+    ref: boolean; // current decision
+  }
+  const items: Item[] = children.map((child) => {
+    if (child.kind === "file") return { child, len: 0, ref: false };
+    const len = child.kind === "dir" ? child.payload.length : child.len;
+    // An unknown length only remains when every subdirectory becomes a ref.
+    return {
+      child,
+      len: len ?? Infinity,
+      ref: len === undefined || len > inlineMax,
+    };
+  });
+
   const itemSize = (it: Item): number =>
-    it.isFile
-      ? fileCost(it.name)
+    it.child.kind === "file"
+      ? fileCost(it.child.name)
       : it.ref
-        ? refCost(it.name)
-        : inlineCost(it.name, it.payload!.length);
+        ? refCost(it.child.name)
+        : inlineCost(it.child.name, it.len);
 
   let size = 16; // header + count headroom
   for (const it of items) size += itemSize(it);
 
   // Demote the largest inline subtrees to refs (deterministic: largest payload
-  // first, name tiebreak) until the node fits. Starting from "all big subtrees
-  // already refs", this converges unless the all-ref entry list itself exceeds
-  // the budget (dense directory), which throws below.
+  // first, name tiebreak) until the node fits.
   if (size > budget) {
     const demotable = items
-      .filter((it) => !it.isFile && !it.ref)
-      .sort((a, b) =>
-        b.payload!.length - a.payload!.length || (a.name < b.name ? -1 : 1),
-      );
+      .filter((it) => it.child.kind !== "file" && !it.ref)
+      .sort((a, b) => b.len - a.len || (a.child.name < b.child.name ? -1 : 1));
     for (const it of demotable) {
       if (size <= budget) break;
       const before = itemSize(it);
@@ -159,20 +274,56 @@ async function packDir(
       size += itemSize(it) - before;
     }
   }
+
   const entries: EncodeEntry[] = [];
   for (const it of items) {
-    if (it.isFile) {
-      entries.push({ name: it.name, kind: KIND_FILE, cl: it.cl! });
+    const c = it.child;
+    if (c.kind === "file") {
+      entries.push({ name: c.name, kind: KIND_FILE, cl: c.cl });
     } else if (!it.ref) {
-      entries.push({ name: it.name, kind: KIND_DIR_INLINE, payload: it.payload! });
+      // A stored subdirectory small enough to inline again: fetch its bytes.
+      let payload: Uint8Array;
+      if (c.kind === "dir") {
+        payload = c.payload;
+      } else {
+        ctx.stats.siblingFetches++;
+        payload = await ctxGet(ctx, c.hash);
+      }
+      entries.push({ name: c.name, kind: KIND_DIR_INLINE, payload });
     } else {
-      const hash = hexToBytes(await store.put(it.payload!));
-      entries.push({ name: it.name, kind: KIND_DIR_REF, hash });
+      const hash =
+        c.kind === "ref" ? c.hash : (c.hash ?? (await ctxPut(ctx, c.payload)));
+      entries.push({ name: c.name, kind: KIND_DIR_REF, hash: hexToBytes(hash) });
     }
   }
   // A leaf node that fits is returned directly; a dense directory whose entry
   // list exceeds the budget is split into chunk blocks under an index node.
-  return finalizeDir(entries, store, budget);
+  return finalizeDir(entries, ctx);
+}
+
+// The smallest encoded node with at least one entry: version, type, count,
+// then shared-prefix, suffix length, a one-byte name, kind, and a one-byte
+// changelist. Empty directories never exist, so no subdirectory is smaller.
+const MIN_NODE_BYTES = 8;
+
+/** Fill in `len` for stored subdirectories, asking the store before fetching. */
+async function resolveLengths(
+  refs: Extract<PackChild, { kind: "ref" }>[],
+  ctx: PackCtx,
+): Promise<void> {
+  const known = ctx.store.lengths
+    ? await ctx.store.lengths(refs.map((r) => r.hash))
+    : new Map<Hash, number>();
+  for (const r of refs) {
+    const len = known.get(r.hash);
+    if (len !== undefined) {
+      r.len = len;
+      ctx.stats.lengthsKnown++;
+    } else {
+      ctx.stats.siblingFetches++;
+      r.len = (await ctxGet(ctx, r.hash)).length;
+    }
+  }
 }
 
 // ── dense-directory chunking ─────────────────────────────────────────
@@ -222,24 +373,22 @@ function chunkEntries(entries: EncodeEntry[], budget: number): EncodeEntry[][] {
 
 async function finalizeDir(
   entries: EncodeEntry[],
-  store: BlockStore,
-  budget: number,
+  ctx: PackCtx,
 ): Promise<Uint8Array> {
   const leaf = encodeNode(NODE_LEAF, entries);
-  if (leaf.length <= budget) return leaf;
-  const groups = chunkEntries(entries, budget);
+  if (leaf.length <= ctx.budget) return leaf;
+  const groups = chunkEntries(entries, ctx.budget);
   const level: { name: string; hash: Uint8Array }[] = [];
   for (const g of groups) {
-    const hash = hexToBytes(await store.put(encodeNode(NODE_LEAF, g)));
+    const hash = hexToBytes(await ctxPut(ctx, encodeNode(NODE_LEAF, g)));
     level.push({ name: g[0]!.name, hash });
   }
-  return finalizeIndex(level, store, budget);
+  return finalizeIndex(level, ctx);
 }
 
 async function finalizeIndex(
   level: { name: string; hash: Uint8Array }[],
-  store: BlockStore,
-  budget: number,
+  ctx: PackCtx,
 ): Promise<Uint8Array> {
   const entries: EncodeEntry[] = level.map((l) => ({
     name: l.name,
@@ -247,14 +396,14 @@ async function finalizeIndex(
     hash: l.hash,
   }));
   const idx = encodeNode(NODE_INDEX, entries);
-  if (idx.length <= budget) return idx;
-  const groups = chunkEntries(entries, budget);
+  if (idx.length <= ctx.budget) return idx;
+  const groups = chunkEntries(entries, ctx.budget);
   const up: { name: string; hash: Uint8Array }[] = [];
   for (const g of groups) {
-    const hash = hexToBytes(await store.put(encodeNode(NODE_INDEX, g)));
+    const hash = hexToBytes(await ctxPut(ctx, encodeNode(NODE_INDEX, g)));
     up.push({ name: g[0]!.name, hash });
   }
-  return finalizeIndex(up, store, budget);
+  return finalizeIndex(up, ctx);
 }
 
 /**
@@ -286,10 +435,359 @@ export async function buildTree(
   entries: Iterable<[string, number]>,
   store: BlockStore,
   budget: number,
+  stats?: TreeOpStats,
 ): Promise<Hash> {
+  const ctx = newCtx(store, budget, stats);
   const root = buildDirTree(entries);
-  const rootPayload = await packDir(root, store, budget);
-  return store.put(rootPayload);
+  const rootPayload = await packDir(root, ctx);
+  return ctxPut(ctx, rootPayload);
+}
+
+// ── incremental update ───────────────────────────────────────────────
+
+/** One change to a tree: a path set to a source changelist, or deleted. */
+export type TreeEdit =
+  | { path: string; cl: number; delete?: false }
+  | { path: string; delete: true };
+
+/**
+ * A path that would be both a file and a directory: adding "a/b" while "a" is
+ * a file, or "a" while "a/..." holds files. A tree cannot hold both, and the
+ * full build used to keep only the file and silently drop the directory.
+ */
+export class TreeCollisionError extends Error {
+  public constructor(
+    public readonly path: string,
+    public readonly existing: "file" | "dir",
+  ) {
+    super(
+      existing === "file"
+        ? `${path} is a file, so nothing can be added beneath it`
+        : `${path} is a directory, so it cannot also be a file`,
+    );
+    this.name = "TreeCollisionError";
+  }
+}
+
+/** The changes under one directory, keyed by child name. */
+interface EditTrie {
+  /** The edit to the file with this name, if any. */
+  file?: { cl: number } | "delete";
+  /** Changes beneath the directory with this name, if any. */
+  dir?: Map<string, EditTrie>;
+}
+
+function splitPath(path: string): string[] {
+  // Same normalization as buildDirTree: empty segments are dropped.
+  return path.split("/").filter((p) => p.length > 0);
+}
+
+function buildEditTrie(edits: TreeEdit[]): Map<string, EditTrie> {
+  const root = new Map<string, EditTrie>();
+  for (const edit of edits) {
+    const parts = splitPath(edit.path);
+    if (parts.length === 0) {
+      throw new Error(`empty path in tree edit: "${edit.path}"`);
+    }
+    let level = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      let node = level.get(parts[i]!);
+      if (!node) {
+        node = {};
+        level.set(parts[i]!, node);
+      }
+      node.dir ??= new Map();
+      level = node.dir;
+    }
+    const leaf = parts[parts.length - 1]!;
+    let node = level.get(leaf);
+    if (!node) {
+      node = {};
+      level.set(leaf, node);
+    }
+    // Later edits to the same path win, as they would applied one by one.
+    node.file = edit.delete ? "delete" : { cl: edit.cl };
+  }
+  return root;
+}
+
+/** Whether a trie adds anything (rather than only deleting). */
+function addsAnything(trie: Map<string, EditTrie>): boolean {
+  for (const node of trie.values()) {
+    if (node.file && node.file !== "delete") return true;
+    if (node.dir && addsAnything(node.dir)) return true;
+  }
+  return false;
+}
+
+/** A directory's children as they stand, before this update's changes. */
+type ExistingChild =
+  | { kind: "file"; cl: number }
+  | { kind: "inline"; payload: Uint8Array }
+  | { kind: "ref"; hash: Hash };
+
+async function readChildren(
+  payload: Uint8Array,
+  ctx: PackCtx,
+): Promise<Map<string, ExistingChild>> {
+  const out = new Map<string, ExistingChild>();
+  for (const e of await readDirEntriesCtx(payload, ctx)) {
+    // A name can appear twice in trees built from a map holding both "a" and
+    // "a/b" (both entries are files then). Keep the first, as readers do.
+    if (out.has(e.name)) continue;
+    if (e.kind === KIND_FILE) out.set(e.name, { kind: "file", cl: e.cl });
+    else if (e.kind === KIND_DIR_INLINE) out.set(e.name, { kind: "inline", payload: e.payload });
+    else out.set(e.name, { kind: "ref", hash: toHex(e.hash) });
+  }
+  return out;
+}
+
+/**
+ * Applies `trie` to a directory (null for one that does not exist yet) and
+ * returns its new payload, or null when it ends up empty (empty directories
+ * do not exist, so the caller drops the entry).
+ */
+async function applyDir(
+  payload: Uint8Array | null,
+  trie: Map<string, EditTrie>,
+  prefix: string,
+  ctx: PackCtx,
+): Promise<Uint8Array | null> {
+  const children = payload ? await readChildren(payload, ctx) : new Map<string, ExistingChild>();
+  const packed = new Map<string, Uint8Array>(); // changed subdirectories
+
+  for (const [name, edit] of trie) {
+    const path = prefix + name;
+    let existing = children.get(name);
+
+    // Deleting a file first lets the same batch put a directory in its place.
+    if (edit.file === "delete" && existing?.kind === "file") {
+      children.delete(name);
+      existing = undefined;
+    }
+
+    if (edit.dir) {
+      if (existing?.kind === "file") {
+        if (addsAnything(edit.dir)) throw new TreeCollisionError(path, "file");
+      } else {
+        let current: Uint8Array | null = null;
+        if (existing?.kind === "inline") current = existing.payload;
+        else if (existing?.kind === "ref") current = await ctxGet(ctx, existing.hash);
+        if (current || addsAnything(edit.dir)) {
+          const next = await applyDir(current, edit.dir, `${path}/`, ctx);
+          if (next) {
+            packed.set(name, next);
+          } else {
+            packed.delete(name);
+            children.delete(name);
+          }
+          existing = next ? { kind: "inline", payload: next } : undefined;
+        }
+      }
+    }
+
+    if (edit.file && edit.file !== "delete") {
+      if (existing && existing.kind !== "file") {
+        throw new TreeCollisionError(path, "dir");
+      }
+      children.set(name, { kind: "file", cl: edit.file.cl });
+    }
+  }
+
+  if (children.size === 0 && packed.size === 0) return null;
+
+  const names = new Set([...children.keys(), ...packed.keys()]);
+  const sorted = [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const list: PackChild[] = sorted.map((name) => {
+    const changed = packed.get(name);
+    if (changed) return { name, kind: "dir", payload: changed };
+    const c = children.get(name)!;
+    if (c.kind === "file") return { name, kind: "file", cl: c.cl };
+    if (c.kind === "inline") return { name, kind: "dir", payload: c.payload };
+    return { name, kind: "ref", hash: c.hash };
+  });
+  return packEntries(list, ctx);
+}
+
+/**
+ * Apply edits to an existing tree and return the new root hash.
+ *
+ * Path-copying: only the directories on the edited paths are read and
+ * re-encoded, and only blocks that did not exist before are written. The
+ * result is byte-identical to {@link buildTree} over the edited path map,
+ * because both pack every directory with {@link packEntries}.
+ *
+ * Throws {@link TreeCollisionError} when an edit would make a path both a
+ * file and a directory. Deleting a path that is not a file is a no-op.
+ */
+export async function applyChanges(
+  parentRoot: Hash | null,
+  edits: TreeEdit[],
+  store: BlockStore,
+  budget: number = BLOCK_BUDGET,
+  stats?: TreeOpStats,
+): Promise<Hash> {
+  const ctx = newCtx(store, budget, stats);
+  const trie = buildEditTrie(edits);
+  let rootPayload: Uint8Array | null = null;
+  if (parentRoot) {
+    rootPayload = await ctxGet(ctx, parentRoot);
+  }
+  if (trie.size === 0 && parentRoot) {
+    return parentRoot;
+  }
+  const next = await applyDir(rootPayload, trie, "", ctx);
+  return ctxPut(ctx, next ?? encodeNode(NODE_LEAF, []));
+}
+
+/** Like readDirEntries, but counts fetches and remembers chunk blocks as stored. */
+async function readDirEntriesCtx(
+  payload: Uint8Array,
+  ctx: PackCtx,
+): Promise<DecodedEntry[]> {
+  const { type, entries } = decodeNode(payload);
+  if (type === NODE_LEAF) return entries;
+  const all: DecodedEntry[] = [];
+  for (const e of entries) {
+    if (e.kind !== KIND_DIR_REF) throw new Error("index entry must be a ref");
+    const child = await ctxGet(ctx, toHex(e.hash));
+    for (const s of await readDirEntriesCtx(child, ctx)) all.push(s);
+  }
+  return all;
+}
+
+// ── point reads ──────────────────────────────────────────────────────
+
+/**
+ * The entry named `name` in a directory node, reading only the chunk of a
+ * dense (INDEX) directory that can hold it.
+ */
+async function findEntry(
+  payload: Uint8Array,
+  name: string,
+  ctx: PackCtx,
+): Promise<DecodedEntry | undefined> {
+  const { type, entries } = decodeNode(payload);
+  if (type === NODE_LEAF) {
+    return entries.find((e) => e.name === name);
+  }
+  // Index entries are named after their chunk's first entry, in name order:
+  // the chunk to read is the last one whose first name is <= `name`.
+  let pick: DecodedEntry | undefined;
+  for (const e of entries) {
+    if (e.name <= name) pick = e;
+    else break;
+  }
+  if (!pick || pick.kind !== KIND_DIR_REF) return undefined;
+  return findEntry(await ctxGet(ctx, toHex(pick.hash)), name, ctx);
+}
+
+async function childPayload(e: DecodedEntry, ctx: PackCtx): Promise<Uint8Array | null> {
+  if (e.kind === KIND_DIR_INLINE) return e.payload;
+  if (e.kind === KIND_DIR_REF) return ctxGet(ctx, toHex(e.hash));
+  return null;
+}
+
+/**
+ * The source changelists of `paths` at a tree, reading only the blocks on
+ * the way to them. Paths that are not files in the tree are absent from the
+ * result.
+ */
+export async function lookup(
+  rootHash: Hash,
+  paths: Iterable<string>,
+  store: BlockStore,
+  stats?: TreeOpStats,
+): Promise<StateMap> {
+  const ctx = newCtx(store, BLOCK_BUDGET, stats);
+  const out: StateMap = new Map();
+  // Group the requested paths by directory so each directory is read once.
+  const trie = new Map<string, EditTrie>();
+  const original = new Map<string, string[]>();
+  for (const path of paths) {
+    const parts = splitPath(path);
+    if (parts.length === 0) continue;
+    const key = parts.join("/");
+    const list = original.get(key);
+    if (list) list.push(path);
+    else original.set(key, [path]);
+    let level = trie;
+    for (let i = 0; i < parts.length - 1; i++) {
+      let node = level.get(parts[i]!);
+      if (!node) {
+        node = {};
+        level.set(parts[i]!, node);
+      }
+      node.dir ??= new Map();
+      level = node.dir;
+    }
+    const leafName = parts[parts.length - 1]!;
+    const leaf = level.get(leafName) ?? {};
+    leaf.file = { cl: 0 };
+    level.set(leafName, leaf);
+  }
+
+  const visit = async (payload: Uint8Array, level: Map<string, EditTrie>, prefix: string) => {
+    // Many names in one directory: read it whole. A few: look each one up,
+    // which in a dense directory reads one chunk per name.
+    let byName: Map<string, DecodedEntry> | null = null;
+    if (level.size > 8) {
+      byName = new Map();
+      for (const e of await readDirEntriesCtx(payload, ctx)) {
+        if (!byName.has(e.name)) byName.set(e.name, e);
+      }
+    }
+    for (const [name, want] of level) {
+      const entry = byName ? byName.get(name) : await findEntry(payload, name, ctx);
+      if (!entry) continue;
+      const path = prefix + name;
+      if (want.file && entry.kind === KIND_FILE) {
+        for (const asked of original.get(path) ?? []) out.set(asked, entry.cl);
+      }
+      if (want.dir && entry.kind !== KIND_FILE) {
+        const child = await childPayload(entry, ctx);
+        if (child) await visit(child, want.dir, `${path}/`);
+      }
+    }
+  };
+  await visit(await ctxGet(ctx, rootHash), trie, "");
+  return out;
+}
+
+/** The direct children of one directory of a tree. */
+export interface DirListing {
+  files: { name: string; cl: number }[];
+  dirs: string[];
+}
+
+/**
+ * The direct children of `dir` ("" for the root), or null if it is not a
+ * directory in the tree. Reads only the blocks on the way there and the
+ * directory itself.
+ */
+export async function listDir(
+  rootHash: Hash,
+  dir: string,
+  store: BlockStore,
+  stats?: TreeOpStats,
+): Promise<DirListing | null> {
+  const ctx = newCtx(store, BLOCK_BUDGET, stats);
+  let payload: Uint8Array | null = await ctxGet(ctx, rootHash);
+  for (const part of splitPath(dir)) {
+    const entry = await findEntry(payload, part, ctx);
+    if (!entry || entry.kind === KIND_FILE) return null;
+    payload = await childPayload(entry, ctx);
+    if (!payload) return null;
+  }
+  const listing: DirListing = { files: [], dirs: [] };
+  const seen = new Set<string>();
+  for (const e of await readDirEntriesCtx(payload, ctx)) {
+    if (seen.has(e.name)) continue;
+    seen.add(e.name);
+    if (e.kind === KIND_FILE) listing.files.push({ name: e.name, cl: e.cl });
+    else listing.dirs.push(e.name);
+  }
+  return listing;
 }
 
 // ── materialize ──────────────────────────────────────────────────────
