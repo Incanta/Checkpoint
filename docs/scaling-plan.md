@@ -47,9 +47,9 @@ Long-history scenario, 100 changelists over a 395-file tree, local dev stack (Wi
 
 At this size the submit cost is dominated by fixed overhead, so it does not yet show growth; the clone's pass count is the clear history-length cost.
 
-After N4 (same scenario): no `store.lsi` is read or written at all; small submits 1.3 to 2.1 s (fixed overhead), fresh clone 1.8 s, pull of one changelist 1.4 s, single-file read 1.0 s.
-
 After N2 (same scenario): fresh clone **2.1 s in 1 native pass** (was 28.7 s in 101), native time 0.5 s (was 26.7 s), no stray corrections; pull of one changelist 2.0 s (fixed overhead: setup and the server diff dominate).
+
+After N4 (same scenario): no `store.lsi` is read or written at all; small submits 1.3 to 2.1 s (fixed overhead), fresh clone 1.8 s, pull of one changelist 1.4 s, single-file read 1.0 s.
 
 ## Needs you
 
@@ -64,7 +64,7 @@ Items only you can decide or do. Each is also noted where it comes up.
   - `state-tree.incremental` ships as `verify`: each submit updates the tree incrementally, also rebuilds it, and logs `[state-tree] MISMATCH` on any difference (using the rebuild). Watch production logs for that line; after a clean period, set it to `on` so submits stop paying for the rebuild. Locally: 0 mismatches over 125 submits; the test suite runs in `strict` mode (a mismatch fails the test).
 
 - **After every deployed repo has migrated** (each repo's `index/migration.json` exists with an empty `broken` list), two code removals become safe; they are not done because they would break repos that have not migrated yet:
-  - the per-changelist pull fallback in `src/core/daemon/src/util/pull.ts` (the `!singlePass` branch) and `changelist.getPullAnomalies` in the app router, with their tests;
+  - the per-changelist pull fallback in `src/core/daemon/src/util/pull.ts` (the `!singlePass` branch) and `changelist.getPullAnomalies` in the app router, with their tests. Keep it if any repo has versions hashed or chunked with different settings (the single pass refuses to mix them and falls back here);
   - the `store.lsi` fallback in `pull-selection.cpp` and `read-file.cpp` (`SyncGetExistingContent` when a block map is missing).
 - **Open decisions**
   - Unique `(repoId, path)` index on `File` after a duplicate audit, or keep it non-unique?
