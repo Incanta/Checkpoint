@@ -28,7 +28,7 @@ Decisions already made: a breaking change behind a version gate is fine; design 
 | S2 | Incremental `applyChanges` (byte-identical to a full build), collision guard, `state-tree.incremental` rollout flag (default `verify`) | Done |
 | S3 | Sparse three-way merge (reads only paths the branch changed; target-unmoved merges reuse the incoming tree), full-map LRU removed | Done |
 | N1 | Submit writes per-version block maps (`versions/<stem>.lsi`), verified by the server before it records anything; block-tag bug in `Longtail_GetExistingStoreIndex` fixed | Done |
-| N2 | Single-pass pull and file reads from block maps | To do |
+| N2 | Single-pass pull (`PullSelectionAsync`: each path from its own source, only selected paths scanned, one `ChangeVersion`), file reads from block maps; per-changelist path kept as fallback for versions without block maps | Done |
 | N3 | Server index segments and `/existing-content`, in shadow mode | To do |
 | N4 | Cutover: client uses `/existing-content`, no lock or merge on submit, migration, version gate (breaking) | To do |
 | N5 | Cleanup: compaction, delete `store.lsi` and the old merge path | To do |
@@ -46,6 +46,8 @@ Long-history scenario, 100 changelists over a 395-file tree, local dev stack (Wi
 | Single-file read | 1.0 s |
 
 At this size the submit cost is dominated by fixed overhead, so it does not yet show growth; the clone's pass count is the clear history-length cost.
+
+After N2 (same scenario): fresh clone **2.1 s in 1 native pass** (was 28.7 s in 101), native time 0.5 s (was 26.7 s), no stray corrections; pull of one changelist 2.0 s (fixed overhead: setup and the server diff dominate).
 
 ## Needs you
 

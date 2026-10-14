@@ -105,6 +105,29 @@ WrapperAsyncHandle* PullAsync(
     uint32_t NumIncludePaths,
     int LogLevel);
 
+WrapperAsyncHandle* PullSelectionAsync(
+    const char* const* Sources,
+    uint32_t NumSources,
+    const char* const* SelectionPaths,
+    const uint32_t* SelectionSources,
+    uint32_t NumSelections,
+    bool EnableMmapIndexing,
+    bool EnableMmapBlockStore,
+    const char* LocalRootPath,
+    const char* RemoteBasePath,
+    const char* StorageType,
+    const char* GatewayUrl,
+    const char* JWT,
+    uint64_t JWTExpirationMs,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
+    const char* CachePath,
+    int LogLevel);
+
 ReadFileAsyncHandle* ReadFileFromVersionAsync(
     const char* FilePath,
     const char* VersionIndexName,
@@ -371,6 +394,110 @@ static Napi::Value NapiPullAsync(const Napi::CallbackInfo& info) {
   if (!handle) {
     delete ctx;
     Napi::Error::New(env, "PullAsync returned null handle").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  ctx->nativeHandle = handle;
+  ctx->isReadFileHandle = false;
+
+  return Napi::External<HandleContext>::New(env, ctx, ContextCleanup);
+}
+
+// --------------------------------------------------------------------------
+// filterPaths(includeRules: string[], paths: string[]): boolean[]
+// --------------------------------------------------------------------------
+// Synchronous: whether each path passes the include rules, by the same
+// matcher the native pull uses, so callers can decide in advance which paths
+// a pull will write.
+static Napi::Value NapiFilterPaths(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 2 || !info[0].IsArray() || !info[1].IsArray()) {
+    Napi::TypeError::New(env, "Expected (includeRules: string[], paths: string[])").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  Napi::Array rulesArray = info[0].As<Napi::Array>();
+  std::vector<std::string> rules;
+  for (uint32_t i = 0; i < rulesArray.Length(); ++i) {
+    rules.push_back(rulesArray.Get(i).As<Napi::String>().Utf8Value());
+  }
+  std::vector<const char*> rulePtrs;
+  for (const auto& r : rules) rulePtrs.push_back(r.c_str());
+  Checkpoint::PathFilter filter(rulePtrs.empty() ? nullptr : rulePtrs.data(), static_cast<uint32_t>(rulePtrs.size()));
+
+  Napi::Array paths = info[1].As<Napi::Array>();
+  Napi::Array out = Napi::Array::New(env, paths.Length());
+  for (uint32_t i = 0; i < paths.Length(); ++i) {
+    const std::string path = paths.Get(i).As<Napi::String>().Utf8Value();
+    out.Set(i, Napi::Boolean::New(env, filter.IsNoOp() || filter.Includes(path.c_str())));
+  }
+  return out;
+}
+
+// --------------------------------------------------------------------------
+// pullSelectionAsync(options: object): External<HandleContext>
+// --------------------------------------------------------------------------
+static Napi::Value NapiPullSelectionAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  if (info.Length() < 1 || !info[0].IsObject()) {
+    Napi::TypeError::New(env, "Expected options object").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  Napi::Object opts = info[0].As<Napi::Object>();
+  auto* ctx = new HandleContext();
+
+  // The wrapper copies these arrays before returning, so pointers into ctx
+  // only need to live for the call; they live on ctx anyway.
+  std::vector<const char*> sources;
+  Napi::Array sourcesArray = opts.Get("sources").As<Napi::Array>();
+  for (uint32_t i = 0; i < sourcesArray.Length(); ++i) {
+    sources.push_back(StoreString(ctx, sourcesArray.Get(i).As<Napi::String>().Utf8Value()));
+  }
+  std::vector<const char*> selectionPaths;
+  std::vector<uint32_t> selectionSources;
+  Napi::Array pathsArray = opts.Get("selectionPaths").As<Napi::Array>();
+  Napi::Array sourceIndexArray = opts.Get("selectionSources").As<Napi::Array>();
+  if (pathsArray.Length() != sourceIndexArray.Length()) {
+    delete ctx;
+    Napi::TypeError::New(env, "selectionPaths and selectionSources must have the same length").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  for (uint32_t i = 0; i < pathsArray.Length(); ++i) {
+    selectionPaths.push_back(StoreString(ctx, pathsArray.Get(i).As<Napi::String>().Utf8Value()));
+    selectionSources.push_back(sourceIndexArray.Get(i).As<Napi::Number>().Uint32Value());
+  }
+
+  bool enableMmapIndexing = opts.Get("enableMmapIndexing").As<Napi::Boolean>().Value();
+  bool enableMmapBlockStore = opts.Get("enableMmapBlockStore").As<Napi::Boolean>().Value();
+  const char* localRootPath = StoreString(ctx, opts.Get("localRootPath").As<Napi::String>().Utf8Value());
+  const char* remoteBasePath = StoreString(ctx, opts.Get("remoteBasePath").As<Napi::String>().Utf8Value());
+  const char* jwt = StoreString(ctx, opts.Get("jwt").As<Napi::String>().Utf8Value());
+  uint64_t jwtExpirationMs = static_cast<uint64_t>(opts.Get("jwtExpirationMs").As<Napi::Number>().Int64Value());
+  const char* storageType = OptStr(ctx, opts, "storageType", "gateway");
+  const char* gatewayUrl = OptStr(ctx, opts, "gatewayUrl", "");
+  const char* s3Endpoint = OptStr(ctx, opts, "s3Endpoint", "");
+  const char* s3Region = OptStr(ctx, opts, "s3Region", "");
+  const char* s3Bucket = OptStr(ctx, opts, "s3Bucket", "");
+  const char* s3AccessKeyId = OptStr(ctx, opts, "s3AccessKeyId", "");
+  const char* s3SecretAccessKey = OptStr(ctx, opts, "s3SecretAccessKey", "");
+  const char* s3SessionToken = OptStr(ctx, opts, "s3SessionToken", "");
+  int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
+  const char* cachePath = OptStr(ctx, opts, "cachePath", nullptr);
+
+  WrapperAsyncHandle* handle = ::PullSelectionAsync(
+      sources.data(), static_cast<uint32_t>(sources.size()),
+      selectionPaths.data(), selectionSources.data(), static_cast<uint32_t>(selectionPaths.size()),
+      enableMmapIndexing, enableMmapBlockStore,
+      localRootPath, remoteBasePath,
+      storageType, gatewayUrl, jwt, jwtExpirationMs,
+      s3Endpoint, s3Region, s3Bucket, s3AccessKeyId, s3SecretAccessKey, s3SessionToken,
+      cachePath,
+      logLevel);
+
+  if (!handle) {
+    delete ctx;
+    Napi::Error::New(env, "PullSelectionAsync returned null handle").ThrowAsJavaScriptException();
     return env.Undefined();
   }
 
@@ -799,6 +926,8 @@ static Napi::Value NapiFreeReadFileHandle(const Napi::CallbackInfo& info) {
 static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("submitAsync", Napi::Function::New(env, NapiSubmitAsync));
   exports.Set("pullAsync", Napi::Function::New(env, NapiPullAsync));
+  exports.Set("pullSelectionAsync", Napi::Function::New(env, NapiPullSelectionAsync));
+  exports.Set("filterPaths", Napi::Function::New(env, NapiFilterPaths));
   exports.Set("mergeAsync", Napi::Function::New(env, NapiMergeAsync));
   exports.Set("storeBlockMapAsync", Napi::Function::New(env, NapiStoreBlockMapAsync));
   exports.Set("readFileFromVersionAsync", Napi::Function::New(env, NapiReadFileFromVersionAsync));

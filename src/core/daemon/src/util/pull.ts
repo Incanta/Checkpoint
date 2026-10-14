@@ -4,7 +4,9 @@ import {
   hashFileMD5,
 } from "@checkpointvcs/common";
 import {
+  filterPaths,
   pullAsync,
+  pullSelectionAsync,
   pollHandle,
   freeHandle,
   GetLogLevel,
@@ -195,22 +197,33 @@ export async function pull(
   const versionsToPull: string[] = sortedChangelists.map(
     (changelist: any) => changelist.versionIndex,
   );
+  const versionByCl = new Map<number, string>(
+    sortedChangelists.map((cl: any) => [cl.number, cl.versionIndex]),
+  );
+
+  // The paths the pull brings in, each from its own source changelist. When
+  // every source has a version index they are written in one native pass
+  // that touches nothing else (see pull-selection.cpp). Otherwise, or if the
+  // native side declines, each source's whole index is applied in turn as
+  // before, with the stray/stale correction that requires.
+  const incoming = [...diff.added, ...diff.modified];
+  let singlePass = incoming.every((c) => (versionByCl.get(c.cl) ?? "") !== "");
 
   // A changelist's version index holds everything that changelist touched,
-  // so applying it can write paths the diff says nothing about: a file a later
-  // changelist deleted (a stray), or a file whose current version comes from
-  // some other changelist (a stale write). Ask the server which, so local
-  // files at those paths can be protected now and the workspace corrected
-  // afterwards. See changelist.getPullAnomalies.
+  // so applying it whole can write paths the diff says nothing about: a file
+  // a later changelist deleted (a stray), or a file whose current version
+  // comes from some other changelist (a stale write). Only the per-index path
+  // needs to know which; ask the server, so local files at those paths can be
+  // protected and the workspace corrected afterwards.
   let anomalies: { stray: string[]; stale: { path: string; cl: number }[] } = {
     stray: [],
     stale: [],
   };
-  const pulledNumbers: number[] = sortedChangelists
-    .filter((cl: any) => cl.versionIndex !== "")
-    .map((cl: any) => cl.number);
-  timer.stage("anomalies");
-  if (pulledNumbers.length > 0) {
+  const loadAnomalies = async (): Promise<void> => {
+    const pulledNumbers: number[] = sortedChangelists
+      .filter((cl: any) => cl.versionIndex !== "")
+      .map((cl: any) => cl.number);
+    if (pulledNumbers.length === 0) return;
     try {
       anomalies = await client.changelist.getPullAnomalies.mutate({
         repoId: workspace.repoId,
@@ -222,7 +235,9 @@ export async function pull(
       // clean up after itself.
       Logger.warn(`Could not check for stray files before pulling: ${err}`);
     }
-  }
+  };
+  timer.stage("anomalies");
+  if (!singlePass) await loadAnomalies();
   const diffPaths = new Set<string>([
     ...diff.modified.map((c) => c.path),
     ...diff.added.map((c) => c.path),
@@ -254,18 +269,21 @@ export async function pull(
       workspaceState.files[removedPath],
     );
   }
-  for (const strayPath of anomalies.stray) {
-    if (diffPaths.has(strayPath)) continue;
-    await guard.protect(strayPath, "added", workspaceState.files[strayPath]);
-  }
-  for (const entry of anomalies.stale) {
-    if (diffPaths.has(entry.path)) continue;
-    await guard.protect(
-      entry.path,
-      "modified",
-      workspaceState.files[entry.path],
-    );
-  }
+  const protectAnomalies = async (): Promise<void> => {
+    for (const strayPath of anomalies.stray) {
+      if (diffPaths.has(strayPath)) continue;
+      await guard.protect(strayPath, "added", workspaceState.files[strayPath]);
+    }
+    for (const entry of anomalies.stale) {
+      if (diffPaths.has(entry.path)) continue;
+      await guard.protect(
+        entry.path,
+        "modified",
+        workspaceState.files[entry.path],
+      );
+    }
+  };
+  await protectAnomalies();
   if (guard.files.length > 0) {
     Logger.info(
       `Pull will touch ${guard.files.length} file(s) with local changes; copies kept in ${guard.backupRoot}`,
@@ -281,7 +299,107 @@ export async function pull(
   let lastStep = "";
   let nativePasses = 0;
   timer.stage("native");
-  for (const versionIndex of versionsToPull) {
+
+  // Paths the include rules keep. Excluded ones are neither written nor
+  // recorded in the workspace state.
+  const included =
+    includePaths && includePaths.length > 0
+      ? filterPaths(includePaths, incoming.map((c) => c.path))
+      : null;
+  const stateIncoming = singlePass
+    ? incoming.filter((_, i) => !included || included[i])
+    : incoming;
+
+  // Polling shared by both native paths.
+  const pollNative = async (handle: any) => {
+    const pollOptions: Parameters<typeof pollHandle>[1] = {
+      onTokenRefresh: refreshStorageToken,
+    };
+    if (onStep) {
+      pollOptions.onStep = (step) => {
+        lastStep = step;
+        onStep(step);
+      };
+    }
+    if (onProgress) {
+      pollOptions.onProgress = (step, done, total) =>
+        onProgress(step, done, total);
+    }
+    if (!onStep && !onProgress) {
+      pollOptions.intervalMs = 250;
+    }
+    try {
+      return await pollHandle(handle, pollOptions);
+    } finally {
+      freeHandle(handle);
+    }
+  };
+
+  if (singlePass) {
+    // A path the workspace already has at its source changelist is skipped:
+    // its file is the one the changelist wrote, plus whatever local edits the
+    // guard is keeping track of.
+    const selections = stateIncoming.filter(
+      (c) => workspaceState.files[c.path]?.changelist !== c.cl,
+    );
+    if (selections.length > 0) {
+      const sources: string[] = [];
+      const sourceIndex = new Map<string, number>();
+      const selectionSources = selections.map((c) => {
+        const name = versionByCl.get(c.cl)!;
+        let index = sourceIndex.get(name);
+        if (index === undefined) {
+          index = sources.length;
+          sources.push(name);
+          sourceIndex.set(name, index);
+        }
+        return index;
+      });
+
+      const handle = pullSelectionAsync({
+        sources,
+        selectionPaths: selections.map((c) => c.path),
+        selectionSources,
+        enableMmapIndexing: daemonConfig.longtail.enableMmapIndexing,
+        enableMmapBlockStore: daemonConfig.longtail.enableMmapBlockStore,
+        localRootPath: workspace.localPath,
+        remoteBasePath: `/${orgId}/${workspace.repoId}`,
+        cachePath: blockCachePath,
+        ...storageOptions,
+        logLevel: GetLogLevel(resolvedLogLevel),
+      });
+      if (!handle) {
+        throw new Error("Failed to create longtail handle");
+      }
+      nativePasses = 1;
+      timer.count("selected", selections.length);
+      timer.count("sources", sources.length);
+      const { status, result } = await pollNative(handle);
+      if (result) Logger.debug(`[pull-selection] ${JSON.stringify(result)}`);
+      if (status.error !== 0) {
+        if (/different hashing or chunk sizes/.test(status.currentStep)) {
+          // Sources that cannot share one index: apply them one at a time.
+          Logger.info("Pull: sources differ in hashing or chunking; applying each changelist in turn");
+          singlePass = false;
+        } else {
+          Logger.error(
+            `Pull failed with exit code: ${status.error} and last step ${status.currentStep}`,
+          );
+          lastStep = status.currentStep;
+          errored = true;
+        }
+      }
+    }
+  }
+
+  if (!singlePass && !errored) {
+    if (anomalies.stray.length === 0 && anomalies.stale.length === 0) {
+      await loadAnomalies();
+      await protectAnomalies();
+    }
+  }
+
+  for (const versionIndex of singlePass || errored ? [] : versionsToPull) {
     if (versionIndex === "") {
       continue;
     }
@@ -494,7 +612,7 @@ export async function pull(
     // existing entry (and hash).
     const newFiles: Record<string, WorkspaceStateFile> = {};
 
-    const changed = [...diff.added, ...diff.modified];
+    const changed = stateIncoming;
     const stateTotal = changed.length;
     onProgress?.("Updating workspace state", 0, stateTotal);
 

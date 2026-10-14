@@ -78,6 +78,8 @@ type NativeHandle = object;
 interface LongtailAddonNative {
   submitAsync(options: SubmitAsyncOptions): NativeHandle;
   pullAsync(options: PullAsyncOptions): NativeHandle;
+  pullSelectionAsync(options: PullSelectionAsyncOptions): NativeHandle;
+  filterPaths(includeRules: string[], paths: string[]): boolean[];
   mergeAsync(options: MergeAsyncOptions): NativeHandle;
   storeBlockMapAsync(options: StoreBlockMapAsyncOptions): NativeHandle;
   readFileFromVersionAsync(
@@ -192,6 +194,28 @@ export interface PullAsyncOptions extends StorageOptions {
   includePaths?: string[];
 }
 
+/**
+ * Bring the given paths to the content each has in its own source version
+ * index, in one pass, finding blocks through each source's block map. Only
+ * the selected paths are scanned and written; deletions are the caller's.
+ * The handle result is `{ assets, written, sources, blockMaps, indexBytes,
+ * fetchMs, ms }`. Fails with ENOTSUP (95 on Linux, 129 on Windows) when the
+ * sources were hashed or chunked differently; apply them one by one then.
+ */
+export interface PullSelectionAsyncOptions extends StorageOptions {
+  /** Version index file names; selections refer to them by position. */
+  sources: string[];
+  selectionPaths: string[];
+  /** For each selection path, the index into `sources` that holds it. */
+  selectionSources: number[];
+  enableMmapIndexing: boolean;
+  enableMmapBlockStore: boolean;
+  localRootPath: string;
+  remoteBasePath: string;
+  cachePath?: string;
+  logLevel: number;
+}
+
 export interface MergeAsyncOptions extends StorageOptions {
   remoteBasePath: string;
   storeIndexBuffer: Buffer;
@@ -272,6 +296,20 @@ export function submitAsync(options: SubmitAsyncOptions): NativeHandle {
 
 export function pullAsync(options: PullAsyncOptions): NativeHandle {
   return addon.pullAsync(options);
+}
+
+export function pullSelectionAsync(
+  options: PullSelectionAsyncOptions,
+): NativeHandle {
+  return addon.pullSelectionAsync(options);
+}
+
+/**
+ * Whether each path passes the gitignore-style include rules, by the matcher
+ * the native pull uses. No rules includes everything.
+ */
+export function filterPaths(includeRules: string[], paths: string[]): boolean[] {
+  return addon.filterPaths(includeRules, paths);
 }
 
 export function mergeAsync(options: MergeAsyncOptions): NativeHandle {

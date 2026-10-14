@@ -2,6 +2,7 @@
 #include <shareblockstore/longtail_shareblockstore.h>
 
 #include <unordered_map>
+#include <vector>
 
 #include "../util/existing-content.h"
 #include "../util/version-index-io.h"
@@ -215,10 +216,29 @@ static int ReadFileFromVersionSync(
     chunk_hashes[i] = version_index->m_ChunkHashes[chunk_index];
   }
 
-  // Get store index for these chunks
+  // Find the blocks holding these chunks. The version's block map
+  // (versions/<name>.lsi) names them directly; a version submitted before
+  // block maps falls back to the repo-wide store index, which is downloaded
+  // whole.
   SetHandleStep(handle, "Fetching block information");
-  struct Longtail_StoreIndex* store_index;
-  err = SyncGetExistingContent(store_block_store_api, chunk_count, chunk_hashes, 0, &store_index);
+  struct Longtail_StoreIndex* store_index = 0;
+  err = ENOENT;
+  {
+    std::string stem = VersionIndexName;
+    if (stem.size() > 4 && stem.compare(stem.size() - 4, 4, ".lvi") == 0) {
+      stem = stem.substr(0, stem.size() - 4);
+    }
+    const std::string map_path = std::string(RemoteBasePath) + "/versions/" + stem + ".lsi";
+    struct Longtail_StoreIndex* block_map = 0;
+    if (remote_storage_api->IsFile(remote_storage_api, map_path.c_str()) &&
+        Longtail_ReadStoreIndex(remote_storage_api, map_path.c_str(), &block_map) == 0) {
+      err = Longtail_GetExistingStoreIndex(block_map, chunk_count, chunk_hashes, 0, &store_index);
+      Longtail_Free(block_map);
+    }
+  }
+  if (err) {
+    err = SyncGetExistingContent(store_block_store_api, chunk_count, chunk_hashes, 0, &store_index);
+  }
   if (err) {
     SetHandleStep(handle, "Failed to get store index");
     handle->error = err;
@@ -240,6 +260,14 @@ static int ReadFileFromVersionSync(
   chunk_hash_to_index.reserve(*store_index->m_ChunkCount);
   for (uint32_t i = 0; i < *store_index->m_ChunkCount; ++i) {
     chunk_hash_to_index[store_index->m_ChunkHashes[i]] = i;
+  }
+
+  // Which block each stored chunk is in, by its position in the index.
+  std::vector<uint32_t> chunk_block(*store_index->m_ChunkCount, 0);
+  for (uint32_t b = 0; b < *store_index->m_BlockCount; ++b) {
+    const uint32_t first = store_index->m_BlockChunksOffsets[b];
+    const uint32_t count = store_index->m_BlockChunkCounts[b];
+    for (uint32_t c = 0; c < count; ++c) chunk_block[first + c] = b;
   }
 
   // Build block hash -> block index lookup using std::unordered_map
@@ -268,6 +296,13 @@ static int ReadFileFromVersionSync(
     SAFE_DISPOSE_API(hash_registry);
     SAFE_DISPOSE_API(job_api);
     return ENOMEM;
+  }
+
+  // Offset of each of the asset's chunks within the file.
+  std::vector<uint64_t> chunk_dest_offsets(chunk_count, 0);
+  for (uint32_t i = 1; i < chunk_count; ++i) {
+    const uint32_t prev = version_index->m_AssetChunkIndexes[chunk_index_start + i - 1];
+    chunk_dest_offsets[i] = chunk_dest_offsets[i - 1] + version_index->m_ChunkSizes[prev];
   }
 
   // Read chunks and assemble file
@@ -299,16 +334,7 @@ static int ReadFileFromVersionSync(
 
     // Find which block this chunk is in
     uint32_t store_chunk_index = chunk_it->second;
-    TLongtail_Hash block_hash = 0;
-    for (uint32_t b = 0; b < *store_index->m_BlockCount; ++b) {
-      uint32_t block_chunk_offset = store_index->m_BlockChunksOffsets[b];
-      uint32_t block_chunk_count = store_index->m_BlockChunkCounts[b];
-      if (store_chunk_index >= block_chunk_offset &&
-          store_chunk_index < block_chunk_offset + block_chunk_count) {
-        block_hash = store_index->m_BlockHashes[b];
-        break;
-      }
-    }
+    TLongtail_Hash block_hash = store_index->m_BlockHashes[chunk_block[store_chunk_index]];
 
     block_to_chunks[block_hash].push_back(i);
   }
@@ -436,13 +462,9 @@ static int ReadFileFromVersionSync(
       uint32_t chunk_offset = it->second.first;
       uint32_t chunk_size = it->second.second;
 
-      // Calculate the destination offset in the file
-      // We need the offset based on chunk order in the asset
-      uint64_t dest_offset = 0;
-      for (uint32_t j = 0; j < chunk_idx; ++j) {
-        uint32_t prev_chunk_index = version_index->m_AssetChunkIndexes[chunk_index_start + j];
-        dest_offset += version_index->m_ChunkSizes[prev_chunk_index];
-      }
+      // Where this chunk goes in the file: the sizes of the asset's chunks
+      // before it, summed once up front.
+      const uint64_t dest_offset = chunk_dest_offsets[chunk_idx];
 
       memcpy((char*)file_data + dest_offset,
              (char*)stored_block->m_BlockData + chunk_offset,
