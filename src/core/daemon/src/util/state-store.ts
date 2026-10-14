@@ -5,6 +5,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   promises as fs,
 } from "fs";
 import type { WorkspaceStateFile } from "@checkpointvcs/common";
@@ -18,6 +19,11 @@ import {
 } from "./util.js";
 import { DaemonConfig, DaemonConfigType } from "../daemon-config.js";
 import { Logger } from "../logging.js";
+import {
+  applyDeltaToState,
+  deltaRowCount,
+  type StateDelta,
+} from "./state-delta.js";
 
 // ── public interface ──────────────────────────────────────────────
 
@@ -32,7 +38,21 @@ export interface StateStoreStats {
 
 export interface StateStore {
   load(): Promise<WorkspaceState>;
+  /**
+   * Writes only what `delta` changes, atomically. The persisted state ends up
+   * equal to `applyDeltaToState(previous, delta)`.
+   */
+  apply(delta: StateDelta): Promise<void>;
+  /**
+   * Replaces the whole state. For imports, tests, and recovery; ordinary
+   * changes go through {@link apply} so they cost what they change.
+   */
   save(state: WorkspaceState): Promise<void>;
+  /**
+   * Changes whenever another connection or process writes the state, so a
+   * cached copy can tell it is stale. Writes through this store do not count.
+   */
+  dataVersion(): number;
   close(): void;
   readonly stats: StateStoreStats;
 }
@@ -136,6 +156,13 @@ class JsonStateStore implements StateStore {
   }
 
   public async load(): Promise<WorkspaceState> {
+    const state = await this.read();
+    this.stats.loads++;
+    this.stats.rowsRead += countRows(state);
+    return state;
+  }
+
+  private async read(): Promise<WorkspaceState> {
     let raw: string;
     try {
       raw = await fs.readFile(this.statePath, "utf-8");
@@ -149,10 +176,7 @@ class JsonStateStore implements StateStore {
     try {
       // v1 files simply lack the optional v2 fields (version, teamSync,
       // artifactType); no structural migration is needed for JSON.
-      const state = JSON.parse(raw) as WorkspaceState;
-      this.stats.loads++;
-      this.stats.rowsRead += countRows(state);
-      return state;
+      return JSON.parse(raw) as WorkspaceState;
     } catch (err) {
       // Not "no state": a state that cannot be read. Answering with an empty
       // one would tell the daemon the workspace tracks nothing and has synced
@@ -176,6 +200,46 @@ class JsonStateStore implements StateStore {
     logWrite("save", rows, ms);
   }
 
+  // JSON has no partial write: the file is rewritten whole. This backend is
+  // kept for existing workspaces and is not the default.
+  public async apply(delta: StateDelta): Promise<void> {
+    const start = Date.now();
+    const state = await this.read();
+    applyDeltaToState(state, delta);
+    await this.writeFile(state);
+    const rows = deltaRowCount(delta);
+    const ms = Date.now() - start;
+    this.stats.writes++;
+    this.stats.rowsWritten += rows;
+    this.stats.ms += ms;
+    logWrite("apply", rows, ms);
+  }
+
+  private knownMtime = 0;
+  private version = 0;
+
+  public dataVersion(): number {
+    let mtime = 0;
+    try {
+      mtime = statSync(this.statePath).mtimeMs;
+    } catch {
+      // No file yet.
+    }
+    if (mtime !== this.knownMtime) {
+      this.knownMtime = mtime;
+      this.version++;
+    }
+    return this.version;
+  }
+
+  private rememberOwnWrite(): void {
+    try {
+      this.knownMtime = statSync(this.statePath).mtimeMs;
+    } catch {
+      // see dataVersion
+    }
+  }
+
   private async writeFile(state: WorkspaceState): Promise<void> {
     await fs.mkdir(path.dirname(this.statePath), { recursive: true });
     // Write beside the file and rename over it, so a crash or a full disk
@@ -187,6 +251,7 @@ class JsonStateStore implements StateStore {
         JSON.stringify({ ...state, version: WORKSPACE_STATE_VERSION }, null, 2),
       );
       await fs.rename(tmpPath, this.statePath);
+      this.rememberOwnWrite();
     } catch (err) {
       await fs.rm(tmpPath, { force: true });
       throw err;
@@ -378,6 +443,7 @@ class SqliteStateStore implements StateStore {
   private discardDatabase(): void {
     this.db?.close();
     this.db = null;
+    this.stmts = null;
     for (const suffix of ["", "-wal", "-shm"]) {
       rmSync(this.dbPath + suffix, { force: true });
     }
@@ -563,31 +629,174 @@ class SqliteStateStore implements StateStore {
     logWrite("save", rows, ms);
   }
 
+  public async apply(delta: StateDelta): Promise<void> {
+    const start = Date.now();
+    this.applySync(delta);
+    const rows = deltaRowCount(delta);
+    const ms = Date.now() - start;
+    this.stats.writes++;
+    this.stats.rowsWritten += rows;
+    this.stats.ms += ms;
+    logWrite("apply", rows, ms);
+  }
+
+  public dataVersion(): number {
+    // Changes only when another connection commits, which is exactly
+    // "someone else wrote the state".
+    return this.open().pragma("data_version", { simple: true }) as number;
+  }
+
+  private stmts: ReturnType<SqliteStateStore["prepare"]> | null = null;
+
+  // Prepared once per connection rather than on every write.
+  private statements(): ReturnType<SqliteStateStore["prepare"]> {
+    const db = this.open();
+    if (!this.stmts) this.stmts = this.prepare(db);
+    return this.stmts;
+  }
+
+  private prepare(db: BetterSqlite3.Database) {
+    return {
+      upsertMeta: db.prepare(
+        "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES (?, ?)",
+      ),
+      deleteMeta: db.prepare("DELETE FROM workspace_meta WHERE key = ?"),
+      clearFiles: db.prepare("DELETE FROM files"),
+      upsertFile: db.prepare(
+        "INSERT OR REPLACE INTO files (path, file_id, changelist, hash, size, mtime, branch) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ),
+      deleteFile: db.prepare("DELETE FROM files WHERE path = ?"),
+      clearArtifacts: db.prepare("DELETE FROM artifact_files"),
+      upsertArtifact: db.prepare(
+        "INSERT OR REPLACE INTO artifact_files (path, file_id, changelist, hash, size, mtime, artifact_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ),
+      deleteArtifact: db.prepare("DELETE FROM artifact_files WHERE path = ?"),
+      clearMarked: db.prepare("DELETE FROM marked_for_add"),
+      addMarked: db.prepare(
+        "INSERT OR IGNORE INTO marked_for_add (path) VALUES (?)",
+      ),
+      removeMarked: db.prepare("DELETE FROM marked_for_add WHERE path = ?"),
+      clearStaged: db.prepare("DELETE FROM staged"),
+      addStaged: db.prepare("INSERT OR IGNORE INTO staged (path) VALUES (?)"),
+      removeStaged: db.prepare("DELETE FROM staged WHERE path = ?"),
+      clearBisect: db.prepare("DELETE FROM bisect"),
+      setBisect: db.prepare(
+        "INSERT OR REPLACE INTO bisect (changelist, verdict) VALUES (?, ?)",
+      ),
+      removeBisect: db.prepare("DELETE FROM bisect WHERE changelist = ?"),
+    };
+  }
+
+  private applySync(delta: StateDelta): void {
+    const db = this.open();
+    const s = this.statements();
+
+    const fileRow = (p: string, f: WorkspaceStateFile) =>
+      s.upsertFile.run(
+        p,
+        f.fileId,
+        f.changelist,
+        f.md5,
+        f.size,
+        f.mtime ?? null,
+        f.branch ?? null,
+      );
+    const artifactRow = (p: string, f: ArtifactStateFile) =>
+      s.upsertArtifact.run(
+        p,
+        f.fileId,
+        f.changelist,
+        f.md5,
+        f.size,
+        f.mtime ?? null,
+        f.artifactType ?? null,
+      );
+    const setScalar = (key: string, value: string | null | undefined) => {
+      if (value === undefined) return;
+      if (value === null) s.deleteMeta.run(key);
+      else s.upsertMeta.run(key, value);
+    };
+    const json = (value: unknown) =>
+      value === undefined ? undefined : value === null ? null : JSON.stringify(value);
+
+    db.transaction(() => {
+      if (delta.files) {
+        if (delta.files.replaceAll) {
+          s.clearFiles.run();
+          for (const [p, f] of Object.entries(delta.files.replaceAll)) fileRow(p, f);
+        }
+        for (const p of delta.files.delete ?? []) s.deleteFile.run(p);
+        for (const [p, f] of Object.entries(delta.files.upsert ?? {})) fileRow(p, f);
+      }
+
+      if (delta.artifactFiles) {
+        if (delta.artifactFiles.replaceAll) {
+          s.clearArtifacts.run();
+          for (const [p, f] of Object.entries(delta.artifactFiles.replaceAll)) {
+            artifactRow(p, f);
+          }
+        }
+        for (const p of delta.artifactFiles.delete ?? []) s.deleteArtifact.run(p);
+        for (const [p, f] of Object.entries(delta.artifactFiles.upsert ?? {})) {
+          artifactRow(p, f);
+        }
+      }
+
+      if (delta.markedForAdd) {
+        if (delta.markedForAdd.clear) s.clearMarked.run();
+        for (const p of delta.markedForAdd.remove ?? []) s.removeMarked.run(p);
+        for (const p of delta.markedForAdd.add ?? []) s.addMarked.run(p);
+      }
+
+      if (delta.staged) {
+        if (delta.staged.clear) s.clearStaged.run();
+        for (const p of delta.staged.remove ?? []) s.removeStaged.run(p);
+        for (const p of delta.staged.add ?? []) s.addStaged.run(p);
+      }
+
+      if (delta.bisect) {
+        if (delta.bisect.clear) s.clearBisect.run();
+        for (const cl of delta.bisect.remove ?? []) s.removeBisect.run(cl);
+        for (const [cl, verdict] of Object.entries(delta.bisect.set ?? {})) {
+          s.setBisect.run(parseInt(cl, 10), verdict);
+        }
+      }
+
+      const meta = delta.meta;
+      if (meta) {
+        if (meta.changelistNumber !== undefined) {
+          s.upsertMeta.run("changelistNumber", String(meta.changelistNumber));
+        }
+        setScalar("branchHeads", json(meta.branchHeads));
+        setScalar("syncFilterHash", meta.syncFilterHash);
+        setScalar(
+          "lastBuiltChangelist",
+          meta.lastBuiltChangelist === undefined || meta.lastBuiltChangelist === null
+            ? meta.lastBuiltChangelist
+            : String(meta.lastBuiltChangelist),
+        );
+        setScalar("lastScheduledSyncAt", meta.lastScheduledSyncAt);
+        setScalar("appliedArtifacts", json(meta.appliedArtifacts));
+      }
+    })();
+  }
+
   private saveSync(state: WorkspaceState): void {
     const db = this.open();
-
-    const upsertMeta = db.prepare(
-      "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES (?, ?)",
-    );
-    const clearFiles = db.prepare("DELETE FROM files");
-    const insertFile = db.prepare(
-      "INSERT INTO files (path, file_id, changelist, hash, size, mtime, branch) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    );
-    const clearArtifacts = db.prepare("DELETE FROM artifact_files");
-    const insertArtifact = db.prepare(
-      "INSERT INTO artifact_files (path, file_id, changelist, hash, size, mtime, artifact_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    );
-    const clearMarked = db.prepare("DELETE FROM marked_for_add");
-    const insertMarked = db.prepare(
-      "INSERT INTO marked_for_add (path) VALUES (?)",
-    );
-    const clearStaged = db.prepare("DELETE FROM staged");
-    const insertStaged = db.prepare("INSERT INTO staged (path) VALUES (?)");
-    const deleteMeta = db.prepare("DELETE FROM workspace_meta WHERE key = ?");
-    const clearBisect = db.prepare("DELETE FROM bisect");
-    const insertBisect = db.prepare(
-      "INSERT INTO bisect (changelist, verdict) VALUES (?, ?)",
-    );
+    const {
+      upsertMeta,
+      clearFiles,
+      upsertFile: insertFile,
+      clearArtifacts,
+      upsertArtifact: insertArtifact,
+      clearMarked,
+      addMarked: insertMarked,
+      clearStaged,
+      addStaged: insertStaged,
+      deleteMeta,
+      clearBisect,
+      setBisect: insertBisect,
+    } = this.statements();
 
     const runTransaction = db.transaction(() => {
       upsertMeta.run("changelistNumber", String(state.changelistNumber));
@@ -682,6 +891,7 @@ class SqliteStateStore implements StateStore {
     if (this.db) {
       this.db.close();
       this.db = null;
+      this.stmts = null;
     }
   }
 }
