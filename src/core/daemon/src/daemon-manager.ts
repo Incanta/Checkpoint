@@ -1788,13 +1788,13 @@ export class DaemonManager {
   }
 
   /**
-   * Persist the in-memory workspace state back to state.json (and workspace.json).
+   * Persist the in-memory workspace state back to the state store.
    */
   private async persistState(
     workspace: Workspace,
     state: WorkspaceState,
   ): Promise<void> {
-    await saveWorkspaceState(workspace as any, state, this.stateBackend);
+    await saveWorkspaceState(workspace, state, this.stateBackend);
   }
 
   // ─── VCS Operation Guard ─────────────────────────────────────────

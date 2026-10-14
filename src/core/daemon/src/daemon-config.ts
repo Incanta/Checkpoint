@@ -11,7 +11,10 @@ export interface DaemonConfigType {
     port: number;
   };
   workspaces: Workspace[];
-  /** "json" (default) keeps state.json; "sqlite" uses a WAL-mode SQLite DB */
+  /**
+   * "sqlite" (default) uses a WAL-mode SQLite DB; "json" keeps state.json.
+   * Only decides the backend for a workspace with no state.db yet.
+   */
   stateBackend: "json" | "sqlite";
   updates: {
     /**
@@ -55,6 +58,31 @@ export interface DaemonConfigType {
     enableBlockCache: boolean;
     logLevel: string;
   };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Copies into `target` every key of `defaults` it lacks, recursing into
+ * nested objects. Values already present (arrays included) are kept as is.
+ * Returns whether anything was added.
+ */
+export function fillMissing(
+  target: Record<string, unknown>,
+  defaults: object,
+): boolean {
+  let added = false;
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!(key in target) || target[key] === undefined) {
+      target[key] = structuredClone(value);
+      added = true;
+    } else if (isPlainObject(value) && isPlainObject(target[key])) {
+      added = fillMissing(target[key], value) || added;
+    }
+  }
+  return added;
 }
 
 export class DaemonConfig {
@@ -147,22 +175,12 @@ export class DaemonConfig {
       const configStr = await fs.readFile(DaemonConfig.configPath, "utf-8");
 
       try {
-        DaemonConfig.Ensure().vars = JSON.parse(configStr);
-        shouldSave = false;
-
-        // Backfill fields missing from configs written by older daemons.
-        if (!DaemonConfig.Ensure().vars.mcp) {
-          DaemonConfig.Ensure().vars.mcp = {
-            enabled: false,
-            port: 13011,
-          };
-          shouldSave = true;
-        }
-
-        if (!DaemonConfig.Ensure().vars.updates) {
-          DaemonConfig.Ensure().vars.updates = { channel: "release" };
-          shouldSave = true;
-        }
+        const parsed = JSON.parse(configStr);
+        // Backfill every field missing from configs written by older daemons.
+        // A missing stateBackend used to read as undefined, which callers
+        // treated as "json" even though the default is "sqlite".
+        shouldSave = fillMissing(parsed, new DaemonConfig().vars);
+        DaemonConfig.Ensure().vars = parsed;
       } catch (e) {
         //
       }

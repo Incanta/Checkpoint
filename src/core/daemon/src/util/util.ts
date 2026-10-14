@@ -287,8 +287,15 @@ export async function getWorkspaceState(
   return store.load();
 }
 
+/**
+ * Writes the workspace's tracked-file state. It does not touch
+ * workspace.json: callers hand over whatever workspace object they hold,
+ * which is often the daemon.json entry or a hand-built one without the
+ * workspace's teamSync settings, so rewriting the config from it lost them.
+ * Config changes go through {@link saveWorkspaceConfig}.
+ */
 export async function saveWorkspaceState(
-  workspace: Workspace,
+  workspace: Pick<Workspace, "localPath">,
   state: WorkspaceState,
   backend?: DaemonConfigType["stateBackend"],
 ): Promise<void> {
@@ -298,8 +305,6 @@ export async function saveWorkspaceState(
     await fs.mkdir(workspaceConfigDir, { recursive: true });
     const store = getStateStore(workspace.localPath, backend);
     await store.save(state);
-
-    await saveWorkspaceConfig(workspace);
   } catch (e) {
     throw new Error(
       `Could not write workspace state, did you initialize this workspace properly? (${

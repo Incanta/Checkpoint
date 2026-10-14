@@ -171,15 +171,7 @@ export const conflictsRouter = router({
 
       if (resolvedPaths.length > 0) {
         // Persist the updated state
-        const utilWorkspace: UtilWorkspace = {
-          id: workspace.id,
-          repoId: workspace.repoId,
-          domainBranchName: workspace.domainBranchName,
-          workspaceName: workspace.name,
-          localPath: workspace.localPath,
-          daemonId: workspace.daemonId,
-        };
-        await saveWorkspaceState(utilWorkspace, state, conflictBackend);
+        await saveWorkspaceState(workspace, state, conflictBackend);
 
         // Reload cached state in the daemon manager
         await manager.reloadWorkspaceState(workspace);

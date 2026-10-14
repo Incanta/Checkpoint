@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   promises as fs,
 } from "fs";
 import type { WorkspaceStateFile } from "@checkpointvcs/common";
@@ -15,7 +16,7 @@ import {
   type WorkspaceTeamSyncState,
   type WorkspaceState,
 } from "./util.js";
-import { DaemonConfigType } from "../daemon-config.js";
+import { DaemonConfig, DaemonConfigType } from "../daemon-config.js";
 
 // ── public interface ──────────────────────────────────────────────
 
@@ -30,22 +31,57 @@ export interface StateStore {
 const storeCache = new Map<string, StateStore>();
 
 /**
- * Return (or create) a StateStore for the workspace at `localPath`.
+ * Decides which backend holds the workspace at `localPath`.
+ *
+ * What is on disk wins over what was asked for. Callers used to pass the
+ * configured backend themselves, and the ones that forgot got "json" on a
+ * workspace whose state lives in state.db: they read an empty state and wrote
+ * a fresh state.json beside it. The preference only matters for a workspace
+ * that has no state yet, or one still on state.json that should be imported.
+ */
+export function resolveStateBackend(
+  localPath: string,
+  preferred: DaemonConfigType["stateBackend"] | undefined,
+): DaemonConfigType["stateBackend"] {
+  const dir = path.join(localPath, ".checkpoint");
+  const dbPath = path.join(dir, "state.db");
+  const jsonPath = path.join(dir, "state.json");
+
+  if (existsSync(dbPath)) {
+    if (existsSync(jsonPath)) {
+      // Written by a caller that picked the wrong backend. state.db is the
+      // real state; keep the stray file for inspection but out of the way.
+      try {
+        renameSync(jsonPath, `${jsonPath}.stray-${Date.now()}`);
+      } catch {
+        // Leaving it is harmless now that state.db always wins.
+      }
+    }
+    return "sqlite";
+  }
+
+  return preferred ?? DaemonConfig.Ensure().vars.stateBackend ?? "sqlite";
+}
+
+/**
+ * Return (or create) the StateStore for the workspace at `localPath`.
  * The returned instance is cached per `localPath` so repeated calls
- * are cheap.
+ * are cheap and every caller shares one store.
+ *
+ * `preferred` is the configured backend. It is only consulted when the
+ * workspace has no state.db yet; see {@link resolveStateBackend}.
  */
 export function getStateStore(
   localPath: string,
-  backend: DaemonConfigType["stateBackend"] = "json",
+  preferred?: DaemonConfigType["stateBackend"],
 ): StateStore {
-  const key = `${backend}:${localPath}`;
-  let store = storeCache.get(key);
+  let store = storeCache.get(localPath);
   if (!store) {
     store =
-      backend === "sqlite"
+      resolveStateBackend(localPath, preferred) === "sqlite"
         ? new SqliteStateStore(localPath)
         : new JsonStateStore(localPath);
-    storeCache.set(key, store);
+    storeCache.set(localPath, store);
   }
   return store;
 }
@@ -147,7 +183,15 @@ class SqliteStateStore implements StateStore {
     if (isNew) {
       this.createSchema();
       this.setSchemaVersion(WORKSPACE_STATE_VERSION);
-      this.migrateFromJson();
+      try {
+        this.migrateFromJson();
+      } catch (err) {
+        // An existing state.db is taken as the workspace's state, so a DB
+        // left behind by a failed import would read as "tracks nothing" on
+        // every later open. Remove it so the next open tries the import again.
+        this.discardDatabase();
+        throw err;
+      }
     } else {
       this.runMigrations();
     }
@@ -257,19 +301,40 @@ class SqliteStateStore implements StateStore {
   /**
    * If a state.json exists next to our DB we import it and rename it
    * so the migration is a one-time operation.
+   *
+   * A state.json that cannot be imported is an error, not an empty
+   * workspace: starting from nothing would tell the daemon the workspace
+   * tracks no files and has synced no changelist.
    */
   private migrateFromJson(): void {
     const jsonPath = path.join(this.localPath, ".checkpoint", "state.json");
     if (!existsSync(jsonPath)) return;
 
+    let state: WorkspaceState;
     try {
-      const raw = readFileSync(jsonPath, "utf-8");
-      const state = JSON.parse(raw) as WorkspaceState;
-      this.saveSync(state);
-      // Keep the old file around with a .bak extension for safety.
+      state = JSON.parse(readFileSync(jsonPath, "utf-8")) as WorkspaceState;
+    } catch (err) {
+      throw new Error(
+        `Workspace state at ${jsonPath} is unreadable (${
+          (err as Error).message
+        }). Restore the file or re-sync the workspace.`,
+      );
+    }
+    this.saveSync(state);
+    // Keep the old file around with a .bak extension for safety. If the
+    // rename fails, state.db still wins on the next open.
+    try {
       renameSync(jsonPath, jsonPath + ".bak");
     } catch {
-      // migration failure is non-fatal; we start with empty state
+      // see above
+    }
+  }
+
+  private discardDatabase(): void {
+    this.db?.close();
+    this.db = null;
+    for (const suffix of ["", "-wal", "-shm"]) {
+      rmSync(this.dbPath + suffix, { force: true });
     }
   }
 
