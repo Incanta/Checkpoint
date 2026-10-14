@@ -7316,7 +7316,8 @@ int Longtail_GetExistingStoreIndex(
         block_index_headers[b].m_BlockHash = &store_index->m_BlockHashes[store_block_index];
         block_index_headers[b].m_HashIdentifier = store_index->m_HashIdentifier;
         block_index_headers[b].m_ChunkCount = &store_index->m_BlockChunkCounts[store_block_index];
-        block_index_headers[b].m_Tag = &store_index->m_BlockTags[block_chunk_index_offset];
+        // Tags are per block (indexed like m_BlockHashes), not per chunk.
+        block_index_headers[b].m_Tag = &store_index->m_BlockTags[store_block_index];
         block_index_headers[b].m_ChunkHashes = &store_index->m_ChunkHashes[block_chunk_index_offset];
         block_index_headers[b].m_ChunkSizes = &store_index->m_ChunkSizes[block_chunk_index_offset];
         block_index_header_ptrs[b] = &block_index_headers[b];

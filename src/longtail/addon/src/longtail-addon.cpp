@@ -69,6 +69,21 @@ WrapperAsyncHandle* MergeAsync(
     size_t additional_store_index_size,
     int LogLevel);
 
+WrapperAsyncHandle* StoreBlockMapAsync(
+    const char* RemoteBasePath,
+    const char* StorageType,
+    const char* LocalStoragePath,
+    const char* S3Endpoint,
+    const char* S3Region,
+    const char* S3Bucket,
+    const char* S3AccessKeyId,
+    const char* S3SecretAccessKey,
+    const char* S3SessionToken,
+    const char* VersionIndexName,
+    const void* BlockMapBuffer,
+    size_t BlockMapSize,
+    int LogLevel);
+
 WrapperAsyncHandle* PullAsync(
     const char* VersionIndex,
     bool EnableMmapIndexing,
@@ -416,6 +431,57 @@ static Napi::Value NapiMergeAsync(const Napi::CallbackInfo& info) {
 }
 
 // --------------------------------------------------------------------------
+// storeBlockMapAsync(options: object): External<HandleContext>
+// --------------------------------------------------------------------------
+static Napi::Value NapiStoreBlockMapAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  if (info.Length() < 1 || !info[0].IsObject()) {
+    Napi::TypeError::New(env, "Expected options object").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  Napi::Object opts = info[0].As<Napi::Object>();
+  auto* ctx = new HandleContext();
+
+  const char* remoteBasePath = StoreString(ctx, opts.Get("remoteBasePath").As<Napi::String>().Utf8Value());
+  // Server side: storageType is "local" or "s3" (never "gateway").
+  const char* storageType = OptStr(ctx, opts, "storageType", "local");
+  const char* localStoragePath = OptStr(ctx, opts, "localStoragePath", "");
+  const char* s3Endpoint = OptStr(ctx, opts, "s3Endpoint", "");
+  const char* s3Region = OptStr(ctx, opts, "s3Region", "");
+  const char* s3Bucket = OptStr(ctx, opts, "s3Bucket", "");
+  const char* s3AccessKeyId = OptStr(ctx, opts, "s3AccessKeyId", "");
+  const char* s3SecretAccessKey = OptStr(ctx, opts, "s3SecretAccessKey", "");
+  const char* s3SessionToken = OptStr(ctx, opts, "s3SessionToken", "");
+  const char* versionIndexName = StoreString(ctx, opts.Get("versionIndex").As<Napi::String>().Utf8Value());
+  int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
+
+  Napi::Buffer<uint8_t> blockMapBuf = opts.Get("blockMapBuffer").As<Napi::Buffer<uint8_t>>();
+  ctx->bufferData.assign(blockMapBuf.Data(), blockMapBuf.Data() + blockMapBuf.Length());
+
+  WrapperAsyncHandle* handle = ::StoreBlockMapAsync(
+      remoteBasePath,
+      storageType, localStoragePath,
+      s3Endpoint, s3Region, s3Bucket, s3AccessKeyId, s3SecretAccessKey, s3SessionToken,
+      versionIndexName,
+      ctx->bufferData.data(),
+      ctx->bufferData.size(),
+      logLevel);
+
+  if (!handle) {
+    delete ctx;
+    Napi::Error::New(env, "StoreBlockMapAsync returned null handle").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  ctx->nativeHandle = handle;
+  ctx->isReadFileHandle = false;
+
+  return Napi::External<HandleContext>::New(env, ctx, ContextCleanup);
+}
+
+// --------------------------------------------------------------------------
 // readFileFromVersionAsync(options: object): External<HandleContext>
 // --------------------------------------------------------------------------
 static Napi::Value NapiReadFileFromVersionAsync(const Napi::CallbackInfo& info) {
@@ -734,6 +800,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("submitAsync", Napi::Function::New(env, NapiSubmitAsync));
   exports.Set("pullAsync", Napi::Function::New(env, NapiPullAsync));
   exports.Set("mergeAsync", Napi::Function::New(env, NapiMergeAsync));
+  exports.Set("storeBlockMapAsync", Napi::Function::New(env, NapiStoreBlockMapAsync));
   exports.Set("readFileFromVersionAsync", Napi::Function::New(env, NapiReadFileFromVersionAsync));
   exports.Set("getHandleStatus", Napi::Function::New(env, NapiGetHandleStatus));
   exports.Set("getHandleResult", Napi::Function::New(env, NapiGetHandleResult));

@@ -12,6 +12,7 @@ import config from "@incanta/config";
 import { CreateApiClientAuthManual } from "@checkpointvcs/common";
 import {
   mergeAsync,
+  storeBlockMapAsync,
   pollHandle,
   freeHandle,
   GetLogLevel,
@@ -126,6 +127,36 @@ async function checkVersionIndex(
   return null;
 }
 
+/**
+ * Verifies and stores a submit's block map beside its version index (see
+ * block-map.cpp). Returns a message describing the problem, or null.
+ */
+async function storeBlockMap(
+  repoId: string,
+  basePath: string,
+  versionIndex: string,
+  blockMapBuffer: Buffer,
+): Promise<string | null> {
+  const handle = storeBlockMapAsync({
+    remoteBasePath: basePath,
+    versionIndex,
+    blockMapBuffer,
+    logLevel: GetLogLevel(config.get<LongtailLogLevel>("longtail.log-level")),
+    ...(await buildMergeStorageOptions(repoId)),
+  } as Parameters<typeof storeBlockMapAsync>[0]);
+  if (!handle) {
+    return "Failed to create longtail handle for the block map";
+  }
+  try {
+    const { status } = await pollHandle(handle);
+    return status.error === 0
+      ? null
+      : `Block map for ${versionIndex} refused: ${status.currentStep} (error ${status.error})`;
+  } finally {
+    freeHandle(handle);
+  }
+}
+
 const RequestSchema = object({
   apiToken: string().required(),
   branchName: string().required(),
@@ -179,8 +210,14 @@ export function routeSubmit(): Router {
   router.post(
     "/submit",
     authenticate,
-    upload.single("storeIndex"),
+    upload.fields([
+      { name: "storeIndex", maxCount: 1 },
+      { name: "blockMap", maxCount: 1 },
+    ]),
     async (req, res) => {
+      const parts = (req.files ?? {}) as Record<string, Express.Multer.File[]>;
+      const storeIndexFile = parts["storeIndex"]?.[0];
+      const blockMapFile = parts["blockMap"]?.[0];
       Logger.debug(`[Submit] Received request`);
 
       const { claims, basePath } = res.locals["repoToken"] as Extract<
@@ -211,7 +248,8 @@ export function routeSubmit(): Router {
       // grow with the repo rather than the change.
       const timing: Record<string, number> = {
         modifications: payload.modifications.length,
-        storeIndexUploadBytes: req.file?.buffer?.length ?? 0,
+        storeIndexUploadBytes: storeIndexFile?.buffer?.length ?? 0,
+        blockMapBytes: blockMapFile?.buffer?.length ?? 0,
       };
       const timed = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
         const start = Date.now();
@@ -239,8 +277,28 @@ export function routeSubmit(): Router {
         }
       }
 
-      if (req.file) {
-        const storeIndexBuffer = req.file.buffer;
+      // The version's block map lets readers find its blocks without the
+      // repo-wide store index. Verified (it covers every chunk of the version
+      // and every block it names exists) and stored before anything records
+      // the changelist; a submit whose map does not check out is refused.
+      if (blockMapFile?.buffer && payload.versionIndex) {
+        const problem = await timed("blockMapMs", () =>
+          storeBlockMap(
+            claims.repoId,
+            basePath,
+            payload.versionIndex,
+            Buffer.from(blockMapFile.buffer),
+          ),
+        );
+        if (problem) {
+          Logger.error(`[Submit] ${problem}`);
+          res.status(400).send(problem);
+          return;
+        }
+      }
+
+      if (storeIndexFile) {
+        const storeIndexBuffer = storeIndexFile.buffer;
 
         if (!storeIndexBuffer) {
           res.status(400).send("Store index required");

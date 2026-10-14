@@ -1,4 +1,5 @@
 ##
+- **FIXED** (Checkpoint fork) `Longtail_GetExistingStoreIndex` read each block's tag from `m_BlockTags[chunk offset]` instead of `m_BlockTags[block index]`, so the returned index carried wrong tags (and read past the tag array when a block's chunk offset exceeded the block count)
 - **NEW** added builds for Arm64 flavours of all components
   - `Longtail_CreateMeowHashAPI()` is not supported on Arm64 and will return 0 if called
   - `Longtail_CreateBlake2HashAPI()` is not supported on Arm64 and will return 0 if called

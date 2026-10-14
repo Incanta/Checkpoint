@@ -737,6 +737,27 @@ int32_t SubmitSync(
     return err;
   }
 
+  // The version's block map: every block holding a chunk of this version, the
+  // reused ones and the ones just uploaded. The server stores it beside the
+  // version index so pulls and file reads of this version can find its
+  // blocks without the repo-wide store index. Not having one is not fatal;
+  // readers fall back to the store index.
+  void* block_map_buffer = 0;
+  size_t block_map_size = 0;
+  {
+    struct Longtail_StoreIndex* block_map = 0;
+    int map_err = Longtail_MergeStoreIndex(existing_remote_store_index, remote_missing_store_index, &block_map);
+    if (!map_err) {
+      map_err = Longtail_WriteStoreIndexToBuffer(block_map, &block_map_buffer, &block_map_size);
+      Longtail_Free(block_map);
+    }
+    if (map_err) {
+      std::cerr << "Could not build the block map, " << map_err << "; submitting without one" << std::endl;
+      block_map_buffer = 0;
+      block_map_size = 0;
+    }
+  }
+
   json payload = {
       {"apiToken", std::string(API_JWT)},
       {"branchName", std::string(BranchName)},
@@ -837,6 +858,13 @@ int32_t SubmitSync(
     curl_mime_filename(store_part, "chunk.bin");
   }
 
+  if (block_map_buffer != 0) {
+    curl_mimepart* map_part = curl_mime_addpart(mime);
+    curl_mime_name(map_part, "blockMap");
+    curl_mime_data(map_part, static_cast<const char*>(block_map_buffer), block_map_size);
+    curl_mime_filename(map_part, "blockmap.lsi");
+  }
+
   std::string url = std::string(BackendUrl) + "/submit";
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -859,6 +887,10 @@ int32_t SubmitSync(
   curl_mime_free(mime);
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
+  if (block_map_buffer) {
+    Longtail_Free(block_map_buffer);
+    block_map_buffer = 0;
+  }
 
   if (res != CURLE_OK || http_status_code != 200) {
     std::string errorMessage = "Failed to submit to backend: " + response_body;

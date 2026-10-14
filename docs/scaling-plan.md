@@ -27,7 +27,7 @@ Decisions already made: a breaking change behind a version gate is fine; design 
 | S1 | Byte-bounded block cache, `lookup`/`listDir`, consumers switched (conflict check, file reads, claims, folder listing, pull anomalies), migration (`File(repoId, path)` index, `Changelist.fileCount`, `TreeBlockLength`) | Done |
 | S2 | Incremental `applyChanges` (byte-identical to a full build), collision guard, `state-tree.incremental` rollout flag (default `verify`) | Done |
 | S3 | Sparse three-way merge (reads only paths the branch changed; target-unmoved merges reuse the incoming tree), full-map LRU removed | Done |
-| N1 | Submit writes per-version block maps (`versions/<stem>.lsi`) | To do |
+| N1 | Submit writes per-version block maps (`versions/<stem>.lsi`), verified by the server before it records anything; block-tag bug in `Longtail_GetExistingStoreIndex` fixed | Done |
 | N2 | Single-pass pull and file reads from block maps | To do |
 | N3 | Server index segments and `/existing-content`, in shadow mode | To do |
 | N4 | Cutover: client uses `/existing-content`, no lock or merge on submit, migration, version gate (breaking) | To do |
@@ -53,6 +53,7 @@ Items only you can decide or do. Each is also noted where it comes up.
 
 - **Actions**
   - Apply migration `20261013220000_state-tree-incremental` to every deployed database (`yarn --cwd src/app db:migrate:deploy`). It is additive. On Postgres, the `File(repoId, path)` index build locks writes to `File` while it runs; on a very large table, create it beforehand with `CREATE INDEX CONCURRENTLY "File_repoId_path_idx" ON "File"("repoId","path")` and skip that statement.
+  - Publish a new `@checkpointvcs/longtail-addon` before deploying the server, daemon, or app from this work: the server now calls `storeBlockMapAsync`, which only the source-built addon has. Bump with `node scripts/set-addon-version.js <version>` (moves all four exact pins together) and release as usual. CI is unaffected (it builds the addon from source).
   - `state-tree.incremental` ships as `verify`: each submit updates the tree incrementally, also rebuilds it, and logs `[state-tree] MISMATCH` on any difference (using the rebuild). Watch production logs for that line; after a clean period, set it to `on` so submits stop paying for the rebuild. Locally: 0 mismatches over 125 submits; the test suite runs in `strict` mode (a mismatch fails the test).
 
 - **Open decisions**

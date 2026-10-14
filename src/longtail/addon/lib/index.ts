@@ -79,6 +79,7 @@ interface LongtailAddonNative {
   submitAsync(options: SubmitAsyncOptions): NativeHandle;
   pullAsync(options: PullAsyncOptions): NativeHandle;
   mergeAsync(options: MergeAsyncOptions): NativeHandle;
+  storeBlockMapAsync(options: StoreBlockMapAsyncOptions): NativeHandle;
   readFileFromVersionAsync(
     options: ReadFileFromVersionAsyncOptions,
   ): NativeHandle;
@@ -197,6 +198,20 @@ export interface MergeAsyncOptions extends StorageOptions {
   logLevel: number;
 }
 
+/**
+ * Server side: verify a submit's block map against its version index (every
+ * chunk covered, every named block stored) and store it beside the index as
+ * versions/<name>.lsi, unless one is there already. The handle result is
+ * `{ written: boolean, blocks: number }`.
+ */
+export interface StoreBlockMapAsyncOptions extends StorageOptions {
+  remoteBasePath: string;
+  /** The version index's file name, e.g. "<sha256>.lvi". */
+  versionIndex: string;
+  blockMapBuffer: Buffer;
+  logLevel: number;
+}
+
 export interface ReadFileFromVersionAsyncOptions extends StorageOptions {
   filePath: string;
   versionIndexName: string;
@@ -261,6 +276,12 @@ export function pullAsync(options: PullAsyncOptions): NativeHandle {
 
 export function mergeAsync(options: MergeAsyncOptions): NativeHandle {
   return addon.mergeAsync(options);
+}
+
+export function storeBlockMapAsync(
+  options: StoreBlockMapAsyncOptions,
+): NativeHandle {
+  return addon.storeBlockMapAsync(options);
 }
 
 export function readFileFromVersionAsync(
