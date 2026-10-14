@@ -38,10 +38,13 @@ import { releaseClaimsForBranch } from "~/server/claims/claims";
 import { restackChildren } from "~/server/claims/domain";
 import { settleClaimsForMerge } from "~/server/claims/landing";
 import {
-  buildStateTreeBlocks,
+  diffStateTreeRoots,
   getStateTreePaths,
-  primeStateTreePaths,
+  lookupStateTreePaths,
+  stateRootOf,
+  submitStateTree,
 } from "~/server/state-tree";
+import { TreeCollisionError, type TreeEdit } from "~/server/tree/tree";
 
 type Tree = ReadonlyMap<string, number>;
 
@@ -110,6 +113,48 @@ export function mergeTrees(
   }
 
   return { merged, applied, conflicts };
+}
+
+/**
+ * The same three-way merge as {@link mergeTrees}, computed from the trees
+ * without materializing them. Only paths the incoming side changed can be
+ * merged or conflict, and a hash-skipping diff of base against incoming finds
+ * exactly those; base and target are then read at just those paths.
+ */
+export async function mergeStateTreesSparse(
+  db: PrismaClient,
+  repoId: string,
+  baseRoot: string,
+  targetRoot: string,
+  incomingRoot: string,
+): Promise<{ applied: AppliedChange[]; conflicts: MergeConflict[]; targetAt: Map<string, number> }> {
+  const d = await diffStateTreeRoots(db, repoId, baseRoot, incomingRoot);
+  const incomingAt = new Map<string, number | null>();
+  for (const c of d.added) incomingAt.set(c.path, c.cl);
+  for (const c of d.modified) incomingAt.set(c.path, c.cl);
+  for (const p of d.removed) incomingAt.set(p, null);
+
+  const candidates = [...incomingAt.keys()].sort();
+  const [baseAt, targetAt] = await Promise.all([
+    lookupStateTreePaths(db, repoId, baseRoot, candidates),
+    lookupStateTreePaths(db, repoId, targetRoot, candidates),
+  ]);
+
+  const applied: AppliedChange[] = [];
+  const conflicts: MergeConflict[] = [];
+  for (const path of candidates) {
+    const b = baseAt.get(path) ?? null;
+    const i = incomingAt.get(path) ?? null;
+    if (i === b) continue;
+    const t = targetAt.get(path) ?? null;
+    if (t === i) continue;
+    if (t !== b) {
+      conflicts.push({ path, base: b, target: t, incoming: i });
+      continue;
+    }
+    applied.push({ path, incoming: i });
+  }
+  return { applied, conflicts, targetAt };
 }
 
 const MAX_LISTED_CONFLICTS = 50;
@@ -342,17 +387,33 @@ export async function mergeBranch(
       });
     }
 
-    const [basePaths, targetPaths, incomingPaths] = await Promise.all([
-      getStateTreePaths(db, repoId, mergeBase.base),
-      getStateTreePaths(db, repoId, targetHead.number),
-      getStateTreePaths(db, repoId, incomingHead.number),
-    ]);
+    const baseRoot = await stateRootOf(db, repoId, mergeBase.base);
+    const targetRoot = targetHead.stateRootHash ?? null;
+    const incomingRoot = incomingHead.stateRootHash ?? null;
 
-    const { merged, applied, conflicts } = mergeTrees(
-      basePaths,
-      targetPaths,
-      incomingPaths,
-    );
+    // With all three trees present, merge from the trees directly: only the
+    // paths the incoming side changed are read. Changelists without a tree
+    // (test fixtures) fall back to comparing the full maps.
+    let applied: AppliedChange[];
+    let conflicts: MergeConflict[];
+    let targetAt: ReadonlyMap<string, number>;
+    if (baseRoot && targetRoot && incomingRoot) {
+      ({ applied, conflicts, targetAt } = await mergeStateTreesSparse(
+        db,
+        repoId,
+        baseRoot,
+        targetRoot,
+        incomingRoot,
+      ));
+    } else {
+      const [basePaths, targetPaths, incomingPaths] = await Promise.all([
+        getStateTreePaths(db, repoId, mergeBase.base),
+        getStateTreePaths(db, repoId, targetHead.number),
+        getStateTreePaths(db, repoId, incomingHead.number),
+      ]);
+      ({ applied, conflicts } = mergeTrees(basePaths, targetPaths, incomingPaths));
+      targetAt = targetPaths;
+    }
     if (conflicts.length > 0) {
       throw new TRPCError({
         code: "CONFLICT",
@@ -410,10 +471,42 @@ export async function mergeBranch(
 
     // Writes outside the transaction, so with a single-writer database it can
     // lose the wait to another commit. Same contention, same answer.
+    // The merged tree is the target's with the applied changes. When the
+    // target has not moved since the base, that is exactly the incoming tree
+    // (trees are canonical), so nothing needs building.
+    const edits: TreeEdit[] = applied.map((change) =>
+      change.incoming === null
+        ? { path: change.path, delete: true as const }
+        : { path: change.path, cl: change.incoming },
+    );
+    let fileCount = targetHead.fileCount;
+    if (fileCount !== null) {
+      for (const change of applied) {
+        const atTarget = targetAt.has(change.path);
+        if (change.incoming !== null && !atTarget) fileCount++;
+        if (change.incoming === null && atTarget) fileCount--;
+      }
+    }
+
     let stateRootHash: string;
     try {
-      stateRootHash = await buildStateTreeBlocks(db, repoId, merged.entries());
+      stateRootHash =
+        targetRoot && incomingRoot && targetRoot === baseRoot
+          ? incomingRoot
+          : await submitStateTree(
+              db,
+              repoId,
+              targetHead.number,
+              targetRoot,
+              edits,
+            );
     } catch (error) {
+      if (error instanceof TreeCollisionError) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Cannot merge ${incomingBranchName} into ${targetBranchName}: ${error.message}. Nothing was merged.`,
+        });
+      }
       if (!isSubmitContention(error)) {
         throw error;
       }
@@ -434,6 +527,7 @@ export async function mergeBranch(
               versionIndex: "",
               parentNumber: targetBranch.headNumber,
               stateRootHash,
+              fileCount,
               artifactVersionIndex: incomingHead.artifactVersionIndex,
               artifactStateTree:
                 Object.keys(targetArtifactState).length > 0
@@ -533,8 +627,6 @@ export async function mergeBranch(
         },
         { maxWait: 60_000, timeout: 15 * 60_000 },
       );
-
-      primeStateTreePaths(repoId, stateRootHash, merged);
 
       return {
         id: mergeCl.id,

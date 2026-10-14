@@ -26,7 +26,7 @@ Decisions already made: a breaking change behind a version gate is fine; design 
 | S0 | Tree stats (`TreeOpStats`, `[state-tree]` log line) | Done |
 | S1 | Byte-bounded block cache, `lookup`/`listDir`, consumers switched (conflict check, file reads, claims, folder listing, pull anomalies), migration (`File(repoId, path)` index, `Changelist.fileCount`, `TreeBlockLength`) | Done |
 | S2 | Incremental `applyChanges` (byte-identical to a full build), collision guard, `state-tree.incremental` rollout flag (default `verify`) | Done |
-| S3 | Sparse three-way merge, remove the full-map LRU | To do |
+| S3 | Sparse three-way merge (reads only paths the branch changed; target-unmoved merges reuse the incoming tree), full-map LRU removed | Done |
 | N1 | Submit writes per-version block maps (`versions/<stem>.lsi`) | To do |
 | N2 | Single-pass pull and file reads from block maps | To do |
 | N3 | Server index segments and `/existing-content`, in shadow mode | To do |

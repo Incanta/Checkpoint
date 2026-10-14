@@ -1,9 +1,6 @@
-// Pluggable content-addressing hash for tree blocks.
-//
-// R1 uses SHA-256 from node:crypto (zero-dependency, deterministic, available
-// everywhere). The hash is a FROZEN format constant: before committing golden
-// vectors we evaluate BLAKE3 (faster, same 32-byte digest) and pick one. Until
-// then everything goes through this module so the choice is swappable.
+// Content-addressing hash for tree blocks: SHA-256 from node:crypto. It is a
+// FROZEN format constant, locked by the golden vectors with the node format
+// and block budget (see DESIGN.md); everything goes through this module.
 
 import { createHash } from "node:crypto";
 

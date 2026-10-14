@@ -203,6 +203,16 @@ export async function submitStateTree(
   return rebuilt;
 }
 
+/** Changed paths between two roots, skipping shared subtrees by hash. */
+export async function diffStateTreeRoots(
+  db: PrismaClient,
+  repoId: string,
+  fromRoot: string,
+  toRoot: string,
+): Promise<{ added: TreeChange[]; removed: string[]; modified: TreeChange[] }> {
+  return diffTrees(fromRoot, toRoot, blockStoreFor(db, repoId));
+}
+
 /** Source changelists of `paths` in the tree rooted at `rootHash`. */
 export async function lookupStateTreePaths(
   db: PrismaClient,
@@ -269,63 +279,25 @@ export async function materializeStateTreeBlocks(
   return materializeTree(rootHash, blockStoreFor(db, repoId));
 }
 
-// Cache materialized path maps by repoId:rootHash. Root hashes are immutable
-// content addresses, so entries never go stale and need no invalidation:
-// different content produces a different hash, hence a different key.
-const PATH_CACHE_MAX = 256;
-const pathTreeCache = new Map<string, StateMap>();
-function pathKey(repoId: string, rootHash: string): string {
-  return `${repoId}:${rootHash}`;
-}
-function pathCacheGet(key: string): StateMap | undefined {
-  const hit = pathTreeCache.get(key);
-  if (hit === undefined) return undefined;
-  pathTreeCache.delete(key);
-  pathTreeCache.set(key, hit);
-  return hit;
-}
-function pathCacheSet(key: string, map: StateMap): void {
-  pathTreeCache.delete(key);
-  pathTreeCache.set(key, map);
-  while (pathTreeCache.size > PATH_CACHE_MAX) {
-    const oldest = pathTreeCache.keys().next().value;
-    if (oldest === undefined) break;
-    pathTreeCache.delete(oldest);
-  }
-}
-
-/** Clear the caches (test isolation; not needed for correctness). */
+/** Clear the block cache (test isolation; not needed for correctness). */
 export function clearStateTreeCache(): void {
-  pathTreeCache.clear();
   blockCache?.clear();
 }
 
-/** The materialized path -> CL state of a changelist (empty if it has no tree). */
+/**
+ * The materialized path -> CL state of a changelist (empty if it has no
+ * tree). Costs the whole tree: request paths need {@link lookupStateTreePaths}
+ * or {@link listStateTreeDir} instead. Used by the rebuild that verifies
+ * incremental updates, merges of changelists without trees, and tests.
+ */
 export async function getStateTreePaths(
   db: PrismaClient,
   repoId: string,
   changelistNumber: number,
 ): Promise<StateMap> {
-  const cl = await db.changelist.findUnique({
-    where: { repoId_number: { repoId, number: changelistNumber } },
-    select: { stateRootHash: true },
-  });
-  if (!cl?.stateRootHash) return new Map();
-  const key = pathKey(repoId, cl.stateRootHash);
-  const hit = pathCacheGet(key);
-  if (hit) return hit;
-  const map = await materializeStateTreeBlocks(db, repoId, cl.stateRootHash);
-  pathCacheSet(key, map);
-  return map;
-}
-
-/** Seed the path cache for a just-built tree (avoids re-materializing). */
-export function primeStateTreePaths(
-  repoId: string,
-  rootHash: string,
-  map: StateMap,
-): void {
-  pathCacheSet(pathKey(repoId, rootHash), new Map(map));
+  const root = await rootHashOf(db, repoId, changelistNumber);
+  if (!root) return new Map();
+  return materializeStateTreeBlocks(db, repoId, root);
 }
 
 /** A changed file: path, source CL, and fileId (for the daemon's state file). */

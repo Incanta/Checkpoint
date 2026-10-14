@@ -110,7 +110,18 @@ than object count. The chosen value is frozen with the golden vectors.
 ## Operations
 
 - **build** (`buildTree`): from `path -> CL` entries, bottom-up subtree packing.
-- **materialize**: root hash -> full `path -> CL` map (with a node cache, hot).
+- **apply** (`applyChanges`): root hash + path edits -> new root. Reads and
+  re-encodes only the directories on the edited paths and writes only new
+  blocks. Shares the packing function with `buildTree`, so its root is
+  byte-identical to a rebuild's (held by `src/tests/src/tree/incremental.test.ts`).
+  Repacking a changed directory needs its untouched subdirectories' payload
+  lengths; `TreeBlockLength` records them so those blocks need not be fetched.
+- **lookup** / **listDir**: the CLs of given paths, or one directory's children,
+  reading only the blocks on the way there (one chunk per name in a dense
+  directory).
+- **materialize**: root hash -> full `path -> CL` map. Costs the whole tree;
+  used by fresh syncs and by the rebuild that verifies incremental updates.
+  All reads go through a byte-bounded, process-wide block cache.
 - **diff**: compare two roots top-down, skip equal subtree hashes, descend only
   changed subtrees -> changed paths. This is the daemon's hot path.
 - **partial fetch**: a subtree is addressed by its node hash; fetch its blocks
@@ -149,7 +160,13 @@ storage-token mechanism, offloading the app server.
   path-keyed, with an incremental workspace-state update. The fileId shim
   (`getStateTreeByFileId`) is gone; `getChangelist` no longer attaches a state
   tree; `listFolder` is path-keyed.
-- **R3 remaining**: client-side block fetch + partial subtree sync (the daemon
-  fetching blocks itself, needs tree code in the daemon); true incremental
-  server-side build (currently a full rebuild from the cached parent map).
+- **R4 (incremental server-side update): COMPLETE.** Submits and merges apply
+  their edits with `applyChanges` instead of rebuilding from the parent's full
+  path map; conflict checks, file reads, claim reconciliation, folder listings,
+  and pull anomaly checks use `lookup`/`listDir`; merges diff base against
+  incoming and read only those paths. `Changelist.fileCount` carries the file
+  count forward. Rolled out behind `state-tree.incremental` (`verify` rebuilds
+  alongside and logs `[state-tree] MISMATCH`). The full-map LRU is gone.
+- **Remaining**: client-side block fetch + partial subtree sync (the daemon
+  fetching blocks itself, needs tree code in the daemon).
 - **Later**: orphan-block GC (only once history pruning exists).
