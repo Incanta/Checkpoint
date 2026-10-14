@@ -59,14 +59,10 @@ async function writeSqliteState(state: WorkspaceState): Promise<void> {
 }
 
 describe("resolveStateBackend", () => {
-  it.each([
-    ["json", "json"],
-    ["sqlite", "sqlite"],
-    [undefined, "sqlite"],
-  ] as const)(
-    "uses the preference %s for a workspace with no state yet",
-    (preferred, expected) => {
-      expect(resolveStateBackend(root, preferred)).toBe(expected);
+  it.each(["json", "sqlite", undefined] as const)(
+    "is sqlite for a new workspace whatever the preference (%s)",
+    (preferred) => {
+      expect(resolveStateBackend(root, preferred)).toBe("sqlite");
     },
   );
 
@@ -87,11 +83,13 @@ describe("resolveStateBackend", () => {
     expect(names.some((n) => n.startsWith("state.json.stray-"))).toBe(true);
   });
 
-  it("keeps a json workspace on json when json is configured", async () => {
+  it("imports a workspace still on state.json even when json is configured", async () => {
+    // JSON stopped being a backend; such a workspace moves to state.db.
     await writeFile(jsonPath(), JSON.stringify(sample));
-    expect(resolveStateBackend(root, "json")).toBe("json");
+    expect(resolveStateBackend(root, "json")).toBe("sqlite");
     expect((await getStateStore(root, "json").load()).changelistNumber).toBe(42);
-    expect(existsSync(dbPath())).toBe(false);
+    expect(existsSync(dbPath())).toBe(true);
+    expect(existsSync(`${jsonPath()}.bak`)).toBe(true);
   });
 });
 

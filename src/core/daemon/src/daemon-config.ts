@@ -12,8 +12,9 @@ export interface DaemonConfigType {
   };
   workspaces: Workspace[];
   /**
-   * "sqlite" (default) uses a WAL-mode SQLite DB; "json" keeps state.json.
-   * Only decides the backend for a workspace with no state.db yet.
+   * Kept for compatibility with existing daemon.json files. Workspace state
+   * is always a WAL-mode SQLite DB now; a workspace still on state.json is
+   * imported on first open, whatever this says.
    */
   stateBackend: "json" | "sqlite";
   updates: {

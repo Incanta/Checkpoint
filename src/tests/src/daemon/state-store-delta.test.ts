@@ -127,7 +127,7 @@ const empty = (): WorkspaceState => ({
   staged: [],
 });
 
-describe.each(["sqlite", "json"] as const)("%s store: apply(delta)", (backend) => {
+describe.each(["sqlite"] as const)("%s store: apply(delta)", (backend) => {
   it.each([1, 2, 3, 4, 5])(
     "matches applyDeltaToState over 60 random deltas (seed %i)",
     async (seed) => {
@@ -228,23 +228,6 @@ describe("sqlite store", () => {
       .run();
     other.close();
 
-    expect(store.dataVersion()).not.toBe(v1);
-  });
-});
-
-describe("json store", () => {
-  it("reports a write by someone else through dataVersion, not its own", async () => {
-    const store = getStateStore(root, "json");
-    await store.apply({ meta: { changelistNumber: 1 } });
-    const v1 = store.dataVersion();
-    await store.apply({ meta: { changelistNumber: 2 } });
-    expect(store.dataVersion()).toBe(v1);
-
-    // Another process rewriting the file (a later mtime).
-    const { utimes } = await import("node:fs/promises");
-    const file = path.join(root, ".checkpoint", "state.json");
-    const later = new Date(Date.now() + 60_000);
-    await utimes(file, later, later);
     expect(store.dataVersion()).not.toBe(v1);
   });
 });

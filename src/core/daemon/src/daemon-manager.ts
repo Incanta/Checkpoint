@@ -28,6 +28,7 @@ import {
   getWorkspaceConfig,
   saveWorkspaceConfig,
   closeAllStateStores,
+  closeStateStore,
   type WorkspaceState,
 } from "./util/index.js";
 import {
@@ -357,6 +358,10 @@ export class DaemonManager {
       watcher.close();
       this.watchers.delete(workspaceId);
     }
+
+    // Release the workspace's state database, so its folder can be deleted.
+    const localPath = this.findWorkspaceById(workspaceId)?.localPath;
+    if (localPath) closeStateStore(localPath);
 
     // Clear all cached state
     this.workspaceStates.delete(workspaceId);

@@ -22,7 +22,7 @@ Decisions already made: a breaking change behind a version gate is fine; design 
 | D1 | `StateStore.apply(delta)` with cached statements, `dataVersion()` | Done |
 | D2 | One shared in-memory state per workspace; every call site writes deltas; sync filter re-checks only pulled paths | Done |
 | D3 | Path index replacing O(dirty x tracked) scans; pending cache kept across stage, revert, resolve, and submit/pull that only edit tracked files | Done |
-| D4 | Remove `json` as a configurable backend | Waiting on your call (see below) |
+| D4 | `json` is no longer a state backend: a workspace on `state.json` is imported into `state.db` on first open; unlinking a workspace now releases its `state.db` | Done (ships with the protocol 3 release, which is breaking anyway) |
 | S0 | Tree stats (`TreeOpStats`, `[state-tree]` log line) | Done |
 | S1 | Byte-bounded block cache, `lookup`/`listDir`, consumers switched (conflict check, file reads, claims, folder listing, pull anomalies), migration (`File(repoId, path)` index, `Changelist.fileCount`, `TreeBlockLength`) | Done |
 | S2 | Incremental `applyChanges` (byte-identical to a full build), collision guard, `state-tree.incremental` rollout flag (default `verify`) | Done |
@@ -69,8 +69,8 @@ Items only you can decide or do. Each is also noted where it comes up.
 - **Open decisions**
   - Unique `(repoId, path)` index on `File` after a duplicate audit, or keep it non-unique?
   - Folder view total file count: keep the union with artifact paths (my default) or count main only?
-  - Which release removes the writable JSON state backend?
   - r2 block-map protection: prefix-scoped R2 credentials (if R2 supports them) or a checksum column on the changelist?
 - **Known hazards not in scope**
+  - A daemon downgraded after its workspaces were imported from `state.json` into `state.db` sees them as empty; the original is kept as `state.json.bak` and can be renamed back.
   - `DaemonConfig.Load` overwrites an unparseable `daemon.json` with defaults, which loses the workspace registry.
   - The frozen tree format's prefix compression can split a UTF-16 surrogate pair, so some astral-character file names decode lossily.

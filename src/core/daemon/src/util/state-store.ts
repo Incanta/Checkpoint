@@ -5,8 +5,6 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
-  promises as fs,
 } from "fs";
 import type { WorkspaceStateFile } from "@checkpointvcs/common";
 import BetterSqlite3 from "better-sqlite3";
@@ -80,13 +78,13 @@ function logWrite(op: string, rows: number, ms: number): void {
 const storeCache = new Map<string, StateStore>();
 
 /**
- * Decides which backend holds the workspace at `localPath`.
+ * The backend that holds the workspace at `localPath`: always sqlite now.
  *
- * What is on disk wins over what was asked for. Callers used to pass the
- * configured backend themselves, and the ones that forgot got "json" on a
- * workspace whose state lives in state.db: they read an empty state and wrote
- * a fresh state.json beside it. The preference only matters for a workspace
- * that has no state yet, or one still on state.json that should be imported.
+ * state.json was a backend once. A workspace still on it is imported into
+ * state.db the first time it is opened, whatever `preferred` (the configured
+ * stateBackend, kept in daemon.json for compatibility) says. A state.json
+ * found beside an existing state.db is a stray from the time callers could
+ * pick the wrong backend, and is moved aside.
  */
 export function resolveStateBackend(
   localPath: string,
@@ -109,7 +107,8 @@ export function resolveStateBackend(
     return "sqlite";
   }
 
-  return preferred ?? DaemonConfig.Ensure().vars.stateBackend ?? "sqlite";
+  void preferred;
+  return "sqlite";
 }
 
 /**
@@ -117,8 +116,8 @@ export function resolveStateBackend(
  * The returned instance is cached per `localPath` so repeated calls
  * are cheap and every caller shares one store.
  *
- * `preferred` is the configured backend. It is only consulted when the
- * workspace has no state.db yet; see {@link resolveStateBackend}.
+ * `preferred` is the configured backend and no longer changes anything;
+ * see {@link resolveStateBackend}.
  */
 export function getStateStore(
   localPath: string,
@@ -126,13 +125,21 @@ export function getStateStore(
 ): StateStore {
   let store = storeCache.get(localPath);
   if (!store) {
-    store =
-      resolveStateBackend(localPath, preferred) === "sqlite"
-        ? new SqliteStateStore(localPath)
-        : new JsonStateStore(localPath);
+    resolveStateBackend(localPath, preferred);
+    store = new SqliteStateStore(localPath);
     storeCache.set(localPath, store);
   }
   return store;
+}
+
+/**
+ * Close one workspace's store and drop its shared state, so nothing holds
+ * its state.db open (an unlinked workspace's folder must be deletable).
+ */
+export function closeStateStore(localPath: string): void {
+  storeCache.get(localPath)?.close();
+  storeCache.delete(localPath);
+  stateCache.delete(localPath);
 }
 
 /**
@@ -217,124 +224,6 @@ export async function replaceWorkspaceState(
     }
     Object.assign(hit.state, copy);
     hit.version = store.dataVersion();
-  }
-}
-
-// ── JSON backend ──────────────────────────────────────────────────
-
-class JsonStateStore implements StateStore {
-  public readonly stats = newStats();
-  private statePath: string;
-
-  public constructor(localPath: string) {
-    this.statePath = path.join(localPath, ".checkpoint", "state.json");
-  }
-
-  public async load(): Promise<WorkspaceState> {
-    const state = await this.read();
-    this.stats.loads++;
-    this.stats.rowsRead += countRows(state);
-    return state;
-  }
-
-  private async read(): Promise<WorkspaceState> {
-    let raw: string;
-    try {
-      raw = await fs.readFile(this.statePath, "utf-8");
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        // A workspace that has never saved state.
-        return { changelistNumber: 0, files: {}, markedForAdd: [], staged: [] };
-      }
-      throw err;
-    }
-    try {
-      // v1 files simply lack the optional v2 fields (version, teamSync,
-      // artifactType); no structural migration is needed for JSON.
-      return JSON.parse(raw) as WorkspaceState;
-    } catch (err) {
-      // Not "no state": a state that cannot be read. Answering with an empty
-      // one would tell the daemon the workspace tracks nothing and has synced
-      // nothing, and everything it did next would be built on that.
-      throw new Error(
-        `Workspace state at ${this.statePath} is unreadable (${
-          (err as Error).message
-        }). Restore the file or re-sync the workspace.`,
-      );
-    }
-  }
-
-  public async save(state: WorkspaceState): Promise<void> {
-    const start = Date.now();
-    await this.writeFile(state);
-    const rows = countRows(state);
-    const ms = Date.now() - start;
-    this.stats.writes++;
-    this.stats.rowsWritten += rows;
-    this.stats.ms += ms;
-    logWrite("save", rows, ms);
-  }
-
-  // JSON has no partial write: the file is rewritten whole. This backend is
-  // kept for existing workspaces and is not the default.
-  public async apply(delta: StateDelta): Promise<void> {
-    const start = Date.now();
-    const state = await this.read();
-    applyDeltaToState(state, delta);
-    await this.writeFile(state);
-    const rows = deltaRowCount(delta);
-    const ms = Date.now() - start;
-    this.stats.writes++;
-    this.stats.rowsWritten += rows;
-    this.stats.ms += ms;
-    logWrite("apply", rows, ms);
-  }
-
-  private knownMtime = 0;
-  private version = 0;
-
-  public dataVersion(): number {
-    let mtime = 0;
-    try {
-      mtime = statSync(this.statePath).mtimeMs;
-    } catch {
-      // No file yet.
-    }
-    if (mtime !== this.knownMtime) {
-      this.knownMtime = mtime;
-      this.version++;
-    }
-    return this.version;
-  }
-
-  private rememberOwnWrite(): void {
-    try {
-      this.knownMtime = statSync(this.statePath).mtimeMs;
-    } catch {
-      // see dataVersion
-    }
-  }
-
-  private async writeFile(state: WorkspaceState): Promise<void> {
-    await fs.mkdir(path.dirname(this.statePath), { recursive: true });
-    // Write beside the file and rename over it, so a crash or a full disk
-    // partway through leaves the previous state, not half of the new one.
-    const tmpPath = `${this.statePath}.tmp-${process.pid}`;
-    try {
-      await fs.writeFile(
-        tmpPath,
-        JSON.stringify({ ...state, version: WORKSPACE_STATE_VERSION }, null, 2),
-      );
-      await fs.rename(tmpPath, this.statePath);
-      this.rememberOwnWrite();
-    } catch (err) {
-      await fs.rm(tmpPath, { force: true });
-      throw err;
-    }
-  }
-
-  public close(): void {
-    // nothing to release
   }
 }
 
