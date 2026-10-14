@@ -14,7 +14,7 @@ import {
 } from "@checkpointvcs/longtail-addon";
 import {
   getWorkspaceState,
-  saveWorkspaceState,
+  updateWorkspaceState,
   type Workspace,
 } from "./util.js";
 import {
@@ -284,6 +284,9 @@ export async function submit(
       workspace.localPath,
       stateBackend,
     );
+    const upsert: Record<string, WorkspaceStateFile> = {};
+    const removed: string[] = [];
+    let advanceTo: number | undefined;
 
     // The workspace's changelist number says "this workspace has everything up
     // to here", and the next pull only fetches what came after it. So it may
@@ -302,7 +305,7 @@ export async function submit(
         created.parentNumber === workspaceState.changelistNumber &&
         !isArtifactSubmit
       ) {
-        workspaceState.changelistNumber = result.changelistNumber;
+        advanceTo = result.changelistNumber;
       }
     } catch {
       // Could not check. Staying where it is only means the next pull looks at
@@ -318,14 +321,14 @@ export async function submit(
     const total = uniqueModifications.length;
     onProgress?.("Updating workspace state", 0, total);
 
+    const idByPath = new Map(fileIds.map((f) => [f.path, f.id]));
     for (const modification of uniqueModifications) {
       // Normalize the path (use forward slashes, no leading slash)
       const normalizedPath = modification.path
         .replace(/\\/g, "/")
         .replace(/^\//, "");
-      const fileId = fileIds.find(
-        (f) => f.path === normalizedPath || f.path === modification.path,
-      )?.id;
+      const fileId =
+        idByPath.get(normalizedPath) ?? idByPath.get(modification.path);
 
       if (!fileId) {
         processed++;
@@ -335,7 +338,7 @@ export async function submit(
 
       if (modification.delete) {
         // Remove the file entry using the path key
-        delete workspaceState.files[normalizedPath];
+        removed.push(normalizedPath);
       } else {
         // Add/update the file entry: hash deferred until change detection
         const fullPath = path.join(workspace.localPath, modification.path);
@@ -350,14 +353,23 @@ export async function submit(
           mtime: stat.mtimeMs,
         };
 
-        workspaceState.files[normalizedPath] = stateFile;
+        upsert[normalizedPath] = stateFile;
       }
 
       processed++;
       onProgress?.("Updating workspace state", processed, total);
     }
 
-    await saveWorkspaceState(workspace, workspaceState, stateBackend);
+    await updateWorkspaceState(
+      workspace,
+      {
+        files: { delete: removed, upsert },
+        ...(advanceTo !== undefined && {
+          meta: { changelistNumber: advanceTo },
+        }),
+      },
+      stateBackend,
+    );
   }
 
   if (status.error !== 0) {

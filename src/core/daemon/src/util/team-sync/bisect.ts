@@ -1,16 +1,14 @@
 import {
   getWorkspaceState,
-  saveWorkspaceState,
-  WORKSPACE_STATE_VERSION,
+  updateWorkspaceState,
   type BisectVerdict,
   type Workspace,
 } from "../util.js";
 import { DaemonConfig } from "../../daemon-config.js";
 
 /**
- * Record a bisect verdict for a single changelist and persist it into the
- * workspace state under teamSync.bisect. Other state fields are preserved and
- * the state version is bumped to the current WORKSPACE_STATE_VERSION.
+ * Record a bisect verdict for a single changelist in the workspace state
+ * under teamSync.bisect. Other state fields are left as they are.
  */
 export async function setBisectVerdict(
   workspace: Workspace,
@@ -18,16 +16,11 @@ export async function setBisectVerdict(
   verdict: BisectVerdict,
 ): Promise<void> {
   const backend = (await DaemonConfig.Get()).stateBackend;
-  const state = await getWorkspaceState(workspace.localPath, backend);
-
-  const teamSync = state.teamSync ?? {};
-  const bisect = teamSync.bisect ?? {};
-  bisect[changelistNumber] = verdict;
-  teamSync.bisect = bisect;
-  state.teamSync = teamSync;
-  state.version = WORKSPACE_STATE_VERSION;
-
-  await saveWorkspaceState(workspace, state, backend);
+  await updateWorkspaceState(
+    workspace,
+    { bisect: { set: { [changelistNumber]: verdict } } },
+    backend,
+  );
 }
 
 /**
@@ -39,9 +32,7 @@ export async function resetBisect(workspace: Workspace): Promise<void> {
   const state = await getWorkspaceState(workspace.localPath, backend);
 
   if (state.teamSync?.bisect) {
-    delete state.teamSync.bisect;
-    state.version = WORKSPACE_STATE_VERSION;
-    await saveWorkspaceState(workspace, state, backend);
+    await updateWorkspaceState(workspace, { bisect: { clear: true } }, backend);
   }
 }
 

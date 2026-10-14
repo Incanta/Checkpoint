@@ -8,7 +8,7 @@ import {
 import {
   getWorkspaceConfig,
   getWorkspaceState,
-  saveWorkspaceState,
+  updateWorkspaceState,
   type Workspace,
 } from "../util.js";
 import { pull, type PullMergeResult } from "../pull.js";
@@ -86,6 +86,7 @@ export async function runSyncPipeline(
     syncedChangelistNumber,
     backend,
     onStep,
+    mergeResult.pulledPaths,
   );
 
   let appliedArtifacts: AppliedArtifactSummary[] = [];
@@ -208,6 +209,7 @@ async function reconcileSyncFilter(
   changelistNumber: number,
   backend: Awaited<ReturnType<typeof DaemonConfig.Get>>["stateBackend"],
   onStep?: (step: string) => void,
+  pulledPaths?: string[],
 ): Promise<number> {
   void orgId;
   const { filter } = await resolveSyncFilter(workspace, changelistNumber);
@@ -217,48 +219,44 @@ async function reconcileSyncFilter(
   if (filter.isNoOp) {
     // Clear a previously applied filter hash so a later narrowing re-runs.
     if (currentHash !== undefined) {
-      await saveWorkspaceState(
+      await updateWorkspaceState(
         workspace,
-        {
-          ...state,
-          teamSync: { ...(state.teamSync ?? {}), syncFilterHash: undefined },
-        },
+        { meta: { syncFilterHash: null } },
         backend,
       );
     }
     return 0;
   }
 
-  const excluded = Object.keys(state.files).filter(
-    (relPath) => !filter.matches(relPath),
-  );
+  // With the same filter already applied, every file the pull did not touch
+  // passed it last time; only the pulled paths need checking. A changed
+  // filter (or no record of what the pull touched) checks everything.
+  const candidates =
+    currentHash === filter.hash && pulledPaths
+      ? pulledPaths.filter((p) => p in state.files)
+      : Object.keys(state.files);
+  const excluded = candidates.filter((relPath) => !filter.matches(relPath));
 
   if (excluded.length > 0) {
     onStep?.("Applying sync filter");
-    const nextFiles = { ...state.files };
     for (const relPath of excluded) {
       const full = path.join(workspace.localPath, relPath);
       if (existsSync(full)) {
         await fs.rm(full, { force: true });
       }
-      delete nextFiles[relPath];
     }
-    await saveWorkspaceState(
+    await updateWorkspaceState(
       workspace,
       {
-        ...state,
-        files: nextFiles,
-        teamSync: { ...(state.teamSync ?? {}), syncFilterHash: filter.hash },
+        files: { delete: excluded },
+        meta: { syncFilterHash: filter.hash },
       },
       backend,
     );
   } else if (currentHash !== filter.hash) {
-    await saveWorkspaceState(
+    await updateWorkspaceState(
       workspace,
-      {
-        ...state,
-        teamSync: { ...(state.teamSync ?? {}), syncFilterHash: filter.hash },
-      },
+      { meta: { syncFilterHash: filter.hash } },
       backend,
     );
   }

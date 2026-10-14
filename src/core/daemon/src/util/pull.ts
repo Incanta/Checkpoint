@@ -12,7 +12,7 @@ import {
 } from "@checkpointvcs/longtail-addon";
 import {
   getWorkspaceState,
-  saveWorkspaceState,
+  updateWorkspaceState,
   type Workspace,
 } from "./util.js";
 import {
@@ -54,6 +54,12 @@ export interface PullMergeResult {
    * conflictMerges so older clients surface them.
    */
   localChangesSetAside: SetAsideFile[];
+  /**
+   * Paths the pull added or modified, so later steps (the sync filter) can
+   * look at just those instead of every tracked file. Absent from results
+   * that did not pull anything.
+   */
+  pulledPaths?: string[];
 }
 
 export async function pull(
@@ -472,12 +478,9 @@ export async function pull(
     onStep?.("Updating workspace state");
     timer.stage("state");
 
-    const newFiles: Record<string, WorkspaceStateFile> = {
-      ...workspaceState.files,
-    };
-    for (const removedPath of diff.removed) {
-      delete newFiles[removedPath];
-    }
+    // Only the paths the pull touched are written; everything else keeps its
+    // existing entry (and hash).
+    const newFiles: Record<string, WorkspaceStateFile> = {};
 
     const changed = [...diff.added, ...diff.modified];
     const stateTotal = changed.length;
@@ -517,7 +520,8 @@ export async function pull(
     }
 
     for (const [restoredPath, stat] of restoredUnchanged) {
-      const existing = newFiles[restoredPath];
+      const existing =
+        newFiles[restoredPath] ?? workspaceState.files[restoredPath];
       if (existing) {
         newFiles[restoredPath] = {
           ...existing,
@@ -528,20 +532,19 @@ export async function pull(
       }
     }
 
-    await saveWorkspaceState(
+    await updateWorkspaceState(
       workspace,
       {
-        ...workspaceState,
-        changelistNumber: changelistResponse.number,
-        files: newFiles,
-        // Preserve any already-applied artifacts; the pipeline's applyArtifacts
-        // step owns changes to this map.
-        artifactFiles: workspaceState.artifactFiles ?? {},
+        files: { delete: diff.removed, upsert: newFiles },
+        meta: { changelistNumber: changelistResponse.number },
       },
       stateBackend,
     );
 
     timer.log("pull-timing");
+    if (changed.length > 0) {
+      mergeResult.pulledPaths = changed.map((change) => change.path);
+    }
     return mergeResult;
   }
 
@@ -666,6 +669,7 @@ export async function pullTextFilesForSubmit(
     conflictMerges: [],
     localChangesSetAside: [],
   };
+  const patched: Record<string, WorkspaceStateFile> = {};
 
   for (const candidate of candidates) {
     try {
@@ -720,7 +724,7 @@ export async function pullTextFilesForSubmit(
       // local edits in it look like no change at all, and they would drop out
       // of the pending list if this submit did not go through.
       const incomingStat = await fs.stat(incomingResult.cachePath);
-      workspaceState.files[candidate.relativePath] = {
+      patched[candidate.relativePath] = {
         fileId: candidate.fileId,
         changelist: candidate.remoteCl,
         md5: await hashFileMD5(incomingResult.cachePath),
@@ -740,8 +744,12 @@ export async function pullTextFilesForSubmit(
     }
   }
 
-  // Save workspace state with patched file entries; head CL is NOT changed
-  await saveWorkspaceState(workspace, workspaceState, textPullBackend);
+  // Record the patched file entries; head CL is NOT changed
+  await updateWorkspaceState(
+    workspace,
+    { files: { upsert: patched } },
+    textPullBackend,
+  );
 
   return mergeResult;
 }

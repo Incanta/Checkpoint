@@ -9,10 +9,8 @@ import {
 
 import {
   getWorkspaceState,
-  saveWorkspaceState,
-  WORKSPACE_STATE_VERSION,
+  updateWorkspaceState,
   type Workspace,
-  type WorkspaceState,
 } from "../util.js";
 import { getProjectInfo } from "../unreal/index.js";
 import { writeVersionFiles } from "./version-files.js";
@@ -500,16 +498,9 @@ export async function runBuild(
     // Record the last-built changelist on overall success.
     if (success) {
       try {
-        const latest = await getWorkspaceState(workspace.localPath);
-        const nextState: WorkspaceState = {
-          ...latest,
-          version: WORKSPACE_STATE_VERSION,
-          teamSync: {
-            ...latest.teamSync,
-            lastBuiltChangelist: changelistNumber,
-          },
-        };
-        await saveWorkspaceState(workspace, nextState);
+        await updateWorkspaceState(workspace, {
+          meta: { lastBuiltChangelist: changelistNumber },
+        });
       } catch (e) {
         Logger.warn(
           `Build: failed to persist lastBuiltChangelist: ${e instanceof Error ? e.message : String(e)}`,

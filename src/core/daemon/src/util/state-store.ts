@@ -143,6 +143,81 @@ export function closeAllStateStores(): void {
     store.close();
   }
   storeCache.clear();
+  stateCache.clear();
+}
+
+// ── shared in-memory state ────────────────────────────────────────
+
+/**
+ * One in-memory copy of each workspace's state, shared by every caller in
+ * the process. Reading the whole state back from disk on every operation
+ * cost as much as the workspace is large; now the copy is reused until the
+ * store reports that another connection or process wrote it.
+ */
+const stateCache = new Map<
+  string,
+  { version: number; state: WorkspaceState }
+>();
+
+/**
+ * The workspace's current state. The object is shared: treat it as read-only
+ * and change state only through {@link applyWorkspaceDelta}, which keeps it
+ * and the store in step.
+ */
+export async function loadWorkspaceState(
+  localPath: string,
+  preferred?: DaemonConfigType["stateBackend"],
+): Promise<WorkspaceState> {
+  const store = getStateStore(localPath, preferred);
+  const version = store.dataVersion();
+  const hit = stateCache.get(localPath);
+  if (hit && hit.version === version) {
+    return hit.state;
+  }
+  const state = await store.load();
+  stateCache.set(localPath, { version: store.dataVersion(), state });
+  return state;
+}
+
+/** Writes `delta` to the store, then to the shared copy if one is loaded. */
+export async function applyWorkspaceDelta(
+  localPath: string,
+  delta: StateDelta,
+  preferred?: DaemonConfigType["stateBackend"],
+): Promise<void> {
+  const store = getStateStore(localPath, preferred);
+  await store.apply(delta);
+  const hit = stateCache.get(localPath);
+  if (hit) {
+    if (hit.version === store.dataVersion()) {
+      applyDeltaToState(hit.state, delta);
+    } else {
+      // Someone else wrote in between: the copy is stale either way.
+      stateCache.delete(localPath);
+    }
+  }
+}
+
+/**
+ * Replaces the whole state. The shared copy is overwritten in place, so
+ * anything holding it sees the new state.
+ */
+export async function replaceWorkspaceState(
+  localPath: string,
+  state: WorkspaceState,
+  preferred?: DaemonConfigType["stateBackend"],
+): Promise<void> {
+  const store = getStateStore(localPath, preferred);
+  await store.save(state);
+  const hit = stateCache.get(localPath);
+  if (hit) {
+    const copy = structuredClone(state);
+    for (const key of Object.keys(hit.state)) {
+      delete (hit.state as unknown as Record<string, unknown>)[key];
+    }
+    Object.assign(hit.state, copy);
+    hit.version = store.dataVersion();
+  }
 }
 
 // ── JSON backend ──────────────────────────────────────────────────

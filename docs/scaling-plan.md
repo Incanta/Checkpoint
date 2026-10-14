@@ -20,7 +20,7 @@ Decisions already made: a breaking change behind a version gate is fine; design 
 | D0 | Daemon state correctness: backend resolver, safe JSON import, no `workspace.json` rewrite on state save, `daemon.json` default backfill | Done |
 | P0 | Instrumentation (`[pull-timing]`, `[state-store]`, `[submit-server-timing]`) and the long-history scenario (`src/tests/src/integration/history-scaling.test.ts`) | Done (`[state-tree]` lands with S0) |
 | D1 | `StateStore.apply(delta)` with cached statements, `dataVersion()` | Done |
-| D2 | One in-memory state handle per workspace; every call site writes deltas | To do |
+| D2 | One shared in-memory state per workspace; every call site writes deltas; sync filter re-checks only pulled paths | Done |
 | D3 | Path index replacing O(dirty x tracked) scans; keep pending cache across pull/submit | To do |
 | D4 | Remove `json` as a configurable backend | To do |
 | S0 | Tree stats and test seams | To do |

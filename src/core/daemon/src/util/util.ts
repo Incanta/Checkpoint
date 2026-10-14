@@ -7,7 +7,12 @@ import {
   type TeamSyncBuildStep,
   type WorkspaceStateFile,
 } from "@checkpointvcs/common";
-import { getStateStore } from "./state-store.js";
+import {
+  applyWorkspaceDelta,
+  loadWorkspaceState,
+  replaceWorkspaceState,
+} from "./state-store.js";
+import type { StateDelta } from "./state-delta.js";
 import { DaemonConfigType } from "../daemon-config.js";
 
 export function relativePath(from: string, to: string): string {
@@ -279,12 +284,36 @@ export async function saveWorkspaceConfig(workspace: Workspace): Promise<void> {
   }
 }
 
+/**
+ * The workspace's tracked-file state. The returned object is shared by every
+ * caller in the process: read it, but change state only through
+ * {@link updateWorkspaceState}.
+ */
 export async function getWorkspaceState(
   localPath: string,
   backend?: DaemonConfigType["stateBackend"],
 ): Promise<WorkspaceState> {
-  const store = getStateStore(localPath, backend);
-  return store.load();
+  return loadWorkspaceState(localPath, backend);
+}
+
+/**
+ * Records a change to the workspace's state, writing only what `delta`
+ * changes. See {@link StateDelta}.
+ */
+export async function updateWorkspaceState(
+  workspace: Pick<Workspace, "localPath">,
+  delta: StateDelta,
+  backend?: DaemonConfigType["stateBackend"],
+): Promise<void> {
+  try {
+    await applyWorkspaceDelta(workspace.localPath, delta, backend);
+  } catch (e) {
+    throw new Error(
+      `Could not write workspace state, did you initialize this workspace properly? (${
+        (e as Error)?.message ?? e
+      })`,
+    );
+  }
 }
 
 /**
@@ -303,8 +332,7 @@ export async function saveWorkspaceState(
 
   try {
     await fs.mkdir(workspaceConfigDir, { recursive: true });
-    const store = getStateStore(workspace.localPath, backend);
-    await store.save(state);
+    await replaceWorkspaceState(workspace.localPath, state, backend);
   } catch (e) {
     throw new Error(
       `Could not write workspace state, did you initialize this workspace properly? (${

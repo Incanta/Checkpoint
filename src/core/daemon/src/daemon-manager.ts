@@ -24,7 +24,7 @@ import {
 } from "@checkpointvcs/common";
 import {
   getWorkspaceState,
-  saveWorkspaceState,
+  updateWorkspaceState,
   getWorkspaceConfig,
   saveWorkspaceConfig,
   closeAllStateStores,
@@ -36,7 +36,7 @@ import {
 } from "./util/team-sync/scheduler.js";
 import { runSyncPipeline } from "./util/team-sync/sync-pipeline.js";
 import { compareWithBaseline } from "./util/baseline.js";
-import { WORKSPACE_STATE_VERSION } from "./util/util.js";
+import type { StateDelta } from "./util/state-delta.js";
 import {
   scanWorkspaceIgnoreFiles,
   buildIgnoreCacheFromPatterns,
@@ -189,19 +189,10 @@ export class DaemonManager {
         }
 
         // Persist the run time so the schedule does not re-fire on restart.
-        const backend = this.stateBackend;
-        const state = await getWorkspaceState(workspace.localPath, backend);
-        await saveWorkspaceState(
+        await updateWorkspaceState(
           workspace,
-          {
-            ...state,
-            version: WORKSPACE_STATE_VERSION,
-            teamSync: {
-              ...(state.teamSync ?? {}),
-              lastScheduledSyncAt: new Date().toISOString(),
-            },
-          },
-          backend,
+          { meta: { lastScheduledSyncAt: new Date().toISOString() } },
+          this.stateBackend,
         );
       },
     });
@@ -1660,9 +1651,7 @@ export class DaemonManager {
     workspace: Workspace,
     relativePaths: string[],
   ): Promise<void> {
-    await this.mutateStaged(workspace, (set) => {
-      for (const p of relativePaths) set.add(p);
-    });
+    await this.mutateStaged(workspace, { add: relativePaths });
   }
 
   /**
@@ -1675,22 +1664,17 @@ export class DaemonManager {
     workspace: Workspace,
     relativePaths: string[],
   ): Promise<void> {
-    await this.mutateStaged(workspace, (set) => {
-      for (const p of relativePaths) set.delete(p);
-    });
+    await this.mutateStaged(workspace, { remove: relativePaths });
   }
 
   private async mutateStaged(
     workspace: Workspace,
-    mutate: (set: Set<string>) => void,
+    change: { add?: string[]; remove?: string[] },
   ): Promise<void> {
     const state = this.workspaceStates.get(workspace.id);
     if (!state) return;
 
-    const existing = new Set(state.staged ?? []);
-    mutate(existing);
-    state.staged = [...existing];
-    await this.persistState(workspace, state);
+    await this.persistDelta(workspace, { staged: change });
 
     // Invalidate so the next refresh reports the new staged flags.
     this.workspacePendingChanges.delete(workspace.id);
@@ -1714,12 +1698,9 @@ export class DaemonManager {
     const state = this.workspaceStates.get(workspace.id);
     if (!state) return;
 
-    const existing = new Set(state.markedForAdd ?? []);
-    for (const p of relativePaths) {
-      existing.add(p);
-    }
-    state.markedForAdd = [...existing];
-    await this.persistState(workspace, state);
+    await this.persistDelta(workspace, {
+      markedForAdd: { add: relativePaths },
+    });
 
     // Invalidate caches so next refresh picks up the new status
     this.workspacePendingChanges.delete(workspace.id);
@@ -1736,12 +1717,9 @@ export class DaemonManager {
     const state = this.workspaceStates.get(workspace.id);
     if (!state) return;
 
-    const existing = new Set(state.markedForAdd ?? []);
-    for (const p of relativePaths) {
-      existing.delete(p);
-    }
-    state.markedForAdd = [...existing];
-    await this.persistState(workspace, state);
+    await this.persistDelta(workspace, {
+      markedForAdd: { remove: relativePaths },
+    });
 
     // Invalidate caches so next refresh picks up the new status
     this.workspacePendingChanges.delete(workspace.id);
@@ -1765,7 +1743,7 @@ export class DaemonManager {
     const state = this.workspaceStates.get(workspace.id);
     if (!state || relativePaths.length === 0) return;
 
-    let updated = false;
+    const upsert: Record<string, WorkspaceState["files"][string]> = {};
     for (const relativePath of relativePaths) {
       const entry = state.files[relativePath];
       if (!entry) continue;
@@ -1773,28 +1751,35 @@ export class DaemonManager {
         const stat = await fs.stat(
           path.join(workspace.localPath, relativePath),
         );
-        entry.size = stat.size;
-        entry.mtime = stat.mtimeMs;
-        entry.md5 = "";
-        updated = true;
+        upsert[relativePath] = {
+          ...entry,
+          size: stat.size,
+          mtime: stat.mtimeMs,
+          md5: "",
+        };
       } catch {
         // Not on disk; nothing to record.
       }
     }
-    if (!updated) return;
+    if (Object.keys(upsert).length === 0) return;
 
-    await this.persistState(workspace, state);
+    await this.persistDelta(workspace, { files: { upsert } });
     this.workspacePendingChanges.delete(workspace.id);
   }
 
   /**
-   * Persist the in-memory workspace state back to the state store.
+   * Records a change to the workspace's state, writing only what changed,
+   * and keeps the manager's copy pointing at the current shared state.
    */
-  private async persistState(
+  private async persistDelta(
     workspace: Workspace,
-    state: WorkspaceState,
+    delta: StateDelta,
   ): Promise<void> {
-    await saveWorkspaceState(workspace, state, this.stateBackend);
+    await updateWorkspaceState(workspace, delta, this.stateBackend);
+    this.workspaceStates.set(
+      workspace.id,
+      await getWorkspaceState(workspace.localPath, this.stateBackend),
+    );
   }
 
   // ─── VCS Operation Guard ─────────────────────────────────────────

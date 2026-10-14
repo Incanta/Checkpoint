@@ -11,13 +11,12 @@ import path from "path";
 import { homedir } from "os";
 
 import {
-  saveWorkspaceState,
+  updateWorkspaceState,
   getWorkspaceState,
   type AppliedArtifactInfo,
   type ArtifactStateFile,
   type Workspace,
   type WorkspaceTeamSyncSettings,
-  type WorkspaceState,
 } from "../util.js";
 import {
   toStorageOptions,
@@ -82,7 +81,7 @@ export async function applyArtifacts(
       Object.keys(existingArtifacts),
       onStep,
     );
-    await persistArtifactState(workspace, state, {}, {}, stateBackend);
+    await persistArtifactState(workspace, {}, {}, stateBackend);
     return {
       artifactFiles: {},
       appliedArtifacts: {},
@@ -292,7 +291,6 @@ export async function applyArtifacts(
 
   await persistArtifactState(
     workspace,
-    state,
     nextArtifactFiles,
     nextApplied,
     stateBackend,
@@ -319,22 +317,18 @@ export async function invalidateArtifactType(
   const stateBackend = daemonConfig.stateBackend;
   const state = await getWorkspaceState(workspace.localPath, stateBackend);
 
-  const artifactFiles = { ...(state.artifactFiles ?? {}) };
-  for (const p of overlappingPaths) {
-    delete artifactFiles[normalizeArtifactPath(p)];
-  }
-
-  const teamSync = { ...(state.teamSync ?? {}) };
-  const appliedArtifacts = { ...(teamSync.appliedArtifacts ?? {}) };
+  const appliedArtifacts = { ...(state.teamSync?.appliedArtifacts ?? {}) };
   const info = appliedArtifacts[type];
   if (info) {
     appliedArtifacts[type] = { ...info, invalidatedByLocalBuild: true };
-    teamSync.appliedArtifacts = appliedArtifacts;
   }
 
-  await saveWorkspaceState(
+  await updateWorkspaceState(
     workspace,
-    { ...state, artifactFiles, teamSync },
+    {
+      artifactFiles: { delete: overlappingPaths.map(normalizeArtifactPath) },
+      ...(info && { meta: { appliedArtifacts } }),
+    },
     stateBackend,
   );
 }
@@ -356,21 +350,19 @@ async function removeArtifactPaths(
 
 async function persistArtifactState(
   workspace: Workspace,
-  state: WorkspaceState,
   artifactFiles: Record<string, ArtifactStateFile>,
   appliedArtifacts: Record<string, AppliedArtifactInfo>,
   stateBackend: StateBackend,
 ): Promise<void> {
-  const teamSync = { ...(state.teamSync ?? {}) };
-  if (Object.keys(appliedArtifacts).length > 0) {
-    teamSync.appliedArtifacts = appliedArtifacts;
-  } else {
-    delete teamSync.appliedArtifacts;
-  }
-
-  await saveWorkspaceState(
+  await updateWorkspaceState(
     workspace,
-    { ...state, artifactFiles, teamSync },
+    {
+      artifactFiles: { replaceAll: artifactFiles },
+      meta: {
+        appliedArtifacts:
+          Object.keys(appliedArtifacts).length > 0 ? appliedArtifacts : null,
+      },
+    },
     stateBackend,
   );
 }

@@ -5,7 +5,7 @@ import { z } from "zod";
 import {
   checkConflicts,
   getWorkspaceState,
-  saveWorkspaceState,
+  updateWorkspaceState,
   getWorkspaceConfig,
   saveWorkspaceConfig,
   type Workspace as UtilWorkspace,
@@ -155,6 +155,7 @@ export const conflictsRouter = router({
       );
 
       const resolvedPaths: string[] = [];
+      const resolved: Record<string, (typeof state.files)[string]> = {};
 
       for (const filePath of input.filePaths) {
         const normalizedPath = filePath
@@ -162,16 +163,24 @@ export const conflictsRouter = router({
           .replace(/\\/g, "/");
 
         const outdated = outdatedByPath.get(normalizedPath);
-        if (outdated && state.files[normalizedPath]) {
+        const entry = state.files[normalizedPath];
+        if (outdated && entry) {
           // Update the file's CL to match the remote, marking it as resolved
-          state.files[normalizedPath]!.changelist = outdated.remoteChangelist;
+          resolved[normalizedPath] = {
+            ...entry,
+            changelist: outdated.remoteChangelist,
+          };
           resolvedPaths.push(normalizedPath);
         }
       }
 
       if (resolvedPaths.length > 0) {
         // Persist the updated state
-        await saveWorkspaceState(workspace, state, conflictBackend);
+        await updateWorkspaceState(
+          workspace,
+          { files: { upsert: resolved } },
+          conflictBackend,
+        );
 
         // Reload cached state in the daemon manager
         await manager.reloadWorkspaceState(workspace);
