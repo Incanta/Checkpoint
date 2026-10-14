@@ -29,7 +29,7 @@ Decisions already made: a breaking change behind a version gate is fine; design 
 | S3 | Sparse three-way merge (reads only paths the branch changed; target-unmoved merges reuse the incoming tree), full-map LRU removed | Done |
 | N1 | Submit writes per-version block maps (`versions/<stem>.lsi`), verified by the server before it records anything; block-tag bug in `Longtail_GetExistingStoreIndex` fixed | Done |
 | N2 | Single-pass pull (`PullSelectionAsync`: each path from its own source, only selected paths scanned, one `ChangeVersion`), file reads from block maps; per-changelist path kept as fallback for versions without block maps | Done |
-| N3 | Server index segments and `/existing-content`, in shadow mode | To do |
+| N3 | Server index segments (`index/seg/<day>/<sha>-<mac>.lsi`, written per submit, lock-free) and `POST /existing-content` from an in-memory native index whose answers equal the full-index lookup; gateway refuses client writes under `index/` | Done (client switches in N4) |
 | N4 | Cutover: client uses `/existing-content`, no lock or merge on submit, migration, version gate (breaking) | To do |
 | N5 | Cleanup: compaction, delete `store.lsi` and the old merge path | To do |
 

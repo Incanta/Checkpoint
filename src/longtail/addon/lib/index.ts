@@ -80,6 +80,12 @@ interface LongtailAddonNative {
   pullAsync(options: PullAsyncOptions): NativeHandle;
   pullSelectionAsync(options: PullSelectionAsyncOptions): NativeHandle;
   filterPaths(includeRules: string[], paths: string[]): boolean[];
+  indexCacheCreate(): IndexCacheHandle;
+  indexCacheAdd(cache: IndexCacheHandle, storeIndex: Buffer): IndexCacheAddResult;
+  indexCacheQuery(cache: IndexCacheHandle, chunkHashes: Buffer, minBlockUsagePercent: number): Buffer;
+  indexCacheSerialize(cache: IndexCacheHandle): Buffer;
+  indexCacheStats(cache: IndexCacheHandle): { blocks: number; chunks: number };
+  getExistingStoreIndex(storeIndex: Buffer, chunkHashes: Buffer, minBlockUsagePercent: number): Buffer;
   mergeAsync(options: MergeAsyncOptions): NativeHandle;
   storeBlockMapAsync(options: StoreBlockMapAsyncOptions): NativeHandle;
   readFileFromVersionAsync(
@@ -310,6 +316,59 @@ export function pullSelectionAsync(
  */
 export function filterPaths(includeRules: string[], paths: string[]): boolean[] {
   return addon.filterPaths(includeRules, paths);
+}
+
+/** Opaque handle to a native in-memory dedup index (see index-cache.cpp). */
+export type IndexCacheHandle = object & { readonly __indexCache: unique symbol };
+
+export interface IndexCacheAddResult {
+  blocksAdded: number;
+  chunksAdded: number;
+}
+
+/**
+ * A new, empty dedup index. Fed serialized store indexes (segments, bases)
+ * with indexCacheAdd; answers what Longtail_GetExistingStoreIndex over all of
+ * them would, while reading only the blocks holding requested chunks. Freed
+ * when garbage collected.
+ */
+export function indexCacheCreate(): IndexCacheHandle {
+  return addon.indexCacheCreate();
+}
+
+/** Adds the blocks of a serialized store index that the cache lacks. */
+export function indexCacheAdd(cache: IndexCacheHandle, storeIndex: Buffer): IndexCacheAddResult {
+  return addon.indexCacheAdd(cache, storeIndex);
+}
+
+/**
+ * The blocks to reuse for `chunkHashes` (little-endian u64s), as a serialized
+ * store index.
+ */
+export function indexCacheQuery(
+  cache: IndexCacheHandle,
+  chunkHashes: Buffer,
+  minBlockUsagePercent: number,
+): Buffer {
+  return addon.indexCacheQuery(cache, chunkHashes, minBlockUsagePercent);
+}
+
+/** The whole index as one serialized store index. */
+export function indexCacheSerialize(cache: IndexCacheHandle): Buffer {
+  return addon.indexCacheSerialize(cache);
+}
+
+export function indexCacheStats(cache: IndexCacheHandle): { blocks: number; chunks: number } {
+  return addon.indexCacheStats(cache);
+}
+
+/** Longtail_GetExistingStoreIndex over a whole serialized store index. */
+export function getExistingStoreIndex(
+  storeIndex: Buffer,
+  chunkHashes: Buffer,
+  minBlockUsagePercent: number,
+): Buffer {
+  return addon.getExistingStoreIndex(storeIndex, chunkHashes, minBlockUsagePercent);
 }
 
 export function mergeAsync(options: MergeAsyncOptions): NativeHandle {

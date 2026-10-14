@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { routeRoot } from "./root.js";
 import { routeSubmit } from "./submit.js";
+import { routeExistingContent } from "./existing-content.js";
 import { routeSystem } from "./system.js";
 import { routeRepoSize } from "./repo-size.js";
 import { routeBlocks } from "./blocks.js";
@@ -12,6 +13,7 @@ export function routes(): Router {
 
   router.use(routeRoot());
   router.use(routeSubmit());
+  router.use(routeExistingContent());
   router.use(routeSystem());
   // State-tree + content block storage goes through the unified backend.
   router.use(routeBlocks());

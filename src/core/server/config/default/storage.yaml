@@ -35,3 +35,14 @@ r2:
   access-key-id: ""
   secret-access-key: ""
   api-token: ""
+
+# The repo dedup index (segments under index/ in each repo, see
+# src/storage/index-segments.ts).
+index:
+  # Key for the MACs on index object names. Empty uses the storage signing
+  # key; set it (or CHECKPOINT_STORAGE_INDEX_KEY) so rotating the signing key
+  # does not invalidate every segment.
+  signing-key: ""
+  # Upper bound on memory for in-memory repo indexes (least recently used
+  # repos are dropped past it).
+  cache-bytes: 1073741824

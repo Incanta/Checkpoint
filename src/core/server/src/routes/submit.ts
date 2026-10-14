@@ -23,6 +23,7 @@ import multer from "multer";
 import { getR2Endpoint } from "../utils/r2.js";
 import { getStorageBackend } from "../storage/backend.js";
 import { withStoreIndexLock } from "../storage/index-lock.js";
+import { writeSegment } from "../storage/index-segments.js";
 import { verifyRepoToken, type RepoTokenResult } from "../utils/repo-token.js";
 import { Logger } from "../logging.js";
 
@@ -383,6 +384,21 @@ export function routeSubmit(): Router {
         addedBytes = Number(
           (result as { addedBytes?: number })?.addedBytes ?? 0,
         );
+
+        // Record this submit's new blocks as an immutable index segment, the
+        // lock-free replacement for merging into store.lsi (which still
+        // happens above until clients stop reading it).
+        try {
+          await timed("segmentMs", async () => {
+            const blockCount = storeIndexBuffer.length >= 12 ? storeIndexBuffer.readUInt32LE(8) : 0;
+            const backend = await getStorageBackend({ bucket: `checkpoint-${claims.repoId}` });
+            await writeSegment(backend, claims.repoId, basePath, Buffer.from(storeIndexBuffer), blockCount);
+          });
+        } catch (e: any) {
+          // The store index merge above already recorded the blocks; a
+          // missing segment costs only re-uploads once clients use segments.
+          Logger.error(`[Submit] Could not write index segment: ${e.message}`);
+        }
       } else if (
         payload.modifications.some((m) => !m.delete) ||
         payload.versionIndex

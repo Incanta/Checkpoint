@@ -47,6 +47,11 @@ export interface StorageBackend {
   delete(key: string): Promise<void>;
   /** Total bytes stored under a "/{org}/{repo}" prefix. */
   sizeUnder(prefix: string): Promise<number>;
+  /**
+   * Keys of every object under a prefix, relative to it ("a/b.lsi" for
+   * "<prefix>/a/b.lsi"). Empty when nothing is there.
+   */
+  listKeys(prefix: string): Promise<string[]>;
   /** Create a prefix (a dir on local disk; a no-op for object stores). */
   ensurePrefix(prefix: string): Promise<void>;
   /** Recursively remove everything under a prefix (repo deletion). */
@@ -120,6 +125,27 @@ class LocalBackend implements StorageBackend {
       await pipeline(body, createWriteStream(tmp));
     }
     await fs.rename(tmp, full);
+  }
+
+  async listKeys(prefix: string): Promise<string[]> {
+    const root = this.resolve(prefix);
+    const out: string[] = [];
+    const walk = async (dir: string, rel: string): Promise<void> => {
+      let entries: import("fs").Dirent[];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw err;
+      }
+      for (const entry of entries) {
+        const name = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) await walk(path.join(dir, entry.name), name);
+        else if (entry.isFile() && !entry.name.includes(".tmp-")) out.push(name);
+      }
+    };
+    await walk(root, "");
+    return out;
   }
 
   async putIfAbsent(key: string, body: Buffer): Promise<boolean> {
@@ -288,6 +314,15 @@ class S3Backend implements StorageBackend {
 
   async ensurePrefix(): Promise<void> {
     // Object stores have no directories; keys are created lazily on put.
+  }
+
+  async listKeys(prefix: string): Promise<string[]> {
+    const root = `${normalizeKey(prefix)}/`;
+    const out: string[] = [];
+    await this.forEachUnder(prefix, (obj) => {
+      if (obj.Key?.startsWith(root)) out.push(obj.Key.slice(root.length));
+    });
+    return out;
   }
 
   async deletePrefix(prefix: string): Promise<void> {

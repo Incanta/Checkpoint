@@ -128,6 +128,16 @@ WrapperAsyncHandle* PullSelectionAsync(
     const char* CachePath,
     int LogLevel);
 
+struct IndexCache;
+IndexCache* IndexCache_Create();
+void IndexCache_Free(IndexCache* cache);
+int IndexCache_Add(IndexCache* cache, const void* buffer, size_t size, uint32_t* out_blocks_added, uint32_t* out_chunks_added);
+int IndexCache_Query(IndexCache* cache, const uint64_t* chunks, uint32_t chunk_count, uint32_t min_block_usage_percent, void** out_buffer, size_t* out_size);
+int IndexCache_Serialize(IndexCache* cache, void** out_buffer, size_t* out_size);
+void IndexCache_Stats(IndexCache* cache, uint32_t* out_blocks, uint32_t* out_chunks);
+int Wrapper_GetExistingStoreIndex(const void* store_index_buffer, size_t store_index_size, const uint64_t* chunks, uint32_t chunk_count, uint32_t min_block_usage_percent, void** out_buffer, size_t* out_size);
+void Wrapper_FreeBuffer(void* buffer);
+
 ReadFileAsyncHandle* ReadFileFromVersionAsync(
     const char* FilePath,
     const char* VersionIndexName,
@@ -401,6 +411,89 @@ static Napi::Value NapiPullAsync(const Napi::CallbackInfo& info) {
   ctx->isReadFileHandle = false;
 
   return Napi::External<HandleContext>::New(env, ctx, ContextCleanup);
+}
+
+// --------------------------------------------------------------------------
+// Index cache: the core server's in-memory dedup index for one repo. All
+// synchronous; see index-cache.cpp.
+// --------------------------------------------------------------------------
+static std::vector<uint64_t> HashesFromBuffer(const Napi::Buffer<uint8_t>& buf) {
+  std::vector<uint64_t> hashes(buf.Length() / 8);
+  if (!hashes.empty()) memcpy(hashes.data(), buf.Data(), hashes.size() * 8);
+  return hashes;
+}
+
+static Napi::Value BufferResult(Napi::Env env, int err, void* data, size_t size, const char* what) {
+  if (err) {
+    if (data) Wrapper_FreeBuffer(data);
+    Napi::Error::New(env, std::string(what) + " failed with error " + std::to_string(err)).ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  Napi::Buffer<uint8_t> out = Napi::Buffer<uint8_t>::Copy(env, static_cast<uint8_t*>(data), size);
+  Wrapper_FreeBuffer(data);
+  return out;
+}
+
+static Napi::Value NapiIndexCacheCreate(const Napi::CallbackInfo& info) {
+  IndexCache* cache = IndexCache_Create();
+  return Napi::External<IndexCache>::New(info.Env(), cache, [](Napi::Env, IndexCache* c) { IndexCache_Free(c); });
+}
+
+static Napi::Value NapiIndexCacheAdd(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  IndexCache* cache = info[0].As<Napi::External<IndexCache>>().Data();
+  Napi::Buffer<uint8_t> buf = info[1].As<Napi::Buffer<uint8_t>>();
+  uint32_t blocks = 0, chunks = 0;
+  int err = IndexCache_Add(cache, buf.Data(), buf.Length(), &blocks, &chunks);
+  if (err) {
+    Napi::Error::New(env, "indexCacheAdd failed with error " + std::to_string(err)).ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  Napi::Object out = Napi::Object::New(env);
+  out.Set("blocksAdded", blocks);
+  out.Set("chunksAdded", chunks);
+  return out;
+}
+
+static Napi::Value NapiIndexCacheQuery(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  IndexCache* cache = info[0].As<Napi::External<IndexCache>>().Data();
+  std::vector<uint64_t> hashes = HashesFromBuffer(info[1].As<Napi::Buffer<uint8_t>>());
+  uint32_t minUsage = info[2].As<Napi::Number>().Uint32Value();
+  void* data = nullptr;
+  size_t size = 0;
+  int err = IndexCache_Query(cache, hashes.data(), (uint32_t)hashes.size(), minUsage, &data, &size);
+  return BufferResult(env, err, data, size, "indexCacheQuery");
+}
+
+static Napi::Value NapiIndexCacheSerialize(const Napi::CallbackInfo& info) {
+  IndexCache* cache = info[0].As<Napi::External<IndexCache>>().Data();
+  void* data = nullptr;
+  size_t size = 0;
+  int err = IndexCache_Serialize(cache, &data, &size);
+  return BufferResult(info.Env(), err, data, size, "indexCacheSerialize");
+}
+
+static Napi::Value NapiIndexCacheStats(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  IndexCache* cache = info[0].As<Napi::External<IndexCache>>().Data();
+  uint32_t blocks = 0, chunks = 0;
+  IndexCache_Stats(cache, &blocks, &chunks);
+  Napi::Object out = Napi::Object::New(env);
+  out.Set("blocks", blocks);
+  out.Set("chunks", chunks);
+  return out;
+}
+
+static Napi::Value NapiGetExistingStoreIndex(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  Napi::Buffer<uint8_t> index = info[0].As<Napi::Buffer<uint8_t>>();
+  std::vector<uint64_t> hashes = HashesFromBuffer(info[1].As<Napi::Buffer<uint8_t>>());
+  uint32_t minUsage = info[2].As<Napi::Number>().Uint32Value();
+  void* data = nullptr;
+  size_t size = 0;
+  int err = Wrapper_GetExistingStoreIndex(index.Data(), index.Length(), hashes.data(), (uint32_t)hashes.size(), minUsage, &data, &size);
+  return BufferResult(env, err, data, size, "getExistingStoreIndex");
 }
 
 // --------------------------------------------------------------------------
@@ -928,6 +1021,12 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("pullAsync", Napi::Function::New(env, NapiPullAsync));
   exports.Set("pullSelectionAsync", Napi::Function::New(env, NapiPullSelectionAsync));
   exports.Set("filterPaths", Napi::Function::New(env, NapiFilterPaths));
+  exports.Set("indexCacheCreate", Napi::Function::New(env, NapiIndexCacheCreate));
+  exports.Set("indexCacheAdd", Napi::Function::New(env, NapiIndexCacheAdd));
+  exports.Set("indexCacheQuery", Napi::Function::New(env, NapiIndexCacheQuery));
+  exports.Set("indexCacheSerialize", Napi::Function::New(env, NapiIndexCacheSerialize));
+  exports.Set("indexCacheStats", Napi::Function::New(env, NapiIndexCacheStats));
+  exports.Set("getExistingStoreIndex", Napi::Function::New(env, NapiGetExistingStoreIndex));
   exports.Set("mergeAsync", Napi::Function::New(env, NapiMergeAsync));
   exports.Set("storeBlockMapAsync", Napi::Function::New(env, NapiStoreBlockMapAsync));
   exports.Set("readFileFromVersionAsync", Napi::Function::New(env, NapiReadFileFromVersionAsync));

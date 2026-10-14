@@ -123,8 +123,13 @@ function versionIndexName(key: string): string | null {
  * let two merges run at once. Clients only ever read the index.
  */
 function isStoreIndexKey(key: string): boolean {
-  const name = key.split("/")[3];
-  return key.split("/").length === 4 && !!name && /^store[.]lsi/i.test(name);
+  const parts = key.split("/");
+  const name = parts[3];
+  if (!name) return false;
+  // The dedup index's segments, bases, and pointer (see
+  // storage/index-segments.ts) are the server's too.
+  if (/^index$/i.test(name)) return true;
+  return parts.length === 4 && /^store[.]lsi/i.test(name);
 }
 
 /** True when the key is spelled the one way a version index may be. */
