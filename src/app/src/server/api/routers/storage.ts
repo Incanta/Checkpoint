@@ -14,15 +14,34 @@ import {
   getBucketUsageR2,
 } from "~/server/r2-service";
 
+/**
+ * The storage protocol clients must speak. 3: submits ask the core server
+ * which chunks exist (POST /existing-content) and upload a block map; the
+ * repo-wide store.lsi is no longer written. A client that would still read
+ * and merge store.lsi gets nothing it can use, so it is refused here, where
+ * every storage access (gateway and r2 alike) starts. Mirrored in the daemon
+ * (util/storage-options.ts STORAGE_PROTOCOL).
+ */
+export const MIN_STORAGE_PROTOCOL = 3;
+
 export const storageRouter = createTRPCRouter({
   getToken: protectedProcedure
     .input(
       z.object({
         repoId: z.string(),
         write: z.boolean(),
+        /** The storage protocol the client speaks; absent means before 3. */
+        clientProtocol: z.number().int().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
+      if ((input.clientProtocol ?? 0) < MIN_STORAGE_PROTOCOL) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `This Checkpoint client is too old for this server (storage protocol ${MIN_STORAGE_PROTOCOL}). Update Checkpoint.`,
+        });
+      }
+
       const { repo } = await getUserAndRepoWithAccess(
         ctx,
         input.repoId,

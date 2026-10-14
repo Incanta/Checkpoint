@@ -204,3 +204,29 @@ DLL_EXPORT int Wrapper_GetExistingStoreIndex(
 DLL_EXPORT void Wrapper_FreeBuffer(void* buffer) {
   if (buffer) Longtail_Free(buffer);
 }
+
+/**
+ * The chunk hashes of a serialized version index, for building a block map
+ * for a version submitted before block maps existed. Free the buffer with
+ * Wrapper_FreeBuffer.
+ */
+DLL_EXPORT int Wrapper_VersionIndexChunkHashes(
+    const void* version_index_buffer,
+    size_t version_index_size,
+    void** out_buffer,
+    size_t* out_size) {
+  struct Longtail_VersionIndex* vi = nullptr;
+  int err = Longtail_ReadVersionIndexFromBuffer(version_index_buffer, version_index_size, &vi);
+  if (err) return err;
+  const uint32_t count = *vi->m_ChunkCount;
+  void* out = Longtail_Alloc("VersionIndexChunkHashes", count == 0 ? 1 : (size_t)count * sizeof(TLongtail_Hash));
+  if (!out) {
+    Longtail_Free(vi);
+    return ENOMEM;
+  }
+  if (count) memcpy(out, vi->m_ChunkHashes, (size_t)count * sizeof(TLongtail_Hash));
+  Longtail_Free(vi);
+  *out_buffer = out;
+  *out_size = (size_t)count * sizeof(TLongtail_Hash);
+  return 0;
+}

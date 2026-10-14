@@ -11,6 +11,103 @@
 #include <unordered_map>
 #include <vector>
 
+// POST /existing-content (see the core server's routes/existing-content.ts):
+// which of `chunks` the store already has, as a store index of the blocks to
+// reuse. Asked in batches so a huge first submit does not send one enormous
+// request; the answers are merged. On failure returns an errno and sets
+// `out_status` to the HTTP status (0 if the request did not complete).
+static int FetchExistingContent(
+    const char* backendUrl,
+    const char* jwt,
+    uint32_t hashIdentifier,
+    uint32_t minBlockUsagePercent,
+    uint32_t chunkCount,
+    const TLongtail_Hash* chunks,
+    WrapperAsyncHandle* handle,
+    struct Longtail_StoreIndex** out,
+    long* out_status) {
+  *out = 0;
+  *out_status = 0;
+  const uint32_t BATCH = 4 * 1024 * 1024;
+  struct Longtail_StoreIndex* merged = 0;
+  int err = Longtail_CreateStoreIndexFromBlocks(0, 0, &merged);
+  if (err) return err;
+
+  for (uint32_t start = 0; start < chunkCount || start == 0; start += BATCH) {
+    const uint32_t n = chunkCount - start < BATCH ? chunkCount - start : BATCH;
+    std::string body;
+    body.reserve(20 + (size_t)n * 8);
+    body.append("CPEC", 4);
+    auto put32 = [&](uint32_t v) { body.append(reinterpret_cast<const char*>(&v), 4); };
+    put32(1);
+    put32(hashIdentifier);
+    put32(minBlockUsagePercent);
+    put32(n);
+    if (n > 0) body.append(reinterpret_cast<const char*>(chunks + start), (size_t)n * 8);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+      Longtail_Free(merged);
+      return ENOMEM;
+    }
+    std::string response;
+    auto write_callback = [](void* contents, size_t size, size_t nmemb, void* userp) -> size_t {
+      static_cast<std::string*>(userp)->append(static_cast<char*>(contents), size * nmemb);
+      return size * nmemb;
+    };
+    auto progress_callback = [](void* clientp, curl_off_t, curl_off_t, curl_off_t, curl_off_t) -> int {
+      return static_cast<WrapperAsyncHandle*>(clientp)->canceled ? 1 : 0;
+    };
+    struct curl_slist* headers = nullptr;
+    std::string auth = std::string("Authorization: Bearer ") + jwt;
+    headers = curl_slist_append(headers, auth.c_str());
+    headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
+    std::string url = std::string(backendUrl) + "/existing-content";
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.data());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)body.size());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, +write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    // A cold server may load the repo's index first; give it time.
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 180L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, +progress_callback);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, handle);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    CURLcode res = curl_easy_perform(curl);
+    long status = 0;
+    if (res == CURLE_OK) curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK || status != 200) {
+      *out_status = status;
+      Longtail_Free(merged);
+      if (handle->canceled) return ECANCELED;
+      std::cerr << "existing-content request failed (" << status << "): " << response << std::endl;
+      return EIO;
+    }
+
+    struct Longtail_StoreIndex* answer = 0;
+    err = Longtail_ReadStoreIndexFromBuffer(response.data(), response.size(), &answer);
+    if (err) {
+      Longtail_Free(merged);
+      return err;
+    }
+    struct Longtail_StoreIndex* next = 0;
+    err = Longtail_MergeStoreIndex(merged, answer, &next);
+    Longtail_Free(answer);
+    Longtail_Free(merged);
+    if (err) return err;
+    merged = next;
+    if (chunkCount == 0) break;
+  }
+  *out = merged;
+  return 0;
+}
+
 int32_t SubmitSync(
     const char* BranchName,
     const char* ShelfName,
@@ -432,13 +529,31 @@ int32_t SubmitSync(
 
   SetHandleStep(handle, "Getting existing content");
 
-  struct Longtail_StoreIndex* existing_remote_store_index;
-  err = SyncGetExistingContent(
-      store_block_store_api,
-      *source_version_index->m_ChunkCount,
-      source_version_index->m_ChunkHashes,
-      MinBlockUsagePercent,
-      &existing_remote_store_index);
+  // Ask the server which chunks the store already has. This used to download
+  // the repo-wide store.lsi, which grows with the repo, and look them up
+  // here. A server without the endpoint (404) gets the old lookup.
+  struct Longtail_StoreIndex* existing_remote_store_index = 0;
+  {
+    const char* jwt_now = (handle->refreshedJwt[0] != '\0') ? handle->refreshedJwt : JWT;
+    long status = 0;
+    err = FetchExistingContent(
+        BackendUrl, jwt_now,
+        *source_version_index->m_HashIdentifier,
+        MinBlockUsagePercent,
+        *source_version_index->m_ChunkCount,
+        source_version_index->m_ChunkHashes,
+        handle,
+        &existing_remote_store_index,
+        &status);
+    if (err && status == 404) {
+      err = SyncGetExistingContent(
+          store_block_store_api,
+          *source_version_index->m_ChunkCount,
+          source_version_index->m_ChunkHashes,
+          MinBlockUsagePercent,
+          &existing_remote_store_index);
+    }
+  }
 
   if (err) {
     SetHandleStep(handle, "Failed to get existing content");
@@ -765,7 +880,10 @@ int32_t SubmitSync(
       {"modifications", json::array()},
       {"versionIndex", version_file_name},
       {"keepCheckedOut", KeepCheckedOut},
-      {"workspaceId", std::string(WorkspaceId)}};
+      {"workspaceId", std::string(WorkspaceId)},
+      // Storage protocol 3: the server records this submit from its block
+      // map and new blocks, and no longer merges store.lsi.
+      {"protocol", 3}};
 
   if (ShelfName != nullptr) {
     payload["shelfName"] = std::string(ShelfName);

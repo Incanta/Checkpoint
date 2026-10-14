@@ -96,6 +96,8 @@ describe.skipIf(!enabled)("storage gateway: repo scope", () => {
     ];
   }
 
+  const victimMap = () => victimIndex.replace(/\.lvi$/, ".lsi");
+
   it("serves the victim's own objects to the victim (control)", async () => {
     const index = await rawGatewayRequest(
       victim,
@@ -105,8 +107,10 @@ describe.skipIf(!enabled)("storage gateway: repo scope", () => {
     expect(index.status).toBe(200);
     expect(index.body.length).toBeGreaterThan(0);
 
-    const store = await rawGatewayRequest(victim, "HEAD", `${victimBase()}/store.lsi`);
-    expect(store.status).toBe(200);
+    // The version's block map: written only by the server, like store.lsi
+    // was before storage protocol 3.
+    const map = await rawGatewayRequest(victim, "HEAD", `${victimBase()}/versions/${victimMap()}`);
+    expect(map.status).toBe(200);
   });
 
   it("refuses another repo's objects addressed directly", async () => {
@@ -137,10 +141,10 @@ describe.skipIf(!enabled)("storage gateway: repo scope", () => {
   });
 
   it("refuses to write or delete in another repo through an escaping path", async () => {
-    const before = await rawGatewayRequest(victim, "GET", `${victimBase()}/store.lsi`);
+    const before = await rawGatewayRequest(victim, "GET", `${victimBase()}/versions/${victimMap()}`);
     expect(before.status).toBe(200);
 
-    for (const path of escapes("store.lsi")) {
+    for (const path of [...escapes("store.lsi"), ...escapes(`versions/${victimMap()}`)]) {
       const put = await rawGatewayRequest(attacker, "PUT", path, {
         body: randomBytes(64),
       });
@@ -153,7 +157,7 @@ describe.skipIf(!enabled)("storage gateway: repo scope", () => {
       await rawGatewayRequest(attacker, "PUT", path, { body: randomBytes(64) });
     }
 
-    const after = await rawGatewayRequest(victim, "GET", `${victimBase()}/store.lsi`);
+    const after = await rawGatewayRequest(victim, "GET", `${victimBase()}/versions/${victimMap()}`);
     expect(after.status).toBe(200);
     expect(after.body.equals(before.body)).toBe(true);
 

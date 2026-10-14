@@ -11,7 +11,6 @@ import { createHash } from "crypto";
 import config from "@incanta/config";
 import { CreateApiClientAuthManual } from "@checkpointvcs/common";
 import {
-  mergeAsync,
   storeBlockMapAsync,
   pollHandle,
   freeHandle,
@@ -20,57 +19,15 @@ import {
 } from "@checkpointvcs/longtail-addon";
 import { Router, type RequestHandler } from "express";
 import multer from "multer";
-import { getR2Endpoint } from "../utils/r2.js";
+import { storeBlockMap } from "../storage/block-maps.js";
 import { getStorageBackend } from "../storage/backend.js";
-import { withStoreIndexLock } from "../storage/index-lock.js";
+import {
+  containmentProblem,
+  readStoreIndexSummary,
+} from "../storage/store-index-format.js";
 import { writeSegment } from "../storage/index-segments.js";
 import { verifyRepoToken, type RepoTokenResult } from "../utils/repo-token.js";
 import { Logger } from "../logging.js";
-
-// Build the backend storage descriptor the addon's server-side store.lsi merge
-// needs, from the configured storage.mode. "local" merges against local disk;
-// "s3" covers both s3 mode (shared bucket) and r2 mode (per-repo bucket), both
-// via the addon's S3 adapter with the server's full credentials.
-async function buildMergeStorageOptions(
-  repoId: string,
-): Promise<Record<string, unknown>> {
-  const mode = config.get<string>("storage.mode");
-  if (mode === "local") {
-    return {
-      storageType: "local",
-      localStoragePath: config.get<string>("storage.local.path"),
-    };
-  }
-  if (mode === "s3") {
-    return {
-      storageType: "s3",
-      s3Endpoint: config.get<string>("storage.s3.endpoint"),
-      s3Region: config.get<string>("storage.s3.region"),
-      s3Bucket: config.get<string>("storage.s3.bucket"),
-      s3ForcePathStyle: config.get<boolean>("storage.s3.force-path-style"),
-      s3AccessKeyId: await config.getWithSecrets<string>(
-        "storage.s3.access-key-id",
-      ),
-      s3SecretAccessKey: await config.getWithSecrets<string>(
-        "storage.s3.secret-access-key",
-      ),
-    };
-  }
-  // r2: the addon's S3 adapter pointed at R2, per-repo bucket.
-  return {
-    storageType: "s3",
-    s3Endpoint: getR2Endpoint(),
-    s3Region: "auto",
-    s3Bucket: `checkpoint-${repoId}`,
-    s3ForcePathStyle: false,
-    s3AccessKeyId: await config.getWithSecrets<string>(
-      "storage.r2.access-key-id",
-    ),
-    s3SecretAccessKey: await config.getWithSecrets<string>(
-      "storage.r2.secret-access-key",
-    ),
-  };
-}
 
 // A version index is named after the SHA-256 of its bytes. The name is
 // client-supplied and becomes part of a storage key, so anything else is
@@ -128,36 +85,6 @@ async function checkVersionIndex(
   return null;
 }
 
-/**
- * Verifies and stores a submit's block map beside its version index (see
- * block-map.cpp). Returns a message describing the problem, or null.
- */
-async function storeBlockMap(
-  repoId: string,
-  basePath: string,
-  versionIndex: string,
-  blockMapBuffer: Buffer,
-): Promise<string | null> {
-  const handle = storeBlockMapAsync({
-    remoteBasePath: basePath,
-    versionIndex,
-    blockMapBuffer,
-    logLevel: GetLogLevel(config.get<LongtailLogLevel>("longtail.log-level")),
-    ...(await buildMergeStorageOptions(repoId)),
-  } as Parameters<typeof storeBlockMapAsync>[0]);
-  if (!handle) {
-    return "Failed to create longtail handle for the block map";
-  }
-  try {
-    const { status } = await pollHandle(handle);
-    return status.error === 0
-      ? null
-      : `Block map for ${versionIndex} refused: ${status.currentStep} (error ${status.error})`;
-  } finally {
-    freeHandle(handle);
-  }
-}
-
 const RequestSchema = object({
   apiToken: string().required(),
   branchName: string().required(),
@@ -176,6 +103,8 @@ const RequestSchema = object({
   ).required(),
   keepCheckedOut: boolean().required(),
   workspaceId: string().required(),
+  /** Storage protocol; 3 since store.lsi stopped being merged. */
+  protocol: number().optional(),
 });
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 interface RequestSchema extends InferType<typeof RequestSchema> {}
@@ -237,6 +166,16 @@ export function routeSubmit(): Router {
             : "Invalid payload";
         Logger.error(`[Submit] Invalid request shape: ${reason}`);
         res.status(400).send(reason);
+        return;
+      }
+
+      // A client from before storage protocol 3 still expects the server to
+      // merge its blocks into store.lsi, which no longer happens; recording
+      // its changelist would leave its blocks out of the dedup index.
+      if (payload.protocol !== 3) {
+        res
+          .status(426)
+          .send("This Checkpoint client is too old for this server (storage protocol 3). Update Checkpoint.");
         return;
       }
 
@@ -315,89 +254,52 @@ export function routeSubmit(): Router {
           return;
         }
 
-        const logLevel = GetLogLevel(
-          config.get<LongtailLogLevel>("longtail.log-level"),
-        );
+        if (!blockMapFile?.buffer) {
+          res
+            .status(400)
+            .send("A block map is required with new content. Update your Checkpoint client.");
+          return;
+        }
 
-        const mergeOptions = {
-          remoteBasePath: basePath,
-          storeIndexBuffer: Buffer.from(storeIndexBuffer),
-          logLevel,
-          ...(await buildMergeStorageOptions(claims.repoId)),
-        } as Parameters<typeof mergeAsync>[0];
-
-        Logger.debug(
-          `[Submit] Merging store index (mode ${config.get<string>("storage.mode")})`,
-        );
-
-        // The merge reads the repo's store index, adds this submit's blocks,
-        // and writes it back. Two of those interleaved would drop one side's
-        // blocks from the index, so it runs under the repo's index lock.
-        let merged: Awaited<ReturnType<typeof pollHandle>>;
+        // The uploaded store index names this submit's new blocks; it becomes
+        // an index segment that later submits deduplicate against. It must be
+        // contained in the block map verified above (whose every block was
+        // proven to exist), or a client could get blocks into the shared
+        // index that are not in the store, and every later submit reusing
+        // them would come out unreadable.
+        let missing;
         try {
-          const lockBackend = await getStorageBackend({
-            bucket: `checkpoint-${claims.repoId}`,
-          });
-          const lockRequested = Date.now();
-          merged = await withStoreIndexLock(lockBackend, basePath, async () => {
-            timing["lockWaitMs"] = Date.now() - lockRequested;
-            const handle = mergeAsync(mergeOptions);
-
-            if (!handle) {
-              throw new Error("Failed to create longtail handle");
-            }
-
-            try {
-              return await timed("mergeMs", () =>
-                pollHandle(handle, {
-                  onStep: (step) =>
-                    Logger.debug(`[Submit] Current step: ${step}`),
-                }),
-              );
-            } finally {
-              freeHandle(handle);
-            }
-          });
+          missing = readStoreIndexSummary(storeIndexBuffer);
+          const map = readStoreIndexSummary(blockMapFile.buffer);
+          const problem = containmentProblem(missing, map);
+          if (problem) {
+            res.status(400).send(`The uploaded store index does not match the block map: ${problem}`);
+            return;
+          }
         } catch (e: any) {
-          Logger.error(`[Submit] Store index merge did not run: ${e.message}`);
-          res
-            .status(503)
-            .send(`Could not update the store index: ${e.message}`);
+          res.status(400).send(`The uploaded store index could not be read: ${e.message}`);
           return;
         }
-        const { status, result } = merged;
+        addedBytes = missing.chunkBytes;
 
-        Logger.debug(
-          `[Submit] Completed with exit code: ${status.error} and last step ${status.currentStep}`,
-        );
-
-        if (status.error !== 0) {
-          res
-            .status(500)
-            .send(
-              `Failed to merge store indexes: ${status.currentStep} (error ${status.error})`,
-            );
-          return;
-        }
-
-        // The merge reports the new content bytes from this submit's store index.
-        addedBytes = Number(
-          (result as { addedBytes?: number })?.addedBytes ?? 0,
-        );
-
-        // Record this submit's new blocks as an immutable index segment, the
-        // lock-free replacement for merging into store.lsi (which still
-        // happens above until clients stop reading it).
+        // Recorded with no lock: segments are write-once and named after
+        // their content. This replaced reading, merging, and rewriting the
+        // repo-wide store.lsi under a lock on every submit.
         try {
           await timed("segmentMs", async () => {
-            const blockCount = storeIndexBuffer.length >= 12 ? storeIndexBuffer.readUInt32LE(8) : 0;
             const backend = await getStorageBackend({ bucket: `checkpoint-${claims.repoId}` });
-            await writeSegment(backend, claims.repoId, basePath, Buffer.from(storeIndexBuffer), blockCount);
+            await writeSegment(
+              backend,
+              claims.repoId,
+              basePath,
+              Buffer.from(storeIndexBuffer),
+              missing.blocks.size,
+            );
           });
         } catch (e: any) {
-          // The store index merge above already recorded the blocks; a
-          // missing segment costs only re-uploads once clients use segments.
           Logger.error(`[Submit] Could not write index segment: ${e.message}`);
+          res.status(503).send(`Could not record the new blocks: ${e.message}`);
+          return;
         }
       } else if (
         payload.modifications.some((m) => !m.delete) ||

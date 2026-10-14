@@ -20,6 +20,7 @@ import {
 import {
   toStorageOptions,
   resolveStorageEndpoints,
+  STORAGE_PROTOCOL,
 } from "./storage-options.js";
 import path from "path";
 import { promises as fs } from "fs";
@@ -65,6 +66,7 @@ export async function submit(
   const client = await CreateApiClientAuth(workspace.daemonId);
 
   const rawStorageTokenResponse = await client.storage.getToken.query({
+    clientProtocol: STORAGE_PROTOCOL,
     repoId: workspace.repoId,
     write: true,
   });
@@ -224,6 +226,7 @@ export async function submit(
     onTokenRefresh: async () => {
       console.log("[submit] Token refresh requested by native addon");
       const newToken = await client.storage.getToken.query({
+        clientProtocol: STORAGE_PROTOCOL,
         repoId: workspace.repoId,
         write: true,
       });

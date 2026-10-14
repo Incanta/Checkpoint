@@ -20,6 +20,7 @@ import {
 import {
   toStorageOptions,
   resolveStorageEndpoints,
+  STORAGE_PROTOCOL,
 } from "./storage-options.js";
 import { readFileFromChangelist } from "./read-file.js";
 import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
@@ -107,6 +108,7 @@ export async function pull(
   );
 
   const rawStorageTokenResponse = await client.storage.getToken.query({
+    clientProtocol: STORAGE_PROTOCOL,
     repoId: workspace.repoId,
     write: true,
   });
@@ -127,6 +129,7 @@ export async function pull(
   const refreshStorageToken = async () => {
     Logger.debug("Token refresh requested by native addon");
     const newToken = await client.storage.getToken.query({
+      clientProtocol: STORAGE_PROTOCOL,
       repoId: workspace.repoId,
       write: true,
     });

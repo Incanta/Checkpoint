@@ -102,6 +102,7 @@ describe.skipIf(!enabled)("block maps", () => {
         modifications: [{ path: "forge/two.bin", delete: false }],
         keepCheckedOut: false,
         workspaceId: ws.workspaceId,
+        protocol: 3,
       }),
     );
     form.append("blockMap", new Blob([new Uint8Array(mapOne!)]), "blockmap.lsi");
@@ -130,6 +131,7 @@ describe.skipIf(!enabled)("block maps", () => {
         modifications: [],
         keepCheckedOut: false,
         workspaceId: ws.workspaceId,
+        protocol: 3,
       }),
     );
     form.append("blockMap", new Blob([new Uint8Array(randomBytes(64))]), "blockmap.lsi");

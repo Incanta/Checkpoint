@@ -13,6 +13,7 @@ import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 import {
   toStorageOptions,
   resolveStorageEndpoints,
+  STORAGE_PROTOCOL,
 } from "./storage-options.js";
 
 export interface ReadFileWorkspace {
@@ -62,6 +63,7 @@ export async function readFileFromVersion(
 
   // Get storage token (read-only)
   const rawStorageTokenResponse = await client.storage.getToken.query({
+    clientProtocol: STORAGE_PROTOCOL,
     repoId: workspace.repoId,
     write: false,
   });

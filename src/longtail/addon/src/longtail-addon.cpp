@@ -55,20 +55,6 @@ WrapperAsyncHandle* SubmitAsync(
 
 void FreeHandle(WrapperAsyncHandle* handle);
 
-WrapperAsyncHandle* MergeAsync(
-    const char* RemoteBasePath,
-    const char* StorageType,
-    const char* LocalStoragePath,
-    const char* S3Endpoint,
-    const char* S3Region,
-    const char* S3Bucket,
-    const char* S3AccessKeyId,
-    const char* S3SecretAccessKey,
-    const char* S3SessionToken,
-    void* additional_store_index_buffer,
-    size_t additional_store_index_size,
-    int LogLevel);
-
 WrapperAsyncHandle* StoreBlockMapAsync(
     const char* RemoteBasePath,
     const char* StorageType,
@@ -137,6 +123,7 @@ int IndexCache_Serialize(IndexCache* cache, void** out_buffer, size_t* out_size)
 void IndexCache_Stats(IndexCache* cache, uint32_t* out_blocks, uint32_t* out_chunks);
 int Wrapper_GetExistingStoreIndex(const void* store_index_buffer, size_t store_index_size, const uint64_t* chunks, uint32_t chunk_count, uint32_t min_block_usage_percent, void** out_buffer, size_t* out_size);
 void Wrapper_FreeBuffer(void* buffer);
+int Wrapper_VersionIndexChunkHashes(const void* version_index_buffer, size_t version_index_size, void** out_buffer, size_t* out_size);
 
 ReadFileAsyncHandle* ReadFileFromVersionAsync(
     const char* FilePath,
@@ -183,7 +170,7 @@ struct HandleContext {
   // `strings` above.
   std::vector<const char*> includePaths;
 
-  // Buffer data for MergeAsync
+  // Buffer data for StoreBlockMapAsync
   std::vector<uint8_t> bufferData;
 
   void Free() {
@@ -485,6 +472,14 @@ static Napi::Value NapiIndexCacheStats(const Napi::CallbackInfo& info) {
   return out;
 }
 
+static Napi::Value NapiVersionIndexChunkHashes(const Napi::CallbackInfo& info) {
+  Napi::Buffer<uint8_t> vi = info[0].As<Napi::Buffer<uint8_t>>();
+  void* data = nullptr;
+  size_t size = 0;
+  int err = Wrapper_VersionIndexChunkHashes(vi.Data(), vi.Length(), &data, &size);
+  return BufferResult(info.Env(), err, data, size, "versionIndexChunkHashes");
+}
+
 static Napi::Value NapiGetExistingStoreIndex(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   Napi::Buffer<uint8_t> index = info[0].As<Napi::Buffer<uint8_t>>();
@@ -591,56 +586,6 @@ static Napi::Value NapiPullSelectionAsync(const Napi::CallbackInfo& info) {
   if (!handle) {
     delete ctx;
     Napi::Error::New(env, "PullSelectionAsync returned null handle").ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
-
-  ctx->nativeHandle = handle;
-  ctx->isReadFileHandle = false;
-
-  return Napi::External<HandleContext>::New(env, ctx, ContextCleanup);
-}
-
-// --------------------------------------------------------------------------
-// mergeAsync(options: object): External<HandleContext>
-// --------------------------------------------------------------------------
-static Napi::Value NapiMergeAsync(const Napi::CallbackInfo& info) {
-  Napi::Env env = info.Env();
-
-  if (info.Length() < 1 || !info[0].IsObject()) {
-    Napi::TypeError::New(env, "Expected options object").ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
-
-  Napi::Object opts = info[0].As<Napi::Object>();
-  auto* ctx = new HandleContext();
-
-  const char* remoteBasePath = StoreString(ctx, opts.Get("remoteBasePath").As<Napi::String>().Utf8Value());
-  // Server-side merge: storageType is "local" or "s3" (never "gateway").
-  const char* storageType = OptStr(ctx, opts, "storageType", "local");
-  const char* localStoragePath = OptStr(ctx, opts, "localStoragePath", "");
-  const char* s3Endpoint = OptStr(ctx, opts, "s3Endpoint", "");
-  const char* s3Region = OptStr(ctx, opts, "s3Region", "");
-  const char* s3Bucket = OptStr(ctx, opts, "s3Bucket", "");
-  const char* s3AccessKeyId = OptStr(ctx, opts, "s3AccessKeyId", "");
-  const char* s3SecretAccessKey = OptStr(ctx, opts, "s3SecretAccessKey", "");
-  const char* s3SessionToken = OptStr(ctx, opts, "s3SessionToken", "");
-  int logLevel = opts.Get("logLevel").As<Napi::Number>().Int32Value();
-
-  // Copy the store index buffer so it stays alive for the async operation
-  Napi::Buffer<uint8_t> storeIndexBuf = opts.Get("storeIndexBuffer").As<Napi::Buffer<uint8_t>>();
-  ctx->bufferData.assign(storeIndexBuf.Data(), storeIndexBuf.Data() + storeIndexBuf.Length());
-
-  WrapperAsyncHandle* handle = ::MergeAsync(
-      remoteBasePath,
-      storageType, localStoragePath,
-      s3Endpoint, s3Region, s3Bucket, s3AccessKeyId, s3SecretAccessKey, s3SessionToken,
-      ctx->bufferData.data(),
-      ctx->bufferData.size(),
-      logLevel);
-
-  if (!handle) {
-    delete ctx;
-    Napi::Error::New(env, "MergeAsync returned null handle").ThrowAsJavaScriptException();
     return env.Undefined();
   }
 
@@ -1027,7 +972,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("indexCacheSerialize", Napi::Function::New(env, NapiIndexCacheSerialize));
   exports.Set("indexCacheStats", Napi::Function::New(env, NapiIndexCacheStats));
   exports.Set("getExistingStoreIndex", Napi::Function::New(env, NapiGetExistingStoreIndex));
-  exports.Set("mergeAsync", Napi::Function::New(env, NapiMergeAsync));
+  exports.Set("versionIndexChunkHashes", Napi::Function::New(env, NapiVersionIndexChunkHashes));
   exports.Set("storeBlockMapAsync", Napi::Function::New(env, NapiStoreBlockMapAsync));
   exports.Set("readFileFromVersionAsync", Napi::Function::New(env, NapiReadFileFromVersionAsync));
   exports.Set("getHandleStatus", Napi::Function::New(env, NapiGetHandleStatus));

@@ -40,6 +40,9 @@ import {
 import type { StorageBackend } from "./backend.js";
 import { storageSigningKey } from "../utils/signing-key.js";
 import { Logger } from "../logging.js";
+import { storeBlockMap } from "./block-maps.js";
+import { migrateRepoInBackground } from "./index-migration.js";
+import { withLease } from "./lease.js";
 
 export const INDEX_KEY_ENV = "CHECKPOINT_STORAGE_INDEX_KEY";
 
@@ -279,7 +282,39 @@ export async function writeSegment(
   await backend.putIfAbsent(key, missingStoreIndex);
   const loaded = repos.get(`${repoId}:${basePath}`);
   if (loaded?.loaded) loaded.addOwnSegment(day, name, missingStoreIndex);
+  if (needsCompaction(repoId, basePath)) {
+    void compactInBackground(backend, repoId, basePath);
+  }
   return key;
+}
+
+/**
+ * Compacts a repo's index off the submit path, under a lease so only one
+ * server does it at a time. Never throws.
+ */
+async function compactInBackground(
+  backend: StorageBackend,
+  repoId: string,
+  basePath: string,
+): Promise<void> {
+  try {
+    await withLease(
+      backend,
+      `${basePath}/index/compact.lease`,
+      async () => {
+        if (!needsCompaction(repoId, basePath)) return;
+        const started = Date.now();
+        const done = await compactIndex(backend, repoId, basePath);
+        Logger.info(
+          `[index-compact] ${JSON.stringify({ basePath, ...done, ms: Date.now() - started })}`,
+        );
+      },
+      // Another server holding it is compacting: skip, do not wait.
+      { acquireTimeoutMs: 1 },
+    );
+  } catch (e) {
+    Logger.info(`[index-compact] ${basePath}: not run now (${(e as Error).message})`);
+  }
 }
 
 export interface ExistingContentAnswer {
@@ -304,11 +339,24 @@ export async function existingContent(
 ): Promise<ExistingContentAnswer> {
   const index = repoIndex(repoId, basePath, backend);
   if (!index.loaded) {
-    index.loaded = index.load().catch((e) => {
-      // Let the next request try again.
-      index.loaded = null;
-      throw e;
-    });
+    index.loaded = index
+      .load()
+      .then(() => {
+        // Versions from before block maps get theirs now, in the background.
+        void migrateRepoInBackground({
+          backend,
+          repoId,
+          basePath,
+          query: (hashes) => index.query(hashes, 0),
+          storeBlockMap: (versionIndex, blockMap) =>
+            storeBlockMap(repoId, basePath, versionIndex, blockMap),
+        });
+      })
+      .catch((e) => {
+        // Let the next request try again.
+        index.loaded = null;
+        throw e;
+      });
   }
   const timeout = options.coldLoadTimeoutMs ?? 60_000;
   const ready = await Promise.race([
@@ -355,6 +403,16 @@ export async function compactIndex(
   await backend.put(`${basePath}/index/base.json`, body, body.length);
   index.segmentsSinceBase = 0;
   index.baseCreatedAt = info.createdAt;
+
+  // Segments the base has long since absorbed. A margin past the watermark
+  // keeps them for any server still loading an older base.json.
+  const pruneBefore = dayOf(Date.now() - 15 * DAY_MS);
+  for (const key of await backend.listKeys(`${basePath}/index/seg`)) {
+    const day = key.split("/")[0]!;
+    if (/^\d{8}$/.test(day) && day < pruneBefore) {
+      await backend.delete(`${basePath}/index/seg/${key}`);
+    }
+  }
   return { base: name, chunks: index.chunks };
 }
 

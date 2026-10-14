@@ -1,10 +1,9 @@
 /**
- * The lock around a repo's store index (store.lsi).
- *
- * Every submit reads the index, adds its blocks, and writes it back. Run two
- * of those at once without a lock and one side's blocks vanish from the index.
- * The old lock was a file created after checking it was absent, which two
- * merges could both do, and which a merge that crashed left behind forever.
+ * Leases in storage, which keep background work on a repo's shared objects
+ * (block-map migration, index compaction) from running twice at once across
+ * servers. They began as the lock around store.lsi merges; the old lock was a
+ * file created after checking it was absent, which two holders could both do,
+ * and which one that crashed left behind forever.
  *
  * These tests cover the replacement against the real local-disk backend: the
  * atomic create it is built on, exclusion inside one process, and the lease
@@ -30,7 +29,15 @@ import {
   getStorageBackend,
   type StorageBackend,
 } from "../../../core/server/src/storage/backend.js";
-import { withStoreIndexLock } from "../../../core/server/src/storage/index-lock.js";
+import { withLease, type LeaseOptions } from "../../../core/server/src/storage/lease.js";
+
+/** The lease for a repo's test key, as the server's background work takes one. */
+const withRepoLease = <T,>(
+  b: StorageBackend,
+  base: string,
+  fn: () => Promise<T>,
+  options?: LeaseOptions,
+) => withLease(b, `${base}/test.lease`, fn, options);
 
 // The server's logger reads its level from config at import time, which the
 // fast suite does not provide. Nothing here asserts on log output.
@@ -47,13 +54,13 @@ vi.mock("../../../core/server/src/logging.js", () => ({
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe("store index lock", () => {
+describe("lease", () => {
   let root: string;
   let backend: StorageBackend;
   let repo: string;
   let counter = 0;
 
-  const lockFile = () => path.join(root, repo, "store.lsi.sync");
+  const lockFile = () => path.join(root, repo, "test.lease");
   const lease = (token: string, renewedAt: number) =>
     JSON.stringify({ token, holder: "other-host:1", renewedAt });
 
@@ -131,7 +138,7 @@ describe("store index lock", () => {
 
       await Promise.all(
         Array.from({ length: 30 }, () =>
-          withStoreIndexLock(backend, repo, async () => {
+          withRepoLease(backend, repo, async () => {
             active++;
             maxActive = Math.max(maxActive, active);
             const value = Number(await readFile(file, "utf8"));
@@ -150,7 +157,7 @@ describe("store index lock", () => {
       const order: number[] = [];
       await Promise.all(
         Array.from({ length: 10 }, (_, i) =>
-          withStoreIndexLock(backend, repo, async () => {
+          withRepoLease(backend, repo, async () => {
             await sleep(3);
             order.push(i);
           }),
@@ -162,10 +169,10 @@ describe("store index lock", () => {
     it("does not make one repo wait for another", async () => {
       let releaseA!: () => void;
       const holdA = new Promise<void>((resolve) => (releaseA = resolve));
-      const a = withStoreIndexLock(backend, `${repo}-a`, () => holdA);
+      const a = withRepoLease(backend, `${repo}-a`, () => holdA);
 
       const started = Date.now();
-      await withStoreIndexLock(backend, `${repo}-b`, async () => {});
+      await withRepoLease(backend, `${repo}-b`, async () => {});
       expect(Date.now() - started).toBeLessThan(2000);
 
       releaseA();
@@ -173,24 +180,24 @@ describe("store index lock", () => {
     });
 
     it("returns the value and releases the lock", async () => {
-      const value = await withStoreIndexLock(backend, repo, async () => 42);
+      const value = await withRepoLease(backend, repo, async () => 42);
       expect(value).toBe(42);
       expect(existsSync(lockFile())).toBe(false);
     });
 
     it("releases the lock when the holder throws, and the next holder runs", async () => {
       await expect(
-        withStoreIndexLock(backend, repo, async () => {
+        withRepoLease(backend, repo, async () => {
           throw new Error("merge failed");
         }),
       ).rejects.toThrow("merge failed");
       expect(existsSync(lockFile())).toBe(false);
 
-      expect(await withStoreIndexLock(backend, repo, async () => "ok")).toBe("ok");
+      expect(await withRepoLease(backend, repo, async () => "ok")).toBe("ok");
     });
 
     it("holds a lease in storage while it runs", async () => {
-      await withStoreIndexLock(backend, repo, async () => {
+      await withRepoLease(backend, repo, async () => {
         const held = JSON.parse(await readFile(lockFile(), "utf8"));
         expect(typeof held.token).toBe("string");
         expect(held.token.length).toBeGreaterThanOrEqual(32);
@@ -205,7 +212,7 @@ describe("store index lock", () => {
       await plantLock(lease("someone-else", Date.now()));
       let ran = false;
 
-      const pending = withStoreIndexLock(
+      const pending = withRepoLease(
         backend,
         repo,
         async () => {
@@ -228,7 +235,7 @@ describe("store index lock", () => {
       let ran = false;
 
       await expect(
-        withStoreIndexLock(
+        withRepoLease(
           backend,
           repo,
           async () => {
@@ -236,7 +243,7 @@ describe("store index lock", () => {
           },
           { pollMs: 10, staleAfterMs: 60_000, acquireTimeoutMs: 120 },
         ),
-      ).rejects.toThrow(/Timed out waiting for the store index lock/);
+      ).rejects.toThrow(/Timed out waiting for the lease/);
 
       expect(ran).toBe(false);
       expect(await readFile(lockFile(), "utf8")).toBe(theirs);
@@ -245,7 +252,7 @@ describe("store index lock", () => {
     it("takes over a lease that has not been renewed", async () => {
       await plantLock(lease("dead-holder", Date.now() - 10 * 60_000));
 
-      const value = await withStoreIndexLock(backend, repo, async () => "ran", {
+      const value = await withRepoLease(backend, repo, async () => "ran", {
         pollMs: 10,
         staleAfterMs: 60_000,
       });
@@ -268,7 +275,7 @@ describe("store index lock", () => {
         await plantLock(content);
         const started = Date.now();
 
-        const value = await withStoreIndexLock(
+        const value = await withRepoLease(
           backend,
           repo,
           async () => "ran",
@@ -290,7 +297,7 @@ describe("store index lock", () => {
       // one at a time behind it, and the last one out must leave no lock.
       await Promise.all(
         Array.from({ length: 12 }, () =>
-          withStoreIndexLock(
+          withRepoLease(
             backend,
             repo,
             async () => {
@@ -310,7 +317,7 @@ describe("store index lock", () => {
 
     it("renews its lease while it holds it", async () => {
       const seen: number[] = [];
-      await withStoreIndexLock(
+      await withRepoLease(
         backend,
         repo,
         async () => {
@@ -329,7 +336,7 @@ describe("store index lock", () => {
     it("does not delete a lease that was taken over from it", async () => {
       const theirs = lease("took-over", Date.now());
 
-      await withStoreIndexLock(backend, repo, async () => {
+      await withRepoLease(backend, repo, async () => {
         // Another server judged this holder dead and took the lock.
         await writeFile(lockFile(), theirs);
       });
@@ -340,7 +347,7 @@ describe("store index lock", () => {
     it("stops renewing once its lease is taken over", async () => {
       const theirs = lease("took-over", 12345);
 
-      await withStoreIndexLock(
+      await withRepoLease(
         backend,
         repo,
         async () => {

@@ -216,7 +216,7 @@ describe.skipIf(!enabled)("version index: content addressed names", () => {
     /** Reads through a proxy that serves `served` in place of the index. */
     async function readWithIndex(number: number, file: string, served: Buffer) {
       proxy = await startFaultProxy(ctx, (r) =>
-        r.path.includes("/versions/") ? { respond: served } : "pass",
+        r.path.includes("/versions/") && r.path.endsWith(".lvi") ? { respond: served } : "pass",
       );
       return readCommitted(ctx, number, file, 20, {
         gatewayUrl: proxy.gatewayUrl,

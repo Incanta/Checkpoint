@@ -86,7 +86,7 @@ interface LongtailAddonNative {
   indexCacheSerialize(cache: IndexCacheHandle): Buffer;
   indexCacheStats(cache: IndexCacheHandle): { blocks: number; chunks: number };
   getExistingStoreIndex(storeIndex: Buffer, chunkHashes: Buffer, minBlockUsagePercent: number): Buffer;
-  mergeAsync(options: MergeAsyncOptions): NativeHandle;
+  versionIndexChunkHashes(versionIndex: Buffer): Buffer;
   storeBlockMapAsync(options: StoreBlockMapAsyncOptions): NativeHandle;
   readFileFromVersionAsync(
     options: ReadFileFromVersionAsyncOptions,
@@ -219,12 +219,6 @@ export interface PullSelectionAsyncOptions extends StorageOptions {
   localRootPath: string;
   remoteBasePath: string;
   cachePath?: string;
-  logLevel: number;
-}
-
-export interface MergeAsyncOptions extends StorageOptions {
-  remoteBasePath: string;
-  storeIndexBuffer: Buffer;
   logLevel: number;
 }
 
@@ -371,8 +365,9 @@ export function getExistingStoreIndex(
   return addon.getExistingStoreIndex(storeIndex, chunkHashes, minBlockUsagePercent);
 }
 
-export function mergeAsync(options: MergeAsyncOptions): NativeHandle {
-  return addon.mergeAsync(options);
+/** The chunk hashes of a serialized version index (little-endian u64s). */
+export function versionIndexChunkHashes(versionIndex: Buffer): Buffer {
+  return addon.versionIndexChunkHashes(versionIndex);
 }
 
 export function storeBlockMapAsync(

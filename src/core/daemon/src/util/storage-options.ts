@@ -1,5 +1,13 @@
 import type { StorageOptions } from "@checkpointvcs/longtail-addon";
 
+/**
+ * The storage protocol this client speaks, sent with every storage token
+ * request. 3: submits ask the core server which chunks exist and upload a
+ * block map; nothing reads or merges the repo-wide store.lsi. The app refuses
+ * tokens to older clients (MIN_STORAGE_PROTOCOL in its storage router).
+ */
+export const STORAGE_PROTOCOL = 3;
+
 // The shape returned by the app's storage.getToken (kept structural so the
 // tRPC-inferred response is assignable). See src/core/server/STORAGE.md.
 export interface StorageTokenResponse {

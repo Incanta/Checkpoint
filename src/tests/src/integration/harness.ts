@@ -41,6 +41,7 @@ import {
 
 import {
   resolveStorageEndpoints,
+  STORAGE_PROTOCOL,
   toStorageOptions,
 } from "../../../core/daemon/src/util/storage-options.js";
 
@@ -163,6 +164,7 @@ export async function nativeSubmit(
   overrides: Partial<SubmitAsyncOptions> = {},
 ): Promise<SubmitOutcome> {
   const rawToken = await ctx.client.storage.getToken.query({
+    clientProtocol: STORAGE_PROTOCOL,
     repoId: ctx.repoId,
     write: true,
   });
@@ -196,6 +198,7 @@ export async function nativeSubmit(
       intervalMs: 50,
       onTokenRefresh: async () => {
         const refreshed = await ctx.client.storage.getToken.query({
+          clientProtocol: STORAGE_PROTOCOL,
           repoId: ctx.repoId,
           write: true,
         });
@@ -267,6 +270,7 @@ export async function startFaultProxy(
   decide: (request: FaultRequest) => FaultAction,
 ): Promise<FaultProxy> {
   const rawToken = await ctx.client.storage.getToken.query({
+    clientProtocol: STORAGE_PROTOCOL,
     repoId: ctx.repoId,
     write: true,
   });
@@ -428,6 +432,7 @@ export async function readCommitted(
   }
 
   const rawToken = await ctx.client.storage.getToken.query({
+    clientProtocol: STORAGE_PROTOCOL,
     repoId: ctx.repoId,
     write: false,
   });
@@ -468,6 +473,7 @@ export async function gatewayRequest(
   body?: Buffer,
 ): Promise<{ status: number; body: Buffer }> {
   const rawToken = await ctx.client.storage.getToken.query({
+    clientProtocol: STORAGE_PROTOCOL,
     repoId: ctx.repoId,
     write: true,
   });
@@ -505,6 +511,7 @@ export async function rawGatewayRequest(
   options: { body?: Buffer; write?: boolean; bearer?: string } = {},
 ): Promise<{ status: number; body: Buffer }> {
   const rawToken = await ctx.client.storage.getToken.query({
+    clientProtocol: STORAGE_PROTOCOL,
     repoId: ctx.repoId,
     write: options.write ?? true,
   });
@@ -552,6 +559,7 @@ export async function storageToken(
   write: boolean,
 ): Promise<{ serverUrl: string; token: string }> {
   const rawToken = await ctx.client.storage.getToken.query({
+    clientProtocol: STORAGE_PROTOCOL,
     repoId: ctx.repoId,
     write,
   });

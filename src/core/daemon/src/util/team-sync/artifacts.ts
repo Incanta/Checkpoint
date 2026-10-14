@@ -21,6 +21,7 @@ import {
 import {
   toStorageOptions,
   resolveStorageEndpoints,
+  STORAGE_PROTOCOL,
 } from "../storage-options.js";
 import { Logger } from "../../logging.js";
 import { DaemonConfig, type DaemonConfigType } from "../../daemon-config.js";
@@ -111,6 +112,7 @@ export async function applyArtifacts(
 
   // Storage plumbing (shared across the per-type pulls).
   const rawStorageTokenResponse = await client.storage.getToken.query({
+    clientProtocol: STORAGE_PROTOCOL,
     repoId: workspace.repoId,
     write: true,
   });
@@ -123,6 +125,7 @@ export async function applyArtifacts(
   const storageOptions = toStorageOptions(storageTokenResponse);
   const refreshStorageToken = async () => {
     const newToken = await client.storage.getToken.query({
+      clientProtocol: STORAGE_PROTOCOL,
       repoId: workspace.repoId,
       write: true,
     });

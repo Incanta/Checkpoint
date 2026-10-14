@@ -33,7 +33,7 @@ import {
   type LocalWorkspace,
 } from "./harness.js";
 
-describe.skipIf(!enabled)("store index: concurrent submits", () => {
+describe.skipIf(!enabled)("dedup index: concurrent submits", () => {
   let ctx: IntegrationContext;
   const workspaces: LocalWorkspace[] = [];
   let proxy: FaultProxy | undefined;
@@ -127,14 +127,13 @@ describe.skipIf(!enabled)("store index: concurrent submits", () => {
     expect(await blockUploadsFor(randomBytes(300 * 1024), "fresh")).toBeGreaterThan(0);
   });
 
-  it("leaves no lock or staging file behind", async () => {
-    for (const name of ["store.lsi.sync", "store.lsi.next"]) {
+  it("no longer writes a repo-wide store index, lock, or staging file", async () => {
+    // Since storage protocol 3 each submit records an immutable index segment
+    // instead, with no lock (see the core server's index-segments.ts).
+    for (const name of ["store.lsi", "store.lsi.sync", "store.lsi.next"]) {
       const head = await gatewayRequest(ctx, "HEAD", name);
       expect(head.status, name).toBe(404);
     }
-    const index = await gatewayRequest(ctx, "GET", "store.lsi");
-    expect(index.status).toBe(200);
-    expect(index.body.length).toBeGreaterThan(0);
   });
 
   it("survives a second wave of concurrent submits on top of the first", async () => {
@@ -161,12 +160,6 @@ describe.skipIf(!enabled)("store index: concurrent submits", () => {
   }, 240_000);
 
   describe("gateway", () => {
-    it("lets a client read the store index", async () => {
-      const res = await rawGatewayRequest(ctx, "GET", `${base()}/store.lsi`, {
-        write: false,
-      });
-      expect(res.status).toBe(200);
-    });
 
     it.each([
       "store.lsi",
@@ -175,8 +168,6 @@ describe.skipIf(!enabled)("store index: concurrent submits", () => {
       "STORE.LSI",
       "Store.Lsi.Sync",
     ])("does not let a client write or delete %s", async (name) => {
-      const before = await rawGatewayRequest(ctx, "GET", `${base()}/store.lsi`);
-
       const put = await rawGatewayRequest(ctx, "PUT", `${base()}/${name}`, {
         body: randomBytes(64),
       });
@@ -185,9 +176,9 @@ describe.skipIf(!enabled)("store index: concurrent submits", () => {
       const del = await rawGatewayRequest(ctx, "DELETE", `${base()}/${name}`);
       expect(del.status).toBe(403);
 
-      const after = await rawGatewayRequest(ctx, "GET", `${base()}/store.lsi`);
-      expect(after.status).toBe(200);
-      expect(after.body.equals(before.body)).toBe(true);
+      // Nothing a client sent became the store index.
+      const after = await rawGatewayRequest(ctx, "HEAD", `${base()}/store.lsi`);
+      expect(after.status).toBe(404);
     });
 
     it("still accepts a submit after those attempts", async () => {

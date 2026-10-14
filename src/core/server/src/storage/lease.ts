@@ -3,31 +3,26 @@ import os from "os";
 import type { StorageBackend } from "./backend.js";
 import { Logger } from "../logging.js";
 
-// Mutual exclusion for a repo's store index (store.lsi).
+// A lease in storage: mutual exclusion for work on a repo's shared objects,
+// across every core server that shares the store.
 //
-// Every submit merges its new blocks into the index with a read, a merge, and
-// a write. Two of those interleaved lose one side's blocks: the index stops
-// listing blocks that are in storage, and the next client that needs them
-// uploads them all over again. So the three steps run under a lock.
+// It used to guard the read-merge-write of the repo-wide store.lsi on every
+// submit. Since storage protocol 3 submits write immutable index segments
+// with no lock at all, and leases guard only background work that must not
+// run twice at once: the one-time block-map migration and index compaction.
 //
-// The lock used to be a file the native merge created after checking it was
-// not there. Two merges could both pass the check, and a merge that died while
-// holding it left the file behind for good: every later submit to that repo
-// waited on it forever.
+// The old lock was a file created after checking it was not there. Two
+// holders could both pass the check, and one that died left the file behind
+// for good. Two layers now:
 //
-// Two layers now:
-//
-//   1. A queue per repo inside this process. With one core server (the usual
-//      deployment, and the only possible one for local storage) this alone is
-//      a complete, fair lock with nothing to go stale.
-//   2. A lease in storage, for deployments that run several core servers
-//      against the same bucket. It is created atomically (create-if-absent),
-//      names its holder, is renewed while held, and can be taken over once it
-//      has gone unrenewed for long enough that its holder must be dead.
+//   1. A queue per key inside this process, which on its own is a complete,
+//      fair lock for a single server.
+//   2. A lease in storage for several servers. It is created atomically
+//      (create-if-absent), names its holder, is renewed while held, and can be
+//      taken over once it has gone unrenewed long enough that its holder must
+//      be dead.
 
-const LOCK_NAME = "store.lsi.sync";
-
-export interface IndexLockOptions {
+export interface LeaseOptions {
   /** A lease not renewed for this long belongs to a dead holder. */
   staleAfterMs?: number;
   /** How often a held lease is renewed. */
@@ -112,7 +107,7 @@ async function acquireLease(
   backend: StorageBackend,
   lockKey: string,
   token: string,
-  opts: Required<Omit<IndexLockOptions, "now">> & { now: () => number },
+  opts: Required<Omit<LeaseOptions, "now">> & { now: () => number },
 ): Promise<void> {
   const deadline = opts.now() + opts.acquireTimeoutMs;
   // A lock file with content we cannot read was written by a server from
@@ -144,7 +139,7 @@ async function acquireLease(
 
     if (stale) {
       Logger.warn(
-        `[IndexLock] Taking over a stale lock at ${lockKey} (held by ${
+        `[Lease] Taking over a stale lock at ${lockKey} (held by ${
           lease?.holder ?? "an older server"
         })`,
       );
@@ -161,7 +156,7 @@ async function acquireLease(
 
     if (now >= deadline) {
       throw new Error(
-        `Timed out waiting for the store index lock at ${lockKey} (held by ${
+        `Timed out waiting for the lease at ${lockKey} (held by ${
           lease?.holder ?? "an older server"
         })`,
       );
@@ -171,23 +166,22 @@ async function acquireLease(
 }
 
 /**
- * Runs `fn` while holding the store index lock for the repo at `basePath`
- * ("/{org}/{repo}"). Nothing else that uses this function, in this process or
- * another, runs for the same repo at the same time.
+ * Runs `fn` holding the lease at `lockKey` (a storage key). Nothing else
+ * holding the same key, in this process or another server, runs at the same
+ * time. Throws, without running `fn`, if the lease cannot be had within
+ * `acquireTimeoutMs`.
  */
-export async function withStoreIndexLock<T>(
+export async function withLease<T>(
   backend: StorageBackend,
-  basePath: string,
+  lockKey: string,
   fn: () => Promise<T>,
-  options: IndexLockOptions = {},
+  options: LeaseOptions = {},
 ): Promise<T> {
   const opts = {
     ...DEFAULTS,
     ...options,
     now: options.now ?? Date.now,
   };
-  const lockKey = `${basePath}/${LOCK_NAME}`;
-
   return withQueue(lockKey, async () => {
     const token = randomBytes(16).toString("hex");
     await acquireLease(backend, lockKey, token, opts);
@@ -206,7 +200,7 @@ export async function withStoreIndexLock<T>(
           const body = leaseBody(token, opts.now());
           await backend.put(lockKey, body, body.length);
         } catch (err) {
-          Logger.warn(`[IndexLock] Could not renew ${lockKey}: ${err}`);
+          Logger.warn(`[Lease] Could not renew ${lockKey}: ${err}`);
         }
       })();
     }, opts.renewEveryMs);
@@ -225,7 +219,7 @@ export async function withStoreIndexLock<T>(
         }
       } catch (err) {
         // The lease will go stale and be taken over.
-        Logger.warn(`[IndexLock] Could not release ${lockKey}: ${err}`);
+        Logger.warn(`[Lease] Could not release ${lockKey}: ${err}`);
       }
     }
   });
