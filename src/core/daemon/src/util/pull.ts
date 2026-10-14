@@ -33,6 +33,7 @@ import path from "path";
 import { homedir } from "os";
 import { Logger } from "../logging.js";
 import { DaemonConfig } from "../daemon-config.js";
+import { StageTimer } from "./stage-timer.js";
 
 /**
  * Files that were auto-merged during pull.
@@ -73,6 +74,8 @@ export async function pull(
    */
   resolveIncludePaths?: (changelistNumber: number) => Promise<string[] | null>,
 ): Promise<PullMergeResult> {
+  const timer = new StageTimer();
+  timer.stage("setup");
   const daemonConfig = await DaemonConfig.Get();
   const resolvedLogLevel =
     logLevel ?? (daemonConfig.longtail.logLevel as LongtailLogLevel);
@@ -154,6 +157,7 @@ export async function pull(
 
   // Path-keyed diff from our base to the target CL: only the changed paths and
   // the source CLs to pull (no full state tree, no fileId resolution).
+  timer.stage("diff");
   const diff = await client.changelist.diffChangelists.query({
     repoId: workspace.repoId,
     fromNumber: workspaceState.changelistNumber,
@@ -187,6 +191,7 @@ export async function pull(
   const pulledNumbers: number[] = sortedChangelists
     .filter((cl: any) => cl.versionIndex !== "")
     .map((cl: any) => cl.number);
+  timer.stage("anomalies");
   if (pulledNumbers.length > 0) {
     try {
       anomalies = await client.changelist.getPullAnomalies.mutate({
@@ -214,6 +219,7 @@ export async function pull(
     workspace.localPath,
     `cl${changelistNumber}`,
   );
+  timer.stage("protect");
   onStep?.("Protecting local changes");
   for (const change of diff.modified) {
     const localFile = workspaceState.files[change.path];
@@ -255,10 +261,13 @@ export async function pull(
       : undefined;
   let errored = false;
   let lastStep = "";
+  let nativePasses = 0;
+  timer.stage("native");
   for (const versionIndex of versionsToPull) {
     if (versionIndex === "") {
       continue;
     }
+    nativePasses++;
 
     Logger.debug(
       `Starting longtail pull for version index ${versionIndex} for workspace ${workspace.workspaceName}...`,
@@ -322,8 +331,16 @@ export async function pull(
   // It is an opt-in, per-workspace step decoupled from the source changelist
   // (see util/team-sync/artifacts.ts applyArtifacts, invoked by the sync
   // pipeline). Existing artifact files are preserved across a source pull.
+  timer.count("added", diff.added.length);
+  timer.count("modified", diff.modified.length);
+  timer.count("removed", diff.removed.length);
+  timer.count("nativePasses", nativePasses);
+  timer.count("stray", anomalies.stray.length);
+  timer.count("stale", anomalies.stale.length);
+  timer.count("localChanges", guard.files.length);
   if (!errored) {
     // Handle deletions (paths come straight from the diff; no getFiles needed).
+    timer.stage("delete");
     if (diff.removed.length > 0) {
       onStep?.("Deleting removed files");
       let deletedCount = 0;
@@ -349,6 +366,7 @@ export async function pull(
     // Files restored here that are not part of the diff keep their existing
     // state entry, so their new size and mtime are collected to update it.
     const restoredUnchanged = new Map<string, { size: number; mtime: number }>();
+    timer.stage("correction");
     if (anomalies.stray.length > 0 || anomalies.stale.length > 0) {
       onStep?.("Verifying pulled files");
       Logger.info(
@@ -415,6 +433,7 @@ export async function pull(
       { size: number; mtime: number; md5: string }
     >();
 
+    timer.stage("mergeLocal");
     if (guard.files.length > 0) {
       onStep?.("Merging local changes");
       const resolved = await guard.resolve(
@@ -451,6 +470,7 @@ export async function pull(
     // files keep their existing entry (and hash). Hashes are deferred (md5 "");
     // the size+mtime baseline is enough until change detection needs them.
     onStep?.("Updating workspace state");
+    timer.stage("state");
 
     const newFiles: Record<string, WorkspaceStateFile> = {
       ...workspaceState.files,
@@ -521,10 +541,12 @@ export async function pull(
       stateBackend,
     );
 
+    timer.log("pull-timing");
     return mergeResult;
   }
 
   if (errored) {
+    timer.log("pull-timing");
     // The workspace state was not advanced, so as far as it is concerned the
     // local versions are still the current ones. Put them back over whatever
     // the partial pull wrote.

@@ -18,7 +18,7 @@ Decisions already made: a breaking change behind a version gate is fine; design 
 | Step | What | Status |
 |---|---|---|
 | D0 | Daemon state correctness: backend resolver, safe JSON import, no `workspace.json` rewrite on state save, `daemon.json` default backfill | Done |
-| P0 | Instrumentation (`[pull-timing]`, `[state-tree]`, `[state-store]`, server merge timing) and a long-history benchmark scenario | To do |
+| P0 | Instrumentation (`[pull-timing]`, `[state-store]`, `[submit-server-timing]`) and the long-history scenario (`src/tests/src/integration/history-scaling.test.ts`) | Done (`[state-tree]` lands with S0) |
 | D1 | `StateStore.apply(delta)` with cached statements | To do |
 | D2 | One in-memory state handle per workspace; every call site writes deltas | To do |
 | D3 | Path index replacing O(dirty x tracked) scans; keep pending cache across pull/submit | To do |
@@ -32,6 +32,20 @@ Decisions already made: a breaking change behind a version gate is fine; design 
 | N3 | Server index segments and `/existing-content`, in shadow mode | To do |
 | N4 | Cutover: client uses `/existing-content`, no lock or merge on submit, migration, version gate (breaking) | To do |
 | N5 | Cleanup: compaction, delete `store.lsi` and the old merge path | To do |
+
+## Baselines
+
+Long-history scenario, 100 changelists over a 395-file tree, local dev stack (Windows, local storage mode), before any scaling change. Run with `CHECKPOINT_HISTORY_BENCH=1 HISTORY_CHANGELISTS=100 yarn test:integration src/integration/history-scaling` (plus the usual `CHECKPOINT_TEST_DAEMON_ID`).
+
+| Measure | Before |
+|---|---|
+| Small submit at CL 10 / 50 / 100 | 1.6 s / 1.6 s / 1.4 s |
+| `store.lsi` size at CL 10 / 50 / 100 | 6.4 KB / 9.6 KB / 13.0 KB (grows every submit) |
+| Pull of one changelist | 1.7 s (diff 0.7 s, anomalies 0.3 s, native 0.26 s) |
+| Fresh clone | 28.7 s, **101 native passes** (26.7 s native), 11 stray files corrected |
+| Single-file read | 1.0 s |
+
+At this size the submit cost is dominated by fixed overhead, so it does not yet show growth; the clone's pass count is the clear history-length cost.
 
 ## Needs you
 

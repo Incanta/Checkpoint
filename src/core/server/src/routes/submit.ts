@@ -206,15 +206,31 @@ export function routeSubmit(): Router {
       // to maintain the repo's cached storage size incrementally.
       let addedBytes = 0;
 
+      // Where the server side of a submit spends its time, emitted as one
+      // parseable line at the end. The index merge is the part expected to
+      // grow with the repo rather than the change.
+      const timing: Record<string, number> = {
+        modifications: payload.modifications.length,
+        storeIndexUploadBytes: req.file?.buffer?.length ?? 0,
+      };
+      const timed = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+        const start = Date.now();
+        try {
+          return await fn();
+        } finally {
+          timing[name] = (timing[name] ?? 0) + (Date.now() - start);
+        }
+      };
+      const logTiming = () =>
+        Logger.info(`[submit-server-timing] ${JSON.stringify(timing)}`);
+
       // The client uploads the version index to storage itself and only tells us
       // its name. Prove it arrived before anything records that name: a
       // changelist pointing at an index that is not there cannot be pulled, and
       // nothing downstream would notice until someone tried.
       if (payload.versionIndex) {
-        const problem = await checkVersionIndex(
-          claims.repoId,
-          basePath,
-          payload.versionIndex,
+        const problem = await timed("versionIndexCheckMs", () =>
+          checkVersionIndex(claims.repoId, basePath, payload.versionIndex),
         );
         if (problem) {
           Logger.error(`[Submit] ${problem}`);
@@ -263,7 +279,9 @@ export function routeSubmit(): Router {
           const lockBackend = await getStorageBackend({
             bucket: `checkpoint-${claims.repoId}`,
           });
+          const lockRequested = Date.now();
           merged = await withStoreIndexLock(lockBackend, basePath, async () => {
+            timing["lockWaitMs"] = Date.now() - lockRequested;
             const handle = mergeAsync(mergeOptions);
 
             if (!handle) {
@@ -271,10 +289,12 @@ export function routeSubmit(): Router {
             }
 
             try {
-              return await pollHandle(handle, {
-                onStep: (step) =>
-                  Logger.debug(`[Submit] Current step: ${step}`),
-              });
+              return await timed("mergeMs", () =>
+                pollHandle(handle, {
+                  onStep: (step) =>
+                    Logger.debug(`[Submit] Current step: ${step}`),
+                }),
+              );
             } finally {
               freeHandle(handle);
             }
@@ -349,8 +369,8 @@ export function routeSubmit(): Router {
         } else {
           Logger.debug(`[Submit] Routing to regular changelist creation`);
 
-          const createChangelistResponse =
-            await client.changelist.createChangelist.mutate({
+          const createChangelistResponse = await timed("createChangelistMs", () =>
+            client.changelist.createChangelist.mutate({
               message: payload.message,
               repoId: claims.repoId,
               versionIndex: payload.versionIndex,
@@ -358,7 +378,8 @@ export function routeSubmit(): Router {
               modifications: payload.modifications,
               keepCheckedOut: payload.keepCheckedOut,
               workspaceId: payload.workspaceId,
-            });
+            }),
+          );
 
           responseMessage = {
             id: createChangelistResponse.id,
@@ -370,10 +391,7 @@ export function routeSubmit(): Router {
           `[Submit] Successfully processed submit request, responding with ${JSON.stringify(responseMessage)}`,
         );
 
-        Logger.debug(
-          `[Submit] Successfully processed submit request, responding with ${JSON.stringify(responseMessage)}`,
-        );
-
+        logTiming();
         res.status(200).json(responseMessage);
 
         // Maintain the repo's cached storage size incrementally

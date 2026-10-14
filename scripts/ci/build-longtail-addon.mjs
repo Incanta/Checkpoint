@@ -80,7 +80,9 @@ console.log(`Building longtail addon for ${platform}-${arch} into ${outDir}`);
 run("yarn install --immutable", addonDir);
 run("npx cmake-js install", addonDir);
 if (platform === "win32") {
-  run("cmd /c build-msvc.bat", addonDir);
+  // Named with .\ because cmd does not search the current directory when
+  // NoDefaultCurrentDirectoryInExePath is set (some shells and agents set it).
+  run("cmd /c .\\build-msvc.bat", addonDir);
 } else {
   run("npx cmake-js build --config Release", addonDir, {
     CMAKE_BUILD_PARALLEL_LEVEL: String(os.cpus().length),

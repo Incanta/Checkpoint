@@ -17,13 +17,42 @@ import {
   type WorkspaceState,
 } from "./util.js";
 import { DaemonConfig, DaemonConfigType } from "../daemon-config.js";
+import { Logger } from "../logging.js";
 
 // ── public interface ──────────────────────────────────────────────
+
+/** Cumulative counters for a store, for tests and timing logs. */
+export interface StateStoreStats {
+  loads: number;
+  rowsRead: number;
+  writes: number;
+  rowsWritten: number;
+  ms: number;
+}
 
 export interface StateStore {
   load(): Promise<WorkspaceState>;
   save(state: WorkspaceState): Promise<void>;
   close(): void;
+  readonly stats: StateStoreStats;
+}
+
+function newStats(): StateStoreStats {
+  return { loads: 0, rowsRead: 0, writes: 0, rowsWritten: 0, ms: 0 };
+}
+
+function countRows(state: WorkspaceState): number {
+  return (
+    Object.keys(state.files).length +
+    Object.keys(state.artifactFiles ?? {}).length +
+    (state.markedForAdd?.length ?? 0) +
+    (state.staged?.length ?? 0)
+  );
+}
+
+function logWrite(op: string, rows: number, ms: number): void {
+  // Unset until InitLogger runs (unit tests, early startup).
+  Logger?.debug(`[state-store] ${JSON.stringify({ op, rows, ms })}`);
 }
 
 // ── factory ───────────────────────────────────────────────────────
@@ -99,6 +128,7 @@ export function closeAllStateStores(): void {
 // ── JSON backend ──────────────────────────────────────────────────
 
 class JsonStateStore implements StateStore {
+  public readonly stats = newStats();
   private statePath: string;
 
   public constructor(localPath: string) {
@@ -119,7 +149,10 @@ class JsonStateStore implements StateStore {
     try {
       // v1 files simply lack the optional v2 fields (version, teamSync,
       // artifactType); no structural migration is needed for JSON.
-      return JSON.parse(raw) as WorkspaceState;
+      const state = JSON.parse(raw) as WorkspaceState;
+      this.stats.loads++;
+      this.stats.rowsRead += countRows(state);
+      return state;
     } catch (err) {
       // Not "no state": a state that cannot be read. Answering with an empty
       // one would tell the daemon the workspace tracks nothing and has synced
@@ -133,6 +166,17 @@ class JsonStateStore implements StateStore {
   }
 
   public async save(state: WorkspaceState): Promise<void> {
+    const start = Date.now();
+    await this.writeFile(state);
+    const rows = countRows(state);
+    const ms = Date.now() - start;
+    this.stats.writes++;
+    this.stats.rowsWritten += rows;
+    this.stats.ms += ms;
+    logWrite("save", rows, ms);
+  }
+
+  private async writeFile(state: WorkspaceState): Promise<void> {
     await fs.mkdir(path.dirname(this.statePath), { recursive: true });
     // Write beside the file and rename over it, so a crash or a full disk
     // partway through leaves the previous state, not half of the new one.
@@ -157,6 +201,7 @@ class JsonStateStore implements StateStore {
 // ── SQLite backend ────────────────────────────────────────────────
 
 class SqliteStateStore implements StateStore {
+  public readonly stats = newStats();
   private dbPath: string;
   private localPath: string;
   private db: BetterSqlite3.Database | null = null;
@@ -428,6 +473,10 @@ class SqliteStateStore implements StateStore {
 
     const teamSync = this.loadTeamSync(db);
 
+    this.stats.loads++;
+    this.stats.rowsRead +=
+      fileRows.length + artRows.length + markedRows.length + stagedRows.length;
+
     return {
       version: WORKSPACE_STATE_VERSION,
       changelistNumber,
@@ -504,7 +553,14 @@ class SqliteStateStore implements StateStore {
   // ── save ──
 
   public async save(state: WorkspaceState): Promise<void> {
+    const start = Date.now();
     this.saveSync(state);
+    const rows = countRows(state);
+    const ms = Date.now() - start;
+    this.stats.writes++;
+    this.stats.rowsWritten += rows;
+    this.stats.ms += ms;
+    logWrite("save", rows, ms);
   }
 
   private saveSync(state: WorkspaceState): void {
