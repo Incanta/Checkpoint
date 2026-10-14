@@ -60,6 +60,18 @@ export interface PullMergeResult {
    * that did not pull anything.
    */
   pulledPaths?: string[];
+  /**
+   * Every path whose file or recorded baseline the pull may have changed
+   * (pulled, removed, corrected, or merged), so the daemon can re-check just
+   * those instead of rescanning the workspace. Absent when nothing changed.
+   */
+  touchedPaths?: string[];
+  /**
+   * Set when the pull added or removed tracked paths. Which directories count
+   * as tracked decides how untracked folders show in status, so the daemon
+   * then rescans instead of re-checking only `touchedPaths`.
+   */
+  trackedSetChanged?: true;
 }
 
 export async function pull(
@@ -544,6 +556,22 @@ export async function pull(
     timer.log("pull-timing");
     if (changed.length > 0) {
       mergeResult.pulledPaths = changed.map((change) => change.path);
+    }
+    const touched = new Set<string>([
+      ...diffPaths,
+      ...anomalies.stray,
+      ...anomalies.stale.map((entry) => entry.path),
+      ...guard.files.map((file) => file.relativePath),
+    ]);
+    if (touched.size > 0) {
+      mergeResult.touchedPaths = [...touched];
+    }
+    if (
+      diff.added.length > 0 ||
+      diff.removed.length > 0 ||
+      anomalies.stray.length > 0
+    ) {
+      mergeResult.trackedSetChanged = true;
     }
     return mergeResult;
   }

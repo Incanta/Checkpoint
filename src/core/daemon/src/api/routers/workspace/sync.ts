@@ -140,7 +140,17 @@ export const syncRouter = router({
           );
 
           jobManager.updateStep(job.id, "Reloading workspace state");
-          await manager.reloadWorkspaceState(workspace);
+          // Artifacts and the sync filter change files beyond what the pull
+          // itself reports, and adding or removing tracked paths changes how
+          // untracked folders show; those syncs re-check the whole workspace.
+          const touchedOnly =
+            !mergeResult.trackedSetChanged &&
+            pipelineResult.appliedArtifacts.length === 0 &&
+            pipelineResult.filteredOutCount === 0;
+          await manager.reloadWorkspaceState(
+            workspace,
+            touchedOnly ? (mergeResult.touchedPaths ?? []) : undefined,
+          );
           manager.clearSyncStatus(workspace.id);
 
           jobManager.completeJob(job.id, mergeResult);

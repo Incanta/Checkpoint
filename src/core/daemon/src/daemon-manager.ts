@@ -37,6 +37,7 @@ import {
 import { runSyncPipeline } from "./util/team-sync/sync-pipeline.js";
 import { compareWithBaseline } from "./util/baseline.js";
 import type { StateDelta } from "./util/state-delta.js";
+import { PathIndex, pathsUnderAny } from "./util/path-index.js";
 import {
   scanWorkspaceIgnoreFiles,
   buildIgnoreCacheFromPatterns,
@@ -78,7 +79,7 @@ export class DaemonManager {
   private syncStatuses: Map<string, SyncStatus> = new Map();
 
   /** Cached set of directories containing tracked files, keyed by workspace.id */
-  private trackedDirSets: Map<string, Set<string>> = new Map();
+  private pathIndexes: Map<string, PathIndex> = new Map();
 
   /** Pre-loaded ignore/hidden patterns per workspace, keyed by workspace.id */
   private ignorePatterns: Map<string, WorkspaceIgnorePatterns> = new Map();
@@ -362,7 +363,7 @@ export class DaemonManager {
     this.dirtyFiles.delete(workspaceId);
     this.workspacePendingChanges.delete(workspaceId);
     this.syncStatuses.delete(workspaceId);
-    this.trackedDirSets.delete(workspaceId);
+    this.pathIndexes.delete(workspaceId);
     this.ignorePatterns.delete(workspaceId);
     this.ignoreCaches.delete(workspaceId);
     this.vcsOperationActive.delete(workspaceId);
@@ -386,7 +387,7 @@ export class DaemonManager {
     );
     this.workspaceStates.set(workspace.id, state);
     this.dirtyFiles.set(workspace.id, new Set());
-    this.trackedDirSets.delete(workspace.id);
+    this.pathIndexes.delete(workspace.id);
   }
 
   // ─── Ignore / Hidden File Management ────────────────────────────────
@@ -544,7 +545,7 @@ export class DaemonManager {
    */
   private findTopmostUntrackedDir(
     relativePath: string,
-    trackedDirs: Set<string>,
+    trackedDirs: { has(dir: string): boolean },
   ): string | null {
     const parts = relativePath.split("/");
     let current = "";
@@ -848,18 +849,12 @@ export class DaemonManager {
 
       // Also check for deleted files (in state.json but not on disk)
       if (workspaceState) {
-        const statePrefix = normalizedPath + "/";
-        const deletedChecks: Array<{ normalized: string; fileFull: string }> =
-          [];
-        for (const filePath of Object.keys(workspaceState.files)) {
-          const normalized = filePath.replace(/^\//, "");
-          if (normalized.startsWith(statePrefix)) {
-            deletedChecks.push({
-              normalized,
-              fileFull: path.join(workspace.localPath, normalized),
-            });
-          }
-        }
+        const deletedChecks = this.getPathIndex(workspace.id)
+          .filesUnder(normalizedPath)
+          .map((normalized) => ({
+            normalized,
+            fileFull: path.join(workspace.localPath, normalized),
+          }));
         // Check existence in parallel batches
         for (let i = 0; i < deletedChecks.length; i += CONCURRENCY) {
           const batch = deletedChecks.slice(i, i + CONCURRENCY);
@@ -881,8 +876,34 @@ export class DaemonManager {
   /**
    * Reloads the workspace state from disk. Call this after pull/sync operations.
    */
-  public async reloadWorkspaceState(workspace: Workspace): Promise<void> {
+  public async reloadWorkspaceState(
+    workspace: Workspace,
+    changedPaths?: string[],
+  ): Promise<void> {
+    // When the operation says exactly which paths it touched and the watcher
+    // is keeping the pending-changes cache current, re-check just those paths
+    // (plus whatever was already dirty) on the next refresh instead of walking
+    // the whole workspace. The watcher replays whatever else changed on disk
+    // during the operation (see endVcsOperation); these cover paths whose
+    // baseline changed while the file on disk did not.
+    const pendingDirty = this.dirtyFiles.get(workspace.id);
+    const keepCache =
+      changedPaths !== undefined &&
+      this.watchers.has(workspace.id) &&
+      pendingDirty !== undefined &&
+      this.workspacePendingChanges.has(workspace.id) &&
+      pendingDirty.size + changedPaths.length <=
+        DaemonManager.INCREMENTAL_DIRTY_THRESHOLD;
+
     await this.loadWorkspaceState(workspace);
+
+    if (keepCache) {
+      const dirty = this.dirtyFiles.get(workspace.id)!;
+      for (const p of pendingDirty!) dirty.add(p);
+      for (const p of changedPaths!) dirty.add(p);
+      return;
+    }
+
     // Clear pending changes cache to force recalculation
     this.workspacePendingChanges.delete(workspace.id);
   }
@@ -904,56 +925,27 @@ export class DaemonManager {
   // ─── Tracked Directory Helpers ──────────────────────────────────────
 
   /**
-   * Builds a set of directory paths (relative, forward-slash) that contain
-   * tracked files or their ancestors. The workspace root ("") is always
-   * included. Useful for pruning untracked subtrees during a full walk.
+   * The workspace's path index (tracked files by directory, and by id),
+   * built lazily from its state and dropped whenever tracked paths or the
+   * marked-for-add set change.
    */
-  private buildTrackedDirSet(
-    state: WorkspaceState,
-    markedForAdd?: string[],
-  ): Set<string> {
-    const dirs = new Set<string>();
-    dirs.add("");
-
-    const addAncestorDirs = (filePath: string) => {
-      const parts = filePath.replace(/^\//, "").split("/");
-      parts.pop(); // remove filename
-      let current = "";
-      for (const part of parts) {
-        current = current ? `${current}/${part}` : part;
-        dirs.add(current);
-      }
-    };
-
-    for (const filePath of Object.keys(state.files)) {
-      addAncestorDirs(filePath);
+  private getPathIndex(workspaceId: string): PathIndex {
+    let index = this.pathIndexes.get(workspaceId);
+    if (!index) {
+      const state = this.workspaceStates.get(workspaceId);
+      index = new PathIndex(state?.files ?? {}, state?.markedForAdd ?? []);
+      this.pathIndexes.set(workspaceId, index);
     }
-
-    if (markedForAdd) {
-      for (const filePath of markedForAdd) {
-        addAncestorDirs(filePath);
-      }
-    }
-
-    return dirs;
+    return index;
   }
 
   /**
-   * Returns the cached tracked-directory set for a workspace, building it
-   * lazily on first access (invalidated when baseline state changes).
+   * Directories that hold tracked files or the ancestors of marked-for-add
+   * paths (the root always counts). Used to prune untracked subtrees.
    */
-  private getTrackedDirSet(workspaceId: string): Set<string> {
-    let cached = this.trackedDirSets.get(workspaceId);
-    if (!cached) {
-      const state = this.workspaceStates.get(workspaceId);
-      if (state) {
-        cached = this.buildTrackedDirSet(state, state.markedForAdd);
-        this.trackedDirSets.set(workspaceId, cached);
-      } else {
-        cached = new Set([""]);
-      }
-    }
-    return cached;
+  private getTrackedDirSet(workspaceId: string): { has(dir: string): boolean } {
+    const index = this.getPathIndex(workspaceId);
+    return { has: (dir: string) => index.hasTrackedDir(dir) };
   }
 
   // ─── Change Detection Helper ───────────────────────────────────────
@@ -968,7 +960,7 @@ export class DaemonManager {
     relativePath: string,
     stat: Stats,
     baselineFile: WorkspaceStateFile | undefined,
-    checkouts: Array<{ fileId: string }>,
+    checkedOutIds: Set<string>,
     markedForAdd: Set<string>,
   ): Promise<File | null> {
     let hasChanged = false;
@@ -992,7 +984,7 @@ export class DaemonManager {
     if (!hasChanged) return null;
 
     const isCheckedOut = baselineFile
-      ? checkouts.some((c) => c.fileId === baselineFile.fileId)
+      ? checkedOutIds.has(baselineFile.fileId)
       : false;
 
     let status: FileStatus;
@@ -1058,14 +1050,15 @@ export class DaemonManager {
         .filter(Boolean),
     );
 
+    const index = this.getPathIndex(workspace.id);
     for (const claim of claims) {
       if (!changedFileIds.has(claim.fileId)) {
-        const baselineEntry = Object.entries(baselineState.files).find(
-          ([, file]) => file.fileId === claim.fileId,
-        );
+        const claimedPath = index.pathOf(claim.fileId);
+        const baselineFile =
+          claimedPath !== undefined ? baselineState.files[claimedPath] : undefined;
 
-        if (baselineEntry) {
-          const [relativePath, baselineFile] = baselineEntry;
+        if (claimedPath !== undefined && baselineFile) {
+          const relativePath = claimedPath;
           const fullPath = path.join(workspace.localPath, relativePath);
 
           if (existsSync(fullPath)) {
@@ -1240,6 +1233,7 @@ export class DaemonManager {
       workspaceId: workspace.id,
       repoId: workspace.repoId,
     });
+    const checkedOutIds = new Set(checkouts.map((c) => c.fileId));
 
     // Track which baseline files we've seen (to detect deletions)
     const seenBaselineFiles = new Set<string>();
@@ -1268,7 +1262,7 @@ export class DaemonManager {
         relativePath,
         stat,
         baselineFile,
-        checkouts,
+        checkedOutIds,
         markedForAdd,
       );
 
@@ -1350,21 +1344,20 @@ export class DaemonManager {
 
     // Expand directory-level dirty paths: when a whole directory is
     // reported as changed, include every baseline / cached file beneath it.
+    // The index answers "tracked files under this directory" directly, and
+    // pending entries are matched by walking their own ancestors, so neither
+    // costs a pass over every tracked path per dirty path.
+    const pathIndex = this.getPathIndex(workspace.id);
     const expandedDirty = new Set(dirtyPaths);
     for (const dirtyPath of dirtyPaths) {
-      const prefix = dirtyPath.endsWith("/") ? dirtyPath : dirtyPath + "/";
-      for (const filePath of Object.keys(baselineState.files)) {
-        const normalized = filePath.replace(/^\//, "");
-        if (normalized.startsWith(prefix)) {
-          expandedDirty.add(normalized);
-        }
-      }
-      for (const filePath of Object.keys(cached.files)) {
-        if (filePath.startsWith(prefix)) {
-          expandedDirty.add(filePath);
-        }
+      for (const filePath of pathIndex.filesUnder(dirtyPath)) {
+        expandedDirty.add(filePath);
       }
     }
+    for (const filePath of pathsUnderAny(Object.keys(cached.files), dirtyPaths)) {
+      expandedDirty.add(filePath);
+    }
+    const checkedOutIds = new Set(checkouts.map((c) => c.fileId));
 
     for (const relativePath of expandedDirty) {
       if (relativePath.startsWith(".checkpoint")) continue;
@@ -1488,7 +1481,7 @@ export class DaemonManager {
         relativePath,
         stat,
         baselineFile,
-        checkouts,
+        checkedOutIds,
         markedForAdd,
       );
 
@@ -1501,7 +1494,7 @@ export class DaemonManager {
     // Refresh checkout-only entries: remove stale ones
     for (const [filePath, file] of Object.entries(result.files)) {
       if (file.status === FileStatus.NotChangedCheckedOut) {
-        if (!checkouts.some((c) => c.fileId === file.id)) {
+        if (!file.id || !checkedOutIds.has(file.id)) {
           delete result.files[filePath];
           result.numChanges--;
         }
@@ -1677,7 +1670,7 @@ export class DaemonManager {
     await this.persistDelta(workspace, { staged: change });
 
     // Invalidate so the next refresh reports the new staged flags.
-    this.workspacePendingChanges.delete(workspace.id);
+    this.invalidatePendingPaths(workspace.id, [...(change.add ?? []), ...(change.remove ?? [])]);
   }
 
   /**
@@ -1702,9 +1695,11 @@ export class DaemonManager {
       markedForAdd: { add: relativePaths },
     });
 
-    // Invalidate caches so next refresh picks up the new status
+    // Invalidate caches so next refresh picks up the new status. Marking
+    // changes which directories count as tracked, which changes how untracked
+    // folders collapse, so this needs a full refresh rather than a re-check.
     this.workspacePendingChanges.delete(workspace.id);
-    this.trackedDirSets.delete(workspace.id);
+    this.pathIndexes.delete(workspace.id);
   }
 
   /**
@@ -1721,9 +1716,11 @@ export class DaemonManager {
       markedForAdd: { remove: relativePaths },
     });
 
-    // Invalidate caches so next refresh picks up the new status
+    // Invalidate caches so next refresh picks up the new status. Marking
+    // changes which directories count as tracked, which changes how untracked
+    // folders collapse, so this needs a full refresh rather than a re-check.
     this.workspacePendingChanges.delete(workspace.id);
-    this.trackedDirSets.delete(workspace.id);
+    this.pathIndexes.delete(workspace.id);
   }
 
   /**
@@ -1764,7 +1761,26 @@ export class DaemonManager {
     if (Object.keys(upsert).length === 0) return;
 
     await this.persistDelta(workspace, { files: { upsert } });
-    this.workspacePendingChanges.delete(workspace.id);
+    this.invalidatePendingPaths(workspace.id, Object.keys(upsert));
+  }
+
+  /**
+   * Marks `paths` for re-checking on the next refresh. With the watcher
+   * keeping the pending-changes cache current, only those paths are looked
+   * at again; otherwise the cache is dropped and the next refresh is full.
+   */
+  private invalidatePendingPaths(workspaceId: string, paths: string[]): void {
+    const dirty = this.dirtyFiles.get(workspaceId);
+    if (
+      this.watchers.has(workspaceId) &&
+      dirty &&
+      this.workspacePendingChanges.has(workspaceId) &&
+      dirty.size + paths.length <= DaemonManager.INCREMENTAL_DIRTY_THRESHOLD
+    ) {
+      for (const p of paths) dirty.add(p);
+      return;
+    }
+    this.workspacePendingChanges.delete(workspaceId);
   }
 
   /**

@@ -560,6 +560,15 @@ export const pendingRouter = router({
         daemonId: workspace.daemonId,
       };
 
+      // Whether the submit only edits files the workspace already tracks
+      // (no adds, no deletes), decided before the submit changes the state.
+      const trackedBefore = manager.getWorkspaceState(workspace.id)?.files ?? {};
+      const onlyEditsTracked = expandedModifications.every(
+        (m) =>
+          !m.delete &&
+          m.path.replace(/^[/\\]/, "").replace(/\\/g, "/") in trackedBefore,
+      );
+
       // Fire-and-forget: run the submit in the background
       (async () => {
         manager.beginVcsOperation(workspace.id);
@@ -622,11 +631,17 @@ export const pendingRouter = router({
             await clearStagedBlob(workspace.localPath, mod.path);
           }
 
-          jobManager.updateStep(job.id, "Reloading workspace state");
-          await manager.reloadWorkspaceState(workspace);
-
           const submittedPaths = expandedModifications.map((m) =>
             m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+          );
+
+          jobManager.updateStep(job.id, "Reloading workspace state");
+          // Only the submitted paths changed baseline. Adding or deleting a
+          // tracked path changes how untracked folders show, so that case
+          // takes a full rescan.
+          await manager.reloadWorkspaceState(
+            workspace,
+            onlyEditsTracked ? submittedPaths : undefined,
           );
           if (submittedPaths.length > 0) {
             await manager.unmarkForAdd(workspace, submittedPaths);

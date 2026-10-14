@@ -21,7 +21,7 @@ Decisions already made: a breaking change behind a version gate is fine; design 
 | P0 | Instrumentation (`[pull-timing]`, `[state-store]`, `[submit-server-timing]`) and the long-history scenario (`src/tests/src/integration/history-scaling.test.ts`) | Done (`[state-tree]` lands with S0) |
 | D1 | `StateStore.apply(delta)` with cached statements, `dataVersion()` | Done |
 | D2 | One shared in-memory state per workspace; every call site writes deltas; sync filter re-checks only pulled paths | Done |
-| D3 | Path index replacing O(dirty x tracked) scans; keep pending cache across pull/submit | To do |
+| D3 | Path index replacing O(dirty x tracked) scans; pending cache kept across stage, revert, resolve, and submit/pull that only edit tracked files | Done |
 | D4 | Remove `json` as a configurable backend | To do |
 | S0 | Tree stats and test seams | To do |
 | S1 | Block cache, batched reads, `lookup`/`listDir`, consumer switch-over, migration (`File(repoId, path)` index, `Changelist.fileCount`, `TreeBlockLength`) | To do |

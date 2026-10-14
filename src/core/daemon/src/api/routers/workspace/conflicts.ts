@@ -182,8 +182,9 @@ export const conflictsRouter = router({
           conflictBackend,
         );
 
-        // Reload cached state in the daemon manager
-        await manager.reloadWorkspaceState(workspace);
+        // Reload cached state in the daemon manager; only the resolved
+        // paths changed baseline.
+        await manager.reloadWorkspaceState(workspace, resolvedPaths);
 
         // Refresh sync status since conflicts may have changed
         await manager.refreshSyncStatus(workspace);
