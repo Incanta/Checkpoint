@@ -275,12 +275,24 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add src/longtail/addon/package.json src/core/server/package.json \
-                  src/core/daemon/package.json src/app/package.json yarn.lock
+                  src/core/daemon/package.json src/app/package.json \
+                  src/tests/package.json yarn.lock
           if git diff --cached --quiet; then
             echo "Nothing to commit"
             exit 0
           fi
           git commit -m "chore: release @checkpointvcs/longtail-addon v${{ inputs.version }}"
+
+          # The rebase below refuses to run over a dirty tree, which surfaces
+          # only as three opaque failed push attempts. If set-addon-version.js
+          # grows a file the `git add` above doesn't know about, name it here.
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo "Tracked files were modified but not committed:"
+            git status --short --untracked-files=no
+            echo "Add them to the git add list in this step."
+            echo "v${{ inputs.version }} IS published to npm; the bump needs applying by hand."
+            exit 1
+          fi
 
           # The native matrix takes long enough that the branch can move
           # underneath us, and the package is already published by this point,
@@ -320,4 +332,5 @@ jobs:
             src/app/package.json
             src/core/server/package.json
             src/core/daemon/package.json
+            src/tests/package.json
             yarn.lock
