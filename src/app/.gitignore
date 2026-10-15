@@ -50,3 +50,5 @@ yarn-error.log*
 
 # trpc
 dist
+
+AGENTS.md
