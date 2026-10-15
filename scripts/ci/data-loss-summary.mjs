@@ -5,11 +5,12 @@
  * (passing tests), and which tests do not apply here (skipped, because the
  * filesystem or platform does not have the behavior they cover).
  *
- * The suite fails by design while its bugs are open, so a failing test is not
- * a reason to fail the job. This exits non-zero only when the suite could not
- * run at all: no report, no tests, or a file that errored before its tests
- * could (an import that broke, say). Read the reproduced list for the rest:
- * a finding fails with its own message, and anything else stands out.
+ * It only reports. The test step itself fails the job while any finding
+ * reproduces; this runs after it either way (`if: always()`) so a red run
+ * says which findings remain. It exits non-zero only when there is nothing to
+ * report: no report file, no tests, or a file that errored before its tests
+ * could run (an import that broke, say), so a crashed suite is called out as
+ * such rather than read as findings.
  *
  * Writes markdown to $GITHUB_STEP_SUMMARY when set, and a plain summary to
  * stdout either way.

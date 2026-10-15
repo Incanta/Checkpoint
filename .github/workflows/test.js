@@ -401,25 +401,6 @@ async function main() {
   });
 
   // ----------------------------------------------------------------
-  // Data-loss red team, native layer (src/tests/src/data-loss/native).
-  // Its tests document open bugs and fail until they are fixed, so, as in
-  // the workflow, a failure here is reported and does not stop the run.
-  // ----------------------------------------------------------------
-  heading("Data-loss red team, native layer (open bugs, non-blocking)");
-
-  try {
-    run("yarn test:data-loss:native", {
-      cwd: path.resolve("src/tests"),
-      env: { CHECKPOINT_TEST_DAEMON_ID: daemonId },
-      timeout: 15 * 60_000,
-    });
-  } catch (err) {
-    console.log(
-      `  (non-blocking) the red team's native tests failed, as expected while their bugs are open:\n${err.stdout ?? err.message}`,
-    );
-  }
-
-  // ----------------------------------------------------------------
   // Done
   // ----------------------------------------------------------------
   heading("All tests passed ✓");
