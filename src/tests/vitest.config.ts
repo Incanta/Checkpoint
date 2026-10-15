@@ -20,7 +20,9 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     // Integration tests need the real addon and running services; they have
     // their own config (vitest.integration.config.ts) without the mocks below.
-    exclude: ["src/integration/**", "**/node_modules/**"],
+    // The data-loss red-team suite documents open bugs, so its tests fail by
+    // design until they are fixed; it runs on its own (vitest.data-loss.config.ts).
+    exclude: ["src/integration/**", "src/data-loss/**", "**/node_modules/**"],
     setupFiles: ["./src/harness/vitest-setup.ts"],
     testTimeout: 30_000,
     hookTimeout: 120_000,

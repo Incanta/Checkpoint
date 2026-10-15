@@ -135,6 +135,18 @@ Without `CHECKPOINT_TEST_DAEMON_ID` every integration file skips itself. Each fi
 
 The daemon-driven counterpart, which seeds a realistic tree, stages whole directories through the daemon API, and compares the pulled tree by hash, lives in `scripts/ci/tree-roundtrip.mjs`.
 
+## Data-loss red-team suite
+
+`src/data-loss/` holds tests for scenarios that lose work during push, pull, merge, and branch use. Each test states the safe outcome, so its failures are open bugs; the findings and recommended fixes are in `src/data-loss/README.md`. The suite is excluded from `yarn test` and runs with:
+
+```bash
+yarn test:data-loss
+```
+
+It needs no running services: the daemon's own endpoints run in-process against the app routers, with only the native addon faked (`src/data-loss/stack.ts`). Its OS-dependent tests (`src/data-loss/os.test.ts`) probe the filesystem and skip what does not apply, and `.github/workflows/data-loss.yaml` runs the suite on Linux, Windows, and macOS without failing on its open findings.
+
+`src/data-loss/native/` covers what the real addon does (`yarn test:data-loss:native`): the include-filter test needs only the addon, and the file-mode tests also need running services and `CHECKPOINT_TEST_DAEMON_ID`, like the integration tests. CI runs them as a non-blocking step of the Linux job in `test.yaml`.
+
 ## Timeouts
 
 Integration tests have a default timeout of 2 minutes (120000ms). Adjust per-test if needed:

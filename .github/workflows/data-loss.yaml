@@ -1,0 +1,83 @@
+# Data-loss red team (src/tests/src/data-loss) on every OS Checkpoint runs on.
+#
+# Its tests fail by design while the bugs they document are open (see
+# src/tests/src/data-loss/README.md), so a failing test never fails this
+# workflow. It is here to show which findings reproduce on which OS (several
+# exist only on case- or normalization-insensitive filesystems, or with
+# Windows file sharing), and to show when a fix makes a test pass. Each leg's
+# run summary lists every test by outcome. A leg fails only when the suite
+# itself cannot run (no report, or a file that errored before its tests).
+#
+# The suite runs in-process and needs no services or native build. Its
+# native-layer tests (src/data-loss/native) do need both, so they run as a
+# non-blocking step of the Linux job in test.yaml instead.
+
+name: Data-loss red team
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/tests/src/data-loss/**"
+      - "src/tests/vitest.data-loss.config.ts"
+      - "scripts/ci/data-loss-summary.mjs"
+      - ".github/workflows/data-loss.yaml"
+  workflow_dispatch:
+
+jobs:
+  red-team:
+    name: red team (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-latest: case-sensitive ext4, POSIX names and file modes.
+        # windows-latest: case-insensitive NTFS, file sharing locks, 8.3 names.
+        # macos-latest: case- and normalization-insensitive APFS.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: |
+          # See the note on the same step in test.yaml.
+          yarn_path=$(command -v yarn || true)
+          if [ -n "$yarn_path" ]; then
+            corepack enable --install-directory "$(dirname "$yarn_path")"
+          else
+            corepack enable
+          fi
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Build services
+        run: yarn build
+
+      - name: Run the red team (failing tests are the open findings)
+        working-directory: src/tests
+        continue-on-error: true
+        run: yarn test:data-loss --reporter=default --reporter=json --outputFile.json=data-loss-results.json
+
+      - name: Summarize by outcome
+        if: always()
+        run: node scripts/ci/data-loss-summary.mjs src/tests/data-loss-results.json "${{ matrix.os }}"
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: data-loss-results-${{ matrix.os }}
+          path: src/tests/data-loss-results.json
+          if-no-files-found: warn

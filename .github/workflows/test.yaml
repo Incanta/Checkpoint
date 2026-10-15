@@ -603,6 +603,19 @@ jobs:
         run: yarn test:integration
 
       # ----------------------------------------------------------------
+      # Data-loss red team, native layer: open bugs in what the real addon
+      # does to files (today, file modes on Linux). Its tests fail until the
+      # bugs are fixed, so the step never fails the job. The in-process part
+      # of the red team runs on every OS in data-loss.yaml.
+      # ----------------------------------------------------------------
+      - name: Data-loss red team, native layer (open bugs, non-blocking)
+        working-directory: src/tests
+        continue-on-error: true
+        env:
+          CHECKPOINT_TEST_DAEMON_ID: ${{ steps.auth.outputs.DAEMON_ID }}
+        run: yarn test:data-loss:native
+
+      # ----------------------------------------------------------------
       # Cleanup
       # ----------------------------------------------------------------
       - name: Stop services
