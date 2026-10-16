@@ -17,12 +17,14 @@ import {
   type BlockStore,
   type DirListing,
   type Hash,
+  type NameFold,
   type StateMap,
   type TreeChange,
   type TreeEdit,
   type TreeOpStats,
 } from "./tree/tree";
 import { BlockCache, CachingBlockStore } from "./tree/cache";
+import { foldName } from "./repo-path";
 import { PrismaBlockStore } from "./tree/prisma-store";
 import { StorageBlockStore } from "./tree/storage-store";
 
@@ -136,11 +138,19 @@ export async function applyStateTreeChanges(
   repoId: string,
   parentRoot: string | null,
   edits: TreeEdit[],
+  fold: NameFold = null,
 ): Promise<string> {
   const store = blockStoreFor(db, repoId);
   const stats = newTreeOpStats();
   const started = Date.now();
-  const root = await applyChanges(parentRoot, edits, store, BLOCK_BUDGET, stats);
+  const root = await applyChanges(
+    parentRoot,
+    edits,
+    store,
+    BLOCK_BUDGET,
+    stats,
+    fold,
+  );
   await persistNewLengths(db, repoId, store);
   logTreeOp("apply", repoId, stats, {
     edits: edits.length,
@@ -169,8 +179,17 @@ export async function submitStateTree(
   parentNumber: number,
   parentRoot: string | null,
   edits: TreeEdit[],
+  options: {
+    /**
+     * Refuse (TreeCollisionError) a new name that folds onto another in its
+     * directory, as Windows and macOS would store them as one file.
+     */
+    foldNames?: boolean;
+  } = {},
 ): Promise<string> {
-  const mode = config.get<IncrementalMode | undefined>("state-tree.incremental") ?? "on";
+  const mode =
+    config.get<IncrementalMode | undefined>("state-tree.incremental") ?? "on";
+  const fold: NameFold = options.foldNames ? foldName : null;
 
   const rebuild = async (): Promise<string> => {
     const paths = new Map(await getStateTreePaths(db, repoId, parentNumber));
@@ -181,9 +200,20 @@ export async function submitStateTree(
     return buildStateTreeBlocks(db, repoId, paths.entries());
   };
 
-  if (mode === "off") return rebuild();
+  if (mode === "off") {
+    // The rebuild does not check names, so the incremental walk still runs
+    // for the check when one is wanted.
+    if (fold) await applyStateTreeChanges(db, repoId, parentRoot, edits, fold);
+    return rebuild();
+  }
 
-  const incremental = await applyStateTreeChanges(db, repoId, parentRoot, edits);
+  const incremental = await applyStateTreeChanges(
+    db,
+    repoId,
+    parentRoot,
+    edits,
+    fold,
+  );
   if (mode === "on") return incremental;
 
   const rebuilt = await rebuild();

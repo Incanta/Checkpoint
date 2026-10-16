@@ -728,50 +728,8 @@ export function apiAs(seat: Seat): Caller {
   return identities.get(seat.workspace.daemonId)!.caller;
 }
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __checkpointSkipPathRules: boolean | undefined;
-}
-
-/**
- * `~/server/repo-path` with a switch: while `asOlderServer` runs, the app
- * accepts any path, as a server from before the path rules did (or a
- * compromised one would). Repositories hold such paths, and older servers
- * still serve them, so the daemon's own defenses are tested against them.
- * Wire it up with
- * `vi.mock("~/server/repo-path", async (io) => (await import("./stack")).repoPathModule(io))`.
- */
-export async function repoPathModule(
-  importOriginal: () => Promise<Record<string, unknown>>,
-) {
-  const actual =
-    (await importOriginal()) as typeof import("~/server/repo-path");
-  return {
-    ...actual,
-    canonicalProblems: (
-      mods: Parameters<typeof actual.canonicalProblems>[0],
-    ) =>
-      globalThis.__checkpointSkipPathRules
-        ? []
-        : actual.canonicalProblems(mods),
-    portabilityProblems: (
-      ...args: Parameters<typeof actual.portabilityProblems>
-    ) =>
-      globalThis.__checkpointSkipPathRules
-        ? []
-        : actual.portabilityProblems(...args),
-  };
-}
-
-/** Runs `fn` against an app that stores any path (see repoPathModule). */
-export async function asOlderServer<T>(fn: () => Promise<T>): Promise<T> {
-  globalThis.__checkpointSkipPathRules = true;
-  try {
-    return await fn();
-  } finally {
-    globalThis.__checkpointSkipPathRules = false;
-  }
-}
+export { asOlderServer, repoPathModule } from "./repo-path-switch";
+import { asOlderServer } from "./repo-path-switch";
 
 /**
  * Records a changelist on the seat's branch straight through the app API,

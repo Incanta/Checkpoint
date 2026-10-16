@@ -82,8 +82,17 @@ interface PackCtx {
   stats: TreeOpStats;
 }
 
-function newCtx(store: BlockStore, budget: number, stats?: TreeOpStats): PackCtx {
-  return { store, budget, existing: new Set(), stats: stats ?? newTreeOpStats() };
+function newCtx(
+  store: BlockStore,
+  budget: number,
+  stats?: TreeOpStats,
+): PackCtx {
+  return {
+    store,
+    budget,
+    existing: new Set(),
+    stats: stats ?? newTreeOpStats(),
+  };
 }
 
 async function ctxPut(ctx: PackCtx, bytes: Uint8Array): Promise<Hash> {
@@ -180,10 +189,9 @@ async function packDir(node: DirNode, ctx: PackCtx): Promise<Uint8Array> {
   for (const [name, child] of node.dirs) {
     childPayloads.set(name, await packDir(child, ctx));
   }
-  const names = [
-    ...[...node.files.keys()],
-    ...[...node.dirs.keys()],
-  ].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const names = [...[...node.files.keys()], ...[...node.dirs.keys()]].sort(
+    (a, b) => (a < b ? -1 : a > b ? 1 : 0),
+  );
   const children: PackChild[] = names.map((name) =>
     node.files.has(name)
       ? { name, kind: "file", cl: node.files.get(name)! }
@@ -293,7 +301,11 @@ async function packEntries(
     } else {
       const hash =
         c.kind === "ref" ? c.hash : (c.hash ?? (await ctxPut(ctx, c.payload)));
-      entries.push({ name: c.name, kind: KIND_DIR_REF, hash: hexToBytes(hash) });
+      entries.push({
+        name: c.name,
+        kind: KIND_DIR_REF,
+        hash: hexToBytes(hash),
+      });
     }
   }
   // A leaf node that fits is returned directly; a dense directory whose entry
@@ -458,16 +470,27 @@ export type TreeEdit =
 export class TreeCollisionError extends Error {
   public constructor(
     public readonly path: string,
-    public readonly existing: "file" | "dir",
+    public readonly existing: "file" | "dir" | "fold",
+    /** For "fold": the existing path it folds onto. */
+    public readonly other?: string,
   ) {
     super(
       existing === "file"
         ? `${path} is a file, so nothing can be added beneath it`
-        : `${path} is a directory, so it cannot also be a file`,
+        : existing === "dir"
+          ? `${path} is a directory, so it cannot also be a file`
+          : `${path} differs from ${other} only in case or Unicode normalization, so on Windows and macOS they are one file. Rename one of them, or delete ${other} in the same changelist`,
     );
     this.name = "TreeCollisionError";
   }
 }
+
+/**
+ * Folds a name to the form it shares with every name some filesystem stores
+ * as the same file (see foldName in repo-path.ts), or null to allow names
+ * that differ only by such folding.
+ */
+export type NameFold = ((name: string) => string) | null;
 
 /** The changes under one directory, keyed by child name. */
 interface EditTrie {
@@ -536,7 +559,8 @@ async function readChildren(
     // "a/b" (both entries are files then). Keep the first, as readers do.
     if (out.has(e.name)) continue;
     if (e.kind === KIND_FILE) out.set(e.name, { kind: "file", cl: e.cl });
-    else if (e.kind === KIND_DIR_INLINE) out.set(e.name, { kind: "inline", payload: e.payload });
+    else if (e.kind === KIND_DIR_INLINE)
+      out.set(e.name, { kind: "inline", payload: e.payload });
     else out.set(e.name, { kind: "ref", hash: toHex(e.hash) });
   }
   return out;
@@ -552,8 +576,12 @@ async function applyDir(
   trie: Map<string, EditTrie>,
   prefix: string,
   ctx: PackCtx,
+  fold: NameFold,
 ): Promise<Uint8Array | null> {
-  const children = payload ? await readChildren(payload, ctx) : new Map<string, ExistingChild>();
+  const children = payload
+    ? await readChildren(payload, ctx)
+    : new Map<string, ExistingChild>();
+  const before = fold ? new Set(children.keys()) : null;
   const packed = new Map<string, Uint8Array>(); // changed subdirectories
 
   for (const [name, edit] of trie) {
@@ -572,9 +600,10 @@ async function applyDir(
       } else {
         let current: Uint8Array | null = null;
         if (existing?.kind === "inline") current = existing.payload;
-        else if (existing?.kind === "ref") current = await ctxGet(ctx, existing.hash);
+        else if (existing?.kind === "ref")
+          current = await ctxGet(ctx, existing.hash);
         if (current || addsAnything(edit.dir)) {
-          const next = await applyDir(current, edit.dir, `${path}/`, ctx);
+          const next = await applyDir(current, edit.dir, `${path}/`, ctx, fold);
           if (next) {
             packed.set(name, next);
           } else {
@@ -597,6 +626,24 @@ async function applyDir(
   if (children.size === 0 && packed.size === 0) return null;
 
   const names = new Set([...children.keys(), ...packed.keys()]);
+  if (fold && before) {
+    // Two entries that fold together are one file on Windows and macOS.
+    // Refuse a name this change brings in that does; collisions already in
+    // the tree are left alone, so a repo that has one keeps working (and a
+    // case-only rename passes, since the old name is gone by now).
+    const byFold = new Map<string, string>();
+    for (const name of [...names].sort(
+      (a, b) => Number(before.has(b)) - Number(before.has(a)),
+    )) {
+      const key = fold(name);
+      const seen = byFold.get(key);
+      if (seen === undefined) {
+        byFold.set(key, name);
+      } else if (!before.has(name)) {
+        throw new TreeCollisionError(prefix + name, "fold", prefix + seen);
+      }
+    }
+  }
   const sorted = [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const list: PackChild[] = sorted.map((name) => {
     const changed = packed.get(name);
@@ -626,6 +673,7 @@ export async function applyChanges(
   store: BlockStore,
   budget: number = BLOCK_BUDGET,
   stats?: TreeOpStats,
+  fold: NameFold = null,
 ): Promise<Hash> {
   const ctx = newCtx(store, budget, stats);
   const trie = buildEditTrie(edits);
@@ -636,7 +684,7 @@ export async function applyChanges(
   if (trie.size === 0 && parentRoot) {
     return parentRoot;
   }
-  const next = await applyDir(rootPayload, trie, "", ctx);
+  const next = await applyDir(rootPayload, trie, "", ctx, fold);
   return ctxPut(ctx, next ?? encodeNode(NODE_LEAF, []));
 }
 
@@ -682,7 +730,10 @@ async function findEntry(
   return findEntry(await ctxGet(ctx, toHex(pick.hash)), name, ctx);
 }
 
-async function childPayload(e: DecodedEntry, ctx: PackCtx): Promise<Uint8Array | null> {
+async function childPayload(
+  e: DecodedEntry,
+  ctx: PackCtx,
+): Promise<Uint8Array | null> {
   if (e.kind === KIND_DIR_INLINE) return e.payload;
   if (e.kind === KIND_DIR_REF) return ctxGet(ctx, toHex(e.hash));
   return null;
@@ -727,7 +778,11 @@ export async function lookup(
     level.set(leafName, leaf);
   }
 
-  const visit = async (payload: Uint8Array, level: Map<string, EditTrie>, prefix: string) => {
+  const visit = async (
+    payload: Uint8Array,
+    level: Map<string, EditTrie>,
+    prefix: string,
+  ) => {
     // Many names in one directory: read it whole. A few: look each one up,
     // which in a dense directory reads one chunk per name.
     let byName: Map<string, DecodedEntry> | null = null;
@@ -738,7 +793,9 @@ export async function lookup(
       }
     }
     for (const [name, want] of level) {
-      const entry = byName ? byName.get(name) : await findEntry(payload, name, ctx);
+      const entry = byName
+        ? byName.get(name)
+        : await findEntry(payload, name, ctx);
       if (!entry) continue;
       const path = prefix + name;
       if (want.file && entry.kind === KIND_FILE) {
@@ -895,7 +952,13 @@ async function diffNode(
     if (!eb) {
       // Removed (file or whole subtree).
       if (ea.kind === KIND_FILE) d.removed.push(full);
-      else await collectRemoved(await payloadOf(ea, store), full + "/", store, d.removed);
+      else
+        await collectRemoved(
+          await payloadOf(ea, store),
+          full + "/",
+          store,
+          d.removed,
+        );
       continue;
     }
     if (ea.kind === KIND_FILE && eb.kind === KIND_FILE) {
@@ -903,9 +966,21 @@ async function diffNode(
     } else if (ea.kind === KIND_FILE || eb.kind === KIND_FILE) {
       // Kind changed (file<->dir): treat as remove + add.
       if (ea.kind === KIND_FILE) d.removed.push(full);
-      else await collectRemoved(await payloadOf(ea, store), full + "/", store, d.removed);
+      else
+        await collectRemoved(
+          await payloadOf(ea, store),
+          full + "/",
+          store,
+          d.removed,
+        );
       if (eb.kind === KIND_FILE) d.added.push({ path: full, cl: eb.cl });
-      else await collectFiles(await payloadOf(eb, store), full + "/", store, d.added);
+      else
+        await collectFiles(
+          await payloadOf(eb, store),
+          full + "/",
+          store,
+          d.added,
+        );
     } else {
       // Both directories. Fast path: identical subtree (ref hash or inline
       // bytes equal) -> shared, skip entirely.
@@ -936,7 +1011,13 @@ async function diffNode(
     if (am.has(name)) continue;
     const full = prefix + name;
     if (eb.kind === KIND_FILE) d.added.push({ path: full, cl: eb.cl });
-    else await collectFiles(await payloadOf(eb, store), full + "/", store, d.added);
+    else
+      await collectFiles(
+        await payloadOf(eb, store),
+        full + "/",
+        store,
+        d.added,
+      );
   }
 }
 

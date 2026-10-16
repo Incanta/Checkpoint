@@ -169,6 +169,24 @@ export function describePathProblems(problems: readonly PathProblem[]): string {
   return `These paths cannot be stored in the repo:\n${lines.join("\n")}`;
 }
 
+/**
+ * The form two names share when some filesystem stores them as one file:
+ * NTFS and APFS ignore case (beyond ASCII: they fold "Ä" and "ä" too), and
+ * APFS and HFS+ ignore Unicode normalization ("é" as one code point or as "e"
+ * plus a combining accent). NFC, then a full case fold, then NFC again, with
+ * the code points HFS+ ignores dropped. toUpperCase().toLowerCase() folds a
+ * little more than some filesystems do ("ß" and "ss"), which only refuses a
+ * few more names; folding less would let two names that are one file in.
+ */
+export function foldName(name: string): string {
+  return name
+    .replace(HFS_IGNORABLE, "")
+    .normalize("NFC")
+    .toUpperCase()
+    .toLowerCase()
+    .normalize("NFC");
+}
+
 /** Backslashes to slashes, as every client's separator is accepted. */
 export function toRepoPath(path: string): string {
   return path.replaceAll("\\", "/");

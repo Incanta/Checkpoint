@@ -650,6 +650,7 @@ export const changelistRouter = createTRPCRouter({
             branch.headNumber,
             headRoot,
             edits,
+            { foldNames: repo.pathPortability },
           );
         } catch (error) {
           if (error instanceof TreeCollisionError) {

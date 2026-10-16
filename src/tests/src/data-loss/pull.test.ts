@@ -23,7 +23,7 @@ import {
 } from "vitest";
 
 vi.mock("~/server/repo-path", async (importOriginal) =>
-  (await import("../harness/stack")).repoPathModule(importOriginal),
+  (await import("../harness/repo-path-switch")).repoPathModule(importOriginal),
 );
 vi.mock(
   "@checkpointvcs/longtail-addon",

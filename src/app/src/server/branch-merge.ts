@@ -127,7 +127,11 @@ export async function mergeStateTreesSparse(
   baseRoot: string,
   targetRoot: string,
   incomingRoot: string,
-): Promise<{ applied: AppliedChange[]; conflicts: MergeConflict[]; targetAt: Map<string, number> }> {
+): Promise<{
+  applied: AppliedChange[];
+  conflicts: MergeConflict[];
+  targetAt: Map<string, number>;
+}> {
   const d = await diffStateTreeRoots(db, repoId, baseRoot, incomingRoot);
   const incomingAt = new Map<string, number | null>();
   for (const c of d.added) incomingAt.set(c.path, c.cl);
@@ -411,7 +415,11 @@ export async function mergeBranch(
         getStateTreePaths(db, repoId, targetHead.number),
         getStateTreePaths(db, repoId, incomingHead.number),
       ]);
-      ({ applied, conflicts } = mergeTrees(basePaths, targetPaths, incomingPaths));
+      ({ applied, conflicts } = mergeTrees(
+        basePaths,
+        targetPaths,
+        incomingPaths,
+      ));
       targetAt = targetPaths;
     }
     if (conflicts.length > 0) {
@@ -499,6 +507,15 @@ export async function mergeBranch(
               targetHead.number,
               targetRoot,
               edits,
+              {
+                foldNames:
+                  (
+                    await db.repo.findUnique({
+                      where: { id: repoId },
+                      select: { pathPortability: true },
+                    })
+                  )?.pathPortability ?? true,
+              },
             );
     } catch (error) {
       if (error instanceof TreeCollisionError) {
