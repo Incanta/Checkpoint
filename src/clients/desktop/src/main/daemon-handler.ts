@@ -285,6 +285,10 @@ export default class DaemonHandler {
       this.workspaceMergeBranch(data);
     });
 
+    ipcOn(this.ipcMain, "workspace:update-branch", async (event, data) => {
+      this.workspaceUpdateBranch(data);
+    });
+
     ipcOn(this.ipcMain, "dashboard:refresh", async (event, data) => {
       this.refreshDashboard(data);
     });
@@ -1683,6 +1687,49 @@ export default class DaemonHandler {
         ipcSend(this.webContents, "workspace:delete-branch:error", {
           message:
             error?.message || "An unknown error occurred deleting the branch",
+        });
+      }
+    }
+  }
+
+  private async workspaceUpdateBranch(
+    data: Channels["workspace:update-branch"],
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    const currentUser = store.get(currentUserAtom);
+    if (!currentWorkspace || !currentUser) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:update-branch:error", {
+          message:
+            "Could not find the workspace or local user account; please try restarting the app",
+          conflicts: false,
+        });
+      }
+      return;
+    }
+
+    try {
+      const client = await CreateDaemonClient();
+      const result = await client.workspaces.branches.updateFromParent.mutate({
+        daemonId: currentUser.daemonId,
+        workspaceId: currentWorkspace.id,
+        branchName: data.branchName,
+        ...(data.resolvedInLatest && { resolvedInLatest: true }),
+      });
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:update-branch:success", {
+          message:
+            result.status === "up-to-date"
+              ? `${data.branchName} already has everything its parent has.`
+              : `Brought ${result.applied} change(s) from its parent into ${data.branchName} (CL #${result.number}).`,
+        });
+      }
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:update-branch:error", {
+          message:
+            error?.message || "An unknown error occurred updating the branch",
+          conflicts: /changed on both/.test(error?.message ?? ""),
         });
       }
     }

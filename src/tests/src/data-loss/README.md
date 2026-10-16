@@ -367,7 +367,7 @@ On the OS side (controls in `os.test.ts`): a working copy a Windows editor saved
 
 ## Other observations
 
-All fixed in R20 of `docs/data-loss-fix-plan.md` except the HFS+ one (covered by R7) and the long-path warning (the backup folder name is shorter instead). Their tests are in `src/tests/src/daemon/other-observations.test.ts` and `src/tests/src/api/merge-provenance.test.ts`.
+All fixed in R20 of `docs/data-loss-fix-plan.md` (the HFS+ one by R7). Their tests are in `src/tests/src/daemon/other-observations.test.ts` and `src/tests/src/api/merge-provenance.test.ts`.
 
 - `revertFiles` deletes a locally added file from disk with `fs.unlink` and no backup. Perforce, which many Unreal teams come from, leaves added files in place on revert.
 - `conflicts.resolve` moves a file's recorded changelist to the remote one without checking the file has local changes. Resolving an unmodified, merely outdated file marks stale content as current, and its next submit reverts the remote change.

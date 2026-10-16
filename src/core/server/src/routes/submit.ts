@@ -105,6 +105,8 @@ const RequestSchema = object({
   workspaceId: string().required(),
   /** Storage protocol; 3 since store.lsi stopped being merged. */
   protocol: number().optional(),
+  /** The client sends a base for every file it tracks (see createChangelist). */
+  basesComplete: boolean().optional(),
 });
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 interface RequestSchema extends InferType<typeof RequestSchema> {}
@@ -175,7 +177,9 @@ export function routeSubmit(): Router {
       if (payload.protocol !== 3) {
         res
           .status(426)
-          .send("This Checkpoint client is too old for this server (storage protocol 3). Update Checkpoint.");
+          .send(
+            "This Checkpoint client is too old for this server (storage protocol 3). Update Checkpoint.",
+          );
         return;
       }
 
@@ -191,7 +195,10 @@ export function routeSubmit(): Router {
         storeIndexUploadBytes: storeIndexFile?.buffer?.length ?? 0,
         blockMapBytes: blockMapFile?.buffer?.length ?? 0,
       };
-      const timed = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+      const timed = async <T>(
+        name: string,
+        fn: () => Promise<T>,
+      ): Promise<T> => {
         const start = Date.now();
         try {
           return await fn();
@@ -257,7 +264,9 @@ export function routeSubmit(): Router {
         if (!blockMapFile?.buffer) {
           res
             .status(400)
-            .send("A block map is required with new content. Update your Checkpoint client.");
+            .send(
+              "A block map is required with new content. Update your Checkpoint client.",
+            );
           return;
         }
 
@@ -273,11 +282,17 @@ export function routeSubmit(): Router {
           const map = readStoreIndexSummary(blockMapFile.buffer);
           const problem = containmentProblem(missing, map);
           if (problem) {
-            res.status(400).send(`The uploaded store index does not match the block map: ${problem}`);
+            res
+              .status(400)
+              .send(
+                `The uploaded store index does not match the block map: ${problem}`,
+              );
             return;
           }
         } catch (e: any) {
-          res.status(400).send(`The uploaded store index could not be read: ${e.message}`);
+          res
+            .status(400)
+            .send(`The uploaded store index could not be read: ${e.message}`);
           return;
         }
         addedBytes = missing.chunkBytes;
@@ -287,7 +302,9 @@ export function routeSubmit(): Router {
         // repo-wide store.lsi under a lock on every submit.
         try {
           await timed("segmentMs", async () => {
-            const backend = await getStorageBackend({ bucket: `checkpoint-${claims.repoId}` });
+            const backend = await getStorageBackend({
+              bucket: `checkpoint-${claims.repoId}`,
+            });
             await writeSegment(
               backend,
               claims.repoId,
@@ -345,16 +362,19 @@ export function routeSubmit(): Router {
         } else {
           Logger.debug(`[Submit] Routing to regular changelist creation`);
 
-          const createChangelistResponse = await timed("createChangelistMs", () =>
-            client.changelist.createChangelist.mutate({
-              message: payload.message,
-              repoId: claims.repoId,
-              versionIndex: payload.versionIndex,
-              branchName: payload.branchName,
-              modifications: payload.modifications,
-              keepCheckedOut: payload.keepCheckedOut,
-              workspaceId: payload.workspaceId,
-            }),
+          const createChangelistResponse = await timed(
+            "createChangelistMs",
+            () =>
+              client.changelist.createChangelist.mutate({
+                message: payload.message,
+                repoId: claims.repoId,
+                versionIndex: payload.versionIndex,
+                branchName: payload.branchName,
+                modifications: payload.modifications,
+                keepCheckedOut: payload.keepCheckedOut,
+                workspaceId: payload.workspaceId,
+                ...(payload.basesComplete === true && { basesComplete: true }),
+              }),
           );
 
           responseMessage = {

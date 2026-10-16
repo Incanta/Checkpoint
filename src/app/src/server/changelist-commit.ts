@@ -91,12 +91,31 @@ export function findBaseConflicts(
     baseChangelist?: number | null;
   }[],
   headPaths: ReadonlyMap<string, number>,
+  options: {
+    /**
+     * The client sends a base for every file it tracks (basesComplete), so
+     * a write with none says nothing about a path the head already has: it
+     * is a conflict, not "unchecked". Clients that may leave bases out
+     * (older daemons) are not held to this.
+     */
+    strict?: boolean;
+  } = {},
 ): BaseConflict[] {
   const conflicts: BaseConflict[] = [];
   const seen = new Set<string>();
 
   for (const mod of modifications) {
     if (mod.baseChangelist === undefined) {
+      const path = mod.path.replaceAll("\\", "/");
+      if (
+        options.strict &&
+        !mod.delete &&
+        !seen.has(path) &&
+        headPaths.has(path)
+      ) {
+        seen.add(path);
+        conflicts.push({ path, base: null, head: headPaths.get(path)! });
+      }
       continue;
     }
     const path = mod.path.replaceAll("\\", "/");

@@ -2,7 +2,7 @@
 
 Plan for fixing the findings in `src/tests/src/data-loss/README.md` (DL-01 to DL-26, Gate, and Backslash) and the smaller observations listed there. For each step it says what changes, which red-team tests turn green, what it depends on, and what needs a decision from you. Written 2026-10-15 on `3d9fd73`; no product code has changed since the findings were written (`81ed16a`), so the README's line numbers still hold.
 
-**Progress (2026-10-16): every step is done** (R1 to R20, committed on `main` one step or one native bundle at a time), except three follow-ups noted in their steps: the server-side strictness for clients that omit bases (R14), the desktop flow for updating a branch from its parent (R17), and a warning for paths past 260 characters (R20). The fixed red-team tests moved into the main suite. The one red-team test still failing is DL-26's in-process test, which loads the installed addon's include matcher and passes once an addon release with R12 is installed (it passes against the addon built from these sources). See [Needs you](#needs-you) for the release and the migrations.
+**Progress (2026-10-16): every step is done** (R1 to R20, committed on `main` one step or one native bundle at a time), including the follow-ups first left open (R14's server-side strictness, R17's desktop action, and R20's long-path warning). The fixed red-team tests moved into the main suite. The one red-team test still failing is DL-26's in-process test, which loads the installed addon's include matcher and passes once an addon release with R12 is installed (it passes against the addon built from these sources). See [Needs you](#needs-you) for the release and the migrations.
 
 Each step is its own commit on `main`. When a step lands, its red-team tests pass, and they move into the main suite with the neighbouring edge cases its section lists (see [Moving tests and CI](#moving-tests-and-ci)). Size is a rough guess that includes tests: S is about a day, M a few days, L a week or more.
 
@@ -43,10 +43,10 @@ Ordering rules:
 | R12 | DL-26 | The native include filter folds case like the daemon's | R3 (re-pull) | M | Done |
 | R13 | DL-03, DL-17, DL-23 | Native pulls and submits refuse unsafe asset paths | R1 | S | Done |
 | **Phase 3** | | **Branches and merges** | | | |
-| R14 | DL-10, DL-11, DL-12 | Sync and pre-submit checks use the active branch; every submit carries bases | | L | Done (server strictness: follow-up) |
+| R14 | DL-10, DL-11, DL-12 | Sync and pre-submit checks use the active branch; every submit carries bases | | L | Done |
 | R15 | Gate | Staged files keep the branch they were staged to | R14 | M | Done |
 | R16 | DL-13 | Merge changelists record what they merged, and the merge base follows it | | M | Done |
-| R17 | DL-14 | Bring a branch's parent into it | R14, R16 | L | Done (desktop UI: follow-up) |
+| R17 | DL-14 | Bring a branch's parent into it | R14, R16 | L | Done |
 | R18 | DL-15 | Deleting a branch with unmerged work needs a flag, and deleted branches can be restored | | M | Done |
 | **Phase 4** | | **Integrity and the smaller observations** | | | |
 | R19 | DL-16 | The app records only version indexes that exist in the repo's storage | | M | Done |
@@ -257,7 +257,7 @@ Fixes DL-10, DL-11, and DL-12.
 - Every submit sends a base for every modification, and the server compares it with the target head. This drops the comparability rule at `submit.ts:137`, which is not needed once a workspace with a branch active only ever holds that branch's versions. Once a submit says its bases are complete, the server treats a modification with no base on a path the head has as a conflict, not as "not checked" (decision 8).
 - How the domain root's changes reach a branch: through R17, as in git (decision 7).
 
-**Status.** Done, except the server-side strictness (a missing base as a conflict once a submit says its bases are complete). The flag would have to travel through the native submit payload and the core server, and the daemon now sends a base for every tracked file, so it is left as a follow-up.
+**Status.** Done. The strictness flag is `basesComplete`, which the native submit of current addons sends (the daemons it ships with send a base for every tracked file) and the core server forwards; older addons send none and are not held to it.
 
 **Tests.** Turns green: `branches.test.ts` "keeps the branch's changes in the workspace when you pull with the branch active", and the three latent tests (still through `submitBehindTheGate` until R15). Add: a stacked chain, deactivating a branch (the pull back to the root), a scheduled sync and sync status with a branch active, a stale submit to a stacked branch, and an older daemon that does not send the flag.
 
@@ -299,7 +299,7 @@ Fixes DL-14. It needs R16, so the merge base follows the result, and R14, so a w
 - Daemon and desktop: an "Update from parent" action. It calls the endpoint, and on conflicts pulls the parent's versions of the conflicting files with the branch active, merges text three ways (`autoMergeText`), asks about binaries (keep mine or take theirs), and submits with `mergeFrom`. Against an older server the first call fails, before anything is submitted.
 - `describeMergeConflicts` (`branch-merge.ts:185`) names the new action instead of an operation that does not exist.
 
-**Status.** Done on the server and in the daemon, with one change of shape: instead of a submit carrying `mergeFrom` (which would have to travel through the native submit payload), the resolution is an ordinary submit to the branch, and `updateFromParent` is called again naming it as `resolvedInNumber`; the branch keeps its version of each conflicting path that changelist touched. The daemon endpoint (`branches.updateFromParent`) calls the server and pulls the result when the branch is active. Not done: the desktop button and the guided resolution flow (pull the parent's versions, merge text, ask about binaries), which are UI work.
+**Status.** Done on the server and in the daemon, with one change of shape: instead of a submit carrying `mergeFrom` (which would have to travel through the native submit payload), the resolution is an ordinary submit to the branch, and `updateFromParent` is called again naming it as `resolvedInNumber`; the branch keeps its version of each conflicting path that changelist touched. The daemon endpoint (`branches.updateFromParent`) calls the server and pulls the result when the branch is active. The desktop's branch menu has "Update from <parent>", and after a conflict "Update from <parent>, keeping my resolutions" (the daemon's `resolvedInLatest` names the branch's latest changelist as the resolution). Resolving the files themselves is ordinary editing and submitting on the branch; a guided flow that pulls the parent's versions and merges text for you is not built.
 
 **Tests.** Turns green: `server.test.ts` "merges once a conflict is resolved on the branch, as the refusal says to". Add: an update with no conflicts, a binary conflict, a delete on one side, the parent moving during resolution, an update and then a merge in a stack, and an update of a branch with no changelists of its own.
 
@@ -341,7 +341,7 @@ From the README's "Other observations". Each is small, they can land in any orde
 - **OS litter.** Default ignore rules for `.DS_Store`, `._*`, `Thumbs.db`, and `desktop.ini`, so a Mac "submit everything" does not add them and Explorer holding `Thumbs.db` open cannot fail Windows pulls (DL-05, DL-25).
 - **Long paths.** Warn when a path plus the backup prefix (`.checkpoint/pull-backups/<timestamp>-cl<N>/`, about 50 characters) passes 260 characters, and shorten the prefix.
 
-**Status.** Done: revert keeps an added file (decision 15), `conflicts.resolve` skips and reports a file with no local changes, `diffStateTrees` refuses a target that does not exist, merge rows record `FileChange.sourceChangelistNumber` (decision 16, with a migration), a nameless watcher event or a watcher error drops the cached pending list, the four OS files are ignored by default (a project's ignore file can negate them), and the backup folder name is 16 characters shorter. Not done: a warning for paths past 260 characters. The watcher change has no test, since the harness runs no watcher.
+**Status.** Done: revert keeps an added file (decision 15), `conflicts.resolve` skips and reports a file with no local changes, `diffStateTrees` refuses a target that does not exist, merge rows record `FileChange.sourceChangelistNumber` (decision 16, with a migration), a nameless watcher event or a watcher error drops the cached pending list, the four OS files are ignored by default (a project's ignore file can negate them), and the backup folder name is 16 characters shorter. Pulled paths of 260 characters or more on Windows (as written, or under the backup folder) are logged and reported in the pull result's `longPaths`. The watcher change has no test, since the harness runs no watcher.
 
 ## Moving tests and CI
 

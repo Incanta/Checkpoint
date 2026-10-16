@@ -72,6 +72,10 @@ export default function WorkspaceBranches() {
   const contextBranchRef = useRef<BranchEntry | null>(null);
   // The branch a delete was last asked for, to ask again with a discard.
   const deletingBranchRef = useRef<string | null>(null);
+  // Branches whose last update from their parent stopped at conflicts, so
+  // the menu can offer to update again with the resolutions.
+  const updateConflictsRef = useRef<Set<string>>(new Set());
+  const updatingBranchRef = useRef<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
   // Create branch dialog
@@ -197,8 +201,38 @@ export default function WorkspaceBranches() {
     const unsubMergeError = ipc.on("workspace:merge-branch:error", () => {
       setMergePending(false);
     });
+    const unsubUpdateSuccess = ipc.on(
+      "workspace:update-branch:success",
+      (data: unknown) => {
+        if (updatingBranchRef.current) {
+          updateConflictsRef.current.delete(updatingBranchRef.current);
+        }
+        refreshBranches();
+        ipc.sendMessage("workspace:history", null);
+        window.alert((data as { message: string }).message);
+      },
+    );
+    const unsubUpdateError = ipc.on(
+      "workspace:update-branch:error",
+      (data: unknown) => {
+        const { message, conflicts } = data as {
+          message: string;
+          conflicts: boolean;
+        };
+        if (conflicts && updatingBranchRef.current) {
+          updateConflictsRef.current.add(updatingBranchRef.current);
+          window.alert(
+            `${message}\n\nResolve each of these on ${updatingBranchRef.current} and submit them there, then choose "Update from parent, keeping my resolutions".`,
+          );
+        } else {
+          window.alert(message);
+        }
+      },
+    );
 
     return () => {
+      unsubUpdateSuccess();
+      unsubUpdateError();
       unsubCreateSuccess();
       unsubCreateError();
       unsubSwitchSuccess();
@@ -303,6 +337,32 @@ export default function WorkspaceBranches() {
               },
             });
           }
+        }
+      }
+
+      // Update from parent (feature branches): brings what the parent
+      // changed into the branch, so it can merge without meeting it again.
+      if (branch.type === "FEATURE" && branch.parentBranchName && !isArchived) {
+        items.push({
+          label: `Update from ${branch.parentBranchName}`,
+          command: () => {
+            updatingBranchRef.current = branch.name;
+            ipc.sendMessage("workspace:update-branch", {
+              branchName: branch.name,
+            });
+          },
+        });
+        if (updateConflictsRef.current.has(branch.name)) {
+          items.push({
+            label: `Update from ${branch.parentBranchName}, keeping my resolutions`,
+            command: () => {
+              updatingBranchRef.current = branch.name;
+              ipc.sendMessage("workspace:update-branch", {
+                branchName: branch.name,
+                resolvedInLatest: true,
+              });
+            },
+          });
         }
       }
 

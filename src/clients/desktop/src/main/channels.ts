@@ -80,6 +80,13 @@ export type Channels = {
   "workspace:delete-branch:success": null;
   "workspace:delete-branch:error": { message: string };
   "workspace:merge-branch": { incomingBranchName: string };
+  /**
+   * Brings a feature branch's parent into it. With resolvedInLatest, the
+   * branch's latest changelist resolves the conflicts the last try listed.
+   */
+  "workspace:update-branch": { branchName: string; resolvedInLatest?: boolean };
+  "workspace:update-branch:success": { message: string };
+  "workspace:update-branch:error": { message: string; conflicts: boolean };
   "workspace:merge-branch:success": { message: string };
   "workspace:merge-branch:error": { message: string };
   "workspace:get-directory": { path: string };

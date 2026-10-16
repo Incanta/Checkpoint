@@ -922,7 +922,11 @@ int32_t SubmitSync(
       {"workspaceId", std::string(WorkspaceId)},
       // Storage protocol 3: the server records this submit from its block
       // map and new blocks, and no longer merges store.lsi.
-      {"protocol", 3}};
+      {"protocol", 3},
+      // The daemons this addon ships with send a base for every file they
+      // track, so the server may treat a write without one on a path the
+      // branch has as a conflict rather than leave it unchecked.
+      {"basesComplete", true}};
 
   if (ShelfName != nullptr) {
     payload["shelfName"] = std::string(ShelfName);

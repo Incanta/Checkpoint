@@ -190,4 +190,19 @@ describe("smaller observations", () => {
     expect(path.basename(guard.backupRoot).length).toBeLessThanOrEqual(20);
     expect(existsSync(guard.backupRoot)).toBe(false);
   });
+
+  it.runIf(process.platform === "win32")(
+    "reports pulled paths that Windows tools cannot handle",
+    async () => {
+      const { alice, bob } = scene!;
+      const long = `Content/${"a".repeat(110)}/${"b".repeat(120)}.txt`;
+      await put(alice, long, "deep\n");
+      await stageAndSubmit(alice, [long]);
+
+      const result = (await syncLatest(bob)) as { longPaths?: string[] };
+
+      expect(result.longPaths).toEqual([long]);
+      expect(await read(bob, long)).toBe("deep\n");
+    },
+  );
 });

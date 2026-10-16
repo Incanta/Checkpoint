@@ -100,6 +100,11 @@ export interface PullMergeResult {
    * program, say), with why. They stay tracked and the next pull retries.
    */
   notRemoved?: { path: string; error: string }[];
+  /**
+   * On Windows, pulled paths of 260 characters or more (as written, or as
+   * backed up), which Explorer and many tools cannot handle.
+   */
+  longPaths?: string[];
 }
 
 export async function pull(
@@ -465,6 +470,28 @@ export async function pull(
     Logger.info(
       `Pull will touch ${guard.files.length} file(s) with local changes; copies kept in ${guard.backupRoot}`,
     );
+  }
+
+  // Windows paths of 260 characters or more: Checkpoint writes them (through
+  // \\?\ paths), but Explorer and many tools cannot open, move, or delete
+  // them. Counted as written and, for files with local changes, as backed up
+  // (the backup folder adds its own prefix). Reported, not refused.
+  const longPaths: string[] = [];
+  if (process.platform === "win32") {
+    const LIMIT = 260;
+    const backedUp = new Set(guard.files.map((f) => f.relativePath));
+    for (const c of incoming) {
+      const written = path.resolve(workspace.localPath, c.path).length;
+      const backup = backedUp.has(c.path)
+        ? path.join(guard.backupRoot, c.path).length
+        : 0;
+      if (written >= LIMIT || backup >= LIMIT) longPaths.push(c.path);
+    }
+    if (longPaths.length > 0) {
+      Logger.warn(
+        `Pull: ${longPaths.length} path(s) are ${LIMIT} characters or longer here, which Explorer and many Windows tools cannot handle: ${longPaths.slice(0, 10).join(", ")}`,
+      );
+    }
   }
 
   // ─── Longtail pull ────────────────────────────────────────────────
@@ -1049,6 +1076,9 @@ export async function pull(
       }
       if (notRemoved.length > 0) {
         mergeResult.notRemoved = notRemoved;
+      }
+      if (longPaths.length > 0) {
+        mergeResult.longPaths = longPaths;
       }
       if (changed.length > 0) {
         mergeResult.pulledPaths = changed.map((change) => change.path);

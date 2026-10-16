@@ -556,6 +556,12 @@ export const branchesRouter = router({
         branchName: z.string(),
         parentHeadNumber: z.number().int().nonnegative().optional(),
         resolvedInNumber: z.number().int().nonnegative().optional(),
+        /**
+         * The branch's latest changelist is the resolution: what a client
+         * sends after the user resolved the listed conflicts on the branch
+         * and submitted them there. Ignored when resolvedInNumber is given.
+         */
+        resolvedInLatest: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -571,15 +577,21 @@ export const branchesRouter = router({
       }
 
       const client = await CreateApiClientAuth(input.daemonId);
+      let resolvedInNumber = input.resolvedInNumber;
+      if (resolvedInNumber === undefined && input.resolvedInLatest) {
+        const branch = await client.branch.getBranch.query({
+          repoId: workspace.repoId,
+          name: input.branchName,
+        });
+        resolvedInNumber = branch?.headNumber;
+      }
       const result = await client.branch.updateFromParent.mutate({
         repoId: workspace.repoId,
         branchName: input.branchName,
         ...(input.parentHeadNumber !== undefined && {
           parentHeadNumber: input.parentHeadNumber,
         }),
-        ...(input.resolvedInNumber !== undefined && {
-          resolvedInNumber: input.resolvedInNumber,
-        }),
+        ...(resolvedInNumber !== undefined && { resolvedInNumber }),
       });
 
       if (
