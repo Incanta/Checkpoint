@@ -193,20 +193,79 @@ export function describeMergeConflicts(
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-/** A branch's changelists from `start` back to the root, newest first. */
-async function* ancestry(
+/** A changelist's parents: its own parent, and for a merge, the head it merged. */
+interface Links {
+  parent: number | null;
+  mergedFrom: number | null;
+}
+
+/**
+ * Loads the parent links of `number` and of the ancestors a page of the
+ * linear walk reaches from it (one query for the walk, one for the merge
+ * links), so long histories cost a query per page, not per changelist.
+ */
+async function loadLinks(
   db: Db,
   repoId: string,
-  start: number,
-): AsyncGenerator<number> {
-  let next: number | null = start;
-  while (next !== null) {
-    const page = await walkChangelistAncestry(db, repoId, next, 512);
-    if (page.numbers.length === 0) {
-      return;
+  number: number,
+  links: Map<number, Links>,
+): Promise<void> {
+  const page = await walkChangelistAncestry(db, repoId, number, 512);
+  if (page.numbers.length === 0) {
+    links.set(number, { parent: null, mergedFrom: null });
+    return;
+  }
+  const rows = await db.changelist.findMany({
+    where: { repoId, number: { in: page.numbers } },
+    select: { number: true, mergedFromNumber: true },
+  });
+  const mergedFrom = new Map(rows.map((r) => [r.number, r.mergedFromNumber]));
+  page.numbers.forEach((n, i) => {
+    if (links.has(n)) return;
+    links.set(n, {
+      parent:
+        i + 1 < page.numbers.length ? page.numbers[i + 1]! : page.nextNumber,
+      mergedFrom: mergedFrom.get(n) ?? null,
+    });
+  });
+}
+
+/** A max-heap of changelist numbers. */
+class NumberHeap {
+  private readonly items: number[] = [];
+  get size(): number {
+    return this.items.length;
+  }
+  push(n: number): void {
+    const a = this.items;
+    a.push(n);
+    let i = a.length - 1;
+    while (i > 0) {
+      const up = (i - 1) >> 1;
+      if (a[up]! >= a[i]!) break;
+      [a[up], a[i]] = [a[i]!, a[up]!];
+      i = up;
     }
-    yield* page.numbers;
-    next = page.nextNumber;
+  }
+  pop(): number {
+    const a = this.items;
+    const top = a[0]!;
+    const last = a.pop()!;
+    if (a.length > 0) {
+      a[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = l + 1;
+        let big = i;
+        if (l < a.length && a[l]! > a[big]!) big = l;
+        if (r < a.length && a[r]! > a[big]!) big = r;
+        if (big === i) break;
+        [a[big], a[i]] = [a[i]!, a[big]!];
+        i = big;
+      }
+    }
+    return top;
   }
 }
 
@@ -218,12 +277,19 @@ export interface MergeBase {
 }
 
 /**
- * Finds the merge base of two heads.
+ * Finds the merge base of two heads: the newest changelist both descend from.
  *
- * A changelist's number is always greater than its parent's, so each line of
- * history is a strictly descending sequence. Walking both down, always
- * stepping whichever is currently higher, the first number they agree on is
- * the newest one they share.
+ * History is a graph, not a line: a merge changelist has its target as its
+ * parent and the head it merged as a second parent (mergedFromNumber). Work a
+ * merge already carried is then shared history, so it is never compared
+ * again, which is what lets a stacked branch merge after its parent merged
+ * (DL-13) and a branch merge once its parent was brought into it (DL-14).
+ *
+ * Both parent edges only ever lead to lower numbers, so walking both heads
+ * best-first by number visits every changelist after all its descendants,
+ * when it is known which heads reach it. The first one both reach is the
+ * newest common ancestor. The changelists only the incoming head reaches,
+ * before it, are the incoming side's own.
  */
 export async function findMergeBase(
   db: Db,
@@ -231,22 +297,33 @@ export async function findMergeBase(
   targetHead: number,
   incomingHead: number,
 ): Promise<MergeBase | null> {
-  const targetLine = ancestry(db, repoId, targetHead);
-  const incomingLine = ancestry(db, repoId, incomingHead);
-  const incomingNumbers: number[] = [];
+  const TARGET = 1;
+  const INCOMING = 2;
+  const links = new Map<number, Links>();
+  const reach = new Map<number, number>();
+  const heap = new NumberHeap();
+  const mark = (n: number | null, side: number) => {
+    if (n === null) return;
+    const had = reach.get(n) ?? 0;
+    if ((had | side) === had) return;
+    reach.set(n, had | side);
+    if (had === 0) heap.push(n);
+  };
+  mark(targetHead, TARGET);
+  mark(incomingHead, INCOMING);
 
-  let t = await targetLine.next();
-  let i = await incomingLine.next();
-  while (!t.done && !i.done) {
-    if (t.value === i.value) {
-      return { base: t.value, incomingNumbers };
+  const incomingNumbers: number[] = [];
+  while (heap.size > 0) {
+    const n = heap.pop();
+    const side = reach.get(n)!;
+    if (side === (TARGET | INCOMING)) {
+      return { base: n, incomingNumbers };
     }
-    if (t.value > i.value) {
-      t = await targetLine.next();
-    } else {
-      incomingNumbers.push(i.value);
-      i = await incomingLine.next();
-    }
+    if (side === INCOMING) incomingNumbers.push(n);
+    if (!links.has(n)) await loadLinks(db, repoId, n, links);
+    const { parent, mergedFrom } = links.get(n)!;
+    mark(parent, side);
+    mark(mergedFrom, side);
   }
   return null;
 }
@@ -543,6 +620,9 @@ export async function mergeBranch(
               message: mergeMessage,
               versionIndex: "",
               parentNumber: targetBranch.headNumber,
+              // The incoming head, as a second parent: what this merge
+              // carried is shared history from now on (findMergeBase).
+              mergedFromNumber: incomingBranch.headNumber,
               stateRootHash,
               fileCount,
               artifactVersionIndex: incomingHead.artifactVersionIndex,

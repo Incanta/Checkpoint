@@ -46,7 +46,7 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | DL-10 | Pull with a feature branch active takes the branch's changes back out of the workspace | Branch | High | Fixed (R14) |
 | DL-11 | The pre-submit merge on a feature branch reverts the branch's own earlier changes | Push, branch | High | Fixed (R14) |
 | DL-12 | Submits to a feature branch have no lost-update protection | Push, branch | High | Fixed (R14) |
-| DL-13 | A stacked branch can never merge after its parent merged | Merge | Medium | Live |
+| DL-13 | A stacked branch can never merge after its parent merged | Merge | Medium | Fixed (R16) |
 | DL-14 | A conflict resolved on the branch, as the error says to, never merges | Merge | Medium | Live |
 | DL-15 | Deleting a branch discards unmerged changelists with no confirmation | Branch | Medium | Live |
 | DL-16 | The app records changelists whose content does not exist | Push | Low | Empty index refused (R1); existence check open (R19) |

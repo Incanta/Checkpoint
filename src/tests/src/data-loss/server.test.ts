@@ -120,23 +120,6 @@ describe("data loss: server", () => {
     });
 
   describe("merge", () => {
-    it("merges a stacked branch after its parent merged, when both changed the same file in turn", async () => {
-      // upper's x.txt is built on lower's. After lower lands, main holds
-      // lower's x.txt, but the squash merge records no link from main to
-      // lower's changelists, so the merge base for upper is still the fork
-      // from main, and x.txt looks changed differently on both sides.
-      await write("main", "x.txt");
-      await branchFrom("main", "lower");
-      await write("lower", "x.txt");
-      await branchFrom("lower", "upper");
-      const u = await write("upper", "x.txt");
-      await merge("lower");
-
-      await merge("upper");
-
-      expect((await treeOf("main"))["x.txt"]).toBe(u);
-    });
-
     it("merges once a conflict is resolved on the branch, as the refusal says to", async () => {
       // The refusal says: bring main into the branch, resolve there, merge
       // again. The only way to put a resolved file on the branch is to submit

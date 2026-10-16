@@ -367,6 +367,12 @@ model Changelist {
   parent       Changelist?  @relation("ChangelistToParent", fields: [repoId, parentNumber], references: [repoId, number])
   children     Changelist[] @relation("ChangelistToParent")
   parentNumber Int? // NOTE: Merges are handled via forced squashing
+  // For a merge changelist, the head it merged (a branch merged into its
+  // parent, or a parent brought into a branch). The merge base follows it
+  // as a second parent, so work a merge already carried is never compared
+  // again (a stacked branch after its parent merged; a conflict resolved on
+  // the branch).
+  mergedFromNumber Int?
 
   // Code/content classification for the Team Sync changelist browser.
   // Null = not yet classified (rows predating the feature; lazily backfilled).

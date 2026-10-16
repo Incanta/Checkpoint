@@ -43,7 +43,7 @@ Ordering rules:
 | **Phase 3** | | **Branches and merges** | | | |
 | R14 | DL-10, DL-11, DL-12 | Sync and pre-submit checks use the active branch; every submit carries bases | | L | Done (server strictness: follow-up) |
 | R15 | Gate | Staged files keep the branch they were staged to | R14 | M | Done |
-| R16 | DL-13 | Merge changelists record what they merged, and the merge base follows it | | M | Not started |
+| R16 | DL-13 | Merge changelists record what they merged, and the merge base follows it | | M | Done |
 | R17 | DL-14 | Bring a branch's parent into it | R14, R16 | L | Not started |
 | R18 | DL-15 | Deleting a branch with unmerged work needs a flag, and deleted branches can be restored | | M | Not started |
 | **Phase 4** | | **Integrity and the smaller observations** | | | |
@@ -281,6 +281,8 @@ Fixes DL-13.
 - `findMergeBase` (`branch-merge.ts:224`) walks both parent and merged-from edges: a max-heap by changelist number over both heads' ancestries, where the first number reached from both sides is the newest common ancestor. Numbers only decrease along both kinds of edge, so today's ordering argument still holds. `incomingNumbers` becomes the incoming side's changelists that the target cannot reach.
 - Restacking needs no change: once `lower`'s merge records `lower`'s head, the merge base of `upper` and `main` is that head.
 - A Prisma migration in both providers. Backfill existing merge changelists from their messages, or start fresh (decision 9).
+
+**Status.** Done, without a backfill: merge changelists recorded before this carry no mergedFromNumber, so a stack whose parent merged before it still needs the old workaround once. A backfill from merge messages remains possible if any deployed repo needs it.
 
 **Tests.** Turns green: `server.test.ts` "merges a stacked branch after its parent merged, when both changed the same file in turn". Add: a three-level stack merged bottom-up, the same stack merged top-down, a branch merged after its parent merged twice, and a history longer than one page of `walkChangelistAncestry`.
 
