@@ -15,6 +15,12 @@ import {
   submitStateTree,
 } from "~/server/state-tree";
 import { TreeCollisionError, type TreeEdit } from "~/server/tree/tree";
+import {
+  canonicalProblems,
+  describePathProblems,
+  portabilityProblems,
+  toRepoPath,
+} from "~/server/repo-path";
 import type { InputJsonValue } from "@prisma/client/runtime/library";
 import { walkChangelistAncestry } from "~/server/changelist-walk";
 import { compareTreePaths } from "~/lib/file-tree-sort";
@@ -274,7 +280,6 @@ export const changelistRouter = createTRPCRouter({
         return { stray, stale };
       }
 
-
       // The last changelist in the set to write each path. Indexes are
       // applied in ascending order, so that is what ends up on disk.
       const lastWriter = new Map<string, number>();
@@ -389,8 +394,29 @@ export const changelistRouter = createTRPCRouter({
       );
       await assertWorkspaceOwnership(ctx, input.workspaceId);
 
+      // Every lookup below (claims, File rows, the tree, the base check) keys
+      // on one canonical spelling, and nothing stored can climb out of a
+      // workspace or into its .checkpoint directory.
+      const pathProblems = canonicalProblems(input.modifications);
+      if (pathProblems.length > 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: describePathProblems(pathProblems),
+        });
+      }
+      if (
+        input.versionIndex === "" &&
+        input.modifications.some((mod) => !mod.delete)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "A changelist that writes files must name the version index holding them",
+        });
+      }
+
       const normalizedPaths = input.modifications.map((mod) =>
-        mod.path.replaceAll("\\", "/"),
+        toRepoPath(mod.path),
       );
 
       const submitBranch = await ctx.db.branch.findFirst({
@@ -555,6 +581,18 @@ export const changelistRouter = createTRPCRouter({
           normalizedPaths,
         );
 
+        if (repo.pathPortability) {
+          const unportable = portabilityProblems(input.modifications, (p) =>
+            headPaths.has(p),
+          );
+          if (unportable.length > 0) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: describePathProblems(unportable),
+            });
+          }
+        }
+
         const conflicts = findBaseConflicts(input.modifications, headPaths);
         if (conflicts.length > 0) {
           throw new TRPCError({
@@ -611,7 +649,10 @@ export const changelistRouter = createTRPCRouter({
           );
         } catch (error) {
           if (error instanceof TreeCollisionError) {
-            throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: error.message,
+            });
           }
           if (!isSubmitContention(error)) {
             throw error;

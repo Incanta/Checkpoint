@@ -68,11 +68,22 @@ function commonPrefixLen(a: string, b: string): number {
   const n = Math.min(a.length, b.length);
   let i = 0;
   while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  // Never split a surrogate pair: the suffix is encoded as UTF-8 on its own,
+  // and a lone low surrogate would encode as U+FFFD, so names that share only
+  // the first half of an astral character (two emoji, say) used to decode as
+  // a different name.
+  if (i > 0) {
+    const last = a.charCodeAt(i - 1);
+    if (last >= 0xd800 && last <= 0xdbff) i--;
+  }
   return i;
 }
 
 /** Encode a node (LEAF or INDEX); entries must be sorted by name ascending. */
-export function encodeNode(nodeType: number, entries: EncodeEntry[]): Uint8Array {
+export function encodeNode(
+  nodeType: number,
+  entries: EncodeEntry[],
+): Uint8Array {
   const out: number[] = [];
   out.push(FORMAT_VERSION);
   out.push(nodeType);

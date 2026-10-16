@@ -8,6 +8,7 @@ import { recordActivity } from "../activity";
 import { assertFeature } from "~/server/license-client";
 import { walkChangelistAncestry } from "~/server/changelist-walk";
 import { compareTreePaths } from "~/lib/file-tree-sort";
+import { canonicalProblems, describePathProblems } from "~/server/repo-path";
 
 const artifactTypeSchema = z
   .string()
@@ -48,6 +49,15 @@ export const artifactRouter = createTRPCRouter({
         RepoAccess.WRITE,
       );
       await assertFeature(repo.orgId, "artifacts", ctx.db);
+
+      // Artifact paths are written into workspaces like source paths.
+      const pathProblems = canonicalProblems(input.modifications);
+      if (pathProblems.length > 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: describePathProblems(pathProblems),
+        });
+      }
 
       const changelist = await ctx.db.changelist.findUnique({
         where: {

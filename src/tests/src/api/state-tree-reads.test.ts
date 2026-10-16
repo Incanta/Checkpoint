@@ -47,7 +47,7 @@ describe("state tree reads and writes through the routers", () => {
     return caller.changelist.createChangelist({
       message: "test",
       repoId,
-      versionIndex: "",
+      versionIndex: "test.lvi",
       branchName: "main",
       modifications: mods.map((m) => ({ path: m.path, delete: m.delete ?? false })),
       keepCheckedOut: false,

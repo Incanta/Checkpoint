@@ -97,7 +97,7 @@ describe("changelist.createChangelist", () => {
     return caller.changelist.createChangelist({
       message: `submit ${mods.map((m) => m.path).join(",")}`,
       repoId,
-      versionIndex: "",
+      versionIndex: "test.lvi",
       branchName,
       modifications: mods.map((m) => ({
         path: m.path,
@@ -371,7 +371,7 @@ describe("changelist.createChangelist", () => {
       const result = await caller.changelist.createChangelist({
         message: "on feature",
         repoId,
-        versionIndex: "",
+        versionIndex: "test.lvi",
         branchName: "feature",
         modifications: [
           { path: "stale.txt", delete: false, baseChangelist: 1 },

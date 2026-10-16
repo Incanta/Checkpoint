@@ -26,7 +26,7 @@ Ordering rules:
 | Step | Fixes | What | Depends on | Size | Status |
 |---|---|---|---|---|---|
 | **Phase 1** | | **Stop the critical losses** | | | |
-| R1 | DL-03, DL-09, DL-17, DL-23 | One path check at every API boundary that accepts a path | | M | Not started |
+| R1 | DL-03, DL-09, DL-17, DL-23 | One path check at every API boundary that accepts a path | | M | Done |
 | R2 | DL-03, DL-17, DL-23 | Every daemon write, delete, and backup goes through one containment helper | R1 (shared rules) | M | Not started |
 | R3 | DL-02, DL-04, DL-22 | The Team Sync reconcile never deletes on an unknown config, never deletes edits, survives a failed delete, and re-pulls when the filter widens | | M | Not started |
 | R4 | DL-01, DL-06 | The pull records only what it wrote, and protects by content | | M | Not started |

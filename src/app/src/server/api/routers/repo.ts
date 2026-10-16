@@ -11,6 +11,7 @@ import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { Logger } from "~/server/logging";
 import { buildStateTreeBlocks } from "~/server/state-tree";
+import { auditRepoPaths } from "~/server/repo-path-audit";
 import { snapshotStoragePeak } from "~/server/billing/storage-usage";
 
 export const repoRouter = createTRPCRouter({
@@ -203,6 +204,7 @@ export const repoRouter = createTRPCRouter({
         public: z.boolean().optional(),
         requiredReviews: z.number().min(0).optional(),
         mergePermissionsSame: z.boolean().optional(),
+        pathPortability: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -214,6 +216,15 @@ export const repoRouter = createTRPCRouter({
         where: { id },
         data: updateData,
       });
+    }),
+
+  // Paths at each branch head that the path rules would refuse today, so a
+  // repo stored before the rules can find and rename them.
+  auditPaths: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .query(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.id, RepoAccess.ADMIN);
+      return auditRepoPaths(ctx.db, input.id);
     }),
 
   deleteRepo: protectedProcedure

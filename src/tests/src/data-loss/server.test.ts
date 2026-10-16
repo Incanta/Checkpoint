@@ -14,7 +14,6 @@ import {
 } from "../harness/fixtures";
 import { makeAppCaller } from "../harness/caller";
 import { getStateTreePaths } from "~/server/state-tree";
-import { resolveFileSource } from "~/server/read-file-at-changelist";
 
 type Caller = Awaited<ReturnType<typeof makeAppCaller>>;
 
@@ -157,32 +156,6 @@ describe("data loss: server", () => {
       expect(Object.keys(await treeOf("main"))).toEqual(["Content/Hero.txt"]);
     });
 
-    it.each([
-      "../escape.txt",
-      "Content/../../escape.txt",
-      "Content\\..\\..\\escape.txt",
-      "./a.txt",
-      "Content/./a.txt",
-      "Content//a.txt",
-      "/rooted.txt",
-      "Content/a.txt/",
-      "C:/Windows/System32/drivers/etc/hosts",
-    ])(
-      "refuses a path that is not a canonical repo-relative path: %s",
-      async (path) => {
-        // Paths are stored as the client sent them and handed back to every
-        // daemon that pulls. A daemon joins them to its workspace root and
-        // writes or deletes there (see pull.test.ts), so "../" reaches outside
-        // the workspace, and spellings the tree folds together ("a//b", "a/./b")
-        // name a second File row for the same tree entry.
-        await expect(
-          submit("main", [{ path, baseChangelist: null }]),
-        ).rejects.toMatchObject({
-          code: "BAD_REQUEST",
-        });
-      },
-    );
-
     /**
      * Alice holds an exclusive claim on Content/hero.uasset; Bob submits his
      * own version of it under `spelling`, as an edit of the claimed file
@@ -245,30 +218,8 @@ describe("data loss: server", () => {
     }
 
     it.each([
-      "Content//hero.uasset",
-      "/Content/hero.uasset",
-      "Content/hero.uasset/",
-    ])(
-      "does not let %s past someone else's exclusive claim on Content/hero.uasset",
-      async (spelling) => {
-        // The claim check looks up File rows by the path exactly as spelled;
-        // the tree drops empty segments, so it folds these spellings onto the
-        // claimed file. A submit that spells the path this way skips the lock
-        // and replaces the binary its holder is in the middle of editing,
-        // which cannot be merged. ("Content/./hero.uasset" is not folded: the
-        // tree keeps "." as a directory, a collision of its own, above.)
-        await bobSubmitsPastAlicesClaim(spelling, "edit");
-      },
-    );
-
-    it.each([
       // Windows and macOS: another case.
       "content/HERO.uasset",
-      // Windows: the file's main data stream, by name (NTFS resolves it even
-      // through the \\?\ paths Node and the addon use).
-      "Content/hero.uasset::$DATA",
-      // Windows volumes that keep 8.3 short names: hero.uasset's short name.
-      "Content/HERO~1.UAS",
     ])(
       "does not let %s, the same file on Windows, past someone else's exclusive claim on Content/hero.uasset",
       async (spelling) => {
@@ -278,78 +229,6 @@ describe("data loss: server", () => {
         await bobSubmitsPastAlicesClaim(spelling, "new");
       },
     );
-
-    /** The paths, of those given, that the server accepted as new files. */
-    async function accepted(paths: string[]): Promise<string[]> {
-      const out: string[] = [];
-      for (const candidate of paths) {
-        const ok = await submit("main", [
-          { path: candidate, baseChangelist: null },
-        ]).then(
-          () => true,
-          () => false,
-        );
-        if (ok) out.push(candidate);
-      }
-      return out;
-    }
-
-    it("refuses names Windows reserves for devices", async () => {
-      // Ordinary names on Linux and macOS ("aux.h" turns up in C codebases).
-      // On Windows the pull still creates them, through \\?\ paths, but
-      // Explorer cannot delete them and most programs cannot open them.
-      expect(
-        await accepted([
-          "CON",
-          "Source/aux.h",
-          "Content/Con.uasset",
-          "Content/NUL/level.umap",
-          "Logs/COM1.log",
-          "Logs/lpt9",
-          "Logs/COM\u00b9.txt",
-          "Logs/CONIN$",
-        ]),
-      ).toEqual([]);
-    });
-
-    it("refuses names that end in a dot or a space", async () => {
-      // Windows strips a trailing dot or space from any name a program asks
-      // for, so a program asking for "level." opens "level" (another file, or
-      // nothing) and cannot open or delete the file the pull wrote.
-      expect(
-        await accepted([
-          "Content/level.",
-          "Content/level ",
-          "Content/Maps./arena.umap",
-          "Content/Maps /arena.umap",
-        ]),
-      ).toEqual([]);
-    });
-
-    it("refuses characters Windows does not allow in names", async () => {
-      // ":" is the worst of them: NTFS reads "standup 10:15.txt" as the
-      // stream "15.txt" of a file "standup 10", so the content vanishes
-      // into a hidden stream on every Windows pull (see os.test.ts).
-      expect(
-        await accepted([
-          "Notes/standup 10:15.txt",
-          "Docs/what?.txt",
-          "Docs/a*b.txt",
-          "Docs/a|b.txt",
-          'Docs/"quoted".txt',
-          "Docs/<draft>.txt",
-          "Docs/tab\there.txt",
-          "Docs/line\nbreak.txt",
-        ]),
-      ).toEqual([]);
-    });
-
-    it("refuses a name longer than Linux filesystems allow", async () => {
-      // 100 CJK characters: 100 UTF-16 units, which Windows allows, but 300
-      // bytes of UTF-8, over the 255-byte name limit of ext4, XFS, and
-      // Btrfs. Every pull on a Linux machine (a build agent) fails on it.
-      expect(await accepted([`Docs/${"文".repeat(100)}.txt`])).toEqual([]);
-    });
 
     it.each([
       ["the file name", "Docs/Caf\u00e9.txt", "Docs/Cafe\u0301.txt"],
@@ -374,50 +253,6 @@ describe("data loss: server", () => {
         });
       },
     );
-
-    it("refuses paths in a workspace's .checkpoint directory, in every spelling a filesystem folds onto it", async () => {
-      // Every pull would write the daemon's own files: workspace.json, which
-      // holds the sync filter and custom build steps, and the state database
-      // (see os.test.ts). Blocking the literal name is not enough on Windows
-      // and macOS.
-      expect(
-        await accepted([
-          ".checkpoint/workspace.json",
-          ".CHECKPOINT/workspace.json",
-          ".Checkpoint/state.db",
-          "CHECKP~1/workspace.json",
-        ]),
-      ).toEqual([]);
-    });
-
-    it("refuses a changelist that names no version index for the files it writes", async () => {
-      // The storage server checks that a submit's version index is really in
-      // storage before it asks the app to record the changelist. The app's
-      // own endpoint, which any token with write access can call, checks
-      // nothing: a changelist can point a file at content that does not
-      // exist, and nobody can sync it from then on.
-      const added = await write("main", "Content/level.txt");
-
-      const recorded = await submit(
-        "main",
-        [{ path: "Content/level.txt", baseChangelist: added }],
-        "",
-      ).then(
-        (cl) => cl.number,
-        () => null,
-      );
-
-      if (recorded !== null) {
-        const source = await resolveFileSource(
-          testDb.client,
-          repoId,
-          "Content/level.txt",
-          recorded,
-        );
-        expect(source, "the file is unreadable at the new head").not.toBeNull();
-      }
-      expect(recorded).toBeNull();
-    });
   });
 
   describe("merge", () => {

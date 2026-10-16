@@ -241,6 +241,12 @@ model Repo {
 
   issuesPlatform IssuesPlatform @default(CHECKPOINT)
 
+  // Refuse new paths that some OS cannot store (Windows device names,
+  // reserved characters, names over 255 bytes) or that fold onto an existing
+  // path on case- or normalization-insensitive filesystems. Off only for
+  // teams that use nothing but Linux.
+  pathPortability Boolean @default(true)
+
   files            File[]
   changelists      Changelist[]
   branches         Branch[]          @relation("RepoBranch")
