@@ -37,7 +37,11 @@ import {
 } from "./util/team-sync/scheduler.js";
 import { runSyncPipeline } from "./util/team-sync/sync-pipeline.js";
 import { compareWithBaseline } from "./util/baseline.js";
-import { isSafeWorkspacePath } from "./util/workspace-path.js";
+import {
+  isSafeWorkspacePath,
+  toRelativeRepoPath,
+  unsupportedNameReason,
+} from "./util/workspace-path.js";
 import { groupByKey, workspacePathKey } from "./util/volume.js";
 import type { StateDelta } from "./util/state-delta.js";
 import { PathIndex, pathsUnderAny } from "./util/path-index.js";
@@ -836,6 +840,8 @@ export class DaemonManager {
       for (const entry of entries) {
         const childRelative = dir ? `${dir}/${entry.name}` : entry.name;
         if (childRelative.startsWith(".checkpoint")) continue;
+        // Never submitted: the server would read a backslash as a separator.
+        if (unsupportedNameReason(entry.name)) continue;
         if (isIgnoredOrHidden(ignoreCache, childRelative, entry.isDirectory()))
           continue;
 
@@ -926,7 +932,9 @@ export class DaemonManager {
    * Gets the relative path from workspace root (normalized with forward slashes).
    */
   private getRelativePath(workspace: Workspace, fullPath: string): string {
-    return path.relative(workspace.localPath, fullPath).replace(/\\/g, "/");
+    // Only Windows uses backslashes as separators; elsewhere one is part of
+    // a file name (see unsupportedNameReason).
+    return toRelativeRepoPath(path.relative(workspace.localPath, fullPath));
   }
 
   // ─── Tracked Directory Helpers ──────────────────────────────────────
@@ -1229,6 +1237,15 @@ export class DaemonManager {
           return;
         }
 
+        const unsupported = unsupportedNameReason(entry.name);
+        if (unsupported) {
+          (result.unsupported ??= []).push({
+            path: relativePath,
+            reason: unsupported,
+          });
+          return;
+        }
+
         if (entry.isDirectory()) {
           if (
             !trackedDirs.has(relativePath) &&
@@ -1286,7 +1303,7 @@ export class DaemonManager {
     const promises = diskFiles.map(async (f) => {
       if (f.isDirectory()) return;
 
-      const fullPath = path.join(f.parentPath, f.name).replace(/\\/g, "/");
+      const fullPath = path.join(f.parentPath, f.name);
       const relativePath = this.getRelativePath(workspace, fullPath);
 
       // Skip the .checkpoint directory (only it: a file named
@@ -1298,7 +1315,21 @@ export class DaemonManager {
         return;
       }
 
-      const stat = await fs.lstat(fullPath);
+      // One file that cannot be read (permissions, or gone since the
+      // directory was listed) must not fail the whole scan.
+      let stat: Stats;
+      try {
+        stat = await fs.lstat(fullPath);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          (result.unsupported ??= []).push({
+            path: relativePath,
+            reason: `it cannot be read (${code ?? String(err)})`,
+          });
+        }
+        return;
+      }
       let trackedPath = relativePath;
       let baselineFile = baselineState.files[relativePath];
       if (!baselineFile && pathKey) {
@@ -1618,7 +1649,7 @@ export class DaemonManager {
       async (eventType, filename) => {
         if (!filename) return;
 
-        const relativePath = filename.replace(/\\/g, "/");
+        const relativePath = toRelativeRepoPath(filename);
 
         // Skip .checkpoint directory
         if (relativePath.startsWith(".checkpoint")) {

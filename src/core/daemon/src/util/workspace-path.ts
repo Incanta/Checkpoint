@@ -75,3 +75,30 @@ export function partitionSafePaths(paths: readonly string[]): {
   }
   return { safe, unsafe };
 }
+
+/**
+ * Why a file name found on disk cannot be submitted, or null. Linux and macOS
+ * allow almost any name, but a backslash there is part of the name, while the
+ * server (and every Windows client) reads it as a separator; control
+ * characters are refused by the server outright. Such a file is listed as
+ * unsupported so the user can rename it, and never staged.
+ */
+export function unsupportedNameReason(
+  name: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  if (platform !== "win32" && name.includes("\\")) {
+    return "a backslash, which Windows and the server read as a folder separator";
+  }
+  if (/[\u0000-\u001f\u007f]/.test(name)) {
+    return "a control character";
+  }
+  return null;
+}
+
+/** A repo-relative path from an OS path relative to the workspace root. */
+export function toRelativeRepoPath(osRelativePath: string): string {
+  return process.platform === "win32"
+    ? osRelativePath.replace(/\\/g, "/")
+    : osRelativePath;
+}

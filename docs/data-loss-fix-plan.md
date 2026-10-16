@@ -34,7 +34,7 @@ Ordering rules:
 | **Phase 2** | | **Filesystems and the native layer** | | | |
 | R6 | DL-08, DL-18, DL-09 | The tree refuses a new name that folds onto an existing one | R1 | M | Done |
 | R7 | DL-07, DL-19 | The daemon probes each workspace's volume and compares folded names where the volume folds | R6 (shared fold) | L | Done |
-| R8 | Backslash | One odd file name no longer fails the scan | | S | Not started |
+| R8 | Backslash | One odd file name no longer fails the scan | | S | Done |
 | R9 | DL-20 | Racily clean baselines are checked by content | | M | Not started |
 | R10 | DL-21 | Native pulls report each file's size and mtime as written | | M | Not started |
 | R11 | DL-24 | File modes are recorded at submit and kept on pull | | M | Not started |

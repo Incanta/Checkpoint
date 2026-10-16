@@ -258,35 +258,4 @@ describe("data loss: the filesystem under the workspace", () => {
       ]);
     });
   });
-
-  describe("names only Linux and macOS allow", () => {
-    it.skipIf(windows)(
-      "still submits other changes when a stray file's name contains a backslash",
-      async () => {
-        // A script written for Windows, run on Linux or macOS, creates
-        // "C:\Users\bob\build.log" as one file in the workspace root;
-        // backslash is an ordinary character there. The scan rebuilds each
-        // file's path with backslashes turned into slashes, stats a path that
-        // does not exist, and the whole refresh fails, so nothing can be
-        // submitted until the file is found and removed.
-        const { alice, bob } = scene!;
-        await put(alice, "notes.txt", "v1\n");
-        await stageAndSubmit(alice, ["notes.txt"]);
-        await syncLatest(bob);
-
-        await put(bob, "C:\\Users\\bob\\build.log", "log\n");
-        await put(bob, "notes.txt", "v2 from bob\n");
-        await stageAndSubmit(bob, ["notes.txt"]);
-
-        expect(
-          await contentAtHead(
-            testDb.client,
-            scene!.repoId,
-            "main",
-            "notes.txt",
-          ),
-        ).toBe("v2 from bob\n");
-      },
-    );
-  });
 });

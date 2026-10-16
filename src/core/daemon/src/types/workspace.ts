@@ -25,6 +25,12 @@ export interface Workspace extends Omit<
 export interface WorkspacePendingChanges {
   numChanges: number;
   files: Record<string, File>;
+  /**
+   * Files on disk whose names cannot be submitted (a backslash on Linux or
+   * macOS, a control character), with why. Never staged; listed so they can
+   * be renamed.
+   */
+  unsupported?: { path: string; reason: string }[];
 }
 
 export enum FileType {

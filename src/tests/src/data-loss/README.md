@@ -62,7 +62,7 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | DL-25 | A failed pull stops putting edits back at the first file it cannot write | Pull | High | Fixed (R5) |
 | DL-26 | A Team Sync rule typed in another case silently stops a folder from syncing | Pull (Team Sync, native) | Medium | Live |
 | Gate | Modified files cannot be submitted to a feature branch at all | Push, branch | Functional, not data loss | Live |
-| Backslash | A file name with a backslash blocks every submit | Push | Functional, not data loss | Live (Linux, macOS) |
+| Backslash | A file name with a backslash blocks every submit | Push | Functional, not data loss | Fixed (R8); its tests run on Linux and macOS in CI |
 
 ### DL-01: Edits made after a submit vanish at the next pull, then get overwritten
 
