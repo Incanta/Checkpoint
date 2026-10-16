@@ -37,6 +37,7 @@ export interface StateDelta {
   meta?: {
     changelistNumber?: number;
     branchHeads?: Record<string, number> | null;
+    pendingRemovals?: string[] | null;
     syncFilterHash?: string | null;
     lastBuiltChangelist?: number | null;
     lastScheduledSyncAt?: string | null;
@@ -76,7 +77,11 @@ function applyToList(
 
 function applyToRecord<T>(
   current: Record<string, T> | undefined,
-  change: { replaceAll?: Record<string, T>; delete?: string[]; upsert?: Record<string, T> },
+  change: {
+    replaceAll?: Record<string, T>;
+    delete?: string[];
+    upsert?: Record<string, T>;
+  },
 ): Record<string, T> {
   const next: Record<string, T> = change.replaceAll
     ? { ...change.replaceAll }
@@ -91,12 +96,18 @@ function applyToRecord<T>(
  * a delta: every store must leave its persisted state equal to what this
  * produces from the state it held before.
  */
-export function applyDeltaToState(state: WorkspaceState, delta: StateDelta): void {
+export function applyDeltaToState(
+  state: WorkspaceState,
+  delta: StateDelta,
+): void {
   if (delta.files) {
     state.files = applyToRecord(state.files, delta.files);
   }
   if (delta.artifactFiles) {
-    state.artifactFiles = applyToRecord(state.artifactFiles, delta.artifactFiles);
+    state.artifactFiles = applyToRecord(
+      state.artifactFiles,
+      delta.artifactFiles,
+    );
   }
   if (delta.markedForAdd) {
     state.markedForAdd = applyToList(state.markedForAdd, delta.markedForAdd);
@@ -111,17 +122,32 @@ export function applyDeltaToState(state: WorkspaceState, delta: StateDelta): voi
   }
   if (meta && "branchHeads" in meta) {
     if (meta.branchHeads === null) delete state.branchHeads;
-    else if (meta.branchHeads !== undefined) state.branchHeads = meta.branchHeads;
+    else if (meta.branchHeads !== undefined)
+      state.branchHeads = meta.branchHeads;
+  }
+  if (meta && "pendingRemovals" in meta) {
+    if (meta.pendingRemovals === null || meta.pendingRemovals?.length === 0) {
+      delete state.pendingRemovals;
+    } else if (meta.pendingRemovals !== undefined) {
+      state.pendingRemovals = meta.pendingRemovals;
+    }
   }
 
   const teamSync = { ...(state.teamSync ?? {}) };
-  const scalar = <K extends "syncFilterHash" | "lastBuiltChangelist" | "lastScheduledSyncAt" | "appliedArtifacts">(
+  const scalar = <
+    K extends
+      | "syncFilterHash"
+      | "lastBuiltChangelist"
+      | "lastScheduledSyncAt"
+      | "appliedArtifacts",
+  >(
     key: K,
   ) => {
     if (!meta || !(key in meta)) return;
     const value = meta[key];
     if (value === null) delete teamSync[key];
-    else if (value !== undefined) (teamSync as Record<string, unknown>)[key] = value;
+    else if (value !== undefined)
+      (teamSync as Record<string, unknown>)[key] = value;
   };
   scalar("syncFilterHash");
   scalar("lastBuiltChangelist");

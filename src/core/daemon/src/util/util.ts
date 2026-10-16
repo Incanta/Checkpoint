@@ -136,6 +136,12 @@ export interface WorkspaceState {
    * the file's `FileClaim.branchName` on the server, so the two cannot drift.
    */
   staged?: string[];
+  /**
+   * Tracked files the server deleted that a pull could not remove (open in
+   * another program, say). They stay tracked, so they never look like
+   * untracked files to add back, and the next pull tries again.
+   */
+  pendingRemovals?: string[];
   teamSync?: WorkspaceTeamSyncState;
 }
 

@@ -174,50 +174,6 @@ describe("data loss: pull", () => {
     ).toBe(true);
   });
 
-  it("puts local edits back when the pull fails partway", async () => {
-    // b.txt was deleted upstream, and on Bob's Windows machine it is open in
-    // another program, so deleting it fails (EBUSY). The native pass has
-    // already written Alice's a.txt over Bob's edit by then. The pull throws
-    // out of its delete pass without restoring what it backed up; only a
-    // pull that fails inside the native pass restores.
-    const { alice, bob } = scene!;
-    await put(alice, "a.txt", "a: line one\n");
-    await put(alice, "b.txt", "b: will be deleted upstream\n");
-    await stageAndSubmit(alice, ["a.txt", "b.txt"]);
-    await syncLatest(bob);
-
-    await put(bob, "a.txt", "a: line one\nbob's local line\n");
-    await put(alice, "a.txt", "a: alice rewrote this line\n");
-    await fsp.rm(fileIn(alice, "b.txt"));
-    await stageAndSubmit(alice, ["a.txt", "b.txt"]);
-
-    const realRm = fsp.rm.bind(fsp);
-    vi.spyOn(fsp, "rm").mockImplementation(async (target, options) => {
-      if (String(target).replace(/\\/g, "/").endsWith(`${bob.root}/b.txt`)) {
-        throw Object.assign(
-          new Error("EBUSY: resource busy or locked, unlink"),
-          {
-            code: "EBUSY",
-          },
-        );
-      }
-      return realRm(target, options);
-    });
-
-    await expect(syncLatest(bob)).rejects.toThrow(/EBUSY/);
-    vi.restoreAllMocks();
-
-    // The workspace state did not advance, so the workspace must look as it
-    // did before the pull: Bob's edit in place. Today it is only in an
-    // unreported backup folder, and a.txt now looks like Bob's own edit of
-    // the version he has not pulled.
-    const backups = await backupsContaining(bob, "bob's local line");
-    expect(
-      await read(bob, "a.txt"),
-      `Bob's edit is only in ${backups.length ? backups.join(", ") : "no backup at all"}`,
-    ).toBe("a: line one\nbob's local line\n");
-  });
-
   it.skipIf(!caseInsensitive)(
     "brings the new content of a file renamed by case only (case-insensitive filesystems)",
     async () => {

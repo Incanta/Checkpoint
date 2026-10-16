@@ -39,7 +39,7 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | DL-02 | One failed Team Sync config read deletes most of the workspace, for good | Pull (Team Sync) | Critical | Fixed (R3) |
 | DL-03 | The server stores paths as sent; `../x` makes teammates' pulls delete files outside their workspace | Push, pull | Critical | Fixed in the server (R1) and daemon (R2); native check open (R13) |
 | DL-04 | Narrowing the sync filter deletes locally edited files with no backup | Pull (Team Sync) | High | Fixed (R3) |
-| DL-05 | A pull that fails after writing files leaves local edits overwritten and unreported | Pull | High | Live |
+| DL-05 | A pull that fails after writing files leaves local edits overwritten and unreported | Pull | High | Fixed (R5) |
 | DL-06 | The whole-index pull fallback overwrites edits the pull meant to skip | Pull | High | Fixed (R4) |
 | DL-07 | A case-only rename upstream leaves the old content, recorded as the new version | Pull | High | Live on Windows and macOS |
 | DL-08 | The server accepts paths that differ only by case | Push | High | Live |
@@ -59,7 +59,7 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | DL-22 | A sync filter change that cannot remove one file leaves the files it did remove looking deleted | Pull (Team Sync) | High | Fixed (R3) |
 | DL-23 | A pull writes into the workspace's own `.checkpoint` directory; one changelist can wipe every teammate's workspace | Push, pull | High, and a security issue | Fixed in the server (R1) and daemon (R2); native check open (R13) |
 | DL-24 | Executable bits are dropped on submit and stripped on pull | Push, pull (native) | High | Live (Linux, macOS) |
-| DL-25 | A failed pull stops putting edits back at the first file it cannot write | Pull | High | Live (Windows) |
+| DL-25 | A failed pull stops putting edits back at the first file it cannot write | Pull | High | Fixed (R5) |
 | DL-26 | A Team Sync rule typed in another case silently stops a folder from syncing | Pull (Team Sync, native) | Medium | Live |
 | Gate | Modified files cannot be submitted to a feature branch at all | Push, branch | Functional, not data loss | Live |
 | Backslash | A file name with a backslash blocks every submit | Push | Functional, not data loss | Live (Linux, macOS) |

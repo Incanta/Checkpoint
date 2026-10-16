@@ -29,6 +29,7 @@ import type { WorkspaceStateFile } from "@checkpointvcs/common";
 
 import {
   LocalChangeGuard,
+  describeFailedPull,
   hasLocalChanges,
   isMergeableText,
 } from "../../../core/daemon/src/util/pull-local-changes.js";
@@ -81,10 +82,8 @@ describe("pull: local changes", () => {
 
   const noBinary = () => false;
   const allBinary = () => true;
-  const baseOf =
-    (content: string | Buffer) =>
-    async (): Promise<Buffer> =>
-      Buffer.from(content);
+  const baseOf = (content: string | Buffer) => async (): Promise<Buffer> =>
+    Buffer.from(content);
   const noBase = async (): Promise<Buffer> => {
     throw new Error("the base should not have been read");
   };
@@ -106,7 +105,9 @@ describe("pull: local changes", () => {
   describe("hasLocalChanges", () => {
     it("is false for a file exactly as the pull left it", async () => {
       await put("a.txt", "hello");
-      expect(await hasLocalChanges(full("a.txt"), await baseline("a.txt"))).toBe(false);
+      expect(
+        await hasLocalChanges(full("a.txt"), await baseline("a.txt")),
+      ).toBe(false);
       expect(
         await hasLocalChanges(full("a.txt"), await baseline("a.txt", 1, true)),
       ).toBe(false);
@@ -138,7 +139,9 @@ describe("pull: local changes", () => {
 
     it("is true for an untracked file and false for a missing one", async () => {
       await put("untracked.txt", "mine");
-      expect(await hasLocalChanges(full("untracked.txt"), undefined)).toBe(true);
+      expect(await hasLocalChanges(full("untracked.txt"), undefined)).toBe(
+        true,
+      );
       expect(await hasLocalChanges(full("missing.txt"), undefined)).toBe(false);
       expect(
         await hasLocalChanges(full("missing.txt"), {
@@ -167,7 +170,11 @@ describe("pull: local changes", () => {
       ["Latin-1 bytes", Buffer.from([0x63, 0x61, 0x66, 0xe9]), false],
       ["UTF-16", Buffer.from("hello", "utf16le"), false],
       ["a truncated UTF-8 sequence", Buffer.from([0x61, 0xe2, 0x82]), false],
-      ["PNG header", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), false],
+      [
+        "PNG header",
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        false,
+      ],
     ])("%s", (_name, bytes, expected) => {
       expect(isMergeableText(bytes)).toBe(expected);
     });
@@ -178,7 +185,13 @@ describe("pull: local changes", () => {
       await put("clean.txt", "as pulled");
       const guard = new LocalChangeGuard(root, "cl2");
 
-      expect(await guard.protect("clean.txt", "modified", await baseline("clean.txt"))).toBe(false);
+      expect(
+        await guard.protect(
+          "clean.txt",
+          "modified",
+          await baseline("clean.txt"),
+        ),
+      ).toBe(false);
       expect(guard.files).toEqual([]);
       expect(await backupCount()).toBe(0);
     });
@@ -189,18 +202,26 @@ describe("pull: local changes", () => {
       await edit("dir/sub/a.txt", "mine");
       const guard = new LocalChangeGuard(root, "cl9");
 
-      expect(await guard.protect("dir/sub/a.txt", "modified", entry)).toBe(true);
+      expect(await guard.protect("dir/sub/a.txt", "modified", entry)).toBe(
+        true,
+      );
 
       const [file] = guard.files;
       expect(file!.baseCl).toBe(7);
-      expect(file!.backupPath).toContain(path.join(".checkpoint", "pull-backups"));
-      expect(file!.backupPath.endsWith(path.join("dir", "sub", "a.txt"))).toBe(true);
+      expect(file!.backupPath).toContain(
+        path.join(".checkpoint", "pull-backups"),
+      );
+      expect(file!.backupPath.endsWith(path.join("dir", "sub", "a.txt"))).toBe(
+        true,
+      );
       expect(await readFile(file!.backupPath, "utf8")).toBe("mine");
     });
 
     it("does not copy a file that is not there", async () => {
       const guard = new LocalChangeGuard(root, "cl2");
-      expect(await guard.protect("missing.txt", "added", undefined)).toBe(false);
+      expect(await guard.protect("missing.txt", "added", undefined)).toBe(
+        false,
+      );
     });
   });
 
@@ -218,7 +239,9 @@ describe("pull: local changes", () => {
 
       const result = await guard.resolve(noBinary, baseOf(base));
 
-      expect(await readFile(full("f.txt"), "utf8")).toBe("ONE\ntwo\nthree\nfour\nFIVE\n");
+      expect(await readFile(full("f.txt"), "utf8")).toBe(
+        "ONE\ntwo\nthree\nfour\nFIVE\n",
+      );
       expect(result.setAside).toEqual([]);
       expect(result.merged.length).toBe(1);
       expect(result.merged[0]!.clean).toBe(true);
@@ -264,7 +287,9 @@ describe("pull: local changes", () => {
       expect(result.merged).toEqual([]);
       expect(result.setAside.length).toBe(1);
       expect(result.setAside[0]!.reason).toBe("binary");
-      expect((await readFile(result.setAside[0]!.backupPath)).equals(mine)).toBe(true);
+      expect(
+        (await readFile(result.setAside[0]!.backupPath)).equals(mine),
+      ).toBe(true);
     });
 
     it("sets aside a same-size binary edit", async () => {
@@ -278,7 +303,9 @@ describe("pull: local changes", () => {
       const result = await guard.resolve(allBinary, noBase);
 
       expect(result.setAside[0]!.reason).toBe("binary");
-      expect(await readFile(result.setAside[0]!.backupPath, "utf8")).toBe("BBBB");
+      expect(await readFile(result.setAside[0]!.backupPath, "utf8")).toBe(
+        "BBBB",
+      );
     });
 
     it.each([
@@ -298,7 +325,9 @@ describe("pull: local changes", () => {
         const result = await guard.resolve(noBinary, noBase);
 
         expect(result.setAside[0]!.reason).toBe("not-text");
-        expect((await readFile(result.setAside[0]!.backupPath)).equals(mine)).toBe(true);
+        expect(
+          (await readFile(result.setAside[0]!.backupPath)).equals(mine),
+        ).toBe(true);
         expect(await readFile(full("notes.txt"), "utf8")).toBe("theirs\n");
       },
     );
@@ -316,7 +345,9 @@ describe("pull: local changes", () => {
 
       expect(result.setAside[0]!.reason).toBe("not-text");
       expect((await readFile(full("f.txt"))).equals(theirs)).toBe(true);
-      expect(await readFile(result.setAside[0]!.backupPath, "utf8")).toBe("mine\n");
+      expect(await readFile(result.setAside[0]!.backupPath, "utf8")).toBe(
+        "mine\n",
+      );
     });
 
     it("keeps the local edit when the base cannot be read", async () => {
@@ -335,7 +366,9 @@ describe("pull: local changes", () => {
 
       expect(result.merged).toEqual([]);
       expect(result.setAside[0]!.reason).toBe("merge-failed");
-      expect(await readFile(result.setAside[0]!.backupPath, "utf8")).toBe("mine\n");
+      expect(await readFile(result.setAside[0]!.backupPath, "utf8")).toBe(
+        "mine\n",
+      );
       expect(await readFile(full("f.txt"), "utf8")).toBe("theirs\n");
     });
 
@@ -427,7 +460,11 @@ describe("pull: local changes", () => {
       for (const name of ["a.txt", "b.bin", "c.txt", "d.bin"]) {
         await guard.protect(name, "modified", entries[name]);
       }
-      expect(guard.files.map((f) => f.relativePath)).toEqual(["a.txt", "b.bin", "c.txt"]);
+      expect(guard.files.map((f) => f.relativePath)).toEqual([
+        "a.txt",
+        "b.bin",
+        "c.txt",
+      ]);
 
       await put("a.txt", "base\ntheirs-a\n");
       await put("b.bin", "theirs-b");
@@ -446,7 +483,9 @@ describe("pull: local changes", () => {
       expect(result.setAside.map((s) => [s.relativePath, s.reason])).toEqual([
         ["b.bin", "binary"],
       ]);
-      expect(await readFile(full("a.txt"), "utf8")).toBe("mine-a\nbase\ntheirs-a\n");
+      expect(await readFile(full("a.txt"), "utf8")).toBe(
+        "mine-a\nbase\ntheirs-a\n",
+      );
       expect(await readFile(full("d.bin"), "utf8")).toBe("theirs-d");
     });
   });
@@ -465,7 +504,9 @@ describe("pull: local changes", () => {
 
       expect(await guard.putBack("stray.txt")).toBe(true);
 
-      expect(await readFile(full("stray.txt"), "utf8")).toBe("my untracked file");
+      expect(await readFile(full("stray.txt"), "utf8")).toBe(
+        "my untracked file",
+      );
       expect(guard.files.map((f) => f.relativePath)).toEqual(["other.txt"]);
       expect(await backupCount()).toBe(1);
     });
@@ -515,6 +556,59 @@ describe("pull: local changes", () => {
       expect(await readFile(full("gone.txt"), "utf8")).toBe("mine-c");
       expect(await backupCount()).toBe(0);
     });
+
+    it("carries on past a file it cannot put back, and says where its local version is", async () => {
+      // On Windows, a file the Unreal Editor holds can be read but not
+      // written, so putting its backup back fails like the pull did. That
+      // must not stop the files after it from going back.
+      await put("first.uasset", "base-1");
+      await put("second.txt", "base-2");
+      const first = await baseline("first.uasset");
+      const second = await baseline("second.txt");
+      await edit("first.uasset", "mine-1");
+      await edit("second.txt", "mine-2");
+
+      const guard = new LocalChangeGuard(root, "cl2");
+      await guard.protect("first.uasset", "modified", first);
+      await guard.protect("second.txt", "modified", second);
+      await put("first.uasset", "theirs-1");
+      await put("second.txt", "theirs-2");
+      // A directory where the file was: copyFile onto it fails.
+      await rm(full("first.uasset"));
+      await mkdir(full("first.uasset"));
+
+      const result = await guard.restoreAll();
+
+      expect(await readFile(full("second.txt"), "utf8")).toBe("mine-2");
+      expect(result.restored).toEqual(["second.txt"]);
+      expect(result.failed.map((f) => f.relativePath)).toEqual([
+        "first.uasset",
+      ]);
+      expect(await readFile(result.failed[0]!.backupPath, "utf8")).toBe(
+        "mine-1",
+      );
+      expect(describeFailedPull("Pull failed: boom", result)).toContain(
+        result.failed[0]!.backupPath,
+      );
+    });
+
+    it("leaves alone a file the pull never got to write", async () => {
+      // Its content is still the local version, so nothing is copied, which
+      // is what lets a file that can be read but not written count as
+      // restored.
+      await put("held.uasset", "base");
+      const entry = await baseline("held.uasset");
+      await edit("held.uasset", "mine");
+      const guard = new LocalChangeGuard(root, "cl2");
+      await guard.protect("held.uasset", "modified", entry);
+      const before = (await stat(full("held.uasset"))).mtimeMs;
+
+      const result = await guard.restoreAll();
+
+      expect(result).toEqual({ restored: ["held.uasset"], failed: [] });
+      expect((await stat(full("held.uasset"))).mtimeMs).toBe(before);
+      expect(await backupCount()).toBe(0);
+    });
   });
 
   describe("text merge", () => {
@@ -540,8 +634,12 @@ describe("pull: local changes", () => {
     });
 
     it("returns the local text when only it changed, and the incoming text when only it did", () => {
-      expect(autoMergeText("a\nb\n", "a\nX\n", "a\nb\n").content).toBe("a\nX\n");
-      expect(autoMergeText("a\nb\n", "a\nb\n", "a\nY\n").content).toBe("a\nY\n");
+      expect(autoMergeText("a\nb\n", "a\nX\n", "a\nb\n").content).toBe(
+        "a\nX\n",
+      );
+      expect(autoMergeText("a\nb\n", "a\nb\n", "a\nY\n").content).toBe(
+        "a\nY\n",
+      );
     });
 
     it("marks a conflict when both changed the same line", () => {

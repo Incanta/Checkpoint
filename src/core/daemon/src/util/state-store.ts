@@ -1,11 +1,5 @@
 import path from "path";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-} from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "fs";
 import type { WorkspaceStateFile } from "@checkpointvcs/common";
 import BetterSqlite3 from "better-sqlite3";
 import {
@@ -501,6 +495,22 @@ class SqliteStateStore implements StateStore {
       }
     }
 
+    const pendingRemovalsRow = db
+      .prepare("SELECT value FROM workspace_meta WHERE key = 'pendingRemovals'")
+      .get() as { value: string } | undefined;
+    let pendingRemovals: string[] | undefined;
+    if (pendingRemovalsRow) {
+      try {
+        const parsed = JSON.parse(pendingRemovalsRow.value) as unknown;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          pendingRemovals = parsed.filter((p) => typeof p === "string");
+        }
+      } catch {
+        // The files are still tracked; losing the retry list only means
+        // they stay on disk until removed by hand.
+      }
+    }
+
     const teamSync = this.loadTeamSync(db);
 
     this.stats.loads++;
@@ -515,6 +525,7 @@ class SqliteStateStore implements StateStore {
       markedForAdd,
       staged,
       ...(branchHeads !== undefined && { branchHeads }),
+      ...(pendingRemovals !== undefined && { pendingRemovals }),
       ...(teamSync !== undefined && { teamSync }),
     };
   }
@@ -681,16 +692,22 @@ class SqliteStateStore implements StateStore {
       else s.upsertMeta.run(key, value);
     };
     const json = (value: unknown) =>
-      value === undefined ? undefined : value === null ? null : JSON.stringify(value);
+      value === undefined
+        ? undefined
+        : value === null
+          ? null
+          : JSON.stringify(value);
 
     db.transaction(() => {
       if (delta.files) {
         if (delta.files.replaceAll) {
           s.clearFiles.run();
-          for (const [p, f] of Object.entries(delta.files.replaceAll)) fileRow(p, f);
+          for (const [p, f] of Object.entries(delta.files.replaceAll))
+            fileRow(p, f);
         }
         for (const p of delta.files.delete ?? []) s.deleteFile.run(p);
-        for (const [p, f] of Object.entries(delta.files.upsert ?? {})) fileRow(p, f);
+        for (const [p, f] of Object.entries(delta.files.upsert ?? {}))
+          fileRow(p, f);
       }
 
       if (delta.artifactFiles) {
@@ -700,7 +717,8 @@ class SqliteStateStore implements StateStore {
             artifactRow(p, f);
           }
         }
-        for (const p of delta.artifactFiles.delete ?? []) s.deleteArtifact.run(p);
+        for (const p of delta.artifactFiles.delete ?? [])
+          s.deleteArtifact.run(p);
         for (const [p, f] of Object.entries(delta.artifactFiles.upsert ?? {})) {
           artifactRow(p, f);
         }
@@ -732,10 +750,17 @@ class SqliteStateStore implements StateStore {
           s.upsertMeta.run("changelistNumber", String(meta.changelistNumber));
         }
         setScalar("branchHeads", json(meta.branchHeads));
+        setScalar(
+          "pendingRemovals",
+          meta.pendingRemovals?.length === 0
+            ? null
+            : json(meta.pendingRemovals),
+        );
         setScalar("syncFilterHash", meta.syncFilterHash);
         setScalar(
           "lastBuiltChangelist",
-          meta.lastBuiltChangelist === undefined || meta.lastBuiltChangelist === null
+          meta.lastBuiltChangelist === undefined ||
+            meta.lastBuiltChangelist === null
             ? meta.lastBuiltChangelist
             : String(meta.lastBuiltChangelist),
         );
@@ -813,6 +838,12 @@ class SqliteStateStore implements StateStore {
           "branchHeads",
           state.branchHeads !== undefined
             ? JSON.stringify(state.branchHeads)
+            : undefined,
+        ],
+        [
+          "pendingRemovals",
+          state.pendingRemovals?.length
+            ? JSON.stringify(state.pendingRemovals)
             : undefined,
         ],
         ["syncFilterHash", teamSync?.syncFilterHash],

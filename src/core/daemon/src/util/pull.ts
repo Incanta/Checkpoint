@@ -27,7 +27,9 @@ import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 import { autoMergeText } from "./auto-merge.js";
 import {
   LocalChangeGuard,
+  describeFailedPull,
   describeSetAside,
+  hasLocalChanges,
   isMergeableText,
   type SetAsideFile,
 } from "./pull-local-changes.js";
@@ -86,6 +88,11 @@ export interface PullMergeResult {
    * with why. They were neither written nor recorded.
    */
   unsafePaths?: { path: string; reason: string }[];
+  /**
+   * Files the server deleted that the pull could not remove (open in another
+   * program, say), with why. They stay tracked and the next pull retries.
+   */
+  notRemoved?: { path: string; error: string }[];
 }
 
 export async function pull(
@@ -618,254 +625,319 @@ export async function pull(
   timer.count("stale", anomalies.stale.length);
   timer.count("localChanges", guard.files.length);
   if (!errored) {
-    // Handle deletions (paths come straight from the diff; no getFiles needed).
-    timer.stage("delete");
-    if (diff.removed.length > 0) {
-      onStep?.("Deleting removed files");
-      let deletedCount = 0;
-      const deleteTotal = diff.removed.length;
-      onProgress?.("Deleting removed files", 0, deleteTotal);
-
-      for (const removedPath of diff.removed) {
-        const filePath = resolveInWorkspace(workspace.localPath, removedPath);
-        if (existsSync(filePath)) {
-          await fs.rm(filePath, { force: true });
-        }
-        deletedCount++;
-        onProgress?.("Deleting removed files", deletedCount, deleteTotal);
-      }
-    }
-
-    // ─── Correction pass ───────────────────────────────────────────
-    // Undo what the applied version indexes wrote beyond the diff. This used
-    // to exist only for syncing backward, where it is common; it can happen
-    // going forward too (a file added and later deleted leaves a stray, and
-    // histories merged before merges were three-way can leave stale content).
-    //
-    // Files restored here that are not part of the diff keep their existing
-    // state entry, so their new size and mtime are collected to update it.
-    const restoredUnchanged = new Map<
-      string,
-      { size: number; mtime: number }
-    >();
-    for (const rewritten of putBackAfterNative) {
-      const fullPath = resolveInWorkspace(workspace.localPath, rewritten);
-      if (!existsSync(fullPath)) continue;
-      if (!(await guard.putBack(rewritten))) {
-        // No local edits: the index wrote the same content again, under a
-        // new mtime. Record that, or it would look edited.
-        const stat = await fs.stat(fullPath);
-        restoredUnchanged.set(rewritten, {
-          size: stat.size,
-          mtime: stat.mtimeMs,
-        });
-      }
-    }
-    timer.stage("correction");
-    if (anomalies.stray.length > 0 || anomalies.stale.length > 0) {
-      onStep?.("Verifying pulled files");
-      Logger.info(
-        `Pull correction: removing ${anomalies.stray.length} stray file(s), restoring ${anomalies.stale.length}`,
+    try {
+      // Handle deletions (paths come straight from the diff; no getFiles needed).
+      // A file that cannot be removed (open in another program, a directory
+      // in its place) does not stop the pull. It stays tracked, so it never
+      // looks like an untracked file to add back, and the next pull retries
+      // it (WorkspaceState.pendingRemovals). Earlier pulls' leftovers go first.
+      timer.stage("delete");
+      const notRemoved: { path: string; error: string }[] = [];
+      const retried = (workspaceState.pendingRemovals ?? []).filter(
+        (p) =>
+          !diffPaths.has(p) &&
+          isSafeWorkspacePath(p) &&
+          workspaceState.files[p] !== undefined,
       );
+      const removedNow: string[] = [];
+      const toRemove = [...retried, ...diff.removed];
+      if (toRemove.length > 0) {
+        onStep?.("Deleting removed files");
+        let deletedCount = 0;
+        const deleteTotal = toRemove.length;
+        onProgress?.("Deleting removed files", 0, deleteTotal);
 
-      for (const strayPath of anomalies.stray) {
-        if (diffPaths.has(strayPath)) continue; // the delete pass handled it
-        if (!isSafeWorkspacePath(strayPath)) continue;
-        const fullPath = resolveInWorkspace(workspace.localPath, strayPath);
-        if (existsSync(fullPath)) {
-          await fs.rm(fullPath, { force: true });
+        for (const removedPath of toRemove) {
+          const filePath = resolveInWorkspace(workspace.localPath, removedPath);
+          const isRetry = deletedCount < retried.length;
+          try {
+            if (
+              isRetry &&
+              (await hasLocalChanges(
+                filePath,
+                workspaceState.files[removedPath],
+              ))
+            ) {
+              // Edited since: it is the user's now. It stays tracked (a
+              // modified file the server deleted, which a submit cannot
+              // quietly re-add), and the pull stops retrying it.
+            } else {
+              if (existsSync(filePath)) {
+                await fs.rm(filePath, { force: true });
+              }
+              if (isRetry) removedNow.push(removedPath);
+            }
+          } catch (err) {
+            notRemoved.push({
+              path: removedPath,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+          deletedCount++;
+          onProgress?.("Deleting removed files", deletedCount, deleteTotal);
         }
-        // An untracked local file that happened to sit at this path is not
-        // the server's business: put it back exactly as it was.
-        await guard.putBack(strayPath);
+        if (notRemoved.length > 0) {
+          Logger.warn(
+            `Pull: could not remove ${notRemoved.length} file(s) the server deleted; will retry: ${notRemoved
+              .map((n) => `${n.path} (${n.error})`)
+              .join(", ")}`,
+          );
+        }
       }
+      const stillPending = new Set(notRemoved.map((n) => n.path));
 
-      let restoredCount = 0;
-      onProgress?.("Verifying pulled files", 0, anomalies.stale.length);
-      for (const entry of anomalies.stale) {
-        if (!isSafeWorkspacePath(entry.path)) continue;
-        const fullPath = resolveInWorkspace(workspace.localPath, entry.path);
-        // Not on disk means the pull never wrote it (filtered out).
-        if (existsSync(fullPath)) {
-          const result = await readFileFromChangelist({
-            workspace,
-            filePath: entry.path,
-            changelistNumber: entry.cl,
+      // ─── Correction pass ───────────────────────────────────────────
+      // Undo what the applied version indexes wrote beyond the diff. This used
+      // to exist only for syncing backward, where it is common; it can happen
+      // going forward too (a file added and later deleted leaves a stray, and
+      // histories merged before merges were three-way can leave stale content).
+      //
+      // Files restored here that are not part of the diff keep their existing
+      // state entry, so their new size and mtime are collected to update it.
+      const restoredUnchanged = new Map<
+        string,
+        { size: number; mtime: number }
+      >();
+      for (const rewritten of putBackAfterNative) {
+        const fullPath = resolveInWorkspace(workspace.localPath, rewritten);
+        if (!existsSync(fullPath)) continue;
+        if (!(await guard.putBack(rewritten))) {
+          // No local edits: the index wrote the same content again, under a
+          // new mtime. Record that, or it would look edited.
+          const stat = await fs.stat(fullPath);
+          restoredUnchanged.set(rewritten, {
+            size: stat.size,
+            mtime: stat.mtimeMs,
           });
-          await fs.mkdir(path.dirname(fullPath), { recursive: true });
-          await fs.copyFile(result.cachePath, fullPath);
+        }
+      }
+      timer.stage("correction");
+      if (anomalies.stray.length > 0 || anomalies.stale.length > 0) {
+        onStep?.("Verifying pulled files");
+        Logger.info(
+          `Pull correction: removing ${anomalies.stray.length} stray file(s), restoring ${anomalies.stale.length}`,
+        );
 
-          if (!diffPaths.has(entry.path)) {
-            // The workspace already had this version and the pull should not
-            // have touched it. Local edits were made on top of exactly this
-            // content, so they go straight back.
-            if (!(await guard.putBack(entry.path))) {
-              const stat = await fs.stat(fullPath);
-              restoredUnchanged.set(entry.path, {
-                size: stat.size,
-                mtime: stat.mtimeMs,
-              });
+        for (const strayPath of anomalies.stray) {
+          if (diffPaths.has(strayPath)) continue; // the delete pass handled it
+          if (!isSafeWorkspacePath(strayPath)) continue;
+          const fullPath = resolveInWorkspace(workspace.localPath, strayPath);
+          if (existsSync(fullPath)) {
+            await fs.rm(fullPath, { force: true });
+          }
+          // An untracked local file that happened to sit at this path is not
+          // the server's business: put it back exactly as it was.
+          await guard.putBack(strayPath);
+        }
+
+        let restoredCount = 0;
+        onProgress?.("Verifying pulled files", 0, anomalies.stale.length);
+        for (const entry of anomalies.stale) {
+          if (!isSafeWorkspacePath(entry.path)) continue;
+          const fullPath = resolveInWorkspace(workspace.localPath, entry.path);
+          // Not on disk means the pull never wrote it (filtered out).
+          if (existsSync(fullPath)) {
+            const result = await readFileFromChangelist({
+              workspace,
+              filePath: entry.path,
+              changelistNumber: entry.cl,
+            });
+            await fs.mkdir(path.dirname(fullPath), { recursive: true });
+            await fs.copyFile(result.cachePath, fullPath);
+
+            if (!diffPaths.has(entry.path)) {
+              // The workspace already had this version and the pull should not
+              // have touched it. Local edits were made on top of exactly this
+              // content, so they go straight back.
+              if (!(await guard.putBack(entry.path))) {
+                const stat = await fs.stat(fullPath);
+                restoredUnchanged.set(entry.path, {
+                  size: stat.size,
+                  mtime: stat.mtimeMs,
+                });
+              }
             }
           }
+          restoredCount++;
+          onProgress?.(
+            "Verifying pulled files",
+            restoredCount,
+            anomalies.stale.length,
+          );
         }
-        restoredCount++;
-        onProgress?.(
-          "Verifying pulled files",
-          restoredCount,
-          anomalies.stale.length,
-        );
       }
-    }
 
-    // ─── Post-pull: settle files that had local changes ────────────
-    const mergeResult: PullMergeResult = {
-      cleanMerges: [],
-      conflictMerges: [],
-      localChangesSetAside: [],
-    };
-    // Baselines for merged files: what the server's version looked like, so
-    // the local edits a merged file contains still show as local edits.
-    const incomingBaselines = new Map<
-      string,
-      { size: number; mtime: number; md5: string }
-    >();
+      // ─── Post-pull: settle files that had local changes ────────────
+      const mergeResult: PullMergeResult = {
+        cleanMerges: [],
+        conflictMerges: [],
+        localChangesSetAside: [],
+      };
+      // Baselines for merged files: what the server's version looked like, so
+      // the local edits a merged file contains still show as local edits.
+      const incomingBaselines = new Map<
+        string,
+        { size: number; mtime: number; md5: string }
+      >();
 
-    timer.stage("mergeLocal");
-    if (guard.files.length > 0) {
-      onStep?.("Merging local changes");
-      const resolved = await guard.resolve(
-        (relativePath) => isBinaryFile(relativePath, binaryExts),
-        async (relativePath, baseCl) => {
-          const baseResult = await readFileFromChangelist({
-            workspace,
-            filePath: relativePath,
-            changelistNumber: baseCl,
-          });
-          return fs.readFile(baseResult.cachePath);
+      timer.stage("mergeLocal");
+      if (guard.files.length > 0) {
+        onStep?.("Merging local changes");
+        const resolved = await guard.resolve(
+          (relativePath) => isBinaryFile(relativePath, binaryExts),
+          async (relativePath, baseCl) => {
+            const baseResult = await readFileFromChangelist({
+              workspace,
+              filePath: relativePath,
+              changelistNumber: baseCl,
+            });
+            return fs.readFile(baseResult.cachePath);
+          },
+        );
+
+        for (const merged of resolved.merged) {
+          incomingBaselines.set(merged.relativePath, merged.incoming);
+          if (merged.clean) {
+            mergeResult.cleanMerges.push(merged.relativePath);
+          } else {
+            mergeResult.conflictMerges.push(merged.relativePath);
+          }
+        }
+        for (const file of resolved.setAside) {
+          Logger.warn(
+            `Local changes set aside by pull: ${describeSetAside(file)}`,
+          );
+          mergeResult.localChangesSetAside.push(file);
+          // Clients that only know about conflictMerges still need to tell the
+          // user this file wants attention.
+          mergeResult.conflictMerges.push(file.relativePath);
+        }
+      }
+
+      // Update workspace state incrementally from the diff: start from the old
+      // state, drop removed files, and re-record added/modified ones. Unchanged
+      // files keep their existing entry (and hash). Hashes are deferred (md5 "");
+      // the size+mtime baseline is enough until change detection needs them.
+      onStep?.("Updating workspace state");
+      timer.stage("state");
+
+      // Only the paths the pull touched are written; everything else keeps its
+      // existing entry (and hash).
+      const newFiles: Record<string, WorkspaceStateFile> = {};
+
+      // Only what the pull wrote. A path it skipped because the workspace
+      // already had it at the incoming changelist keeps its entry: the file
+      // may hold edits made after this workspace submitted it, and re-recording
+      // its size and mtime now would hide them (and let a later pull
+      // overwrite them).
+      const changed = selections.filter((c) => !putBackAfterNative.has(c.path));
+      const stateTotal = changed.length;
+      onProgress?.("Updating workspace state", 0, stateTotal);
+
+      const statResults = await Promise.all(
+        changed.map(async (change) => {
+          const fullPath = path.join(workspace.localPath, change.path);
+          try {
+            return { change, stat: await fs.stat(fullPath) };
+          } catch {
+            return { change, stat: null };
+          }
+        }),
+      );
+      for (let i = 0; i < statResults.length; i++) {
+        const { change, stat } = statResults[i]!;
+        const incoming = incomingBaselines.get(change.path);
+        if (incoming) {
+          newFiles[change.path] = {
+            fileId: change.fileId,
+            changelist: change.cl,
+            md5: incoming.md5,
+            size: incoming.size,
+            mtime: incoming.mtime,
+          };
+        } else if (stat) {
+          newFiles[change.path] = {
+            fileId: change.fileId,
+            changelist: change.cl,
+            md5: "",
+            size: stat.size,
+            mtime: stat.mtimeMs,
+          };
+        }
+        onProgress?.("Updating workspace state", i + 1, stateTotal);
+      }
+
+      for (const [restoredPath, stat] of restoredUnchanged) {
+        const existing =
+          newFiles[restoredPath] ?? workspaceState.files[restoredPath];
+        if (existing) {
+          newFiles[restoredPath] = {
+            ...existing,
+            md5: "",
+            size: stat.size,
+            mtime: stat.mtime,
+          };
+        }
+      }
+
+      await updateWorkspaceState(
+        workspace,
+        {
+          files: {
+            delete: [
+              ...diff.removed.filter((p) => !stillPending.has(p)),
+              ...unsafeRemoved,
+              ...removedNow.filter((p) => !stillPending.has(p)),
+            ],
+            upsert: newFiles,
+          },
+          meta: {
+            changelistNumber: changelistResponse.number,
+            pendingRemovals: [...stillPending],
+          },
         },
+        stateBackend,
       );
 
-      for (const merged of resolved.merged) {
-        incomingBaselines.set(merged.relativePath, merged.incoming);
-        if (merged.clean) {
-          mergeResult.cleanMerges.push(merged.relativePath);
-        } else {
-          mergeResult.conflictMerges.push(merged.relativePath);
-        }
+      timer.log("pull-timing");
+      if (unsafePaths.length > 0) {
+        mergeResult.unsafePaths = unsafePaths;
       }
-      for (const file of resolved.setAside) {
-        Logger.warn(
-          `Local changes set aside by pull: ${describeSetAside(file)}`,
-        );
-        mergeResult.localChangesSetAside.push(file);
-        // Clients that only know about conflictMerges still need to tell the
-        // user this file wants attention.
-        mergeResult.conflictMerges.push(file.relativePath);
+      if (notRemoved.length > 0) {
+        mergeResult.notRemoved = notRemoved;
       }
-    }
-
-    // Update workspace state incrementally from the diff: start from the old
-    // state, drop removed files, and re-record added/modified ones. Unchanged
-    // files keep their existing entry (and hash). Hashes are deferred (md5 "");
-    // the size+mtime baseline is enough until change detection needs them.
-    onStep?.("Updating workspace state");
-    timer.stage("state");
-
-    // Only the paths the pull touched are written; everything else keeps its
-    // existing entry (and hash).
-    const newFiles: Record<string, WorkspaceStateFile> = {};
-
-    // Only what the pull wrote. A path it skipped because the workspace
-    // already had it at the incoming changelist keeps its entry: the file
-    // may hold edits made after this workspace submitted it, and re-recording
-    // its size and mtime now would hide them (and let a later pull
-    // overwrite them).
-    const changed = selections.filter((c) => !putBackAfterNative.has(c.path));
-    const stateTotal = changed.length;
-    onProgress?.("Updating workspace state", 0, stateTotal);
-
-    const statResults = await Promise.all(
-      changed.map(async (change) => {
-        const fullPath = path.join(workspace.localPath, change.path);
-        try {
-          return { change, stat: await fs.stat(fullPath) };
-        } catch {
-          return { change, stat: null };
-        }
-      }),
-    );
-    for (let i = 0; i < statResults.length; i++) {
-      const { change, stat } = statResults[i]!;
-      const incoming = incomingBaselines.get(change.path);
-      if (incoming) {
-        newFiles[change.path] = {
-          fileId: change.fileId,
-          changelist: change.cl,
-          md5: incoming.md5,
-          size: incoming.size,
-          mtime: incoming.mtime,
-        };
-      } else if (stat) {
-        newFiles[change.path] = {
-          fileId: change.fileId,
-          changelist: change.cl,
-          md5: "",
-          size: stat.size,
-          mtime: stat.mtimeMs,
-        };
+      if (changed.length > 0) {
+        mergeResult.pulledPaths = changed.map((change) => change.path);
       }
-      onProgress?.("Updating workspace state", i + 1, stateTotal);
-    }
-
-    for (const [restoredPath, stat] of restoredUnchanged) {
-      const existing =
-        newFiles[restoredPath] ?? workspaceState.files[restoredPath];
-      if (existing) {
-        newFiles[restoredPath] = {
-          ...existing,
-          md5: "",
-          size: stat.size,
-          mtime: stat.mtime,
-        };
+      const touched = new Set<string>([
+        ...diffPaths,
+        ...anomalies.stray,
+        ...anomalies.stale.map((entry) => entry.path),
+        ...guard.files.map((file) => file.relativePath),
+      ]);
+      if (touched.size > 0) {
+        mergeResult.touchedPaths = [...touched];
       }
+      if (
+        diff.added.length > 0 ||
+        diff.removed.length > 0 ||
+        anomalies.stray.length > 0
+      ) {
+        mergeResult.trackedSetChanged = true;
+      }
+      return mergeResult;
+    } catch (err) {
+      // Anything that fails after the native pass wrote files (reading a stale
+      // file back, a merge, the state update) leaves the workspace state where
+      // it was, so the local versions are still the current ones: put them
+      // back, as for a native failure.
+      timer.log("pull-timing");
+      const restore = await guard.restoreAll();
+      const cause = err instanceof Error ? err.message : String(err);
+      throw new Error(describeFailedPull(`Pull failed: ${cause}`, restore), {
+        cause: err,
+      });
     }
-
-    await updateWorkspaceState(
-      workspace,
-      {
-        files: {
-          delete: [...diff.removed, ...unsafeRemoved],
-          upsert: newFiles,
-        },
-        meta: { changelistNumber: changelistResponse.number },
-      },
-      stateBackend,
-    );
-
-    timer.log("pull-timing");
-    if (unsafePaths.length > 0) {
-      mergeResult.unsafePaths = unsafePaths;
-    }
-    if (changed.length > 0) {
-      mergeResult.pulledPaths = changed.map((change) => change.path);
-    }
-    const touched = new Set<string>([
-      ...diffPaths,
-      ...anomalies.stray,
-      ...anomalies.stale.map((entry) => entry.path),
-      ...guard.files.map((file) => file.relativePath),
-    ]);
-    if (touched.size > 0) {
-      mergeResult.touchedPaths = [...touched];
-    }
-    if (
-      diff.added.length > 0 ||
-      diff.removed.length > 0 ||
-      anomalies.stray.length > 0
-    ) {
-      mergeResult.trackedSetChanged = true;
-    }
-    return mergeResult;
   }
 
   if (errored) {
@@ -873,8 +945,8 @@ export async function pull(
     // The workspace state was not advanced, so as far as it is concerned the
     // local versions are still the current ones. Put them back over whatever
     // the partial pull wrote.
-    await guard.restoreAll();
-    throw new Error("Pull failed: " + lastStep);
+    const restore = await guard.restoreAll();
+    throw new Error(describeFailedPull("Pull failed: " + lastStep, restore));
   }
 
   // Should not reach here: errored throws above, and !errored returns above

@@ -77,6 +77,28 @@ export interface MergedFile {
   incoming: { size: number; mtime: number; md5: string };
 }
 
+export interface RestoreResult {
+  /** Files whose local version is in place again. */
+  restored: string[];
+  /** Files it could not put back; their local version is at backupPath. */
+  failed: { relativePath: string; backupPath: string; error: string }[];
+}
+
+/** The message for a pull that failed, with what was and was not put back. */
+export function describeFailedPull(
+  cause: string,
+  restore: RestoreResult,
+): string {
+  if (restore.failed.length === 0) return cause;
+  const lines = restore.failed.map(
+    (f) => `${f.relativePath} (your version is at ${f.backupPath}: ${f.error})`,
+  );
+  return (
+    `${cause}. Your local changes to ${restore.failed.length} file(s) could not be put back and are kept in the backup folder:\n` +
+    lines.join("\n")
+  );
+}
+
 export interface ResolveResult {
   merged: MergedFile[];
   setAside: SetAsideFile[];
@@ -199,16 +221,46 @@ export class LocalChangeGuard {
    * Puts every backed-up file back where it was. For a pull that failed: the
    * workspace state was not advanced, so the local versions belong in place.
    */
-  async restoreAll(): Promise<void> {
+  async restoreAll(): Promise<RestoreResult> {
+    const result: RestoreResult = { restored: [], failed: [] };
+    const done: string[] = [];
     for (const file of this.protectedFiles) {
       const fullPath = resolveInWorkspace(
         this.workspaceRoot,
         file.relativePath,
       );
-      await fs.mkdir(path.dirname(fullPath), { recursive: true });
-      await fs.copyFile(file.backupPath, fullPath);
+      let backup: Buffer;
+      try {
+        backup = await fs.readFile(file.backupPath);
+      } catch {
+        // Settled already (merged into the workspace, or identical to what
+        // the pull wrote), so the workspace copy is the one to keep.
+        continue;
+      }
+      try {
+        // A file the pull never got to write still holds the local version.
+        // Leaving it alone matters on Windows, where a file another program
+        // has open can be read but not written.
+        const current = await fs.readFile(fullPath).catch(() => null);
+        if (!current || !current.equals(backup)) {
+          await fs.mkdir(path.dirname(fullPath), { recursive: true });
+          await fs.copyFile(file.backupPath, fullPath);
+        }
+        result.restored.push(file.relativePath);
+        done.push(file.backupPath);
+      } catch (err) {
+        // Keep going: one locked file must not leave the rest overwritten.
+        // Its backup stays where it is, and the caller reports it.
+        result.failed.push({
+          relativePath: file.relativePath,
+          backupPath: file.backupPath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
-    await this.removeBackups(this.protectedFiles.map((f) => f.backupPath));
+    await this.removeBackups(done);
+    this.protectedFiles.length = 0;
+    return result;
   }
 
   /**
