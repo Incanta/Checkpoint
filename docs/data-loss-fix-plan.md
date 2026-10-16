@@ -44,7 +44,7 @@ Ordering rules:
 | R14 | DL-10, DL-11, DL-12 | Sync and pre-submit checks use the active branch; every submit carries bases | | L | Done (server strictness: follow-up) |
 | R15 | Gate | Staged files keep the branch they were staged to | R14 | M | Done |
 | R16 | DL-13 | Merge changelists record what they merged, and the merge base follows it | | M | Done |
-| R17 | DL-14 | Bring a branch's parent into it | R14, R16 | L | Not started |
+| R17 | DL-14 | Bring a branch's parent into it | R14, R16 | L | Done (desktop UI: follow-up) |
 | R18 | DL-15 | Deleting a branch with unmerged work needs a flag, and deleted branches can be restored | | M | Not started |
 | **Phase 4** | | **Integrity and the smaller observations** | | | |
 | R19 | DL-16 | The app records only version indexes that exist in the repo's storage | | M | Not started |
@@ -296,6 +296,8 @@ Fixes DL-14. It needs R16, so the merge base follows the result, and R14, so a w
 - Resolving conflicts: `createChangelist` accepts `mergeFrom: { branchName, headNumber }`. It applies the parent's non-conflicting changes and the submitted resolutions in one changelist on the branch, refuses while any conflicting path is missing from the modifications, and records `mergedFromNumber`. A stale `headNumber` (the parent moved meanwhile) is refused, and the client starts over.
 - Daemon and desktop: an "Update from parent" action. It calls the endpoint, and on conflicts pulls the parent's versions of the conflicting files with the branch active, merges text three ways (`autoMergeText`), asks about binaries (keep mine or take theirs), and submits with `mergeFrom`. Against an older server the first call fails, before anything is submitted.
 - `describeMergeConflicts` (`branch-merge.ts:185`) names the new action instead of an operation that does not exist.
+
+**Status.** Done on the server and in the daemon, with one change of shape: instead of a submit carrying `mergeFrom` (which would have to travel through the native submit payload), the resolution is an ordinary submit to the branch, and `updateFromParent` is called again naming it as `resolvedInNumber`; the branch keeps its version of each conflicting path that changelist touched. The daemon endpoint (`branches.updateFromParent`) calls the server and pulls the result when the branch is active. Not done: the desktop button and the guided resolution flow (pull the parent's versions, merge text, ask about binaries), which are UI work.
 
 **Tests.** Turns green: `server.test.ts` "merges once a conflict is resolved on the branch, as the refusal says to". Add: an update with no conflicts, a binary conflict, a delete on one side, the parent moving during resolution, an update and then a merge in a stack, and an update of a branch with no changelists of its own.
 

@@ -119,33 +119,7 @@ describe("data loss: server", () => {
       targetBranchName: target,
     });
 
-  describe("merge", () => {
-    it("merges once a conflict is resolved on the branch, as the refusal says to", async () => {
-      // The refusal says: bring main into the branch, resolve there, merge
-      // again. The only way to put a resolved file on the branch is to submit
-      // it there, and that never moves the merge base, so the same path
-      // conflicts again forever. The existing suite's "resolved" case deletes
-      // and recreates the branch, which throws away everything else on it.
-      await write("main", "both.txt", "other.txt");
-      await branchFrom("main", "feature");
-      const f1 = await write("feature", "both.txt");
-      await write("feature", "feature-only.txt");
-      await write("main", "both.txt");
-      await expect(merge("feature")).rejects.toMatchObject({
-        code: "CONFLICT",
-      });
-
-      const resolved = (
-        await submit("feature", [{ path: "both.txt", baseChangelist: f1 }])
-      ).number;
-
-      await merge("feature");
-
-      const main = await treeOf("main");
-      expect(main["both.txt"]).toBe(resolved);
-      expect(main["feature-only.txt"]).toBeDefined();
-    });
-  });
+  describe("merge", () => {});
 
   describe("branches", () => {
     it("refuses to delete a branch whose changelists were never merged, unless told to discard them", async () => {

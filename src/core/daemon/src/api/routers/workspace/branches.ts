@@ -538,6 +538,80 @@ export const branchesRouter = router({
       });
     }),
 
+  /**
+   * Brings a feature branch's parent into it (branch.updateFromParent on the
+   * server), then, when this workspace has the branch active, pulls the
+   * result. A conflict comes back as the server's CONFLICT error listing the
+   * paths: resolve each on the branch (submit the resolved file there) and
+   * call again with that changelist as `resolvedInNumber`.
+   */
+  updateFromParent: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        branchName: z.string(),
+        parentHeadNumber: z.number().int().nonnegative().optional(),
+        resolvedInNumber: z.number().int().nonnegative().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const manager = ctx.manager;
+      const workspace = manager.workspaces
+        .get(input.daemonId)
+        ?.find((w) => w.id === input.workspaceId);
+      if (!workspace) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Could not find workspace ID ${input.workspaceId}`,
+        });
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+      const result = await client.branch.updateFromParent.mutate({
+        repoId: workspace.repoId,
+        branchName: input.branchName,
+        ...(input.parentHeadNumber !== undefined && {
+          parentHeadNumber: input.parentHeadNumber,
+        }),
+        ...(input.resolvedInNumber !== undefined && {
+          resolvedInNumber: input.resolvedInNumber,
+        }),
+      });
+
+      if (
+        result.status === "updated" &&
+        workspace.activeBranches.includes(input.branchName)
+      ) {
+        const repo = await client.repo.getRepo.query({ id: workspace.repoId });
+        if (repo) {
+          manager.beginVcsOperation(workspace.id);
+          try {
+            await pull(
+              {
+                id: workspace.id,
+                repoId: workspace.repoId,
+                domainBranchName: workspace.domainBranchName,
+                activeBranches: workspace.activeBranches,
+                workspaceName: workspace.name,
+                localPath: workspace.localPath,
+                daemonId: workspace.daemonId,
+              },
+              repo.orgId,
+              null,
+              null,
+            );
+          } finally {
+            await manager.endVcsOperation(workspace.id);
+          }
+          await manager.reloadWorkspaceState(workspace);
+          manager.clearSyncStatus(workspace.id);
+        }
+      }
+
+      return result;
+    }),
+
   merge: publicProcedure
     .input(
       z.object({

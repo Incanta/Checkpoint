@@ -186,7 +186,7 @@ export function describeMergeConflicts(
   const noun = conflicts.length === 1 ? "file was" : "files were";
   return (
     `Cannot merge ${incomingBranchName} into ${targetBranchName}: ${conflicts.length} ${noun} changed on both branches. ` +
-    `Nothing was merged. Bring ${targetBranchName} into ${incomingBranchName}, resolve them there, and merge again:\n` +
+    `Nothing was merged. Update ${incomingBranchName} from ${targetBranchName} (resolving these on ${incomingBranchName}), and merge again:\n` +
     lines.join("\n")
   );
 }
@@ -741,5 +741,319 @@ export async function mergeBranch(
   throw new TRPCError({
     code: "CONFLICT",
     message: `Could not merge ${incomingBranchName} into ${targetBranchName}: the branches kept changing. Nothing was merged; try again.`,
+  });
+}
+
+export interface UpdateFromParentParams {
+  repoId: string;
+  branchName: string;
+  userId: string;
+  /**
+   * The parent head the caller resolved conflicts against. Refused if the
+   * parent has moved since, so a resolution never covers changes it did not
+   * see.
+   */
+  parentHeadNumber?: number;
+  /**
+   * A changelist on the branch that resolves the conflicts: each path both
+   * sides changed that it touched keeps the branch's version. Paths it did
+   * not touch still conflict.
+   */
+  resolvedInNumber?: number;
+}
+
+export type UpdateFromParentResult =
+  | { status: "up-to-date"; headNumber: number }
+  | { status: "updated"; number: number; applied: number };
+
+/**
+ * Brings a feature branch's parent into it: a changelist on the branch that
+ * applies everything the parent changed since they last shared history, with
+ * the parent's head as its second parent (mergedFromNumber), so the merge base
+ * moves and the branch can merge cleanly later (DL-14).
+ *
+ * A path both sides changed is a conflict. The way through is to resolve it
+ * on the branch (submit the resolved file there) and update again naming that
+ * changelist as \`resolvedInNumber\`: the branch keeps its version of each path
+ * the resolution touched.
+ */
+export async function updateBranchFromParent(
+  db: PrismaClient,
+  params: UpdateFromParentParams,
+): Promise<UpdateFromParentResult> {
+  const { repoId, branchName, userId } = params;
+
+  for (let attempt = 0; attempt < MAX_SUBMIT_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, 15 * attempt + Math.random() * 60),
+      );
+    }
+
+    const branch = await db.branch.findUnique({
+      where: { repoId_name: { repoId, name: branchName } },
+    });
+    if (!branch) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: `Branch "${branchName}" not found`,
+      });
+    }
+    if (branch.type !== "FEATURE" || !branch.parentBranchName) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Only a feature branch can be updated from its parent",
+      });
+    }
+    if (branch.archivedAt) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Cannot update an archived branch",
+      });
+    }
+    const parentName = branch.parentBranchName;
+    const parent = await db.branch.findUnique({
+      where: { repoId_name: { repoId, name: parentName } },
+    });
+    if (!parent) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: `Parent branch "${parentName}" not found`,
+      });
+    }
+    if (
+      params.parentHeadNumber !== undefined &&
+      parent.headNumber !== params.parentHeadNumber
+    ) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: `${parentName} has moved since #${params.parentHeadNumber}: update again against #${parent.headNumber}`,
+      });
+    }
+
+    // Here the branch is the target and its parent comes in.
+    const mergeBase = await findMergeBase(
+      db,
+      repoId,
+      branch.headNumber,
+      parent.headNumber,
+    );
+    if (!mergeBase) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `${branchName} and ${parentName} share no history`,
+      });
+    }
+    if (mergeBase.incomingNumbers.length === 0) {
+      return { status: "up-to-date", headNumber: branch.headNumber };
+    }
+
+    const [branchHead, parentHead] = await Promise.all([
+      db.changelist.findUnique({
+        where: { repoId_number: { repoId, number: branch.headNumber } },
+      }),
+      db.changelist.findUnique({
+        where: { repoId_number: { repoId, number: parent.headNumber } },
+      }),
+    ]);
+    if (!branchHead || !parentHead) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Could not find branch head changelists",
+      });
+    }
+    const baseRoot = await stateRootOf(db, repoId, mergeBase.base);
+    const branchRoot = branchHead.stateRootHash ?? null;
+    const parentRoot = parentHead.stateRootHash ?? null;
+
+    let applied: AppliedChange[];
+    let conflicts: MergeConflict[];
+    let targetAt: ReadonlyMap<string, number>;
+    if (baseRoot && branchRoot && parentRoot) {
+      ({ applied, conflicts, targetAt } = await mergeStateTreesSparse(
+        db,
+        repoId,
+        baseRoot,
+        branchRoot,
+        parentRoot,
+      ));
+    } else {
+      const [basePaths, branchPaths, parentPaths] = await Promise.all([
+        getStateTreePaths(db, repoId, mergeBase.base),
+        getStateTreePaths(db, repoId, branchHead.number),
+        getStateTreePaths(db, repoId, parentHead.number),
+      ]);
+      ({ applied, conflicts } = mergeTrees(
+        basePaths,
+        branchPaths,
+        parentPaths,
+      ));
+      targetAt = branchPaths;
+    }
+
+    if (conflicts.length > 0 && params.resolvedInNumber !== undefined) {
+      const resolution = await db.changelist.findUnique({
+        where: {
+          repoId_number: { repoId, number: params.resolvedInNumber },
+        },
+      });
+      // The resolution must be on the branch, after it last shared history
+      // with the parent: walking the branch down to the base must reach it.
+      const onBranch =
+        resolution !== null &&
+        resolution.number > mergeBase.base &&
+        (await findMergeBase(db, repoId, branch.headNumber, resolution.number))
+          ?.base === resolution.number;
+      if (!onBranch) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `#${params.resolvedInNumber} is not a changelist on ${branchName} since it last shared history with ${parentName}`,
+        });
+      }
+      const touched = new Set(
+        (
+          await db.fileChange.findMany({
+            where: { repoId, changelistNumber: params.resolvedInNumber },
+            include: { file: { select: { path: true } } },
+          })
+        ).map((fc) => fc.file.path),
+      );
+      conflicts = conflicts.filter((c) => !touched.has(c.path));
+    }
+    if (conflicts.length > 0) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message:
+          describeMergeConflicts(parentName, branchName, conflicts).replace(
+            /^Cannot merge/,
+            "Cannot bring",
+          ) +
+          `\nResolve them on ${branchName} (submit each resolved file there), then update again naming that changelist.`,
+      });
+    }
+
+    const edits: TreeEdit[] = applied.map((change) =>
+      change.incoming === null
+        ? { path: change.path, delete: true as const }
+        : { path: change.path, cl: change.incoming },
+    );
+    let fileCount = branchHead.fileCount;
+    if (fileCount !== null) {
+      for (const change of applied) {
+        const atBranch = targetAt.has(change.path);
+        if (change.incoming !== null && !atBranch) fileCount++;
+        if (change.incoming === null && atBranch) fileCount--;
+      }
+    }
+
+    const lastCl = await db.changelist.findFirst({
+      where: { repoId },
+      orderBy: { number: "desc" },
+      select: { number: true },
+    });
+    const nextNumber = (lastCl?.number ?? -1) + 1;
+
+    let stateRootHash: string;
+    try {
+      const repo = await db.repo.findUnique({
+        where: { id: repoId },
+        select: { pathPortability: true },
+      });
+      stateRootHash =
+        applied.length === 0 && branchRoot
+          ? branchRoot
+          : await submitStateTree(
+              db,
+              repoId,
+              branchHead.number,
+              branchRoot,
+              edits,
+              { foldNames: repo?.pathPortability ?? true },
+            );
+    } catch (error) {
+      if (error instanceof TreeCollisionError) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Cannot bring ${parentName} into ${branchName}: ${error.message}. Nothing was changed.`,
+        });
+      }
+      if (!isSubmitContention(error)) {
+        throw error;
+      }
+      continue;
+    }
+
+    const files = await db.file.findMany({
+      where: { repoId, path: { in: applied.map((c) => c.path) } },
+      select: { id: true, path: true },
+    });
+    const fileIdByPath = new Map(files.map((f) => [f.path, f.id]));
+
+    try {
+      const created = await db.$transaction(async (tx) => {
+        const cl = await tx.changelist.create({
+          data: {
+            number: nextNumber,
+            message: `Brought ${parentName} into ${branchName}`,
+            versionIndex: "",
+            parentNumber: branch.headNumber,
+            mergedFromNumber: parent.headNumber,
+            stateRootHash,
+            fileCount,
+            artifactVersionIndex: branchHead.artifactVersionIndex,
+            artifactStateTree:
+              (branchHead.artifactStateTree as InputJsonValue | null) ??
+              undefined,
+            repoId,
+            userId,
+          },
+        });
+        const moved = await tx.branch.updateMany({
+          where: {
+            id: branch.id,
+            headNumber: branch.headNumber,
+            archivedAt: null,
+          },
+          data: { headNumber: nextNumber },
+        });
+        if (moved.count !== 1) {
+          throw new SubmitContention(`the head of ${branchName} moved`);
+        }
+        const rows = applied.flatMap((change) => {
+          const fileId = fileIdByPath.get(change.path);
+          return fileId
+            ? [
+                {
+                  repoId,
+                  fileId,
+                  changelistNumber: nextNumber,
+                  type:
+                    change.incoming === null
+                      ? FileChangeType.DELETE
+                      : FileChangeType.MODIFY,
+                },
+              ]
+            : [];
+        });
+        for (let i = 0; i < rows.length; i += 20000) {
+          await tx.fileChange.createMany({ data: rows.slice(i, i + 20000) });
+        }
+        return cl;
+      });
+      return {
+        status: "updated",
+        number: created.number,
+        applied: applied.length,
+      };
+    } catch (error) {
+      if (!isSubmitContention(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw new TRPCError({
+    code: "CONFLICT",
+    message: `${branchName} kept moving while it was being updated; try again`,
   });
 }

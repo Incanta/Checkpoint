@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
-import { mergeBranch } from "~/server/branch-merge";
+import { mergeBranch, updateBranchFromParent } from "~/server/branch-merge";
 import { releaseClaimsForBranch } from "~/server/claims/claims";
 import { resolveDomainBranchName } from "~/server/claims/domain";
 
@@ -372,6 +372,45 @@ export const branchRouter = createTRPCRouter({
         where: { id: branch.id },
       });
     }),
+
+  /**
+   * Brings a feature branch's parent into it (see updateBranchFromParent):
+   * what the parent changed since they last shared history lands on the
+   * branch, and the branch can then merge without re-meeting those changes.
+   */
+  updateFromParent: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        branchName: z.string(),
+        parentHeadNumber: z.number().int().nonnegative().optional(),
+        resolvedInNumber: z.number().int().nonnegative().optional(),
+      }),
+    )
+    .mutation(
+      async ({
+        ctx,
+        input,
+      }): Promise<
+        // Spelled out rather than named, so routers built on this one
+        // (the daemon's) can name their own types.
+        | { status: "up-to-date"; headNumber: number }
+        | { status: "updated"; number: number; applied: number }
+      > => {
+        await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+        return updateBranchFromParent(ctx.db, {
+          repoId: input.repoId,
+          branchName: input.branchName,
+          userId: ctx.session.user.id,
+          ...(input.parentHeadNumber !== undefined && {
+            parentHeadNumber: input.parentHeadNumber,
+          }),
+          ...(input.resolvedInNumber !== undefined && {
+            resolvedInNumber: input.resolvedInNumber,
+          }),
+        });
+      },
+    ),
 
   mergeBranch: protectedProcedure
     .input(
