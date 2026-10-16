@@ -99,14 +99,15 @@ const RequestSchema = object({
       // The changelist the submitter's copy came from, or null for a file
       // that is new to the branch. Checked by the app against the branch head.
       baseChangelist: number().integer().min(0).nullable().optional(),
+      // The client always sends a base for a file it tracks (see the app's
+      // findBaseConflicts).
+      requireBase: boolean().optional(),
     }).required(),
   ).required(),
   keepCheckedOut: boolean().required(),
   workspaceId: string().required(),
   /** Storage protocol; 3 since store.lsi stopped being merged. */
   protocol: number().optional(),
-  /** The client sends a base for every file it tracks (see createChangelist). */
-  basesComplete: boolean().optional(),
 });
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 interface RequestSchema extends InferType<typeof RequestSchema> {}
@@ -373,7 +374,6 @@ export function routeSubmit(): Router {
                 modifications: payload.modifications,
                 keepCheckedOut: payload.keepCheckedOut,
                 workspaceId: payload.workspaceId,
-                ...(payload.basesComplete === true && { basesComplete: true }),
               }),
           );
 

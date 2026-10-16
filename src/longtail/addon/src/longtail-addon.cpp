@@ -286,6 +286,10 @@ static Napi::Value NapiSubmitAsync(const Napi::CallbackInfo& info) {
       ctx->modifications[i].OldPath = nullptr;
     }
 
+    Napi::Value requireBaseVal = mod.Get("requireBase");
+    ctx->modifications[i].RequireBase =
+        requireBaseVal.IsBoolean() && requireBaseVal.As<Napi::Boolean>().Value();
+
     Napi::Value modeVal = mod.Get("mode");
     ctx->modifications[i].Mode =
         modeVal.IsNumber() ? static_cast<uint16_t>(modeVal.As<Napi::Number>().Uint32Value() & 07777) : 0;

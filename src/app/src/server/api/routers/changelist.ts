@@ -385,15 +385,13 @@ export const changelistRouter = createTRPCRouter({
             // null for a file it believes is new to the branch. See
             // findBaseConflicts.
             baseChangelist: z.number().int().nonnegative().nullish(),
+            // The client always sends a base for a file it tracks, so none on
+            // a path the head has is a conflict (findBaseConflicts).
+            requireBase: z.boolean().optional(),
           }),
         ),
         keepCheckedOut: z.boolean(),
         workspaceId: z.string(),
-        /**
-         * The client sends a base for every file it tracks, so a write with
-         * no base on a path the head has is a conflict (findBaseConflicts).
-         */
-        basesComplete: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -617,9 +615,7 @@ export const changelistRouter = createTRPCRouter({
           }
         }
 
-        const conflicts = findBaseConflicts(input.modifications, headPaths, {
-          strict: input.basesComplete ?? false,
-        });
+        const conflicts = findBaseConflicts(input.modifications, headPaths);
         if (conflicts.length > 0) {
           throw new TRPCError({
             code: "CONFLICT",

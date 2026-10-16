@@ -257,7 +257,7 @@ Fixes DL-10, DL-11, and DL-12.
 - Every submit sends a base for every modification, and the server compares it with the target head. This drops the comparability rule at `submit.ts:137`, which is not needed once a workspace with a branch active only ever holds that branch's versions. Once a submit says its bases are complete, the server treats a modification with no base on a path the head has as a conflict, not as "not checked" (decision 8).
 - How the domain root's changes reach a branch: through R17, as in git (decision 7).
 
-**Status.** Done. The strictness flag is `basesComplete`, which the native submit of current addons sends (the daemons it ships with send a base for every tracked file) and the core server forwards; older addons send none and are not held to it.
+**Status.** Done. The strictness is per modification: the daemon sets `requireBase` on each write (it sends a base for every file it tracks), the native submit and the core server pass it through, and `findBaseConflicts` then treats a missing base on a path the head has as a conflict. Callers that do not set it (older daemons, scripts, direct addon users) are not held to it. A first version that had the addon always send a submit-level flag broke those callers in CI.
 
 **Tests.** Turns green: `branches.test.ts` "keeps the branch's changes in the workspace when you pull with the branch active", and the three latent tests (still through `submitBehindTheGate` until R15). Add: a stacked chain, deactivating a branch (the pull back to the root), a scheduled sync and sync status with a branch active, a stale submit to a stacked branch, and an older daemon that does not send the flag.
 

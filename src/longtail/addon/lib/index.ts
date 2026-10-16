@@ -127,6 +127,11 @@ export interface Modification {
    * there never strips +x. Ignored for deletes.
    */
   mode?: number;
+  /**
+   * The caller always sends a base for files it tracks, so the server treats
+   * a missing base on a path the branch has as a conflict.
+   */
+  requireBase?: boolean;
 }
 
 // Storage backend selection shared by the async operations. See STORAGE.md.

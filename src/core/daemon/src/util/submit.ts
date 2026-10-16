@@ -35,6 +35,8 @@ import { DaemonConfig } from "../daemon-config.js";
 type SubmitModification = Modification & {
   baseChangelist?: number | null;
   mode?: number;
+  /** The server may treat a missing base on this write as a conflict. */
+  requireBase?: boolean;
 };
 
 export async function submit(
@@ -135,7 +137,10 @@ export async function submit(
           baseState.files[m.path.replace(/\\/g, "/").replace(/^\//, "")]?.mode;
         return known !== undefined ? { ...m, mode: known } : m;
       };
-      return withMode(baseFor(mod));
+      // This daemon sends a base for every file it tracks (null for one it
+      // does not), so the server may hold every write to it.
+      const m = withMode(baseFor(mod));
+      return m.delete ? m : { ...m, requireBase: true };
     },
   );
   // What each file was based on: see the comment above.

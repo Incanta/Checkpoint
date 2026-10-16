@@ -1,6 +1,6 @@
 /**
- * Submits from clients that send a base for every file they track
- * (basesComplete, set by the native submit of current addons) are held to it:
+ * Writes from a client that sends a base for every file it tracks
+ * (requireBase on each modification, set by the daemon) are held to it:
  * a write with no base on a path the branch already has is a conflict, not
  * left unchecked, so a stale copy cannot silently replace a teammate's change
  * (DL-12, the server half). Older clients, which may leave bases out, are not.
@@ -55,7 +55,7 @@ describe("strict bases", () => {
 
   const submit = (
     mods: { path: string; delete?: boolean; baseChangelist?: number | null }[],
-    basesComplete?: boolean,
+    requireBase?: boolean,
   ) =>
     caller.changelist.createChangelist({
       message: "m",
@@ -68,10 +68,10 @@ describe("strict bases", () => {
         ...(m.baseChangelist !== undefined && {
           baseChangelist: m.baseChangelist,
         }),
+        ...(requireBase && { requireBase: true }),
       })),
       keepCheckedOut: false,
       workspaceId,
-      ...(basesComplete !== undefined && { basesComplete }),
     });
 
   it("refuses a write with no base on a path the branch has", async () => {

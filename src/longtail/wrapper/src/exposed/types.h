@@ -29,6 +29,11 @@ struct Modification {
    * file has at the head there, and an edit made on Windows never strips +x.
    */
   uint16_t Mode;
+  /**
+   * The caller always sends a base for a file it tracks, so a missing one on
+   * a path the branch has is a conflict rather than "not checked".
+   */
+  bool RequireBase;
 };
 
 }  // namespace Checkpoint

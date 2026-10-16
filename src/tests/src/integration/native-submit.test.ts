@@ -361,10 +361,22 @@ describe.skipIf(!enabled)(
         await write(ws, "Dir/Readme.txt", "capital R\n");
         await write(ws, "Dir/readme.txt", "lower r\n");
 
+        // Two names Windows and macOS store as one file: a repo refuses them
+        // unless it is set up for Linux only (pathPortability off), which is
+        // the case this checks the native sizing for.
+        await ctx.client.repo.updateRepo.mutate({
+          id: ctx.repoId,
+          pathPortability: false,
+        });
         const outcome = await nativeSubmit(ctx, ws, [
           add("Dir/Readme.txt"),
           add("Dir/readme.txt"),
-        ]);
+        ]).finally(() =>
+          ctx.client.repo.updateRepo.mutate({
+            id: ctx.repoId,
+            pathPortability: true,
+          }),
+        );
 
         expect(outcome.error, outcome.step).toBe(0);
         await expectCommitted(
