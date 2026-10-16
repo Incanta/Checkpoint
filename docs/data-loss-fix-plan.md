@@ -1,6 +1,8 @@
 # Data-loss fix plan: close every red-team finding, in dependency order
 
-Plan for fixing the findings in `src/tests/src/data-loss/README.md` (DL-01 to DL-26, Gate, and Backslash) and the smaller observations listed there. For each step it says what changes, which red-team tests turn green, what it depends on, and what needs a decision from you. Nothing here is started. Written 2026-10-15 on `3d9fd73`; no product code has changed since the findings were written (`81ed16a`), so the README's line numbers still hold.
+Plan for fixing the findings in `src/tests/src/data-loss/README.md` (DL-01 to DL-26, Gate, and Backslash) and the smaller observations listed there. For each step it says what changes, which red-team tests turn green, what it depends on, and what needs a decision from you. Written 2026-10-15 on `3d9fd73`; no product code has changed since the findings were written (`81ed16a`), so the README's line numbers still hold.
+
+**Progress (2026-10-16): every step is done** (R1 to R20, committed on `main` one step or one native bundle at a time), except three follow-ups noted in their steps: the server-side strictness for clients that omit bases (R14), the desktop flow for updating a branch from its parent (R17), and a warning for paths past 260 characters (R20). The fixed red-team tests moved into the main suite. The one red-team test still failing is DL-26's in-process test, which loads the installed addon's include matcher and passes once an addon release with R12 is installed (it passes against the addon built from these sources). See [Needs you](#needs-you) for the release and the migrations.
 
 Each step is its own commit on `main`. When a step lands, its red-team tests pass, and they move into the main suite with the neighbouring edge cases its section lists (see [Moving tests and CI](#moving-tests-and-ci)). Size is a rough guess that includes tests: S is about a day, M a few days, L a week or more.
 
@@ -343,6 +345,8 @@ From the README's "Other observations". Each is small, they can land in any orde
 
 ## Moving tests and CI
 
+**Status.** Done. The harness is `src/tests/src/harness/stack.ts`, with `repo-path-switch.ts` beside it (a mock factory that imports stack.ts deadlocks). In-process tests went to `src/tests/src/daemon/` and `src/tests/src/api/` (none needed a separate `os/` folder: they probe the filesystem and skip in place), and native ones to `src/tests/src/integration/`. `test.yaml` gained a macOS job for the filesystem-probing tests (decision 13), and `data-loss.yaml` lost its native job, whose tests now run in `test.yaml`'s integration step.
+
 - Promote `src/tests/src/data-loss/stack.ts` into `src/tests/src/harness/`, so main-suite files can use it. The four hoisted `vi.mock` calls each file needs move with the tests.
 - When a step lands, move its red-team tests, with the edge cases its section lists, into the main suite: server tests into `src/tests/src/api/`, in-process stack tests into `src/tests/src/daemon/`, filesystem-probing tests into `src/tests/src/os/`, and native ones into `src/tests/src/integration/`. Mark the finding fixed in the README's table (with the commit), and delete the moved tests from `src/data-loss/`.
 - `test.yaml` runs the main suite on Linux and Windows, which covers most moved tests. The macOS-only ones (DL-18, and DL-07 and DL-19 on APFS) need a macOS leg (decision 13). Native tests that need services join `yarn test:integration`.
@@ -371,6 +375,10 @@ Each decision is also noted in its step; the first option is the recommendation.
   16. **The merge log** (R20): record the source changelist on merge rows, which keeps the invariant `tree/DESIGN.md` relies on (the tree can be rebuilt from the log); or amend DESIGN.md to make the tree canonical for where content lives.
 
 - **Actions**
+  - Deploy these migrations (both providers are written): `20261016000000_repo-path-portability` (R1), `20261016100000_changelist-merged-from` (R16), `20261016120000_deleted-branch` (R18), and `20261016140000_filechange-source` (R20). All are additive. Then run `yarn --cwd src/app db:migrate:deploy` on every deployed database.
+  - Publish an addon release with R10 to R13 and move the pins with `node scripts/set-addon-version.js <version>`. The version is not bumped in these commits. Until then, users keep the old native behavior: DL-21's per-file stats (the daemon falls back to stat-ing), DL-24's file modes, DL-26's case folding, and the native path refusal. The daemon and server work with either addon.
+  - Deploy the core server with or before the app: the app's new version-index check (R19) calls the core server's new `/system/version-exists` route, and refuses changelists while it cannot.
+  - The daemon's state schema goes to 5 (`recorded_at`, `mode`) through its stepwise migrations; nothing to run by hand.
   - Prisma migrations in both providers: the portability setting on `Repo` (R1, R6), `Changelist.mergedFromNumber` (R16), and `DeletedBranch` (R18). Author SQLite with `migrate diff` and Postgres by hand, then run `yarn --cwd src/app db:migrate:deploy` on every deployed database.
   - One addon release for R10 to R13 (and R11's submit change). Bump with `node scripts/set-addon-version.js <version>`, and publish before deploying the daemon. CI is unaffected, since it builds the addon from source.
   - Run `scripts/audit-repo-paths.mjs` (R1) on each deployed repo before turning on the portability and fold rules.

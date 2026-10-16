@@ -12,7 +12,7 @@ Status when written (2026-10-14, on `81ed16a`): 35 tests, 32 failing (the findin
 
 Updated 2026-10-15 with OS and filesystem findings (DL-17 to DL-26). On Windows: 66 in-process tests, 58 failing, 6 passing, 2 skipped (they apply to macOS and to Linux and macOS), plus 3 native tests (1 failing; the 2 file-mode tests need services and do not apply on Windows). Linux and macOS skip a different set. `.github/workflows/data-loss.yaml` runs the suite on all three, plus the native tests on Linux, and lists every test by outcome in each run's summary. It fails while any finding reproduces, on purpose: a commit with open findings is not a clean one, and a green leg means every finding on that OS is fixed. It is a separate workflow so that the main CI (`test.yaml`) keeps meaning "nothing regressed".
 
-The plan for fixing these findings, in dependency order and with the decisions it needs, is `docs/data-loss-fix-plan.md`.
+The plan for fixing these findings is `docs/data-loss-fix-plan.md`. **Status 2026-10-16: every finding is fixed** (the table's last column says by which step), and the fixed tests moved into the main suite (`src/tests/src/api`, `src/tests/src/daemon`, `src/tests/src/integration`). What remains here are controls, and DL-26's in-process test, which loads the installed addon's include matcher and stays red until an addon release with the fix is installed.
 
 ## How the tests run
 

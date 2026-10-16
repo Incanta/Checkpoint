@@ -796,3 +796,39 @@ jobs:
       # annotation when the published addon is behind these sources.
       - name: Report addon publish status
         run: node scripts/check-addon-version.js --sources --registry
+
+  # The filesystem-dependent daemon tests on APFS, which folds Unicode
+  # normalization as well as case: they probe the volume and skip what does not
+  # apply, so the Linux and Windows jobs cannot run the macOS cases. In-process,
+  # with the native addon faked, so this needs no services and no native build.
+  # (test.js has no counterpart: it runs on whatever OS the developer has.)
+  test-macos:
+    name: test (macos filesystem)
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Build services
+        run: yarn build
+
+      - name: Run the filesystem tests
+        working-directory: src/tests
+        run: >-
+          yarn vitest run
+          src/daemon/folding-volumes.test.ts
+          src/daemon/odd-names.test.ts
+          src/daemon/unsafe-paths.test.ts
+          src/daemon/racy-baselines.test.ts
+          src/api/fold-collisions.test.ts
