@@ -36,9 +36,9 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | ID | Finding | Area | Severity | Status |
 | --- | --- | --- | --- | --- |
 | DL-01 | Edits made after a submit vanish from pending changes at the next pull, then get overwritten | Pull | Critical | Live |
-| DL-02 | One failed Team Sync config read deletes most of the workspace, for good | Pull (Team Sync) | Critical | Live |
+| DL-02 | One failed Team Sync config read deletes most of the workspace, for good | Pull (Team Sync) | Critical | Fixed (R3) |
 | DL-03 | The server stores paths as sent; `../x` makes teammates' pulls delete files outside their workspace | Push, pull | Critical | Fixed in the server (R1) and daemon (R2); native check open (R13) |
-| DL-04 | Narrowing the sync filter deletes locally edited files with no backup | Pull (Team Sync) | High | Live |
+| DL-04 | Narrowing the sync filter deletes locally edited files with no backup | Pull (Team Sync) | High | Fixed (R3) |
 | DL-05 | A pull that fails after writing files leaves local edits overwritten and unreported | Pull | High | Live |
 | DL-06 | The whole-index pull fallback overwrites edits the pull meant to skip | Pull | High | Live, fallback only |
 | DL-07 | A case-only rename upstream leaves the old content, recorded as the new version | Pull | High | Live on Windows and macOS |
@@ -56,7 +56,7 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | DL-19 | On case-insensitive filesystems the daemon takes one file for two: deleting one spelling deletes both, phantom pending changes, Clean Workspace deletes tracked files | Pull, cleanup | High | Live (Windows, macOS) |
 | DL-20 | A same-size edit within one timestamp tick of a pull is invisible, then overwritten | Pull | High | Live (any OS; likelier on FAT32, exFAT, HFS+) |
 | DL-21 | An edit made while a pull runs is recorded as the pulled version, then overwritten | Pull | High | Live (any OS) |
-| DL-22 | A sync filter change that cannot remove one file leaves the files it did remove looking deleted | Pull (Team Sync) | High | Live (Windows locks; any failed delete) |
+| DL-22 | A sync filter change that cannot remove one file leaves the files it did remove looking deleted | Pull (Team Sync) | High | Fixed (R3) |
 | DL-23 | A pull writes into the workspace's own `.checkpoint` directory; one changelist can wipe every teammate's workspace | Push, pull | High, and a security issue | Fixed in the server (R1) and daemon (R2); native check open (R13) |
 | DL-24 | Executable bits are dropped on submit and stripped on pull | Push, pull (native) | High | Live (Linux, macOS) |
 | DL-25 | A failed pull stops putting edits back at the first file it cannot write | Pull | High | Live (Windows) |

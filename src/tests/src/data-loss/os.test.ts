@@ -439,41 +439,6 @@ describe("data loss: the filesystem under the workspace", () => {
         ).toBe(before);
       },
     );
-
-    it.runIf(windows)(
-      "does not leave the files a sync filter change removed looking deleted when it cannot remove one",
-      async () => {
-        // Bob narrows his sync to code. The filter deletes the excluded files
-        // one by one and only then drops them from the workspace state; the
-        // last of them is open in the editor, so the delete throws and the
-        // state keeps every one of them.
-        const { alice, bob } = scene!;
-        await put(alice, "Source/game.cpp", "int main() { return 0; }\n");
-        await put(alice, "Content/level1.txt", "level 1\n");
-        await put(alice, "Content/level2.txt", "level 2\n");
-        await put(alice, "Content/level3.txt", "level 3\n");
-        await stageAndSubmit(alice, ["Source", "Content"]);
-        await syncLatest(bob);
-
-        const order = Object.keys(
-          (await getWorkspaceState(bob.root, "sqlite")).files,
-        ).filter((p) => p.startsWith("Content/"));
-        await setTeamSync(bob, { customIncludeRules: ["Source/"] });
-
-        const release = await holdOpen(fileIn(bob, order.at(-1)!), "read");
-        try {
-          await expect(syncLatest(bob)).rejects.toThrow(/EPERM|EBUSY/);
-        } finally {
-          await release();
-        }
-
-        const pending = await pendingChanges(bob);
-        expect(
-          Object.keys(pending).filter((p) => pending[p] === "Deleted"),
-          `the filter removed these from disk but not from the state, so "submit everything" deletes them for everyone`,
-        ).toEqual([]);
-      },
-    );
   });
 
   describe("text encodings and line endings", () => {

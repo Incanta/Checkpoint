@@ -105,6 +105,16 @@ export async function pull(
    * downloads them.
    */
   resolveIncludePaths?: (changelistNumber: number) => Promise<string[] | null>,
+  /**
+   * Optional hook supplying files the target has that the workspace should
+   * have but does not track, and that no diff will mention again: files a
+   * narrower sync filter left out, after the filter widens. They are pulled
+   * as additions. Called once the diff is known.
+   */
+  resolveMissing?: (
+    changelistNumber: number,
+    trackedPaths: ReadonlySet<string>,
+  ) => Promise<{ path: string; cl: number; fileId: string }[]>,
 ): Promise<PullMergeResult> {
   const timer = new StageTimer();
   timer.stage("setup");
@@ -218,6 +228,28 @@ export async function pull(
     modified: keepSafe(serverDiff.modified),
     removed: serverDiff.removed.filter((p) => isSafeWorkspacePath(p)),
   };
+  if (resolveMissing) {
+    const known = new Set<string>([
+      ...Object.keys(workspaceState.files),
+      ...diff.added.map((c) => c.path),
+      ...diff.modified.map((c) => c.path),
+      ...diff.removed,
+    ]);
+    const missing = keepSafe(
+      (await resolveMissing(changelistNumber, known)).filter(
+        (c) => !known.has(c.path),
+      ),
+    );
+    if (missing.length > 0) {
+      Logger.info(
+        `Pull: bringing in ${missing.length} file(s) the sync filter now includes`,
+      );
+      diff.added = [...diff.added, ...missing];
+      diff.changelistsToPull = [
+        ...new Set([...diff.changelistsToPull, ...missing.map((c) => c.cl)]),
+      ];
+    }
+  }
   if (unsafePaths.length > 0) {
     Logger.warn(
       `Pull: not syncing ${unsafePaths.length} path(s) this workspace cannot safely hold: ${unsafePaths

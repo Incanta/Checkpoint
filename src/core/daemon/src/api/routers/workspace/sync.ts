@@ -150,14 +150,26 @@ export const syncRouter = router({
           const touchedOnly =
             !mergeResult.trackedSetChanged &&
             pipelineResult.appliedArtifacts.length === 0 &&
-            pipelineResult.filteredOutCount === 0;
+            pipelineResult.filteredOutCount === 0 &&
+            pipelineResult.filterKept.length === 0 &&
+            pipelineResult.filterFailed.length === 0;
           await manager.reloadWorkspaceState(
             workspace,
             touchedOnly ? (mergeResult.touchedPaths ?? []) : undefined,
           );
           manager.clearSyncStatus(workspace.id);
 
-          jobManager.completeJob(job.id, mergeResult);
+          jobManager.completeJob(job.id, {
+            ...mergeResult,
+            // Files the sync filter excludes but left in place: kept for
+            // their local work, or not removable (open in another program).
+            ...(pipelineResult.filterKept.length > 0 && {
+              filterKept: pipelineResult.filterKept,
+            }),
+            ...(pipelineResult.filterFailed.length > 0 && {
+              filterFailed: pipelineResult.filterFailed,
+            }),
+          });
         } catch (e: any) {
           Logger.error(
             `Pull failed for workspace ${workspace.name}: ${e.message}`,

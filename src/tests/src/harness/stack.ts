@@ -70,6 +70,11 @@ export interface StackOverrides {
    */
   teamSyncConfig?: (input: unknown) => Promise<unknown>;
   /**
+   * Replaces app procedures the daemon calls, by router and name, so a test
+   * can make one fail (`{ file: { getWorkspaceClaims: () => { throw ... } } }`).
+   */
+  procedures?: Record<string, Record<string, (input: unknown) => unknown>>;
+  /**
    * When set, the single-pass selection pull fails with this step text. The
    * real addon fails with "different hashing or chunk sizes" when the source
    * versions were indexed with different settings (two teammates with
@@ -111,6 +116,7 @@ export function resetStack(): void {
   versions.clear();
   daemonLog.length = 0;
   delete overrides.teamSyncConfig;
+  delete overrides.procedures;
   delete overrides.selectionPullFailure;
   delete overrides.writeTime;
   delete overrides.duringPull;
@@ -148,6 +154,7 @@ function clientFor(identity: Identity): unknown {
         get(_target, name) {
           if (typeof name !== "string" || name === "then") return undefined;
           const fn: AnyFn =
+            (overrides.procedures?.[router]?.[name] as AnyFn | undefined) ??
             procedureOverrides[router]?.[name] ??
             ((input) =>
               (
@@ -627,6 +634,15 @@ const ids = (seat: Seat) => ({
  * directory), which claims each on the target branch, then submit that bucket
  * and wait for the background job the daemon runs it in.
  */
+/** Stages pending paths without submitting them. */
+export async function stage(seat: Seat, paths: string[]): Promise<void> {
+  const { daemon } = await daemonModules();
+  await daemon.workspaces.pending.stage({
+    ...ids(seat),
+    paths: paths.map(normalize),
+  });
+}
+
 export async function stageAndSubmit(
   seat: Seat,
   paths: string[],
