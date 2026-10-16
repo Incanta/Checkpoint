@@ -156,6 +156,9 @@ export class LocalChangeGuard {
     kind: IncomingKind,
     entry: WorkspaceStateFile | undefined,
   ): Promise<boolean> {
+    if (this.protectedFiles.some((f) => f.relativePath === relativePath)) {
+      return true; // Already copied; the first copy is the local version.
+    }
     const fullPath = resolveInWorkspace(this.workspaceRoot, relativePath);
     if (!(await hasLocalChanges(fullPath, entry))) {
       return false;

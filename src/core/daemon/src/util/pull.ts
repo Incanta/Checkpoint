@@ -289,7 +289,12 @@ export async function pull(
   // comes from some other changelist (a stale write). Only the per-index path
   // needs to know which; ask the server, so local files at those paths can be
   // protected and the workspace corrected afterwards.
-  let anomalies: { stray: string[]; stale: { path: string; cl: number }[] } = {
+  let anomalies: {
+    stray: string[];
+    stale: { path: string; cl: number }[];
+    /** Every path the indexes write (servers from before it omit it). */
+    written?: string[];
+  } = {
     stray: [],
     stale: [],
   };
@@ -330,7 +335,10 @@ export async function pull(
   onStep?.("Protecting local changes");
   for (const change of diff.modified) {
     const localFile = workspaceState.files[change.path];
-    if (localFile && localFile.changelist === change.cl) continue; // up to date
+    // Already at the incoming changelist (this workspace submitted it): the
+    // single pass leaves the file alone. Applying whole indexes rewrites it,
+    // which protectAnomalies covers.
+    if (localFile && localFile.changelist === change.cl) continue;
     await guard.protect(change.path, "modified", localFile);
   }
   for (const change of diff.added) {
@@ -347,7 +355,38 @@ export async function pull(
       workspaceState.files[removedPath],
     );
   }
+  // Paths whole indexes rewrite with the version the workspace already has:
+  // after the native pass, any local edits go straight back on top, and the
+  // workspace state keeps its entry. Only used when applying whole indexes.
+  const putBackAfterNative = new Set<string>();
   const protectAnomalies = async (): Promise<void> => {
+    if (singlePass) return;
+    for (const change of diff.modified) {
+      const localFile = workspaceState.files[change.path];
+      if (localFile && localFile.changelist === change.cl) {
+        await guard.protect(change.path, "modified", localFile);
+        putBackAfterNative.add(change.path);
+      }
+    }
+    const anomalous = new Set<string>([
+      ...anomalies.stray,
+      ...anomalies.stale.map((e) => e.path),
+    ]);
+    for (const writtenPath of anomalies.written ?? []) {
+      if (
+        diffPaths.has(writtenPath) ||
+        anomalous.has(writtenPath) ||
+        !isSafeWorkspacePath(writtenPath)
+      ) {
+        continue;
+      }
+      await guard.protect(
+        writtenPath,
+        "modified",
+        workspaceState.files[writtenPath],
+      );
+      putBackAfterNative.add(writtenPath);
+    }
     for (const strayPath of anomalies.stray) {
       if (diffPaths.has(strayPath) || !isSafeWorkspacePath(strayPath)) continue;
       await guard.protect(strayPath, "added", workspaceState.files[strayPath]);
@@ -418,11 +457,14 @@ export async function pull(
     }
   };
 
+  // What the native pass writes: every incoming path when whole indexes are
+  // applied, or just the selections in a single pass.
+  let selections: typeof stateIncoming = stateIncoming;
   if (singlePass) {
     // A path the workspace already has at its source changelist is skipped:
     // its file is the one the changelist wrote, plus whatever local edits the
     // guard is keeping track of.
-    const selections = stateIncoming.filter(
+    selections = stateIncoming.filter(
       (c) => workspaceState.files[c.path]?.changelist !== c.cl,
     );
     if (selections.length > 0) {
@@ -466,6 +508,7 @@ export async function pull(
             "Pull: sources differ in hashing or chunking; applying each changelist in turn",
           );
           singlePass = false;
+          selections = stateIncoming;
         } else {
           Logger.error(
             `Pull failed with exit code: ${status.error} and last step ${status.currentStep}`,
@@ -605,6 +648,19 @@ export async function pull(
       string,
       { size: number; mtime: number }
     >();
+    for (const rewritten of putBackAfterNative) {
+      const fullPath = resolveInWorkspace(workspace.localPath, rewritten);
+      if (!existsSync(fullPath)) continue;
+      if (!(await guard.putBack(rewritten))) {
+        // No local edits: the index wrote the same content again, under a
+        // new mtime. Record that, or it would look edited.
+        const stat = await fs.stat(fullPath);
+        restoredUnchanged.set(rewritten, {
+          size: stat.size,
+          mtime: stat.mtimeMs,
+        });
+      }
+    }
     timer.stage("correction");
     if (anomalies.stray.length > 0 || anomalies.stale.length > 0) {
       onStep?.("Verifying pulled files");
@@ -719,7 +775,12 @@ export async function pull(
     // existing entry (and hash).
     const newFiles: Record<string, WorkspaceStateFile> = {};
 
-    const changed = stateIncoming;
+    // Only what the pull wrote. A path it skipped because the workspace
+    // already had it at the incoming changelist keeps its entry: the file
+    // may hold edits made after this workspace submitted it, and re-recording
+    // its size and mtime now would hide them (and let a later pull
+    // overwrite them).
+    const changed = selections.filter((c) => !putBackAfterNative.has(c.path));
     const stateTotal = changed.length;
     onProgress?.("Updating workspace state", 0, stateTotal);
 

@@ -277,7 +277,7 @@ export const changelistRouter = createTRPCRouter({
       const stray: string[] = [];
       const stale: { path: string; cl: number }[] = [];
       if (input.numbers.length === 0) {
-        return { stray, stale };
+        return { stray, stale, written: [] as string[] };
       }
 
       // The last changelist in the set to write each path. Indexes are
@@ -323,7 +323,11 @@ export const changelistRouter = createTRPCRouter({
 
       stray.sort();
       stale.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-      return { stray, stale };
+      // Every path the indexes write, including the ones they write
+      // correctly: a file the workspace already has at that changelist may
+      // still hold local edits the write would replace.
+      const written = [...lastWriter.keys()].sort();
+      return { stray, stale, written };
     }),
 
   getChangelistFiles: protectedProcedure

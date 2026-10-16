@@ -35,12 +35,12 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 
 | ID | Finding | Area | Severity | Status |
 | --- | --- | --- | --- | --- |
-| DL-01 | Edits made after a submit vanish from pending changes at the next pull, then get overwritten | Pull | Critical | Live |
+| DL-01 | Edits made after a submit vanish from pending changes at the next pull, then get overwritten | Pull | Critical | Fixed (R4) |
 | DL-02 | One failed Team Sync config read deletes most of the workspace, for good | Pull (Team Sync) | Critical | Fixed (R3) |
 | DL-03 | The server stores paths as sent; `../x` makes teammates' pulls delete files outside their workspace | Push, pull | Critical | Fixed in the server (R1) and daemon (R2); native check open (R13) |
 | DL-04 | Narrowing the sync filter deletes locally edited files with no backup | Pull (Team Sync) | High | Fixed (R3) |
 | DL-05 | A pull that fails after writing files leaves local edits overwritten and unreported | Pull | High | Live |
-| DL-06 | The whole-index pull fallback overwrites edits the pull meant to skip | Pull | High | Live, fallback only |
+| DL-06 | The whole-index pull fallback overwrites edits the pull meant to skip | Pull | High | Fixed (R4) |
 | DL-07 | A case-only rename upstream leaves the old content, recorded as the new version | Pull | High | Live on Windows and macOS |
 | DL-08 | The server accepts paths that differ only by case | Push | High | Live |
 | DL-09 | Respelling a path (`Content//x`, `/Content/x`, `Content/x/`) bypasses someone else's exclusive lock | Push | High | Respellings, `::$DATA`, and `~1` fixed (R1); case spelling open (R6) |

@@ -39,7 +39,8 @@ import { settleClaimsForSubmit } from "~/server/claims/claims";
 // The real implementation, wrapped so one test can make it fail inside the
 // transaction.
 vi.mock("~/server/claims/claims", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("~/server/claims/claims")>();
+  const actual =
+    await importOriginal<typeof import("~/server/claims/claims")>();
   return {
     ...actual,
     settleClaimsForSubmit: vi.fn(actual.settleClaimsForSubmit),
@@ -401,8 +402,16 @@ describe("changelist.createChangelist", () => {
       const c1 = (await submit([{ path: "a.txt" }, { path: "b.txt" }])).number;
       const c2 = (await submit([{ path: "a.txt" }])).number;
 
-      expect(await anomalies(c2, [c1, c2])).toEqual({ stray: [], stale: [] });
-      expect(await anomalies(c2, [])).toEqual({ stray: [], stale: [] });
+      expect(await anomalies(c2, [c1, c2])).toEqual({
+        stray: [],
+        stale: [],
+        written: ["a.txt", "b.txt"],
+      });
+      expect(await anomalies(c2, [])).toEqual({
+        stray: [],
+        stale: [],
+        written: [],
+      });
     });
 
     it("reports a file that a pulled changelist wrote and a later one deleted", async () => {
@@ -415,6 +424,7 @@ describe("changelist.createChangelist", () => {
       expect(await anomalies(c2, [c1])).toEqual({
         stray: ["gone.txt"],
         stale: [],
+        written: ["gone.txt", "keep.txt"],
       });
     });
 
@@ -428,6 +438,7 @@ describe("changelist.createChangelist", () => {
       expect(await anomalies(c2, [c1])).toEqual({
         stray: [],
         stale: [{ path: "a.txt", cl: c2 }],
+        written: ["a.txt", "b.txt"],
       });
     });
 
