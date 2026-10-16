@@ -78,7 +78,12 @@ export default function WorkspacePendingChanges() {
     const unstaged = files.filter((f) => !f.staged);
     const bucketFor = (branch: string) =>
       files.filter(
-        (f) => f.staged && (f.claims[0]?.branchName ?? domain) === branch,
+        (f) =>
+          f.staged &&
+          // The open claim is where the file is being worked on now; a
+          // submitted one is where earlier work went (a parent in a stack).
+          ((f.claims.find((c) => c.state === "OPEN") ?? f.claims[0])
+            ?.branchName ?? domain) === branch,
       );
 
     return [

@@ -1,5 +1,5 @@
 import { CreateApiClientAuth } from "@checkpointvcs/common";
-import { getWorkspaceState, type Workspace } from "./util.js";
+import { getWorkspaceState, syncTargetBranch, type Workspace } from "./util.js";
 import { getBinaryExtensions, isBinaryFile } from "./binary-extensions.js";
 import { DaemonConfig } from "../daemon-config.js";
 
@@ -73,6 +73,8 @@ export interface ConflictCheckResult {
  */
 export async function checkSyncStatus(
   workspace: Workspace,
+  /** The branch to compare with; the workspace's sync target by default. */
+  targetBranch: string = syncTargetBranch(workspace),
 ): Promise<SyncStatus> {
   const client = await CreateApiClientAuth(workspace.daemonId);
   const daemonConfig = await DaemonConfig.Get();
@@ -84,7 +86,7 @@ export async function checkSyncStatus(
   // Get branch head info
   const branchResponse = await client.branch.getBranch.query({
     repoId: workspace.repoId,
-    name: workspace.domainBranchName,
+    name: targetBranch,
   });
 
   if (!branchResponse) {
@@ -169,8 +171,10 @@ export async function checkConflicts(
   workspace: Workspace,
   locallyModifiedPaths: string[],
   syncStatus?: SyncStatus,
+  /** The branch being submitted to (see pullTextFilesForSubmit). */
+  targetBranch?: string,
 ): Promise<ConflictCheckResult> {
-  const status = syncStatus ?? (await checkSyncStatus(workspace));
+  const status = syncStatus ?? (await checkSyncStatus(workspace, targetBranch));
 
   if (status.upToDate) {
     return { hasConflicts: false, conflicts: [] };

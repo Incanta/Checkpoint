@@ -10,6 +10,7 @@ import {
   getWorkspaceState,
   updateWorkspaceState,
   type Workspace,
+  syncTargetBranch,
 } from "../util.js";
 import { pull, type PullMergeResult } from "../pull.js";
 import { applyArtifacts, type AppliedArtifactSummary } from "./artifacts.js";
@@ -128,7 +129,7 @@ export async function runSyncPipeline(
     wroteVersionFiles = await writeVersionFiles(
       workspace,
       syncedChangelistNumber,
-      workspace.domainBranchName,
+      syncTargetBranch(workspace),
     );
   }
 

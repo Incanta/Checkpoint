@@ -43,9 +43,9 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | DL-07 | A case-only rename upstream leaves the old content, recorded as the new version | Pull | High | Fixed (R7) |
 | DL-08 | The server accepts paths that differ only by case | Push | High | Fixed (R6, R7) |
 | DL-09 | Respelling a path (`Content//x`, `/Content/x`, `Content/x/`) bypasses someone else's exclusive lock | Push | High | Fixed (R1, R6) |
-| DL-10 | Pull with a feature branch active takes the branch's changes back out of the workspace | Branch | High | Live |
-| DL-11 | The pre-submit merge on a feature branch reverts the branch's own earlier changes | Push, branch | High | Latent |
-| DL-12 | Submits to a feature branch have no lost-update protection | Push, branch | High | Latent |
+| DL-10 | Pull with a feature branch active takes the branch's changes back out of the workspace | Branch | High | Fixed (R14) |
+| DL-11 | The pre-submit merge on a feature branch reverts the branch's own earlier changes | Push, branch | High | Fixed (R14) |
+| DL-12 | Submits to a feature branch have no lost-update protection | Push, branch | High | Fixed (R14) |
 | DL-13 | A stacked branch can never merge after its parent merged | Merge | Medium | Live |
 | DL-14 | A conflict resolved on the branch, as the error says to, never merges | Merge | Medium | Live |
 | DL-15 | Deleting a branch discards unmerged changelists with no confirmation | Branch | Medium | Live |
@@ -60,7 +60,7 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | DL-24 | Executable bits are dropped on submit and stripped on pull | Push, pull (native) | High | Fixed (R11); users need an addon release; its tests run on Linux in CI |
 | DL-25 | A failed pull stops putting edits back at the first file it cannot write | Pull | High | Fixed (R5) |
 | DL-26 | A Team Sync rule typed in another case silently stops a folder from syncing | Pull (Team Sync, native) | Medium | Fixed (R12); users need an addon release, and the in-process test here stays red until one is installed |
-| Gate | Modified files cannot be submitted to a feature branch at all | Push, branch | Functional, not data loss | Live |
+| Gate | Modified files cannot be submitted to a feature branch at all | Push, branch | Functional, not data loss | Fixed (R15) |
 | Backslash | A file name with a backslash blocks every submit | Push | Functional, not data loss | Fixed (R8); its tests run on Linux and macOS in CI |
 
 ### DL-01: Edits made after a submit vanish at the next pull, then get overwritten

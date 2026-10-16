@@ -1,16 +1,12 @@
 /**
- * Red team: working on a feature branch overlaid on the domain root.
- *
- * A workspace materializes from a domain root (main) and overlays feature
- * branches; switching to a feature branch pulls that branch's head and
- * records it in `activeBranches`. Nothing after the switch reads
- * `activeBranches`: pull, sync status, the pre-submit merge, and the conflict
- * check all aim at the domain root's head. And no daemon code sets a state
- * entry's `branch`, so every tracked file "came from" the domain root, and a
- * submit to the feature branch sends no base changelist for any of them.
+ * Feature branches overlaid on a workspace. Every pull and pre-submit check
+ * targets the active branch's head (syncTargetBranch), every submit tells the
+ * server what each file was based on, and a file staged to a branch is
+ * submitted there. Moved here from the data-loss red team (DL-10, DL-11,
+ * DL-12, and the gate).
  *
  * Driven through the daemon's own endpoints against the real app routers,
- * with only the native addon faked (see ./stack.ts). See ./README.md.
+ * with only the native addon faked (src/harness/stack.ts).
  */
 import {
   afterAll,
@@ -51,11 +47,6 @@ vi.mock(
 import { createTestDb, type TestDb } from "../harness/db";
 import { closeAllStateStores } from "../../../core/daemon/src/util/state-store.js";
 import {
-  checkConflicts,
-  pullTextFilesForSubmit,
-  submit,
-} from "../../../core/daemon/src/util/index.js";
-import {
   apiAs,
   contentAtHead,
   lastSubmit,
@@ -69,12 +60,12 @@ import {
   syncLatest,
   tearDownScene,
   type Scene,
-  type Seat,
+  pendingChanges,
 } from "../harness/stack";
 
 const FIVE_LINES = "one\ntwo\nthree\nfour\nfive\n";
 
-describe("data loss: feature branches", () => {
+describe("feature branches", () => {
   let testDb: TestDb;
   let scene: Scene | undefined;
 
@@ -114,56 +105,6 @@ describe("data loss: feature branches", () => {
   const featureHas = (relativePath: string) =>
     contentAtHead(testDb.client, scene!.repoId, "feature", relativePath);
 
-  /**
-   * Everything the daemon's submit endpoint runs once it has its list of
-   * modifications (api/routers/workspace/pending.ts), with the same arguments:
-   * the conflict check, the pre-submit merge of outdated text files, and the
-   * submit itself. Today the endpoint's own filter never lets a modified file
-   * through to a feature branch (see the "gate" test below), so this is the
-   * path a feature-branch submit takes as soon as that is fixed.
-   */
-  async function submitBehindTheGate(
-    seat: Seat,
-    paths: string[],
-    branch: string,
-  ) {
-    const workspaceInfo = {
-      id: seat.workspace.id,
-      repoId: seat.workspace.repoId,
-      domainBranchName: seat.workspace.domainBranchName,
-      workspaceName: seat.workspace.name,
-      localPath: seat.root,
-      daemonId: seat.workspace.daemonId,
-    };
-    const conflicts = await checkConflicts(workspaceInfo, paths);
-    if (conflicts.hasConflicts) {
-      throw new Error(
-        `conflicts: ${conflicts.conflicts.map((c) => c.path).join(", ")}`,
-      );
-    }
-    const merged = await pullTextFilesForSubmit(
-      workspaceInfo,
-      seat.orgId,
-      paths,
-    );
-    if (merged.conflictMerges.length > 0) {
-      throw new Error(`merge conflicts: ${merged.conflictMerges.join(", ")}`);
-    }
-    await submit(
-      workspaceInfo,
-      seat.orgId,
-      `${seat.name} on ${branch}`,
-      paths.map((p) => ({ path: p, delete: false })),
-      seat.workspace.id,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      branch,
-    );
-  }
-
   it("keeps the branch's changes in the workspace when you pull with the branch active", async () => {
     // Live today. Bob activates "feature" and gets its version of notes.txt.
     // Then he presses Pull. The pull targets main's head, so the diff takes
@@ -192,7 +133,7 @@ describe("data loss: feature branches", () => {
     expect(await read(bob, "notes.txt")).toBe(featureNotes);
   });
 
-  it("gate: submits a modified file staged to an active feature branch", async () => {
+  it("submits a modified file staged to an active feature branch", async () => {
     // Not data loss, but the reason the two tests after it are latent rather
     // than live. Changed files in the daemon's pending list never carry their
     // claims, and the submit endpoint (like the desktop's bucket view) puts a
@@ -210,7 +151,7 @@ describe("data loss: feature branches", () => {
     );
   });
 
-  it("latent: a second edit on a feature branch does not revert the first", async () => {
+  it("a second edit on a feature branch does not revert the first", async () => {
     // One person, no concurrency. The pre-submit merge compares the
     // workspace with main's head, so main's older notes.txt looks like an
     // upstream change. It merges cleanly (different lines) and the first
@@ -220,7 +161,7 @@ describe("data loss: feature branches", () => {
 
     const first = FIVE_LINES.replace("one", "one (first feature edit)");
     await put(alice, "notes.txt", first);
-    await submitBehindTheGate(alice, ["notes.txt"], "feature");
+    await stageAndSubmit(alice, ["notes.txt"], { branch: "feature" });
     expect(await featureHas("notes.txt")).toBe(first);
 
     await put(
@@ -228,7 +169,7 @@ describe("data loss: feature branches", () => {
       "notes.txt",
       first.replace("five", "five (second feature edit)"),
     );
-    await submitBehindTheGate(alice, ["notes.txt"], "feature");
+    await stageAndSubmit(alice, ["notes.txt"], { branch: "feature" });
 
     expect(await featureHas("notes.txt")).toBe(
       "one (first feature edit)\ntwo\nthree\nfour\nfive (second feature edit)\n",
@@ -238,7 +179,7 @@ describe("data loss: feature branches", () => {
     );
   });
 
-  it("latent: a stale submit to a feature branch does not silently replace a teammate's change", async () => {
+  it("a stale submit to a feature branch does not silently replace a teammate's change", async () => {
     // Alice and Bob both have "feature" active. Alice submits an edit; Bob,
     // who has not pulled it, submits his. With no base on either submit the
     // server cannot tell Bob's copy is stale, and both checks the daemon runs
@@ -250,18 +191,18 @@ describe("data loss: feature branches", () => {
     await switchBranch(bob, "feature");
 
     await put(alice, "notes.txt", FIVE_LINES.replace("one", "one (alice)"));
-    await submitBehindTheGate(alice, ["notes.txt"], "feature");
+    await stageAndSubmit(alice, ["notes.txt"], { branch: "feature" });
 
     await put(bob, "notes.txt", FIVE_LINES.replace("five", "five (bob)"));
     // Refusing Bob's submit is a safe outcome; so is merging Alice's line in.
-    await submitBehindTheGate(bob, ["notes.txt"], "feature").catch(
+    await stageAndSubmit(bob, ["notes.txt"], { branch: "feature" }).catch(
       () => undefined,
     );
 
     expect(await featureHas("notes.txt")).toContain("one (alice)");
   });
 
-  it("latent: a submit to a feature branch tells the server what each file was based on", async () => {
+  it("a submit to a feature branch tells the server what each file was based on", async () => {
     // The cause of the test above, checked directly. Alice's notes.txt is
     // recorded at changelist 1, which is exactly what "feature" holds, so the
     // base is comparable. It is dropped because the state entry has no
@@ -270,8 +211,63 @@ describe("data loss: feature branches", () => {
     await switchBranch(alice, "feature");
     await put(alice, "notes.txt", FIVE_LINES.replace("one", "one (feature)"));
 
-    await submitBehindTheGate(alice, ["notes.txt"], "feature");
+    await stageAndSubmit(alice, ["notes.txt"], { branch: "feature" });
 
     expect(lastSubmit.modifications?.[0]).toHaveProperty("baseChangelist", 1);
+  });
+
+  it("keeps a stacked branch's changes, and its parent's, when you pull with it active", async () => {
+    const { alice, bob } = scene!;
+    await apiAs(alice).branch.createBranch({
+      repoId: scene!.repoId,
+      name: "upper",
+      type: "FEATURE",
+      parentBranchName: "feature",
+    });
+    await switchBranch(alice, "feature");
+    const lower = FIVE_LINES.replace("one", "one (feature)");
+    await put(alice, "notes.txt", lower);
+    await stageAndSubmit(alice, ["notes.txt"], { branch: "feature" });
+    await switchBranch(alice, "upper");
+    const upper = lower.replace("five", "five (upper)");
+    await put(alice, "notes.txt", upper);
+    await stageAndSubmit(alice, ["notes.txt"], { branch: "upper" });
+
+    await syncLatest(bob);
+    await switchBranch(bob, "upper");
+    expect(bob.workspace.activeBranches).toEqual(["feature", "upper"]);
+    await syncLatest(bob);
+
+    expect(await read(bob, "notes.txt")).toBe(upper);
+  });
+
+  it("goes back to the domain root's version when the branch is deactivated", async () => {
+    const { alice, bob } = scene!;
+    await switchBranch(alice, "feature");
+    await put(alice, "notes.txt", FIVE_LINES.replace("one", "one (feature)"));
+    await stageAndSubmit(alice, ["notes.txt"], { branch: "feature" });
+
+    await syncLatest(bob);
+    await switchBranch(bob, "feature");
+    await switchBranch(bob, "main");
+    await syncLatest(bob);
+
+    expect(await read(bob, "notes.txt")).toBe(FIVE_LINES);
+    expect(await pendingChanges(bob)).toEqual({});
+  });
+
+  it("still submits to the domain root with the base checked", async () => {
+    const { alice, bob } = scene!;
+    await syncLatest(bob);
+    await put(alice, "notes.txt", FIVE_LINES.replace("one", "one (alice)"));
+    await stageAndSubmit(alice, ["notes.txt"]);
+
+    // Bob has not pulled Alice's change; his stale copy must not replace it.
+    await put(bob, "notes.txt", FIVE_LINES.replace("five", "five (bob)"));
+    await stageAndSubmit(bob, ["notes.txt"]).catch(() => undefined);
+
+    expect(
+      await contentAtHead(testDb.client, scene!.repoId, "main", "notes.txt"),
+    ).toContain("one (alice)");
   });
 });

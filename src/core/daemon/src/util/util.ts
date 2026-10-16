@@ -362,6 +362,22 @@ export async function saveWorkspaceState(
   }
 }
 
+/**
+ * The branch whose head a workspace syncs: the deepest active feature branch,
+ * whose head holds its parents' changes too, or the domain root when none is
+ * active. Every pull, sync status, and pre-submit check targets it; one that
+ * looked at the domain root would take an active branch's changes back out of
+ * the workspace (DL-10).
+ */
+export function syncTargetBranch(
+  workspace: Pick<WorkspaceConfig, "domainBranchName" | "activeBranches">,
+): string {
+  const active = workspace.activeBranches ?? [];
+  return active.length > 0
+    ? active[active.length - 1]!
+    : workspace.domainBranchName;
+}
+
 export async function getLatestChangelistId(
   workspace: Workspace,
 ): Promise<string> {
@@ -369,7 +385,7 @@ export async function getLatestChangelistId(
 
   const branch = await client.branch.getBranch.query({
     repoId: workspace.repoId,
-    name: workspace.domainBranchName,
+    name: syncTargetBranch(workspace),
   });
 
   if (!branch) {
@@ -389,7 +405,7 @@ export async function getChangelistId(
 
   const changelists = await client.changelist.getChangelists.query({
     repoId: workspace.repoId,
-    branchName: workspace.domainBranchName,
+    branchName: syncTargetBranch(workspace),
     start: {
       number: changelistNumber,
       timestamp: null,

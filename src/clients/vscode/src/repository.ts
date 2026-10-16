@@ -574,7 +574,7 @@ export class CheckpointRepository implements vscode.Disposable {
     if (!file.staged) return info.group;
 
     const destination =
-      file.claims[0]?.branchName ?? this.config.domainBranchName;
+      destinationClaim(file)?.branchName ?? this.config.domainBranchName;
     return branchGroupId(destination);
   }
 
@@ -585,7 +585,7 @@ export class CheckpointRepository implements vscode.Disposable {
    * without touching its status, and so does moving it between buckets.
    */
   private renderKeyFor(file: File): string {
-    return `${file.status}|${file.staged ? 1 : 0}|${file.claims[0]?.branchName ?? ""}`;
+    return `${file.status}|${file.staged ? 1 : 0}|${destinationClaim(file)?.branchName ?? ""}`;
   }
 
   private uriFor(relPath: string): vscode.Uri {
@@ -1031,7 +1031,8 @@ export class CheckpointRepository implements vscode.Disposable {
    * bucket it is already destined for rather than silently moving it.
    */
   public claimBranchFor(relPath: string): string | undefined {
-    return this.pendingFiles.get(relPath)?.claims[0]?.branchName;
+    const file = this.pendingFiles.get(relPath);
+    return file ? destinationClaim(file)?.branchName : undefined;
   }
 
   /** Unstage files. Leaves their claims alone. */
@@ -1507,4 +1508,13 @@ export function errorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+/**
+ * The claim that says where a file is going: the open one (where it is being
+ * worked on now) over a submitted one (where earlier work went, such as a
+ * parent in a stack). Matches the daemon's submit endpoint.
+ */
+function destinationClaim(file: File): File["claims"][number] | undefined {
+  return file.claims.find((c) => c.state === "OPEN") ?? file.claims[0];
 }

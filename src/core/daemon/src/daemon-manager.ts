@@ -1423,6 +1423,7 @@ export class DaemonManager {
       checkouts,
     );
 
+    this.attachClaims(result, checkouts as FileClaimInfo[]);
     this.applyStagedFlags(workspace.id, result);
     this.workspacePendingChanges.set(workspace.id, result);
 
@@ -1632,6 +1633,7 @@ export class DaemonManager {
       checkouts,
     );
 
+    this.attachClaims(result, checkouts as FileClaimInfo[]);
     this.applyStagedFlags(workspace.id, result);
     this.workspacePendingChanges.set(workspace.id, result);
     this.dirtyFiles.set(workspace.id, new Set());
@@ -1740,6 +1742,36 @@ export class DaemonManager {
    * Done in one place rather than at each of the ~10 File construction sites,
    * so a new site cannot silently forget it.
    */
+  /**
+   * Gives each pending file this workspace's claims on it. Staging claims a
+   * file onto the branch it is staged to, and the submit endpoint (like the
+   * desktop's bucket view) sends a file to the branch its claim names, so a
+   * changed file listed with no claims always went to the domain root and a
+   * feature-branch submit found nothing to send (the gate).
+   */
+  private attachClaims(
+    result: WorkspacePendingChanges,
+    claims: FileClaimInfo[],
+  ): void {
+    if (claims.length === 0) return;
+    const byFileId = new Map<string, FileClaimInfo[]>();
+    const byPath = new Map<string, FileClaimInfo[]>();
+    for (const claim of claims) {
+      const id = byFileId.get(claim.fileId);
+      if (id) id.push(claim);
+      else byFileId.set(claim.fileId, [claim]);
+      const p = byPath.get(claim.filePath);
+      if (p) p.push(claim);
+      else byPath.set(claim.filePath, [claim]);
+    }
+    for (const file of Object.values(result.files)) {
+      if (file.claims.length > 0) continue;
+      const found =
+        (file.id ? byFileId.get(file.id) : undefined) ?? byPath.get(file.path);
+      if (found) file.claims = found;
+    }
+  }
+
   private applyStagedFlags(
     workspaceId: string,
     result: WorkspacePendingChanges,

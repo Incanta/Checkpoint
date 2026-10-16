@@ -41,8 +41,8 @@ Ordering rules:
 | R12 | DL-26 | The native include filter folds case like the daemon's | R3 (re-pull) | M | Done |
 | R13 | DL-03, DL-17, DL-23 | Native pulls and submits refuse unsafe asset paths | R1 | S | Done |
 | **Phase 3** | | **Branches and merges** | | | |
-| R14 | DL-10, DL-11, DL-12 | Sync and pre-submit checks use the active branch; every submit carries bases | | L | Not started |
-| R15 | Gate | Staged files keep the branch they were staged to | R14 | M | Not started |
+| R14 | DL-10, DL-11, DL-12 | Sync and pre-submit checks use the active branch; every submit carries bases | | L | Done (server strictness: follow-up) |
+| R15 | Gate | Staged files keep the branch they were staged to | R14 | M | Done |
 | R16 | DL-13 | Merge changelists record what they merged, and the merge base follows it | | M | Not started |
 | R17 | DL-14 | Bring a branch's parent into it | R14, R16 | L | Not started |
 | R18 | DL-15 | Deleting a branch with unmerged work needs a flag, and deleted branches can be restored | | M | Not started |
@@ -254,6 +254,8 @@ Fixes DL-10, DL-11, and DL-12.
 - Every state entry records the branch whose head it was pulled from or submitted to (`WorkspaceStateFile.branch`, which nothing sets today).
 - Every submit sends a base for every modification, and the server compares it with the target head. This drops the comparability rule at `submit.ts:137`, which is not needed once a workspace with a branch active only ever holds that branch's versions. Once a submit says its bases are complete, the server treats a modification with no base on a path the head has as a conflict, not as "not checked" (decision 8).
 - How the domain root's changes reach a branch: through R17, as in git (decision 7).
+
+**Status.** Done, except the server-side strictness (a missing base as a conflict once a submit says its bases are complete). The flag would have to travel through the native submit payload and the core server, and the daemon now sends a base for every tracked file, so it is left as a follow-up.
 
 **Tests.** Turns green: `branches.test.ts` "keeps the branch's changes in the workspace when you pull with the branch active", and the three latent tests (still through `submitBehindTheGate` until R15). Add: a stacked chain, deactivating a branch (the pull back to the root), a scheduled sync and sync status with a branch active, a stale submit to a stacked branch, and an older daemon that does not send the flag.
 

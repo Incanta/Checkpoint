@@ -3,6 +3,7 @@ import {
   getWorkspaceConfig,
   getWorkspaceState,
   type Workspace,
+  syncTargetBranch,
 } from "../util.js";
 import { DaemonConfig } from "../../daemon-config.js";
 import { Logger } from "../../logging.js";
@@ -209,7 +210,7 @@ export class TeamSyncScheduler {
 
       const branch = await client.branch.getBranch.query({
         repoId: workspace.repoId,
-        name: workspace.domainBranchName,
+        name: syncTargetBranch(workspace),
       });
       if (!branch) {
         return null;

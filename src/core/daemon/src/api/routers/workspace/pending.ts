@@ -499,7 +499,9 @@ export const pendingRouter = router({
       const modifications = Object.values(pending.files)
         .filter((f) => staged.has(f.path))
         .filter((f) => {
-          const claim = f.claims[0];
+          // The open claim is where the file is being worked on now; a
+          // submitted one is where earlier work went (a parent in a stack).
+          const claim = f.claims.find((c) => c.state === "OPEN") ?? f.claims[0];
           // No claim means nothing has pinned this file to a branch, so it
           // belongs to the domain root by default.
           const destined = claim?.branchName ?? workspace.domainBranchName;
@@ -532,11 +534,16 @@ export const pendingRouter = router({
           id: workspace.id,
           repoId: workspace.repoId,
           domainBranchName: workspace.domainBranchName,
+          activeBranches: workspace.activeBranches,
           workspaceName: workspace.name,
           localPath: workspace.localPath,
           daemonId: workspace.daemonId,
         },
         modificationPaths,
+        undefined,
+        // Compared with the branch being submitted to, not the domain root:
+        // a feature branch's own changes are not upstream changes.
+        targetBranch,
       );
 
       if (conflictResult.hasConflicts) {
@@ -557,6 +564,7 @@ export const pendingRouter = router({
         id: workspace.id,
         repoId: workspace.repoId,
         domainBranchName: workspace.domainBranchName,
+        activeBranches: workspace.activeBranches,
         workspaceName: workspace.name,
         localPath: workspace.localPath,
         daemonId: workspace.daemonId,
@@ -582,6 +590,7 @@ export const pendingRouter = router({
             workspaceInfo,
             repo.orgId,
             modificationPaths,
+            targetBranch,
           );
 
           if (mergeResult.conflictMerges.length > 0) {

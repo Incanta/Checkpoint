@@ -117,11 +117,10 @@ export async function submit(
   // changelist in the workspace state is exactly that: the changelist the
   // local copy came from.
   //
-  // A base is only sent when it is comparable with the target branch's head:
-  // the file's content came from the branch being submitted to. A file that
-  // came from the domain root and is being submitted to a feature branch
-  // overlaid on it can legitimately be newer than the branch's copy, so it is
-  // left unchecked rather than reported as a conflict that a pull cannot fix.
+  // A base is sent for every file the workspace tracks: a workspace with a
+  // feature branch active syncs that branch's head, so its files can be
+  // compared with the head they are submitted to. A domain root's changes
+  // reach the branch by bringing the parent in (branch.updateFromParent).
   const isArtifactSubmit =
     artifactForChangelistNum != null && artifactForChangelistNum >= 0;
   const baseState = isArtifactSubmit
@@ -153,10 +152,10 @@ export async function submit(
       // to the branch; a delete of an untracked path asserts nothing.
       return mod.delete ? mod : { ...mod, baseChangelist: null };
     }
-    const cameFrom = entry.branch ?? workspace.domainBranchName;
-    if (cameFrom !== branchName) {
-      return mod;
-    }
+    // Always the changelist the local copy came from. A workspace with a
+    // feature branch active syncs that branch's head (syncTargetBranch), so
+    // its files match the head they are compared with; a file that does not
+    // is a real conflict, not one to skip (DL-12).
     return { ...mod, baseChangelist: entry.changelist };
   }
 
@@ -389,6 +388,10 @@ export async function submit(
           size: stat.size,
           mtime: stat.mtimeMs,
           mode,
+          // Which head this matches (absent means the domain root).
+          ...(branchName !== workspace.domainBranchName && {
+            branch: branchName,
+          }),
         };
 
         upsert[normalizedPath] = stateFile;

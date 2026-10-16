@@ -14,6 +14,7 @@ import {
 } from "@checkpointvcs/longtail-addon";
 import {
   getWorkspaceState,
+  syncTargetBranch,
   updateWorkspaceState,
   type Workspace,
 } from "./util.js";
@@ -179,10 +180,12 @@ export async function pull(
     };
   };
 
+  // The branch this pull brings the workspace to (see syncTargetBranch).
+  const targetBranch = syncTargetBranch(workspace);
   if (changelistNumber === null) {
     const branchResponse = await client.branch.getBranch.query({
       repoId: workspace.repoId,
-      name: workspace.domainBranchName,
+      name: targetBranch,
     });
 
     if (!branchResponse) {
@@ -938,6 +941,10 @@ export async function pull(
       // its size and mtime now would hide them (and let a later pull
       // overwrite them).
       const changed = selections.filter((c) => !putBackAfterNative.has(c.path));
+      // Entries pulled from a feature branch's head say so (absent means the
+      // domain root), so a submit there can tell which head they match.
+      const fromBranch =
+        targetBranch !== workspace.domainBranchName ? targetBranch : undefined;
       const stateTotal = changed.length;
       onProgress?.("Updating workspace state", 0, stateTotal);
 
@@ -988,6 +995,7 @@ export async function pull(
             size: incoming.size,
             mtime: incoming.mtime,
             ...(mode !== undefined && { mode }),
+            ...(fromBranch && { branch: fromBranch }),
           };
         } else if (stat) {
           newFiles[change.path] = {
@@ -997,6 +1005,7 @@ export async function pull(
             size: stat.size,
             mtime: stat.mtimeMs,
             ...(mode !== undefined && { mode }),
+            ...(fromBranch && { branch: fromBranch }),
           };
         }
         onProgress?.("Updating workspace state", i + 1, stateTotal);
@@ -1107,6 +1116,12 @@ export async function pullTextFilesForSubmit(
   workspace: Workspace,
   orgId: string,
   submitPaths: string[],
+  /**
+   * The branch being submitted to. Its head is what "outdated" means: a
+   * feature branch's own earlier changes are not upstream changes to merge
+   * back out (DL-11). Defaults to the workspace's sync target.
+   */
+  targetBranch: string = syncTargetBranch(workspace),
 ): Promise<PullMergeResult> {
   const client = await CreateApiClientAuth(workspace.daemonId);
   const binaryExts = await getBinaryExtensions(
@@ -1123,7 +1138,7 @@ export async function pullTextFilesForSubmit(
   // Get the remote branch head
   const branchResponse = await client.branch.getBranch.query({
     repoId: workspace.repoId,
-    name: workspace.domainBranchName,
+    name: targetBranch,
   });
 
   if (!branchResponse) {

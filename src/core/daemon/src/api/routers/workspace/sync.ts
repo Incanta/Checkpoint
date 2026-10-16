@@ -109,6 +109,7 @@ export const syncRouter = router({
         id: workspace.id,
         repoId: workspace.repoId,
         domainBranchName: workspace.domainBranchName,
+        activeBranches: workspace.activeBranches,
         workspaceName: workspace.name,
         localPath: workspace.localPath,
         daemonId: workspace.daemonId,
