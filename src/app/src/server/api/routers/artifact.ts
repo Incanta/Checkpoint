@@ -9,6 +9,7 @@ import { assertFeature } from "~/server/license-client";
 import { walkChangelistAncestry } from "~/server/changelist-walk";
 import { compareTreePaths } from "~/lib/file-tree-sort";
 import { canonicalProblems, describePathProblems } from "~/server/repo-path";
+import { versionIndexProblem } from "~/server/version-index";
 
 const artifactTypeSchema = z
   .string()
@@ -49,6 +50,20 @@ export const artifactRouter = createTRPCRouter({
         RepoAccess.WRITE,
       );
       await assertFeature(repo.orgId, "artifacts", ctx.db);
+
+      if (input.versionIndex !== "") {
+        const problem = await versionIndexProblem(
+          ctx.db,
+          input.repoId,
+          input.versionIndex,
+        );
+        if (problem) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Cannot attach the artifacts: ${problem}`,
+          });
+        }
+      }
 
       // Artifact paths are written into workspaces like source paths.
       const pathProblems = canonicalProblems(input.modifications);

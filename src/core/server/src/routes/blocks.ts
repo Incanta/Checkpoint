@@ -18,10 +18,17 @@ interface SystemJWTClaims {
 // Max serialized block size (matches the app's BLOCK_BUDGET, with headroom).
 const MAX_BLOCK_BYTES = 1024 * 1024;
 
+/** Tree block paths: /{orgId}/{repoId}/tree/{64-hex-hash}. */
+const BLOCK_PATH = /^\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/tree\/[0-9a-f]{64}$/;
+/** Version index paths: /{orgId}/{repoId}/versions/{64-hex-hash}.lvi. */
+const VERSION_PATH =
+  /^\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/versions\/[0-9a-f]{64}\.lvi$/;
+
 function verify(
   req: Request,
   res: Response,
   expectedAction: string,
+  pathPattern: RegExp = BLOCK_PATH,
 ): SystemJWTClaims | null {
   const header = req.headers["authorization"];
   if (!header) {
@@ -35,10 +42,7 @@ function verify(
   }
   let claims: SystemJWTClaims;
   try {
-    const verified = njwt.verify(
-      token,
-      storageSigningKey(),
-    );
+    const verified = njwt.verify(token, storageSigningKey());
     claims = verified!.body.toJSON() as unknown as SystemJWTClaims;
   } catch {
     res.status(401).send("Unauthorized: Token verification failed");
@@ -53,13 +57,10 @@ function verify(
     return null;
   }
   const blockPath =
-    (req.query["path"] as string | undefined) ?? req.header("x-checkpoint-path");
+    (req.query["path"] as string | undefined) ??
+    req.header("x-checkpoint-path");
   // Block paths are /{orgId}/{repoId}/tree/{64-hex-hash}.
-  if (
-    !blockPath ||
-    blockPath !== claims.path ||
-    !/^\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/tree\/[0-9a-f]{64}$/.test(blockPath)
-  ) {
+  if (!blockPath || blockPath !== claims.path || !pathPattern.test(blockPath)) {
     res.status(403).send("Forbidden: Path mismatch or invalid");
     return null;
   }
@@ -112,7 +113,10 @@ export function routeBlocks(): Router {
     const claims = verify(req, res, "blob-get");
     if (!claims) return;
     try {
-      const data = await readBlob(claims.path, req.header("x-checkpoint-bucket"));
+      const data = await readBlob(
+        claims.path,
+        req.header("x-checkpoint-bucket"),
+      );
       if (!data) {
         res.status(404).send("Not Found");
         return;
@@ -120,6 +124,25 @@ export function routeBlocks(): Router {
       res.status(200).type("application/octet-stream").send(data);
     } catch (error) {
       console.error("block read failed:", error);
+      res.status(500).send(`Internal server error: ${error}`);
+    }
+  });
+
+  // Whether a version index is in the repo's storage, for the app to check
+  // before it records a changelist pointing at one (it refuses a changelist
+  // whose content does not exist, whoever sends it). Answers rather than
+  // 404s, so "missing" and "could not ask" stay distinct for the caller.
+  router.get("/system/version-exists", async (req, res) => {
+    const claims = verify(req, res, "version-head", VERSION_PATH);
+    if (!claims) return;
+    try {
+      const backend = await getStorageBackend({
+        bucket: req.header("x-checkpoint-bucket"),
+      });
+      const size = await backend.head(claims.path);
+      res.status(200).json({ exists: !!size });
+    } catch (error) {
+      console.error("version check failed:", error);
       res.status(500).send(`Internal server error: ${error}`);
     }
   });

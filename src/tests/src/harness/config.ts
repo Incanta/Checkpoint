@@ -62,6 +62,9 @@ function applyDefaults(): void {
     "fast-suite-only-storage-signing-key-0123456789",
   );
   setConfig("storage.token-expiration-seconds", 3600);
+  // No storage server runs, so changelists name versions that exist nowhere.
+  // src/api/version-index.test.ts turns the check back on.
+  setConfig("storage.verify-version-index", false);
   // Tree blocks go to the TreeBlock table in tests (no storage server running).
   setConfig("state-tree.block-store", "postgres");
   setConfig("state-tree.block-cache-bytes", 64 * 1024 * 1024);

@@ -15,6 +15,12 @@ jwt:
 
 token-expiration-seconds: 3600
 
+# Before recording a changelist (or attaching artifacts), ask the core server
+# whether its version index is in the repo's storage, so a changelist never
+# points files at content nobody can sync. Off only in tests, which run no
+# storage server.
+verify-version-index: true
+
 # Core server base URL. serverUrl in the token (control plane: /submit,
 # /repo-size); the gateway blob base is derived as serverUrl + /storage.
 #   external-lan: optional LAN-only address (e.g. "http://10.0.0.10:13001").

@@ -21,6 +21,7 @@ import {
   portabilityProblems,
   toRepoPath,
 } from "~/server/repo-path";
+import { versionIndexProblem } from "~/server/version-index";
 import type { InputJsonValue } from "@prisma/client/runtime/library";
 import { walkChangelistAncestry } from "~/server/changelist-walk";
 import { compareTreePaths } from "~/lib/file-tree-sort";
@@ -417,6 +418,20 @@ export const changelistRouter = createTRPCRouter({
           message:
             "A changelist that writes files must name the version index holding them",
         });
+      }
+
+      if (input.versionIndex !== "") {
+        const problem = await versionIndexProblem(
+          ctx.db,
+          input.repoId,
+          input.versionIndex,
+        );
+        if (problem) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Cannot record the changelist: ${problem}`,
+          });
+        }
       }
 
       const normalizedPaths = input.modifications.map((mod) =>

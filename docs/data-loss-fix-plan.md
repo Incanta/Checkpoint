@@ -47,7 +47,7 @@ Ordering rules:
 | R17 | DL-14 | Bring a branch's parent into it | R14, R16 | L | Done (desktop UI: follow-up) |
 | R18 | DL-15 | Deleting a branch with unmerged work needs a flag, and deleted branches can be restored | | M | Done |
 | **Phase 4** | | **Integrity and the smaller observations** | | | |
-| R19 | DL-16 | The app records only version indexes that exist in the repo's storage | | M | Not started |
+| R19 | DL-16 | The app records only version indexes that exist in the repo's storage | | M | Done |
 | R20 | Other observations | Revert, resolve, the empty-tree diff, the merge log, watcher gaps, OS litter, and long paths | | M | Not started |
 
 By finding: DL-01: R4; DL-02: R3; DL-03: R1, R2, R13; DL-04: R3; DL-05: R5; DL-06: R4; DL-07: R7; DL-08: R6, R7; DL-09: R1, R6; DL-10: R14; DL-11: R14; DL-12: R14; DL-13: R16; DL-14: R17; DL-15: R18; DL-16: R1, R19; DL-17: R1, R2, R13; DL-18: R6, R7; DL-19: R7; DL-20: R9; DL-21: R10; DL-22: R3; DL-23: R1, R2, R13; DL-24: R11; DL-25: R5; DL-26: R12, R3; Gate: R15; Backslash: R8.
