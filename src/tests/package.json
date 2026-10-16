@@ -22,7 +22,7 @@
     "@checkpointvcs/app": "workspace:*",
     "@checkpointvcs/common": "workspace:*",
     "@checkpointvcs/daemon": "workspace:*",
-    "@checkpointvcs/longtail-addon": "3.0.0",
+    "@checkpointvcs/longtail-addon": "3.0.1",
     "uuid": "^14.0.2"
   },
   "devDependencies": {

@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@checkpointvcs/common": "workspace:*",
-    "@checkpointvcs/longtail-addon": "3.0.0",
+    "@checkpointvcs/longtail-addon": "3.0.1",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "better-sqlite3": "^13.0.3",
     "commander": "^14.0.3",
