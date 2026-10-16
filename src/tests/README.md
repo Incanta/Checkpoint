@@ -143,7 +143,7 @@ The daemon-driven counterpart, which seeds a realistic tree, stages whole direct
 yarn test:data-loss
 ```
 
-It needs no running services: the daemon's own endpoints run in-process against the app routers, with only the native addon faked (`src/data-loss/stack.ts`). Its OS-dependent tests (`src/data-loss/os.test.ts`) probe the filesystem and skip what does not apply. `.github/workflows/data-loss.yaml` runs the suite on Linux, Windows, and macOS, and fails while any of its findings reproduces: open findings mean the commit is not clean. It is kept out of `test.yaml`, so a known finding never turns the main CI red and a regression never hides among findings.
+It needs no running services: the daemon's own endpoints run in-process against the app routers, with only the native addon faked (`src/harness/stack.ts`). Its OS-dependent tests (`src/data-loss/os.test.ts`) probe the filesystem and skip what does not apply. `.github/workflows/data-loss.yaml` runs the suite on Linux, Windows, and macOS, and fails while any of its findings reproduces: open findings mean the commit is not clean. It is kept out of `test.yaml`, so a known finding never turns the main CI red and a regression never hides among findings.
 
 `src/data-loss/native/` covers what the real addon does (`yarn test:data-loss:native`): the include-filter test needs only the addon, and the file-mode tests also need running services and `CHECKPOINT_TEST_DAEMON_ID`, like the integration tests. CI runs them in the `native` job of `data-loss.yaml`.
 

@@ -3,6 +3,7 @@ import { CreateApiClientAuth } from "@checkpointvcs/common";
 import { z } from "zod";
 import fs from "fs/promises";
 import path from "path";
+import { resolveInWorkspace } from "../../../util/workspace-path.js";
 import {
   File,
   FileClaimInfo,
@@ -562,7 +563,8 @@ export const pendingRouter = router({
 
       // Whether the submit only edits files the workspace already tracks
       // (no adds, no deletes), decided before the submit changes the state.
-      const trackedBefore = manager.getWorkspaceState(workspace.id)?.files ?? {};
+      const trackedBefore =
+        manager.getWorkspaceState(workspace.id)?.files ?? {};
       const onlyEditsTracked = expandedModifications.every(
         (m) =>
           !m.delete &&
@@ -1308,7 +1310,7 @@ export const pendingRouter = router({
             });
 
             // Copy cached head version over the working copy
-            const localFilePath = path.join(
+            const localFilePath = resolveInWorkspace(
               workspace.localPath,
               normalizedPath,
             );
@@ -1317,7 +1319,7 @@ export const pendingRouter = router({
           } else {
             // File is not in any head version (locally added file).
             // Delete it from disk so it reverts to "not existing".
-            const localFilePath = path.join(
+            const localFilePath = resolveInWorkspace(
               workspace.localPath,
               normalizedPath,
             );

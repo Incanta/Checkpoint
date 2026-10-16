@@ -22,13 +22,16 @@ import {
   vi,
 } from "vitest";
 
+vi.mock("~/server/repo-path", async (importOriginal) =>
+  (await import("../harness/stack")).repoPathModule(importOriginal),
+);
 vi.mock(
   "@checkpointvcs/longtail-addon",
-  async () => (await import("./stack")).fakeAddon,
+  async () => (await import("../harness/stack")).fakeAddon,
 );
 vi.mock("@checkpointvcs/common", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  const stack = await import("./stack");
+  const stack = await import("../harness/stack");
   return {
     ...actual,
     CreateApiClientAuth: stack.createApiClientAuth,
@@ -37,11 +40,11 @@ vi.mock("@checkpointvcs/common", async (importOriginal) => {
 });
 vi.mock(
   "../../../core/daemon/src/daemon-config.js",
-  async () => (await import("./stack")).fakeDaemonConfigModule,
+  async () => (await import("../harness/stack")).fakeDaemonConfigModule,
 );
 vi.mock(
   "../../../core/daemon/src/logging.js",
-  async () => (await import("./stack")).fakeLoggingModule,
+  async () => (await import("../harness/stack")).fakeLoggingModule,
 );
 
 import { createTestDb, type TestDb } from "../harness/db";
@@ -53,6 +56,7 @@ import {
 import type { PullMergeResult } from "../../../core/daemon/src/util/pull.js";
 import {
   apiAs,
+  asOlderServer,
   backupsContaining,
   describeFile,
   filesystemIsCaseInsensitive,
@@ -70,7 +74,7 @@ import {
   tearDownScene,
   utilWorkspace,
   type Scene,
-} from "./stack";
+} from "../harness/stack";
 
 const caseInsensitive = await filesystemIsCaseInsensitive();
 
@@ -342,53 +346,6 @@ describe("data loss: pull", () => {
       ).toBe("hero, updated by alice\n");
     },
   );
-
-  it("never deletes a file outside the workspace for a path that climbs out of it", async () => {
-    // Paths come from whoever submitted them, and the server stores "../x"
-    // as given (see server.test.ts). The daemon joins every removed path to
-    // the workspace root and deletes it, with no check that it stays inside.
-    const { alice, bob } = scene!;
-    const outside = path.join(
-      path.dirname(bob.root),
-      `not-a-workspace-${Date.now()}.txt`,
-    );
-    await writeFile(outside, "a file that belongs to nobody's workspace\n");
-    const climbing = `../${path.basename(outside)}`;
-
-    try {
-      const added = await apiAs(alice).changelist.createChangelist({
-        message: "add a path outside the workspace",
-        repoId: scene!.repoId,
-        versionIndex: storeVersion({ [climbing]: "planted\n" }),
-        branchName: "main",
-        modifications: [{ path: climbing, delete: false }],
-        keepCheckedOut: false,
-        workspaceId: alice.workspace.id,
-      });
-      // Bob is at that changelist. Whatever the native pull did with the
-      // path, the daemon's own delete pass is what runs next.
-      await updateWorkspaceState(
-        utilWorkspace(bob),
-        { meta: { changelistNumber: added.number } },
-        "sqlite",
-      );
-      await apiAs(alice).changelist.createChangelist({
-        message: "remove it again",
-        repoId: scene!.repoId,
-        versionIndex: "",
-        branchName: "main",
-        modifications: [{ path: climbing, delete: true }],
-        keepCheckedOut: false,
-        workspaceId: alice.workspace.id,
-      });
-
-      await syncLatest(bob);
-
-      expect(existsSync(outside), `Bob's pull deleted ${outside}`).toBe(true);
-    } finally {
-      await fsp.rm(outside, { force: true });
-    }
-  });
 
   it("records the workspace at the pulled changelist (sanity check of the harness)", async () => {
     const { alice, bob } = scene!;

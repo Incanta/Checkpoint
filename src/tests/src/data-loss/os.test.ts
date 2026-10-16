@@ -24,13 +24,16 @@ import {
   vi,
 } from "vitest";
 
+vi.mock("~/server/repo-path", async (importOriginal) =>
+  (await import("../harness/stack")).repoPathModule(importOriginal),
+);
 vi.mock(
   "@checkpointvcs/longtail-addon",
-  async () => (await import("./stack")).fakeAddon,
+  async () => (await import("../harness/stack")).fakeAddon,
 );
 vi.mock("@checkpointvcs/common", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  const stack = await import("./stack");
+  const stack = await import("../harness/stack");
   return {
     ...actual,
     CreateApiClientAuth: stack.createApiClientAuth,
@@ -39,11 +42,11 @@ vi.mock("@checkpointvcs/common", async (importOriginal) => {
 });
 vi.mock(
   "../../../core/daemon/src/daemon-config.js",
-  async () => (await import("./stack")).fakeDaemonConfigModule,
+  async () => (await import("../harness/stack")).fakeDaemonConfigModule,
 );
 vi.mock(
   "../../../core/daemon/src/logging.js",
-  async () => (await import("./stack")).fakeLoggingModule,
+  async () => (await import("../harness/stack")).fakeLoggingModule,
 );
 
 import { createTestDb, type TestDb } from "../harness/db";
@@ -76,7 +79,7 @@ import {
   syncLatest,
   tearDownScene,
   type Scene,
-} from "./stack";
+} from "../harness/stack";
 
 const caseInsensitive = await filesystemIsCaseInsensitive();
 const normalizationInsensitive = await filesystemIsNormalizationInsensitive();
@@ -471,89 +474,6 @@ describe("data loss: the filesystem under the workspace", () => {
         ).toEqual([]);
       },
     );
-  });
-
-  describe("names Windows cannot store", () => {
-    it.runIf(windows)(
-      "leaves nothing pending after pulling a file a Mac or Linux user named with a colon",
-      async () => {
-        // "standup 10:15.txt" is an ordinary name on Linux, and a Mac user
-        // who types "standup 10/15" in Finder gets that name underneath. NTFS
-        // reads it as the stream "15.txt" of a file named "standup 10": the
-        // pull creates an empty "standup 10" and hides the text in a stream.
-        // The scan finds the empty file as new and the real path as deleted,
-        // so "submit everything" deletes the file for everyone.
-        const { alice, bob } = scene!;
-        await submitDirect(alice, {
-          write: { "Notes/standup 10:15.txt": "who is doing what\n" },
-        });
-
-        await syncLatest(bob);
-
-        expect(await pendingChanges(bob)).toEqual({});
-      },
-    );
-  });
-
-  describe("the workspace's own .checkpoint directory", () => {
-    /**
-     * Bob has synced and has an unsubmitted edit. Another client records a
-     * changelist that adds a workspace.json under `spelling` (anything with
-     * a write token can; the daemon itself never stages .checkpoint). It
-     * narrows the sync filter to nothing, and Bob syncs.
-     */
-    async function plantWorkspaceConfig(spelling: string) {
-      const { alice, bob } = scene!;
-      await put(alice, "Source/game.cpp", "int main() { return 0; }\n");
-      await put(alice, "Content/level.txt", "level\n");
-      await stageAndSubmit(alice, ["Source", "Content"]);
-      await syncLatest(bob);
-      await setTeamSync(bob, {});
-      await put(
-        bob,
-        "Content/level.txt",
-        "level, plus bob's unsubmitted edits\n",
-      );
-
-      await submitDirect(alice, {
-        write: {
-          [`${spelling}/workspace.json`]: JSON.stringify({
-            teamSync: { customIncludeRules: ["Nothing/"] },
-          }),
-        },
-      });
-      await syncLatest(bob);
-    }
-
-    for (const [spelling, applies, where] of [
-      [".checkpoint", true, "everywhere"],
-      [".CHECKPOINT", caseInsensitive, "Windows and macOS"],
-      ["CHECKP~1", keepsShortNames, "Windows volumes with 8.3 short names"],
-    ] as const) {
-      it.runIf(applies)(
-        `does not let a pull replace the workspace's config through ${spelling}/workspace.json (${where})`,
-        async () => {
-          // The pull writes the file into Bob's .checkpoint directory. The
-          // sync pipeline then reads its filter from that file and deletes
-          // every tracked file outside it, the edited one included, with no
-          // backup (DL-04); the config itself is tracked now, so it goes too.
-          const { bob } = scene!;
-          await plantWorkspaceConfig(spelling);
-
-          expect(
-            exists(bob, "Source/game.cpp") &&
-              (await survives(
-                bob,
-                "Content/level.txt",
-                "bob's unsubmitted edits",
-              )),
-            `${await describeFile(bob, ".checkpoint/workspace.json")}; ` +
-              `${await describeFile(bob, "Source/game.cpp")}; ` +
-              `${await describeFile(bob, "Content/level.txt")}`,
-          ).toBe(true);
-        },
-      );
-    }
   });
 
   describe("text encodings and line endings", () => {

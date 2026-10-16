@@ -4,6 +4,7 @@ import path from "path";
 import type { WorkspaceStateFile } from "@checkpointvcs/common";
 import { autoMergeText } from "./auto-merge.js";
 import { compareWithBaseline } from "./baseline.js";
+import { resolveInWorkspace } from "./workspace-path.js";
 
 // Keeping local work safe across a pull.
 //
@@ -155,7 +156,7 @@ export class LocalChangeGuard {
     kind: IncomingKind,
     entry: WorkspaceStateFile | undefined,
   ): Promise<boolean> {
-    const fullPath = path.join(this.workspaceRoot, relativePath);
+    const fullPath = resolveInWorkspace(this.workspaceRoot, relativePath);
     if (!(await hasLocalChanges(fullPath, entry))) {
       return false;
     }
@@ -184,7 +185,7 @@ export class LocalChangeGuard {
       return false;
     }
     const [file] = this.protectedFiles.splice(index, 1);
-    const fullPath = path.join(this.workspaceRoot, file!.relativePath);
+    const fullPath = resolveInWorkspace(this.workspaceRoot, file!.relativePath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.copyFile(file!.backupPath, fullPath);
     await this.removeBackups([file!.backupPath]);
@@ -197,7 +198,10 @@ export class LocalChangeGuard {
    */
   async restoreAll(): Promise<void> {
     for (const file of this.protectedFiles) {
-      const fullPath = path.join(this.workspaceRoot, file.relativePath);
+      const fullPath = resolveInWorkspace(
+        this.workspaceRoot,
+        file.relativePath,
+      );
       await fs.mkdir(path.dirname(fullPath), { recursive: true });
       await fs.copyFile(file.backupPath, fullPath);
     }
@@ -219,7 +223,10 @@ export class LocalChangeGuard {
     const settled: string[] = [];
 
     for (const file of this.protectedFiles) {
-      const fullPath = path.join(this.workspaceRoot, file.relativePath);
+      const fullPath = resolveInWorkspace(
+        this.workspaceRoot,
+        file.relativePath,
+      );
       const mine = await fs.readFile(file.backupPath);
 
       if (file.kind === "removed") {

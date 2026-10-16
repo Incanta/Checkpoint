@@ -37,6 +37,11 @@ import { homedir } from "os";
 import { Logger } from "../logging.js";
 import { DaemonConfig } from "../daemon-config.js";
 import { StageTimer } from "./stage-timer.js";
+import {
+  isSafeWorkspacePath,
+  resolveInWorkspace,
+  unsafePathReason,
+} from "./workspace-path.js";
 
 /**
  * Files that were auto-merged during pull.
@@ -75,6 +80,12 @@ export interface PullMergeResult {
    * then rescans instead of re-checking only `touchedPaths`.
    */
   trackedSetChanged?: true;
+  /**
+   * Paths the server sent that this workspace cannot safely hold (they climb
+   * out of it, name its .checkpoint directory, or contain a ":" on Windows),
+   * with why. They were neither written nor recorded.
+   */
+  unsafePaths?: { path: string; reason: string }[];
 }
 
 export async function pull(
@@ -181,11 +192,39 @@ export async function pull(
   // Path-keyed diff from our base to the target CL: only the changed paths and
   // the source CLs to pull (no full state tree, no fileId resolution).
   timer.stage("diff");
-  const diff = await client.changelist.diffChangelists.query({
+  const serverDiff = await client.changelist.diffChangelists.query({
     repoId: workspace.repoId,
     fromNumber: workspaceState.changelistNumber,
     toNumber: changelistNumber,
   });
+
+  // Paths this daemon must not touch (see workspace-path.ts) are neither
+  // written, deleted, nor recorded: a recorded path that cannot exist on disk
+  // would show as deleted, and "submit everything" would delete it for the
+  // team. They are reported instead. A removed one still leaves the state.
+  const unsafePaths: { path: string; reason: string }[] = [];
+  const keepSafe = <T extends { path: string }>(changes: T[]): T[] =>
+    changes.filter((c) => {
+      const reason = unsafePathReason(c.path);
+      if (reason) unsafePaths.push({ path: c.path, reason });
+      return !reason;
+    });
+  const unsafeRemoved = serverDiff.removed.filter(
+    (p) => !isSafeWorkspacePath(p),
+  );
+  const diff = {
+    ...serverDiff,
+    added: keepSafe(serverDiff.added),
+    modified: keepSafe(serverDiff.modified),
+    removed: serverDiff.removed.filter((p) => isSafeWorkspacePath(p)),
+  };
+  if (unsafePaths.length > 0) {
+    Logger.warn(
+      `Pull: not syncing ${unsafePaths.length} path(s) this workspace cannot safely hold: ${unsafePaths
+        .map((u) => `${u.path} (${u.reason})`)
+        .join(", ")}`,
+    );
+  }
 
   const changelistsResponse =
     await client.changelist.getChangelistsWithNumbers.mutate({
@@ -263,7 +302,11 @@ export async function pull(
     await guard.protect(change.path, "modified", localFile);
   }
   for (const change of diff.added) {
-    await guard.protect(change.path, "added", workspaceState.files[change.path]);
+    await guard.protect(
+      change.path,
+      "added",
+      workspaceState.files[change.path],
+    );
   }
   for (const removedPath of diff.removed) {
     await guard.protect(
@@ -274,11 +317,13 @@ export async function pull(
   }
   const protectAnomalies = async (): Promise<void> => {
     for (const strayPath of anomalies.stray) {
-      if (diffPaths.has(strayPath)) continue;
+      if (diffPaths.has(strayPath) || !isSafeWorkspacePath(strayPath)) continue;
       await guard.protect(strayPath, "added", workspaceState.files[strayPath]);
     }
     for (const entry of anomalies.stale) {
-      if (diffPaths.has(entry.path)) continue;
+      if (diffPaths.has(entry.path) || !isSafeWorkspacePath(entry.path)) {
+        continue;
+      }
       await guard.protect(
         entry.path,
         "modified",
@@ -307,7 +352,10 @@ export async function pull(
   // recorded in the workspace state.
   const included =
     includePaths && includePaths.length > 0
-      ? filterPaths(includePaths, incoming.map((c) => c.path))
+      ? filterPaths(
+          includePaths,
+          incoming.map((c) => c.path),
+        )
       : null;
   const stateIncoming = singlePass
     ? incoming.filter((_, i) => !included || included[i])
@@ -382,7 +430,9 @@ export async function pull(
       if (status.error !== 0) {
         if (/different hashing or chunk sizes/.test(status.currentStep)) {
           // Sources that cannot share one index: apply them one at a time.
-          Logger.info("Pull: sources differ in hashing or chunking; applying each changelist in turn");
+          Logger.info(
+            "Pull: sources differ in hashing or chunking; applying each changelist in turn",
+          );
           singlePass = false;
         } else {
           Logger.error(
@@ -400,6 +450,21 @@ export async function pull(
       await loadAnomalies();
       await protectAnomalies();
     }
+  }
+
+  // A whole version index is applied as it is, so it would write the unsafe
+  // paths the single pass leaves out. Refuse before anything is written.
+  const unsafeInIndexes = [
+    ...unsafePaths.map((u) => u.path),
+    ...anomalies.stray.filter((p) => !isSafeWorkspacePath(p)),
+    ...anomalies.stale
+      .map((e) => e.path)
+      .filter((p) => !isSafeWorkspacePath(p)),
+  ];
+  if (!singlePass && !errored && unsafeInIndexes.length > 0) {
+    throw new Error(
+      `Pull refused: the changelists to apply contain paths this workspace cannot safely hold (${unsafeInIndexes.join(", ")}), and they can only be applied whole here`,
+    );
   }
 
   for (const versionIndex of singlePass || errored ? [] : versionsToPull) {
@@ -487,7 +552,7 @@ export async function pull(
       onProgress?.("Deleting removed files", 0, deleteTotal);
 
       for (const removedPath of diff.removed) {
-        const filePath = path.join(workspace.localPath, removedPath);
+        const filePath = resolveInWorkspace(workspace.localPath, removedPath);
         if (existsSync(filePath)) {
           await fs.rm(filePath, { force: true });
         }
@@ -504,7 +569,10 @@ export async function pull(
     //
     // Files restored here that are not part of the diff keep their existing
     // state entry, so their new size and mtime are collected to update it.
-    const restoredUnchanged = new Map<string, { size: number; mtime: number }>();
+    const restoredUnchanged = new Map<
+      string,
+      { size: number; mtime: number }
+    >();
     timer.stage("correction");
     if (anomalies.stray.length > 0 || anomalies.stale.length > 0) {
       onStep?.("Verifying pulled files");
@@ -514,7 +582,8 @@ export async function pull(
 
       for (const strayPath of anomalies.stray) {
         if (diffPaths.has(strayPath)) continue; // the delete pass handled it
-        const fullPath = path.join(workspace.localPath, strayPath);
+        if (!isSafeWorkspacePath(strayPath)) continue;
+        const fullPath = resolveInWorkspace(workspace.localPath, strayPath);
         if (existsSync(fullPath)) {
           await fs.rm(fullPath, { force: true });
         }
@@ -526,7 +595,8 @@ export async function pull(
       let restoredCount = 0;
       onProgress?.("Verifying pulled files", 0, anomalies.stale.length);
       for (const entry of anomalies.stale) {
-        const fullPath = path.join(workspace.localPath, entry.path);
+        if (!isSafeWorkspacePath(entry.path)) continue;
+        const fullPath = resolveInWorkspace(workspace.localPath, entry.path);
         // Not on disk means the pull never wrote it (filtered out).
         if (existsSync(fullPath)) {
           const result = await readFileFromChangelist({
@@ -596,7 +666,9 @@ export async function pull(
         }
       }
       for (const file of resolved.setAside) {
-        Logger.warn(`Local changes set aside by pull: ${describeSetAside(file)}`);
+        Logger.warn(
+          `Local changes set aside by pull: ${describeSetAside(file)}`,
+        );
         mergeResult.localChangesSetAside.push(file);
         // Clients that only know about conflictMerges still need to tell the
         // user this file wants attention.
@@ -668,13 +740,19 @@ export async function pull(
     await updateWorkspaceState(
       workspace,
       {
-        files: { delete: diff.removed, upsert: newFiles },
+        files: {
+          delete: [...diff.removed, ...unsafeRemoved],
+          upsert: newFiles,
+        },
         meta: { changelistNumber: changelistResponse.number },
       },
       stateBackend,
     );
 
     timer.log("pull-timing");
+    if (unsafePaths.length > 0) {
+      mergeResult.unsafePaths = unsafePaths;
+    }
     if (changed.length > 0) {
       mergeResult.pulledPaths = changed.map((change) => change.path);
     }
@@ -791,7 +869,8 @@ export async function pullTextFilesForSubmit(
     // Only text files
     if (isBinaryFile(localPath, binaryExts)) continue;
 
-    const fullPath = path.join(workspace.localPath, localPath);
+    if (!isSafeWorkspacePath(localPath)) continue;
+    const fullPath = resolveInWorkspace(workspace.localPath, localPath);
     if (!existsSync(fullPath)) continue; // deleted locally
 
     try {
@@ -858,7 +937,10 @@ export async function pullTextFilesForSubmit(
       );
 
       // Write merged content back to disk
-      const fullPath = path.join(workspace.localPath, candidate.relativePath);
+      const fullPath = resolveInWorkspace(
+        workspace.localPath,
+        candidate.relativePath,
+      );
       await fs.writeFile(fullPath, merged.content, "utf-8");
 
       if (merged.clean) {

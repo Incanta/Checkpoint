@@ -19,7 +19,7 @@ The plan for fixing these findings, in dependency order and with the decisions i
 
 `server.test.ts` calls the app's tRPC routers in-process over the per-file SQLite database, like the rest of `src/api`.
 
-The other files use `stack.ts`, which runs a whole Checkpoint stack in one process:
+The other files use `../harness/stack.ts`, which runs a whole Checkpoint stack in one process:
 
 - **Real:** the app routers (submit, merge, tree diff, pull anomalies, claims), the daemon's own tRPC endpoints (`pending.stage`, `pending.submit`, `sync.pull`, `branches.switch`, `pending.refresh`), and everything they call (pull, submit, the pre-submit merge, the Team Sync pipeline, the local-change guard, the SQLite workspace state, pending-change detection).
 - **Fake:** the native longtail addon. A submit stores each submitted file's bytes under a new version index name and records the changelist through the app; a version index holds only its own changelist's files, as the real format does. Selection pulls write exactly the selected paths; whole-index pulls write every file in the index. Also faked: the HTTP transport (an in-process adapter), storage tokens, the Team Sync config endpoint (so a test can make it fail), and the daemon's config and logger (so nothing reads or writes `~/.checkpoint`).
@@ -37,27 +37,27 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | --- | --- | --- | --- | --- |
 | DL-01 | Edits made after a submit vanish from pending changes at the next pull, then get overwritten | Pull | Critical | Live |
 | DL-02 | One failed Team Sync config read deletes most of the workspace, for good | Pull (Team Sync) | Critical | Live |
-| DL-03 | The server stores paths as sent; `../x` makes teammates' pulls delete files outside their workspace | Push, pull | Critical | Live |
+| DL-03 | The server stores paths as sent; `../x` makes teammates' pulls delete files outside their workspace | Push, pull | Critical | Fixed in the server (R1) and daemon (R2); native check open (R13) |
 | DL-04 | Narrowing the sync filter deletes locally edited files with no backup | Pull (Team Sync) | High | Live |
 | DL-05 | A pull that fails after writing files leaves local edits overwritten and unreported | Pull | High | Live |
 | DL-06 | The whole-index pull fallback overwrites edits the pull meant to skip | Pull | High | Live, fallback only |
 | DL-07 | A case-only rename upstream leaves the old content, recorded as the new version | Pull | High | Live on Windows and macOS |
 | DL-08 | The server accepts paths that differ only by case | Push | High | Live |
-| DL-09 | Respelling a path (`Content//x`, `/Content/x`, `Content/x/`) bypasses someone else's exclusive lock | Push | High | Live |
+| DL-09 | Respelling a path (`Content//x`, `/Content/x`, `Content/x/`) bypasses someone else's exclusive lock | Push | High | Respellings, `::$DATA`, and `~1` fixed (R1); case spelling open (R6) |
 | DL-10 | Pull with a feature branch active takes the branch's changes back out of the workspace | Branch | High | Live |
 | DL-11 | The pre-submit merge on a feature branch reverts the branch's own earlier changes | Push, branch | High | Latent |
 | DL-12 | Submits to a feature branch have no lost-update protection | Push, branch | High | Latent |
 | DL-13 | A stacked branch can never merge after its parent merged | Merge | Medium | Live |
 | DL-14 | A conflict resolved on the branch, as the error says to, never merges | Merge | Medium | Live |
 | DL-15 | Deleting a branch discards unmerged changelists with no confirmation | Branch | Medium | Live |
-| DL-16 | The app records changelists whose content does not exist | Push | Low | Live |
-| DL-17 | Names Windows cannot store are accepted; a `:` hides a file's content in an NTFS stream, and a Windows "submit everything" then deletes the file | Push, pull | High | Live (Windows) |
+| DL-16 | The app records changelists whose content does not exist | Push | Low | Empty index refused (R1); existence check open (R19) |
+| DL-17 | Names Windows cannot store are accepted; a `:` hides a file's content in an NTFS stream, and a Windows "submit everything" then deletes the file | Push, pull | High | Fixed in the server (R1) and daemon (R2); native check open (R13) |
 | DL-18 | Names that differ only in Unicode normalization are accepted; on macOS they are one file | Push, pull | High | Live (macOS) |
 | DL-19 | On case-insensitive filesystems the daemon takes one file for two: deleting one spelling deletes both, phantom pending changes, Clean Workspace deletes tracked files | Pull, cleanup | High | Live (Windows, macOS) |
 | DL-20 | A same-size edit within one timestamp tick of a pull is invisible, then overwritten | Pull | High | Live (any OS; likelier on FAT32, exFAT, HFS+) |
 | DL-21 | An edit made while a pull runs is recorded as the pulled version, then overwritten | Pull | High | Live (any OS) |
 | DL-22 | A sync filter change that cannot remove one file leaves the files it did remove looking deleted | Pull (Team Sync) | High | Live (Windows locks; any failed delete) |
-| DL-23 | A pull writes into the workspace's own `.checkpoint` directory; one changelist can wipe every teammate's workspace | Push, pull | High, and a security issue | Live |
+| DL-23 | A pull writes into the workspace's own `.checkpoint` directory; one changelist can wipe every teammate's workspace | Push, pull | High, and a security issue | Fixed in the server (R1) and daemon (R2); native check open (R13) |
 | DL-24 | Executable bits are dropped on submit and stripped on pull | Push, pull (native) | High | Live (Linux, macOS) |
 | DL-25 | A failed pull stops putting edits back at the first file it cannot write | Pull | High | Live (Windows) |
 | DL-26 | A Team Sync rule typed in another case silently stops a folder from syncing | Pull (Team Sync, native) | Medium | Live |

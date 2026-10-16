@@ -25,6 +25,7 @@ import {
 } from "../storage-options.js";
 import { Logger } from "../../logging.js";
 import { DaemonConfig, type DaemonConfigType } from "../../daemon-config.js";
+import { isSafeWorkspacePath, resolveInWorkspace } from "../workspace-path.js";
 
 type StateBackend = DaemonConfigType["stateBackend"];
 
@@ -256,8 +257,8 @@ export async function applyArtifacts(
     let fileCount = 0;
     for (const fileId of fileIds) {
       const relPath = pathById.get(fileId);
-      if (!relPath) continue;
-      const fullPath = path.join(workspace.localPath, relPath);
+      if (!relPath || !isSafeWorkspacePath(relPath)) continue;
+      const fullPath = resolveInWorkspace(workspace.localPath, relPath);
       if (!existsSync(fullPath)) continue;
       const changelist = set.stateTree[fileId]!;
 
@@ -344,7 +345,8 @@ async function removeArtifactPaths(
   if (relPaths.length === 0) return;
   onStep?.("Removing stale binaries");
   for (const relPath of relPaths) {
-    const fullPath = path.join(workspace.localPath, relPath);
+    if (!isSafeWorkspacePath(relPath)) continue;
+    const fullPath = resolveInWorkspace(workspace.localPath, relPath);
     if (existsSync(fullPath)) {
       await fs.rm(fullPath, { force: true });
     }

@@ -21,13 +21,16 @@ import {
   vi,
 } from "vitest";
 
+vi.mock("~/server/repo-path", async (importOriginal) =>
+  (await import("../harness/stack")).repoPathModule(importOriginal),
+);
 vi.mock(
   "@checkpointvcs/longtail-addon",
-  async () => (await import("./stack")).fakeAddon,
+  async () => (await import("../harness/stack")).fakeAddon,
 );
 vi.mock("@checkpointvcs/common", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  const stack = await import("./stack");
+  const stack = await import("../harness/stack");
   return {
     ...actual,
     CreateApiClientAuth: stack.createApiClientAuth,
@@ -36,11 +39,11 @@ vi.mock("@checkpointvcs/common", async (importOriginal) => {
 });
 vi.mock(
   "../../../core/daemon/src/daemon-config.js",
-  async () => (await import("./stack")).fakeDaemonConfigModule,
+  async () => (await import("../harness/stack")).fakeDaemonConfigModule,
 );
 vi.mock(
   "../../../core/daemon/src/logging.js",
-  async () => (await import("./stack")).fakeLoggingModule,
+  async () => (await import("../harness/stack")).fakeLoggingModule,
 );
 
 import type { TeamSyncConfig } from "@checkpointvcs/common";
@@ -62,7 +65,7 @@ import {
   syncLatest,
   tearDownScene,
   type Scene,
-} from "./stack";
+} from "../harness/stack";
 
 /** A repo config with two default-on categories: code and content. */
 const repoConfig: TeamSyncConfig = {

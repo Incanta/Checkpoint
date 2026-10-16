@@ -11,6 +11,10 @@ import { ApiTypes } from "../../../types/api-types.js";
 import { FileStatus, FileType } from "../../../types/index.js";
 import { Logger } from "../../../logging.js";
 import { JobManager } from "../../../job-manager.js";
+import {
+  isSafeWorkspacePath,
+  resolveInWorkspace,
+} from "../../../util/workspace-path.js";
 
 export const syncRouter = router({
   pull: publicProcedure
@@ -240,7 +244,17 @@ export const syncRouter = router({
 
           let done = 0;
           for (const file of entries) {
-            const localFilePath = path.join(workspace.localPath, file.path);
+            if (!isSafeWorkspacePath(file.path)) {
+              errors.push({
+                path: file.path,
+                error: "not a path this workspace can safely hold",
+              });
+              continue;
+            }
+            const localFilePath = resolveInWorkspace(
+              workspace.localPath,
+              file.path,
+            );
             const tracked = state?.files[file.path];
 
             try {

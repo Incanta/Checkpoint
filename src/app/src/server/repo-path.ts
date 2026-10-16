@@ -8,9 +8,9 @@
 // repo asks for portability, unless every OS the team uses can store it (the
 // "portable" rules).
 //
-// Mirrored in the daemon (src/core/daemon/src/util/repo-path-rules.ts): the
-// app does not depend on @checkpointvcs/common. The test vectors in
-// src/tests/src/api/repo-path.test.ts run against both copies.
+// Mirrored in the daemon (src/core/daemon/src/util/repo-path-rules.ts), since the
+// app does not depend on @checkpointvcs/common;
+// src/tests/src/daemon/workspace-path.test.ts checks that both copies agree.
 
 /** Longest path accepted, in bytes of UTF-8. */
 export const MAX_PATH_BYTES = 1024;

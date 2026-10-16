@@ -39,14 +39,14 @@ import path from "node:path";
 import type { PrismaClient } from "@prisma/client";
 
 import type { WorkspaceTeamSyncSettings } from "../../../core/daemon/src/util/util.js";
-import { makeAppCaller } from "../harness/caller";
+import { makeAppCaller } from "./caller";
 import {
   makeOrg,
   makeRepo,
   makeUser,
   makeWorkspace,
   type TestUser,
-} from "../harness/fixtures";
+} from "./fixtures";
 
 type Caller = Awaited<ReturnType<typeof makeAppCaller>>;
 type AnyFn = (input: unknown) => Promise<unknown>;
@@ -712,11 +712,59 @@ export function apiAs(seat: Seat): Caller {
   return identities.get(seat.workspace.daemonId)!.caller;
 }
 
+declare global {
+  // eslint-disable-next-line no-var
+  var __checkpointSkipPathRules: boolean | undefined;
+}
+
+/**
+ * `~/server/repo-path` with a switch: while `asOlderServer` runs, the app
+ * accepts any path, as a server from before the path rules did (or a
+ * compromised one would). Repositories hold such paths, and older servers
+ * still serve them, so the daemon's own defenses are tested against them.
+ * Wire it up with
+ * `vi.mock("~/server/repo-path", async (io) => (await import("./stack")).repoPathModule(io))`.
+ */
+export async function repoPathModule(
+  importOriginal: () => Promise<Record<string, unknown>>,
+) {
+  const actual =
+    (await importOriginal()) as typeof import("~/server/repo-path");
+  return {
+    ...actual,
+    canonicalProblems: (
+      mods: Parameters<typeof actual.canonicalProblems>[0],
+    ) =>
+      globalThis.__checkpointSkipPathRules
+        ? []
+        : actual.canonicalProblems(mods),
+    portabilityProblems: (
+      ...args: Parameters<typeof actual.portabilityProblems>
+    ) =>
+      globalThis.__checkpointSkipPathRules
+        ? []
+        : actual.portabilityProblems(...args),
+  };
+}
+
+/** Runs `fn` against an app that stores any path (see repoPathModule). */
+export async function asOlderServer<T>(fn: () => Promise<T>): Promise<T> {
+  globalThis.__checkpointSkipPathRules = true;
+  try {
+    return await fn();
+  } finally {
+    globalThis.__checkpointSkipPathRules = false;
+  }
+}
+
 /**
  * Records a changelist on the seat's branch straight through the app API,
  * the way another client does: a teammate on an OS whose filesystem allows
  * names this one does not, a script, a tool. `write` maps each path to its
  * new content; `remove` lists paths to delete. Returns the changelist number.
+ *
+ * Path rules are off for it (see asOlderServer), since what it tests is how
+ * the daemon copes with paths a repository already holds.
  */
 export async function submitDirect(
   seat: Seat,
@@ -724,18 +772,20 @@ export async function submitDirect(
   message = "recorded through the API by another client",
 ): Promise<number> {
   const write = changes.write ?? {};
-  const created = await apiAs(seat).changelist.createChangelist({
-    message,
-    repoId: seat.workspace.repoId,
-    versionIndex: Object.keys(write).length > 0 ? storeVersion(write) : "",
-    branchName: seat.workspace.domainBranchName,
-    modifications: [
-      ...Object.keys(write).map((p) => ({ path: p, delete: false })),
-      ...(changes.remove ?? []).map((p) => ({ path: p, delete: true })),
-    ],
-    keepCheckedOut: false,
-    workspaceId: seat.workspace.id,
-  });
+  const created = await asOlderServer(() =>
+    apiAs(seat).changelist.createChangelist({
+      message,
+      repoId: seat.workspace.repoId,
+      versionIndex: Object.keys(write).length > 0 ? storeVersion(write) : "",
+      branchName: seat.workspace.domainBranchName,
+      modifications: [
+        ...Object.keys(write).map((p) => ({ path: p, delete: false })),
+        ...(changes.remove ?? []).map((p) => ({ path: p, delete: true })),
+      ],
+      keepCheckedOut: false,
+      workspaceId: seat.workspace.id,
+    }),
+  );
   return created.number;
 }
 

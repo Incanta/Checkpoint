@@ -18,6 +18,7 @@ import { writeVersionFiles } from "../build/version-files.js";
 import { reportSyncedChangelist } from "./events.js";
 import { DaemonConfig } from "../../daemon-config.js";
 import { Logger } from "../../logging.js";
+import { isSafeWorkspacePath, resolveInWorkspace } from "../workspace-path.js";
 
 export interface SyncPipelineOptions {
   changelistId: number | null;
@@ -240,7 +241,8 @@ async function reconcileSyncFilter(
   if (excluded.length > 0) {
     onStep?.("Applying sync filter");
     for (const relPath of excluded) {
-      const full = path.join(workspace.localPath, relPath);
+      if (!isSafeWorkspacePath(relPath)) continue;
+      const full = resolveInWorkspace(workspace.localPath, relPath);
       if (existsSync(full)) {
         await fs.rm(full, { force: true });
       }

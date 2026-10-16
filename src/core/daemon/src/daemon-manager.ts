@@ -37,6 +37,7 @@ import {
 } from "./util/team-sync/scheduler.js";
 import { runSyncPipeline } from "./util/team-sync/sync-pipeline.js";
 import { compareWithBaseline } from "./util/baseline.js";
+import { isSafeWorkspacePath } from "./util/workspace-path.js";
 import type { StateDelta } from "./util/state-delta.js";
 import { PathIndex, pathsUnderAny } from "./util/path-index.js";
 import {
@@ -1060,7 +1061,9 @@ export class DaemonManager {
       if (!changedFileIds.has(claim.fileId)) {
         const claimedPath = index.pathOf(claim.fileId);
         const baselineFile =
-          claimedPath !== undefined ? baselineState.files[claimedPath] : undefined;
+          claimedPath !== undefined
+            ? baselineState.files[claimedPath]
+            : undefined;
 
         if (claimedPath !== undefined && baselineFile) {
           const relativePath = claimedPath;
@@ -1250,8 +1253,12 @@ export class DaemonManager {
       const fullPath = path.join(f.parentPath, f.name).replace(/\\/g, "/");
       const relativePath = this.getRelativePath(workspace, fullPath);
 
-      // Skip .checkpoint directory
-      if (relativePath.startsWith(".checkpoint")) {
+      // Skip the .checkpoint directory (only it: a file named
+      // ".checkpointrc" is the user's).
+      if (
+        relativePath === ".checkpoint" ||
+        relativePath.startsWith(".checkpoint/")
+      ) {
         return;
       }
 
@@ -1285,6 +1292,11 @@ export class DaemonManager {
     )) {
       // Normalize key (strip leading slash for compatibility)
       const relativePath = stateKey.replace(/^\//, "");
+      // A path this workspace cannot hold (an older daemon recorded it) is
+      // missing because it cannot exist here, not because the user deleted
+      // it. Reporting it as deleted would let "submit everything" delete it
+      // for the team.
+      if (!isSafeWorkspacePath(relativePath)) continue;
       if (!seenBaselineFiles.has(relativePath)) {
         result.files[relativePath] = {
           path: relativePath,
@@ -1359,7 +1371,10 @@ export class DaemonManager {
         expandedDirty.add(filePath);
       }
     }
-    for (const filePath of pathsUnderAny(Object.keys(cached.files), dirtyPaths)) {
+    for (const filePath of pathsUnderAny(
+      Object.keys(cached.files),
+      dirtyPaths,
+    )) {
       expandedDirty.add(filePath);
     }
     const checkedOutIds = new Set(checkouts.map((c) => c.fileId));
@@ -1431,8 +1446,9 @@ export class DaemonManager {
       }
 
       if (!stat) {
-        // File deleted (or is a directory)
-        if (baselineFile) {
+        // File deleted (or is a directory). A path this workspace cannot
+        // hold is missing for that reason, not deleted (see the full scan).
+        if (baselineFile && isSafeWorkspacePath(relativePath)) {
           result.files[relativePath] = {
             path: relativePath,
             type: FileType.Unknown,
@@ -1675,7 +1691,10 @@ export class DaemonManager {
     await this.persistDelta(workspace, { staged: change });
 
     // Invalidate so the next refresh reports the new staged flags.
-    this.invalidatePendingPaths(workspace.id, [...(change.add ?? []), ...(change.remove ?? [])]);
+    this.invalidatePendingPaths(workspace.id, [
+      ...(change.add ?? []),
+      ...(change.remove ?? []),
+    ]);
   }
 
   /**
