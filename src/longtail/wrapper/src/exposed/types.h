@@ -23,6 +23,12 @@ struct Modification {
   const char* OldPath;
   int BaseState;
   long long BaseChangelist;
+  /**
+   * The file's mode to record (0644, 0755, ...), or 0 to read it from the
+   * file. Windows has no executable bit, so the daemon passes the mode the
+   * file has at the head there, and an edit made on Windows never strips +x.
+   */
+  uint16_t Mode;
 };
 
 }  // namespace Checkpoint

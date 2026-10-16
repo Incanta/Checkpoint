@@ -29,6 +29,7 @@ import {
   readdir,
   readFile,
   rm,
+  stat,
   utimes,
   writeFile,
 } from "node:fs/promises";
@@ -257,15 +258,31 @@ async function writeAll(
   files: Iterable<[string, Buffer]>,
 ): Promise<{ code: number; step: string } | null> {
   let failure: { code: number; step: string } | null = null;
+  // What the real addon reports it wrote (tracking-storage.h): each file's
+  // size and mtime as its write finished, written to the workspace once the
+  // pass succeeds.
+  const record: string[] = [];
   for (const [rel, bytes] of files) {
     try {
       await writeInto(root, rel, bytes);
+      const st = await stat(path.join(root, rel), { bigint: true });
+      const ns = st.mtimeNs;
+      record.push(
+        `${normalize(rel)}\t${st.size}\t${ns / 1_000_000_000n}\t${ns % 1_000_000_000n}\t-`,
+      );
     } catch (e) {
       failure ??= {
         code: errnoOf(e),
         step: `Could not write ${rel}: ${(e as Error).message}`,
       };
     }
+  }
+  if (!failure) {
+    await mkdir(path.join(root, ".checkpoint"), { recursive: true });
+    await writeFile(
+      path.join(root, ".checkpoint", "pull-written.tsv"),
+      record.map((line) => `${line}\n`).join(""),
+    );
   }
   return failure;
 }

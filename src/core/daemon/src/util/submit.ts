@@ -30,7 +30,12 @@ import { DaemonConfig } from "../daemon-config.js";
 // or null for a file that is new to the branch. Declared here rather than
 // taken from the addon's types so this builds against an installed addon that
 // predates the field; such an addon ignores it and the server skips the check.
-type SubmitModification = Modification & { baseChangelist?: number | null };
+// The same goes for mode (the file's permission bits, sent on Windows, which
+// has no executable bit of its own; an older addon records 0644).
+type SubmitModification = Modification & {
+  baseChangelist?: number | null;
+  mode?: number;
+};
 
 export async function submit(
   workspace: Workspace,
@@ -122,25 +127,38 @@ export async function submit(
   const baseState = isArtifactSubmit
     ? null
     : await getWorkspaceState(workspace.localPath, stateBackend);
+  const windows = process.platform === "win32";
   const modificationsWithBase: SubmitModification[] = uniqueModifications.map(
     (mod) => {
-      if (!baseState) {
-        return mod;
-      }
-      const normalized = mod.path.replace(/\\/g, "/").replace(/^\//, "");
-      const entry = baseState.files[normalized];
-      if (!entry) {
-        // Nothing local to have been based on. An add asserts the path is new
-        // to the branch; a delete of an untracked path asserts nothing.
-        return mod.delete ? mod : { ...mod, baseChangelist: null };
-      }
-      const cameFrom = entry.branch ?? workspace.domainBranchName;
-      if (cameFrom !== branchName) {
-        return mod;
-      }
-      return { ...mod, baseChangelist: entry.changelist };
+      const withMode = (m: SubmitModification): SubmitModification => {
+        if (!windows || m.delete || !baseState) return m;
+        const known =
+          baseState.files[m.path.replace(/\\/g, "/").replace(/^\//, "")]?.mode;
+        return known !== undefined ? { ...m, mode: known } : m;
+      };
+      return withMode(baseFor(mod));
     },
   );
+  // What each file was based on: see the comment above.
+  function baseFor(
+    mod: (typeof uniqueModifications)[number],
+  ): SubmitModification {
+    if (!baseState) {
+      return mod;
+    }
+    const normalized = mod.path.replace(/\\/g, "/").replace(/^\//, "");
+    const entry = baseState.files[normalized];
+    if (!entry) {
+      // Nothing local to have been based on. An add asserts the path is new
+      // to the branch; a delete of an untracked path asserts nothing.
+      return mod.delete ? mod : { ...mod, baseChangelist: null };
+    }
+    const cameFrom = entry.branch ?? workspace.domainBranchName;
+    if (cameFrom !== branchName) {
+      return mod;
+    }
+    return { ...mod, baseChangelist: entry.changelist };
+  }
 
   console.log(`[submit] Calling SubmitAsync:`);
   console.log(`[submit]   branchName: ${branchName}`);
@@ -183,12 +201,19 @@ export async function submit(
   // version": a file edited while a long submit was running would otherwise
   // have its newer, unsubmitted content recorded as the baseline, and that
   // edit would never show as pending.
-  const statBeforeSubmit = new Map<string, { size: number; mtimeMs: number }>();
+  const statBeforeSubmit = new Map<
+    string,
+    { size: number; mtimeMs: number; mode: number }
+  >();
   for (const mod of uniqueModifications) {
     if (mod.delete) continue;
     try {
       const stat = await fs.stat(path.join(workspace.localPath, mod.path));
-      statBeforeSubmit.set(mod.path, { size: stat.size, mtimeMs: stat.mtimeMs });
+      statBeforeSubmit.set(mod.path, {
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        mode: stat.mode & 0o777,
+      });
     } catch {
       // The addon reports a missing file itself.
     }
@@ -348,12 +373,22 @@ export async function submit(
         const stat =
           statBeforeSubmit.get(modification.path) ?? (await fs.stat(fullPath));
 
+        // The mode the submit recorded: the file's own on Linux and macOS,
+        // the one sent (or 0644 for a new file) on Windows.
+        const sentMode = modificationsWithBase.find(
+          (m) => m.path === modification.path,
+        )?.mode;
+        const mode = windows
+          ? (sentMode ?? 0o644)
+          : (statBeforeSubmit.get(modification.path)?.mode ??
+            (stat as { mode?: number }).mode! & 0o777);
         const stateFile: WorkspaceStateFile = {
           fileId: fileId,
           changelist: result.changelistNumber,
           md5: "",
           size: stat.size,
           mtime: stat.mtimeMs,
+          mode,
         };
 
         upsert[normalizedPath] = stateFile;

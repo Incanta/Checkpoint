@@ -24,4 +24,10 @@ export interface WorkspaceStateFile {
    * compareWithBaseline). Absent on entries from older daemons.
    */
   recordedAt?: number;
+  /**
+   * The file's permission bits (0o644, 0o755) as last pulled or submitted.
+   * Absent on entries from older daemons, and where nothing told the daemon
+   * (a Windows pull by an addon that does not report modes).
+   */
+  mode?: number;
 }

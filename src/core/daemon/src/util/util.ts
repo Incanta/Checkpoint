@@ -100,7 +100,7 @@ export type ArtifactStateFile = WorkspaceStateFile & {
   artifactType?: string;
 };
 
-export const WORKSPACE_STATE_VERSION = 4;
+export const WORKSPACE_STATE_VERSION = 5;
 
 export interface WorkspaceState {
   /** State schema version; absent = 1. Current: WORKSPACE_STATE_VERSION. */

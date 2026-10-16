@@ -12,7 +12,14 @@
  *     empty state: a workspace that tracks nothing and has synced nothing.
  */
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -41,13 +48,19 @@ describe("compareWithBaseline", () => {
   const strict = { whenUnknowable: "changed" } as const;
 
   it("is changed when the file is not tracked", () => {
-    expect(compareWithBaseline({ size: 1, mtimeMs: 1 }, undefined, lenient)).toBe("changed");
+    expect(
+      compareWithBaseline({ size: 1, mtimeMs: 1 }, undefined, lenient),
+    ).toBe("changed");
   });
 
   it("is changed when the size differs, whatever else matches", () => {
     for (const md5 of ["", "abc"]) {
       expect(
-        compareWithBaseline({ size: 101, mtimeMs: 1000.5 }, entry({ md5 }), lenient),
+        compareWithBaseline(
+          { size: 101, mtimeMs: 1000.5 },
+          entry({ md5 }),
+          lenient,
+        ),
       ).toBe("changed");
     }
   });
@@ -55,14 +68,22 @@ describe("compareWithBaseline", () => {
   it("is unchanged when size and mtime both match", () => {
     for (const md5 of ["", "abc"]) {
       expect(
-        compareWithBaseline({ size: 100, mtimeMs: 1000.5 }, entry({ md5 }), strict),
+        compareWithBaseline(
+          { size: 100, mtimeMs: 1000.5 },
+          entry({ md5 }),
+          strict,
+        ),
       ).toBe("unchanged");
     }
   });
 
   it("asks for the hash when the file was written since and a hash was recorded", () => {
     expect(
-      compareWithBaseline({ size: 100, mtimeMs: 2000 }, entry({ md5: "abc" }), lenient),
+      compareWithBaseline(
+        { size: 100, mtimeMs: 2000 },
+        entry({ md5: "abc" }),
+        lenient,
+      ),
     ).toBe("compare-hash");
   });
 
@@ -97,14 +118,24 @@ describe("compareWithBaseline", () => {
     // State written by old versions. Change detection must not flag the whole
     // workspace; the pull would rather copy a file it did not need to.
     const legacy = entry({ mtime: undefined });
-    expect(compareWithBaseline({ size: 100, mtimeMs: 5 }, legacy, lenient)).toBe("unchanged");
-    expect(compareWithBaseline({ size: 100, mtimeMs: 5 }, legacy, strict)).toBe("changed");
+    expect(
+      compareWithBaseline({ size: 100, mtimeMs: 5 }, legacy, lenient),
+    ).toBe("unchanged");
+    expect(compareWithBaseline({ size: 100, mtimeMs: 5 }, legacy, strict)).toBe(
+      "changed",
+    );
   });
 
   it("treats an empty file like any other", () => {
     const empty = entry({ size: 0, mtime: 7 });
-    expect(compareWithBaseline({ size: 0, mtimeMs: 7 }, empty, strict)).toBe("unchanged");
-    expect(compareWithBaseline({ size: 0, mtimeMs: 8 }, empty, strict)).toBe("changed");
-    expect(compareWithBaseline({ size: 1, mtimeMs: 7 }, empty, strict)).toBe("changed");
+    expect(compareWithBaseline({ size: 0, mtimeMs: 7 }, empty, strict)).toBe(
+      "unchanged",
+    );
+    expect(compareWithBaseline({ size: 0, mtimeMs: 8 }, empty, strict)).toBe(
+      "changed",
+    );
+    expect(compareWithBaseline({ size: 1, mtimeMs: 7 }, empty, strict)).toBe(
+      "changed",
+    );
   });
 });

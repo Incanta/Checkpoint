@@ -96,9 +96,9 @@ describe("sqlite state store", () => {
         .prepare("SELECT value FROM workspace_meta WHERE key = 'schemaVersion'")
         .get() as { value: string }
     ).value;
-    const columns = db
-      .prepare("PRAGMA table_info(files)")
-      .all() as Array<{ name: string }>;
+    const columns = db.prepare("PRAGMA table_info(files)").all() as Array<{
+      name: string;
+    }>;
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
       .all() as Array<{ name: string }>;

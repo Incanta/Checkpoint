@@ -996,6 +996,17 @@ export class DaemonManager {
       hasChanged = currentHash !== baselineFile.md5;
     }
 
+    // A mode-only change (chmod +x) is a change on Linux and macOS, where the
+    // bit is real and is submitted with the file. Windows has no such bit.
+    if (
+      !hasChanged &&
+      baselineFile?.mode !== undefined &&
+      process.platform !== "win32" &&
+      (stat.mode & 0o777) !== baselineFile.mode
+    ) {
+      hasChanged = true;
+    }
+
     if (!hasChanged) return null;
 
     const isCheckedOut = baselineFile

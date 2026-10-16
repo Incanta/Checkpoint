@@ -1,14 +1,11 @@
 /**
- * Red team, native layer: what a submit and a pull do to file modes on Linux
- * and macOS. Uses the real longtail addon against running services, like
- * src/integration, so it is skipped unless CHECKPOINT_TEST_DAEMON_ID is set
- * (see that harness), and on Windows, which has no executable bit.
- *
- * The native submit records every file as 0644 (submit.cpp, where it builds
- * the file infos), and both native pulls apply the recorded permissions to
- * each file they write (retain_permissions), so the executable bit of a
- * script or a binary is dropped when it is submitted and stripped from a
- * teammate's copy whenever it changes. See ../README.md.
+ * File modes on Linux and macOS: the native submit records each file's real
+ * mode, and the pull applies it, so a script or binary made executable stays
+ * executable for teammates, and a local chmod survives an upstream change
+ * that did not touch the mode. Uses the real addon against running services,
+ * so it is skipped unless CHECKPOINT_TEST_DAEMON_ID is set (see harness.ts),
+ * and on Windows, which has no executable bit. Moved here from the data-loss
+ * red team (DL-24).
  */
 import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,17 +13,17 @@ import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { pull } from "../../../../core/daemon/src/util/pull.js";
-import { closeAllStateStores } from "../../../../core/daemon/src/util/state-store.js";
-import { submit } from "../../../../core/daemon/src/util/submit.js";
-import type { Workspace } from "../../../../core/daemon/src/util/util.js";
+import { pull } from "../../../core/daemon/src/util/pull.js";
+import { closeAllStateStores } from "../../../core/daemon/src/util/state-store.js";
+import { submit } from "../../../core/daemon/src/util/submit.js";
+import type { Workspace } from "../../../core/daemon/src/util/util.js";
 import {
   DAEMON_ID,
   createContext,
   enabled,
   headChangelistNumber,
   type IntegrationContext,
-} from "../../integration/harness.js";
+} from "./harness.js";
 
 interface Seat {
   workspace: Workspace;
@@ -35,7 +32,7 @@ interface Seat {
 
 const posix = process.platform !== "win32";
 
-describe.skipIf(!enabled || !posix)("data loss (native): file modes", () => {
+describe.skipIf(!enabled || !posix)("file modes (native)", () => {
   let ctx: IntegrationContext;
   const seats: Seat[] = [];
 
@@ -127,5 +124,43 @@ describe.skipIf(!enabled || !posix)("data loss (native): file modes", () => {
     await pull(bob.workspace, ctx.orgId, await headChangelistNumber(ctx));
 
     expect((await modeOf(bob, "Tools/build.sh")).toString(8)).toBe("755");
+  });
+
+  it("submits a mode-only change", async () => {
+    const alice = await seat("alice3");
+    await put(alice, "Tools/run.sh", "#!/bin/sh\necho run\n", 0o644);
+    await send(alice, ["Tools/run.sh"]);
+    await chmod(path.join(alice.root, "Tools/run.sh"), 0o755);
+    await send(alice, ["Tools/run.sh"]);
+
+    const bob = await seat("bob3");
+    await pull(bob.workspace, ctx.orgId, await headChangelistNumber(ctx));
+
+    expect((await modeOf(bob, "Tools/run.sh")).toString(8)).toBe("755");
+  });
+
+  it("keeps a local chmod when upstream changes the content but not the mode", async () => {
+    const alice = await seat("alice4");
+    await put(alice, "Tools/lint.sh", "#!/bin/sh\necho v1\n", 0o644);
+    await send(alice, ["Tools/lint.sh"]);
+    const bob = await seat("bob4");
+    await pull(bob.workspace, ctx.orgId, await headChangelistNumber(ctx));
+    await chmod(path.join(bob.root, "Tools/lint.sh"), 0o755);
+
+    await put(alice, "Tools/lint.sh", "#!/bin/sh\necho v2\n", 0o644);
+    await send(alice, ["Tools/lint.sh"]);
+    await pull(bob.workspace, ctx.orgId, await headChangelistNumber(ctx));
+
+    expect((await modeOf(bob, "Tools/lint.sh")).toString(8)).toBe("755");
+  });
+
+  it("keeps a file executable by its owner only as it is", async () => {
+    const alice = await seat("alice5");
+    await put(alice, "Tools/private.sh", "#!/bin/sh\n", 0o700);
+    await send(alice, ["Tools/private.sh"]);
+    const bob = await seat("bob5");
+    await pull(bob.workspace, ctx.orgId, await headChangelistNumber(ctx));
+
+    expect((await modeOf(bob, "Tools/private.sh")).toString(8)).toBe("700");
   });
 });

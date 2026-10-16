@@ -5,6 +5,7 @@
 #include "../util/upload-status.h"
 #include "../util/version-index-io.h"
 #include "main.h"
+#include "../util/asset-path.h"
 
 #include <iostream>
 #include <string>
@@ -140,6 +141,24 @@ int32_t SubmitSync(
     uint32_t NumModifications,
     const Checkpoint::Modification* Modifications,
     WrapperAsyncHandle* handle) {
+  // Never read (and upload) a file from outside the workspace or its
+  // .checkpoint directory, whatever the caller asks for.
+  for (uint32_t i = 0; i < NumModifications; ++i) {
+    const char* checked[] = {Modifications[i].IsDelete ? nullptr : Modifications[i].Path,
+                             Modifications[i].OldPath};
+    for (const char* p : checked) {
+      if (!p) continue;
+      const std::string unsafe = Checkpoint::UnsafeAssetPathReason(p);
+      if (!unsafe.empty()) {
+        const std::string step = std::string("Refusing to submit ") + p + ": " + unsafe;
+        SetHandleStep(handle, step.c_str());
+        handle->error = EINVAL;
+        handle->settled = 1;
+        return EINVAL;
+      }
+    }
+  }
+
   struct Longtail_HashRegistryAPI* hash_registry = Longtail_CreateFullHashRegistry();
   struct Longtail_JobAPI* job_api = Longtail_CreateBikeshedJobAPI(Longtail_GetCPUCount(), 0);
   struct Longtail_CompressionRegistryAPI* compression_registry = Longtail_CreateFullCompressionRegistry();
@@ -254,6 +273,8 @@ int32_t SubmitSync(
     std::string filename;
     uint64_t size;
     bool found;
+    /** The file's permissions as read from disk, or 0 if not read. */
+    uint16_t permissions = 0;
   };
   std::unordered_map<std::string, std::vector<ModEntry>> dir_to_files;
 
@@ -322,6 +343,7 @@ int32_t SubmitSync(
             for (size_t entry_index : it->second) {
               if (!entries[entry_index].found) {
                 entries[entry_index].size = props.m_Size;
+                entries[entry_index].permissions = props.m_Permissions;
                 entries[entry_index].found = true;
                 --remaining;
               }
@@ -454,7 +476,24 @@ int32_t SubmitSync(
       uint32_t length = (uint32_t)strlen(Modifications[i].Path) + 1;
 
       file_infos->m_Sizes[file_infos_num] = entry.size;
-      file_infos->m_Permissions[file_infos_num] = 0644;
+      // The mode the file really has, so an executable stays executable
+      // for teammates. The daemon passes one on Windows, which has no
+      // executable bit; elsewhere it is read from the file.
+      uint16_t mode = Modifications[i].Mode;
+#ifndef _WIN32
+      if (mode == 0) {
+        mode = entry.permissions;
+        if (mode == 0) {
+          char* full_path = file_storage_api->ConcatPath(file_storage_api, LocalRootPath, Modifications[i].Path);
+          if (full_path) {
+            file_storage_api->GetPermissions(file_storage_api, full_path, &mode);
+            Longtail_Free(full_path);
+          }
+        }
+        mode &= 0777;
+      }
+#endif
+      file_infos->m_Permissions[file_infos_num] = mode != 0 ? mode : 0644;
       file_infos->m_PathStartOffsets[file_infos_num] = offset;
       memmove(&file_infos->m_PathData[offset], Modifications[i].Path, length);
       offset += length;

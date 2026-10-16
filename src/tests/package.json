@@ -11,8 +11,7 @@
     "test:watch": "vitest",
     "test:billing": "vitest run src/billing",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:data-loss": "vitest run --config vitest.data-loss.config.ts",
-    "test:data-loss:native": "vitest run --config vitest.data-loss-native.config.ts"
+    "test:data-loss": "vitest run --config vitest.data-loss.config.ts"
   },
   "peerDependencies": {
     "@trpc/client": "^11.11.0",

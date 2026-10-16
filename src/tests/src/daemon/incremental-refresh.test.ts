@@ -18,7 +18,9 @@ vi.mock("@checkpointvcs/common", async (importOriginal) => {
   const client = {
     file: { getWorkspaceClaims: { query: async () => [] } },
     repo: { getRepo: { query: async () => ({ orgId: "org" }) } },
-    org: { getBinaryExtensions: { query: async () => ({ resolved: [".uasset"] }) } },
+    org: {
+      getBinaryExtensions: { query: async () => ({ resolved: [".uasset"] }) },
+    },
     branch: { getBranch: { query: async () => null } },
     workspace: { setBranchState: { mutate: async () => undefined } },
   };
@@ -74,102 +76,131 @@ async function put(relativePath: string, content: string) {
 }
 
 /** Path -> status, the part of a refresh result that must agree. */
-function summary(result: { files: Record<string, { status: unknown; staged?: boolean }> }) {
+function summary(result: {
+  files: Record<string, { status: unknown; staged?: boolean }>;
+}) {
   return Object.fromEntries(
     Object.entries(result.files)
-      .map(([p, f]) => [p, `${String(f.status)}${f.staged ? "+staged" : ""}`] as const)
+      .map(
+        ([p, f]) =>
+          [p, `${String(f.status)}${f.staged ? "+staged" : ""}`] as const,
+      )
       .sort(([a], [b]) => a.localeCompare(b)),
   );
 }
 
 describe("incremental refresh", () => {
-  it.each([1, 2, 3, 4])("agrees with a full rescan after random edits (seed %i)", async (seed) => {
-    const rand = rng(seed);
+  it.each([1, 2, 3, 4])(
+    "agrees with a full rescan after random edits (seed %i)",
+    async (seed) => {
+      const rand = rng(seed);
 
-    // A tracked tree, recorded in state with the size and mtime on disk.
-    const tracked: string[] = [];
-    for (const dir of ["src/a", "src/b", "src/b/deep", "content", "docs"]) {
-      for (let i = 0; i < 6; i++) {
-        const ext = dir === "content" ? "uasset" : "txt";
-        tracked.push(`${dir}/f${i}.${ext}`);
-      }
-    }
-    const files: Record<string, { fileId: string; changelist: number; md5: string; size: number; mtime: number }> = {};
-    for (const p of tracked) {
-      await put(p, `${p}\n`);
-      const s = await stat(path.join(root, p));
-      files[p] = { fileId: `id:${p}`, changelist: 1, md5: "", size: s.size, mtime: s.mtimeMs };
-    }
-    await put("Saved/logs/old.log", "untracked");
-    await updateWorkspaceState(
-      { localPath: root },
-      { files: { upsert: files }, meta: { changelistNumber: 1 } },
-      "sqlite",
-    );
-
-    await manager.registerWorkspace(workspace, { watch: false });
-    // Stand in for the filesystem watcher: this test reports the dirty paths
-    // itself, and the manager only trusts its cache while a watcher runs.
-    (manager as unknown as { watchers: Map<string, { close(): void }> }).watchers.set(
-      workspace.id,
-      { close: () => undefined },
-    );
-    await manager.refreshWorkspaceContents(workspace, { forceFullRefresh: true });
-    const dirty = (manager as unknown as { dirtyFiles: Map<string, Set<string>> })
-      .dirtyFiles;
-
-    const incrementalCalls = vi.spyOn(
-      manager as unknown as { incrementalRefresh: () => unknown },
-      "incrementalRefresh",
-    );
-
-    let counter = 0;
-    for (let round = 0; round < 6; round++) {
-      const reported: string[] = [];
-      for (let op = 0; op < 4; op++) {
-        const live = tracked.filter((p) => files[p]);
-        const pick = live[Math.floor(rand() * live.length)]!;
-        const r = rand();
-        if (r < 0.3) {
-          await put(pick, `edited ${++counter} ${"x".repeat(counter)}`);
-          reported.push(pick);
-        } else if (r < 0.45) {
-          await rm(path.join(root, pick), { force: true });
-          reported.push(pick);
-        } else if (r < 0.6) {
-          const p = `${path.posix.dirname(pick)}/new${++counter}.txt`;
-          await put(p, "new");
-          reported.push(p);
-        } else if (r < 0.75) {
-          const top = `Untracked${++counter}`;
-          await put(`${top}/inner/file.txt`, "u");
-          reported.push(top, `${top}/inner/file.txt`);
-        } else if (r < 0.85) {
-          // A whole tracked directory removed: the watcher reports the
-          // directory, not each file inside it.
-          const dir = rand() < 0.5 ? "src/b/deep" : "docs";
-          await rm(path.join(root, dir), { recursive: true, force: true });
-          reported.push(dir);
-        } else {
-          await put(`Saved/logs/new${++counter}.log`, "u");
-          reported.push(`Saved/logs/new${counter}.log`);
+      // A tracked tree, recorded in state with the size and mtime on disk.
+      const tracked: string[] = [];
+      for (const dir of ["src/a", "src/b", "src/b/deep", "content", "docs"]) {
+        for (let i = 0; i < 6; i++) {
+          const ext = dir === "content" ? "uasset" : "txt";
+          tracked.push(`${dir}/f${i}.${ext}`);
         }
       }
-      if (rand() < 0.5) {
-        const stage = tracked.filter((p) => files[p]).slice(0, 2);
-        await manager.stage(workspace, stage);
+      const files: Record<
+        string,
+        {
+          fileId: string;
+          changelist: number;
+          md5: string;
+          size: number;
+          mtime: number;
+        }
+      > = {};
+      for (const p of tracked) {
+        await put(p, `${p}\n`);
+        const s = await stat(path.join(root, p));
+        files[p] = {
+          fileId: `id:${p}`,
+          changelist: 1,
+          md5: "",
+          size: s.size,
+          mtime: s.mtimeMs,
+        };
+      }
+      await put("Saved/logs/old.log", "untracked");
+      await updateWorkspaceState(
+        { localPath: root },
+        { files: { upsert: files }, meta: { changelistNumber: 1 } },
+        "sqlite",
+      );
+
+      await manager.registerWorkspace(workspace, { watch: false });
+      // Stand in for the filesystem watcher: this test reports the dirty paths
+      // itself, and the manager only trusts its cache while a watcher runs.
+      (
+        manager as unknown as { watchers: Map<string, { close(): void }> }
+      ).watchers.set(workspace.id, { close: () => undefined });
+      await manager.refreshWorkspaceContents(workspace, {
+        forceFullRefresh: true,
+      });
+      const dirty = (
+        manager as unknown as { dirtyFiles: Map<string, Set<string>> }
+      ).dirtyFiles;
+
+      const incrementalCalls = vi.spyOn(
+        manager as unknown as { incrementalRefresh: () => unknown },
+        "incrementalRefresh",
+      );
+
+      let counter = 0;
+      for (let round = 0; round < 6; round++) {
+        const reported: string[] = [];
+        for (let op = 0; op < 4; op++) {
+          const live = tracked.filter((p) => files[p]);
+          const pick = live[Math.floor(rand() * live.length)]!;
+          const r = rand();
+          if (r < 0.3) {
+            await put(pick, `edited ${++counter} ${"x".repeat(counter)}`);
+            reported.push(pick);
+          } else if (r < 0.45) {
+            await rm(path.join(root, pick), { force: true });
+            reported.push(pick);
+          } else if (r < 0.6) {
+            const p = `${path.posix.dirname(pick)}/new${++counter}.txt`;
+            await put(p, "new");
+            reported.push(p);
+          } else if (r < 0.75) {
+            const top = `Untracked${++counter}`;
+            await put(`${top}/inner/file.txt`, "u");
+            reported.push(top, `${top}/inner/file.txt`);
+          } else if (r < 0.85) {
+            // A whole tracked directory removed: the watcher reports the
+            // directory, not each file inside it.
+            const dir = rand() < 0.5 ? "src/b/deep" : "docs";
+            await rm(path.join(root, dir), { recursive: true, force: true });
+            reported.push(dir);
+          } else {
+            await put(`Saved/logs/new${++counter}.log`, "u");
+            reported.push(`Saved/logs/new${counter}.log`);
+          }
+        }
+        if (rand() < 0.5) {
+          const stage = tracked.filter((p) => files[p]).slice(0, 2);
+          await manager.stage(workspace, stage);
+        }
+
+        for (const p of reported) dirty.get(workspace.id)!.add(p);
+        const incremental = summary(
+          await manager.refreshWorkspaceContents(workspace),
+        );
+        const full = summary(
+          await manager.refreshWorkspaceContents(workspace, {
+            forceFullRefresh: true,
+          }),
+        );
+        expect(incremental, `seed ${seed} round ${round}`).toEqual(full);
       }
 
-      for (const p of reported) dirty.get(workspace.id)!.add(p);
-      const incremental = summary(await manager.refreshWorkspaceContents(workspace));
-      const full = summary(
-        await manager.refreshWorkspaceContents(workspace, { forceFullRefresh: true }),
-      );
-      expect(incremental, `seed ${seed} round ${round}`).toEqual(full);
-    }
-
-    // Every round's first refresh took the incremental path.
-    expect(incrementalCalls.mock.calls.length).toBe(6);
-    incrementalCalls.mockRestore();
-  });
+      // Every round's first refresh took the incremental path.
+      expect(incrementalCalls.mock.calls.length).toBe(6);
+      incrementalCalls.mockRestore();
+    },
+  );
 });

@@ -133,47 +133,6 @@ describe("data loss: pull", () => {
     );
   });
 
-  it("does not record an edit made while the pull runs as the version it pulled", async () => {
-    // A big sync runs for minutes, and people keep working (or leave the
-    // editor open, which resaves). notes.txt is written early; Bob changes it
-    // before the pull finishes. The pull then stats every file it pulled and
-    // records that as the pristine baseline, so the edit stops being a local
-    // change and the next upstream change overwrites it with no backup.
-    // submit() records the stat it took before reading for exactly this
-    // reason (statBeforeSubmit in util/submit.ts); the pull does not.
-    const { alice, bob } = scene!;
-    await put(alice, "notes.txt", "v1\n");
-    await stageAndSubmit(alice, ["notes.txt"]);
-    await syncLatest(bob);
-    await put(alice, "notes.txt", "v2 from alice\n");
-    await stageAndSubmit(alice, ["notes.txt"]);
-
-    overrides.duringPull = () =>
-      put(
-        bob,
-        "notes.txt",
-        "v2 from alice\nbob's edit, made during the pull\n",
-      );
-    await syncLatest(bob);
-    delete overrides.duringPull;
-
-    expect
-      .soft(
-        await pendingChanges(bob),
-        "notes.txt differs from what the pull wrote, so it must be pending",
-      )
-      .toHaveProperty(["notes.txt"], stillPending);
-
-    await put(alice, "notes.txt", "v3 from alice\n");
-    await stageAndSubmit(alice, ["notes.txt"]);
-    await syncLatest(bob);
-
-    expect(
-      await survives(bob, "notes.txt", "made during the pull"),
-      `${await describeFile(bob, "notes.txt")}, and no backup holds Bob's edit`,
-    ).toBe(true);
-  });
-
   it("records the workspace at the pulled changelist (sanity check of the harness)", async () => {
     const { alice, bob } = scene!;
     await put(alice, "a.txt", "a\n");

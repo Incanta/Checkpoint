@@ -93,7 +93,13 @@ const repoConfig: TeamSyncConfig = {
       hidden: false,
     },
   ],
-} as TeamSyncConfig;
+  presets: [],
+  buildSteps: [],
+  artifacts: [],
+  contentBadges: [],
+  tools: [],
+  forceClean: { changelists: [] },
+};
 
 const windows = process.platform === "win32";
 

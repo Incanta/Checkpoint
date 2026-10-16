@@ -13,7 +13,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -74,7 +81,10 @@ describe("resolveStateBackend", () => {
 
   it("moves a stray state.json beside an existing state.db out of the way", async () => {
     await writeSqliteState(sample);
-    await writeFile(jsonPath(), JSON.stringify({ changelistNumber: 0, files: {} }));
+    await writeFile(
+      jsonPath(),
+      JSON.stringify({ changelistNumber: 0, files: {} }),
+    );
 
     expect(resolveStateBackend(root, "json")).toBe("sqlite");
 
@@ -87,7 +97,9 @@ describe("resolveStateBackend", () => {
     // JSON stopped being a backend; such a workspace moves to state.db.
     await writeFile(jsonPath(), JSON.stringify(sample));
     expect(resolveStateBackend(root, "json")).toBe("sqlite");
-    expect((await getStateStore(root, "json").load()).changelistNumber).toBe(42);
+    expect((await getStateStore(root, "json").load()).changelistNumber).toBe(
+      42,
+    );
     expect(existsSync(dbPath())).toBe(true);
     expect(existsSync(`${jsonPath()}.bak`)).toBe(true);
   });
@@ -113,7 +125,10 @@ describe("state store selection", () => {
     expect(latest.changelistNumber).toBe(42);
     await saveWorkspaceState(
       { localPath: root },
-      { ...latest, teamSync: { ...(latest.teamSync ?? {}), lastBuiltChangelist: 42 } },
+      {
+        ...latest,
+        teamSync: { ...(latest.teamSync ?? {}), lastBuiltChangelist: 42 },
+      },
     );
     closeAllStateStores();
 
@@ -206,7 +221,10 @@ describe("fillMissing (daemon.json backfill)", () => {
     stateBackend: "sqlite",
     mcp: { enabled: false, port: 13011 },
     workspaces: [] as unknown[],
-    logging: { level: "info", logFile: { enabled: false, maxArchivedFiles: 10 } },
+    logging: {
+      level: "info",
+      logFile: { enabled: false, maxArchivedFiles: 10 },
+    },
   };
 
   it("adds missing keys at every depth without overriding present ones", () => {
@@ -221,7 +239,10 @@ describe("fillMissing (daemon.json backfill)", () => {
       stateBackend: "sqlite",
       mcp: { enabled: true, port: 13011 },
       workspaces: [{ id: "ws" }],
-      logging: { level: "debug", logFile: { enabled: true, maxArchivedFiles: 10 } },
+      logging: {
+        level: "debug",
+        logFile: { enabled: true, maxArchivedFiles: 10 },
+      },
     });
   });
 

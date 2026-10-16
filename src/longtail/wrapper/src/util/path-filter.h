@@ -25,6 +25,9 @@ namespace Checkpoint {
  *     directory's whole subtree, as gitignore does.
  *   - "*" matches within a single path segment, "**" matches across segments,
  *     and "?" matches one non-separator character.
+ *   - ASCII letters match in either case, as the `ignore` package (which folds
+ *     case by default) matches them. Other bytes compare exactly, so the daemon
+ *     withholds rules containing non-ASCII letters.
  *
  * NOT supported: "!" negation and "[...]" character classes. The daemon is
  * responsible for withholding rules that use them (it falls back to filtering

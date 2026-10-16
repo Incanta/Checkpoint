@@ -11,11 +11,12 @@
 # Kept out of test.yaml so its jobs keep meaning "nothing regressed": a known
 # finding never turns them red, and a regression never hides among findings.
 #
-# Two jobs:
-#   red-team  The in-process suite on Linux, Windows, and macOS. It needs no
-#             services and no native build (the addon is faked).
-#   native    The tests in src/data-loss/native, which use the real addon
-#             built from this commit against running services, on Linux.
+# The in-process suite runs on Linux, Windows, and macOS. It needs no
+# services and no native build: the addon is faked, except for the one test
+# that loads the installed addon's include matcher (DL-26), which stays red
+# until a release carries the fix. The native-layer findings are fixed, and
+# their tests run in test.yaml's integration step against the source-built
+# addon (src/tests/src/integration).
 
 name: Data-loss red team
 
@@ -27,7 +28,6 @@ on:
     paths:
       - "src/tests/src/data-loss/**"
       - "src/tests/vitest.data-loss.config.ts"
-      - "src/tests/vitest.data-loss-native.config.ts"
       - "scripts/ci/data-loss-summary.mjs"
       - ".github/workflows/data-loss.yaml"
   workflow_dispatch:
@@ -88,126 +88,3 @@ jobs:
           path: src/tests/data-loss-results.json
           if-no-files-found: warn
 
-  native:
-    name: red team, native layer (ubuntu-latest)
-    runs-on: ubuntu-latest
-    # A cold longtail addon build (cache miss below) adds several minutes.
-    timeout-minutes: 45
-    defaults:
-      run:
-        shell: bash
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Enable Corepack
-        run: |
-          # See the note on the same step in test.yaml.
-          yarn_path=$(command -v yarn || true)
-          if [ -n "$yarn_path" ]; then
-            corepack enable --install-directory "$(dirname "$yarn_path")"
-          else
-            corepack enable
-          fi
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: "24"
-
-      - name: Install dependencies
-        run: yarn install
-
-      - name: Build services
-        run: yarn build
-
-      - name: Install C++ dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake g++ libcurl4-openssl-dev nlohmann-json3-dev libssl-dev
-
-      # The addon built from this commit, not the last publish, so a fix to
-      # the native layer shows up here before it is released. The cache is
-      # the one test.yaml uses (same key). It is saved straight after a
-      # build, because a cache action's own save at the end of the job is
-      # skipped when the job fails, and this job fails while findings remain.
-      - name: Fingerprint the addon sources
-        id: addon-fp
-        run: |
-          fingerprint=$(node scripts/addon-source-fingerprint.js)
-          echo "Addon source fingerprint: ${fingerprint}"
-
-      - name: Restore source-built longtail addon
-        id: addon-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: .ci/longtail-addon
-          key: longtail-addon-${{ runner.os }}-${{ runner.arch }}-node24-build1-${{ steps.addon-fp.outputs.fingerprint }}
-
-      - name: Build longtail addon from source
-        if: steps.addon-cache.outputs.cache-hit != 'true'
-        run: node scripts/ci/build-longtail-addon.mjs
-
-      - name: Save source-built longtail addon
-        if: steps.addon-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: .ci/longtail-addon
-          key: longtail-addon-${{ runner.os }}-${{ runner.arch }}-node24-build1-${{ steps.addon-fp.outputs.fingerprint }}
-
-      - name: Use the source-built longtail addon
-        run: node scripts/ci/install-local-addon.mjs
-
-      - name: Start services
-        run: yarn dev --background
-
-      - name: Wait for the app and the server
-        run: |
-          for port in 13000 13001; do
-            for i in $(seq 1 90); do
-              if curl -sf "http://localhost:$port" > /dev/null 2>&1; then
-                echo "Port $port is reachable"
-                break
-              fi
-              echo "  Waiting for port $port... ($i/90)"
-              sleep 2
-            done
-          done
-
-      - name: Create dev user and authenticate
-        id: auth
-        run: node scripts/ci/dev-login.mjs
-
-      - name: Run the native red team (fails while any finding reproduces)
-        working-directory: src/tests
-        env:
-          CHECKPOINT_TEST_DAEMON_ID: ${{ steps.auth.outputs.DAEMON_ID }}
-        run: yarn test:data-loss:native --reporter=default --reporter=json --outputFile.json=data-loss-native-results.json
-
-      - name: Summarize by outcome
-        if: always()
-        run: node scripts/ci/data-loss-summary.mjs src/tests/data-loss-native-results.json "the native layer (ubuntu-latest)"
-
-      - name: Keep the report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: data-loss-native-results
-          path: src/tests/data-loss-native-results.json
-          if-no-files-found: warn
-
-      - name: Stop services
-        if: always()
-        run: yarn dev stop || true
-
-      # Collapsed: this job fails on every run while findings remain, and the
-      # logs only matter when the services themselves were the problem.
-      - name: Show service logs on failure
-        if: failure()
-        run: |
-          for log in logs/*.log; do
-            if [ -f "$log" ]; then
-              echo "::group::$log"
-              cat "$log"
-              echo "::endgroup::"
-            fi
-          done

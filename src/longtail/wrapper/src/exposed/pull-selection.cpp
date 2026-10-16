@@ -7,7 +7,9 @@
 #include <unordered_set>
 #include <vector>
 
+#include "../util/asset-path.h"
 #include "../util/existing-content.h"
+#include "../util/tracking-storage.h"
 #include "../util/progress.h"
 #include "../util/version-index-io.h"
 #include "main.h"
@@ -159,7 +161,9 @@ int PullSelectionSync(
   apis.hash_registry = Longtail_CreateFullHashRegistry();
   apis.job_api = Longtail_CreateBikeshedJobAPI(Longtail_GetCPUCount(), 0);
   apis.compression_registry = Longtail_CreateFullCompressionRegistry();
-  apis.file_storage_api = Longtail_CreateFSStorageAPI();
+  // Remembers each file's size and mtime as it is written (see
+  // tracking-storage.h); written out for the daemon once the pass succeeds.
+  apis.file_storage_api = CreateTrackingStorageAPI(Longtail_CreateFSStorageAPI());
   if (StorageType && strcmp(StorageType, "gateway") == 0) {
     apis.remote_storage_api = CreateGatewayStorageAPI(GatewayUrl, JWT, handle, JWTExpirationMs);
   } else {
@@ -209,6 +213,11 @@ int PullSelectionSync(
   for (uint32_t i = 0; i < SelectionPaths.size(); ++i) {
     if (SelectionSources[i] >= Sources.size()) {
       return Fail(handle, EINVAL, "A selection names a source that was not given");
+    }
+    // The daemon never selects such a path; this is the second line.
+    const std::string unsafe = Checkpoint::UnsafeAssetPathReason(SelectionPaths[i].c_str());
+    if (!unsafe.empty()) {
+      return Fail(handle, EINVAL, "Refusing to write " + SelectionPaths[i] + ": " + unsafe);
     }
     by_source[SelectionSources[i]].push_back(i);
   }
@@ -434,6 +443,9 @@ int PullSelectionSync(
       store_index.p, local.p, target.p, diff.p, LocalRootPath, 1);
   SAFE_DISPOSE_API(progress);
   if (err) return Fail(handle, err, "Failed to update version");
+
+  // Best effort: without the record the daemon stats the files itself.
+  WritePullRecord(apis.file_storage_api, LocalRootPath);
 
   std::stringstream result;
   result << "{\"assets\":" << asset_total << ",\"written\":" << to_write << ",\"sources\":" << Sources.size()

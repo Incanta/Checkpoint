@@ -108,6 +108,11 @@ export function compileFilter(
   const hash = createHash("sha1")
     .update(
       JSON.stringify({
+        // Bumped when what a filter includes changes without its rules
+        // changing, so every workspace re-checks once. 2: the native filter
+        // folds ASCII case, so files a rule typed in another case left out
+        // are brought in (see resolveNewlyIncluded in sync-pipeline.ts).
+        version: 2,
         enabledCategoryIds: enabledSorted,
         includeRules,
         excludeRules: customExclude,
@@ -128,8 +133,12 @@ export function compileFilter(
   const excludeMatcher: Ignore | null =
     customExclude.length > 0 ? ignore().add(customExclude) : null;
 
-  const nativeIncludeRules = includeRules.some((rule) =>
-    NATIVE_UNSUPPORTED.test(rule),
+  // The native filter folds ASCII case only, while `ignore` folds more; a
+  // rule with a non-ASCII character could match less natively than here, and
+  // what the native pull skips the reconcile cannot bring back. Such rules
+  // are withheld: the pull fetches everything and the reconcile filters.
+  const nativeIncludeRules = includeRules.some(
+    (rule) => NATIVE_UNSUPPORTED.test(rule) || /[^\x00-\x7f]/.test(rule),
   )
     ? null
     : includeRules;

@@ -22,7 +22,12 @@ import {
 
 let root: string;
 const ws = () => ({ localPath: root });
-const file = (cl: number) => ({ fileId: `f${cl}`, changelist: cl, md5: "", size: cl });
+const file = (cl: number) => ({
+  fileId: `f${cl}`,
+  changelist: cl,
+  md5: "",
+  size: cl,
+});
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), "chk-shared-"));
@@ -36,7 +41,11 @@ afterEach(async () => {
 
 describe("shared workspace state", () => {
   it("hands every caller the same copy and keeps it current", async () => {
-    await updateWorkspaceState(ws(), { files: { upsert: { a: file(1) } } }, "sqlite");
+    await updateWorkspaceState(
+      ws(),
+      { files: { upsert: { a: file(1) } } },
+      "sqlite",
+    );
     const first = await getWorkspaceState(root, "sqlite");
     const second = await getWorkspaceState(root, "sqlite");
     expect(second).toBe(first);
@@ -48,7 +57,10 @@ describe("shared workspace state", () => {
   it("keeps a stage made while a pull is in flight", async () => {
     await updateWorkspaceState(
       ws(),
-      { files: { upsert: { a: file(1), b: file(1) } }, meta: { changelistNumber: 1 } },
+      {
+        files: { upsert: { a: file(1), b: file(1) } },
+        meta: { changelistNumber: 1 },
+      },
       "sqlite",
     );
 
@@ -71,12 +83,18 @@ describe("shared workspace state", () => {
   });
 
   it("reloads when another process writes the state", async () => {
-    await updateWorkspaceState(ws(), { meta: { changelistNumber: 1 } }, "sqlite");
+    await updateWorkspaceState(
+      ws(),
+      { meta: { changelistNumber: 1 } },
+      "sqlite",
+    );
     expect((await getWorkspaceState(root, "sqlite")).changelistNumber).toBe(1);
 
     const other = new BetterSqlite3(path.join(root, ".checkpoint", "state.db"));
     other
-      .prepare("INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('changelistNumber', '7')")
+      .prepare(
+        "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('changelistNumber', '7')",
+      )
       .run();
     other.close();
 
@@ -84,10 +102,18 @@ describe("shared workspace state", () => {
   });
 
   it("overwrites the shared copy in place on a whole-state save", async () => {
-    await updateWorkspaceState(ws(), { files: { upsert: { a: file(1) } } }, "sqlite");
+    await updateWorkspaceState(
+      ws(),
+      { files: { upsert: { a: file(1) } } },
+      "sqlite",
+    );
     const held = await getWorkspaceState(root, "sqlite");
 
-    await saveWorkspaceState(ws(), { changelistNumber: 5, files: { z: file(5) } }, "sqlite");
+    await saveWorkspaceState(
+      ws(),
+      { changelistNumber: 5, files: { z: file(5) } },
+      "sqlite",
+    );
 
     expect(held.changelistNumber).toBe(5);
     expect(Object.keys(held.files)).toEqual(["z"]);
@@ -95,13 +121,22 @@ describe("shared workspace state", () => {
   });
 
   it("does not let a failed delta change the shared copy", async () => {
-    await updateWorkspaceState(ws(), { files: { upsert: { a: file(1) } } }, "sqlite");
+    await updateWorkspaceState(
+      ws(),
+      { files: { upsert: { a: file(1) } } },
+      "sqlite",
+    );
     const held = await getWorkspaceState(root, "sqlite");
 
     await expect(
       updateWorkspaceState(
         ws(),
-        { files: { delete: ["a"], upsert: { b: { ...file(2), fileId: null as never } } } },
+        {
+          files: {
+            delete: ["a"],
+            upsert: { b: { ...file(2), fileId: null as never } },
+          },
+        },
         "sqlite",
       ),
     ).rejects.toThrow();

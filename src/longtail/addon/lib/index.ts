@@ -120,6 +120,13 @@ export interface Modification {
    * be silently replaced. Leave it out and the path is not checked.
    */
   baseChangelist?: number | null;
+  /**
+   * The mode to record for the file (0o644, 0o755, ...). Leave it out to read
+   * it from the file, which is right on Linux and macOS; on Windows, which has
+   * no executable bit, pass the mode the file has at the head so an edit made
+   * there never strips +x. Ignored for deletes.
+   */
+  mode?: number;
 }
 
 // Storage backend selection shared by the async operations. See STORAGE.md.

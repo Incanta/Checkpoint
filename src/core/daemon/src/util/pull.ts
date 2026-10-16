@@ -41,6 +41,11 @@ import { DaemonConfig } from "../daemon-config.js";
 import { StageTimer } from "./stage-timer.js";
 import { workspacePathKey } from "./volume.js";
 import {
+  clearPullRecord,
+  takePullRecord,
+  type WrittenFile,
+} from "./pull-record.js";
+import {
   isSafeWorkspacePath,
   resolveInWorkspace,
   unsafePathReason,
@@ -507,6 +512,30 @@ export async function pull(
     }
   };
 
+  // Each file's size, mtime, and mode as the native passes wrote it.
+  const writtenByNative = new Map<string, WrittenFile>();
+
+  // Local mode changes (chmod +x) on files the pull rewrites. The pull
+  // applies the incoming version's mode; when upstream did not change the
+  // mode, the local change goes back on top and stays pending.
+  const localModes = new Map<string, number>();
+  /** Paths whose local mode was put back over the incoming one. */
+  const modesPutBack = new Set<string>();
+  if (process.platform !== "win32") {
+    for (const change of diff.modified) {
+      const entry = workspaceState.files[change.path];
+      if (entry?.mode === undefined) continue;
+      try {
+        const mode =
+          (await fs.stat(resolveInWorkspace(workspace.localPath, change.path)))
+            .mode & 0o777;
+        if (mode !== entry.mode) localModes.set(change.path, mode);
+      } catch {
+        // Not on disk: nothing to keep.
+      }
+    }
+  }
+
   // What the native pass writes: every incoming path when whole indexes are
   // applied, or just the selections in a single pass.
   let selections: typeof stateIncoming = stateIncoming;
@@ -531,6 +560,7 @@ export async function pull(
         return index;
       });
 
+      await clearPullRecord(workspace.localPath);
       const handle = pullSelectionAsync({
         sources,
         selectionPaths: selections.map((c) => c.path),
@@ -550,6 +580,9 @@ export async function pull(
       timer.count("selected", selections.length);
       timer.count("sources", sources.length);
       const { status, result } = await pollNative(handle);
+      if (status.error === 0) {
+        await takePullRecord(workspace.localPath, writtenByNative);
+      }
       if (result) Logger.debug(`[pull-selection] ${JSON.stringify(result)}`);
       if (status.error !== 0) {
         if (/different hashing or chunk sizes/.test(status.currentStep)) {
@@ -602,6 +635,7 @@ export async function pull(
       `Starting longtail pull for version index ${versionIndex} for workspace ${workspace.workspaceName}...`,
     );
 
+    await clearPullRecord(workspace.localPath);
     const handle = pullAsync({
       versionIndex,
       enableMmapIndexing: daemonConfig.longtail.enableMmapIndexing,
@@ -637,6 +671,9 @@ export async function pull(
       pollOptions.intervalMs = 250;
     }
     const { status } = await pollHandle(handle, pollOptions);
+    if (status.error === 0) {
+      await takePullRecord(workspace.localPath, writtenByNative);
+    }
 
     Logger.debug(
       `Longtail pull for version index ${versionIndex} completed with status: ${status.error === 0 ? "success" : "failure"}. Last step: ${lastStep}`,
@@ -669,6 +706,20 @@ export async function pull(
   timer.count("localChanges", guard.files.length);
   if (!errored) {
     try {
+      for (const [modePath, localMode] of localModes) {
+        const fullPath = resolveInWorkspace(workspace.localPath, modePath);
+        const base = workspaceState.files[modePath]?.mode;
+        const incoming =
+          writtenByNative.get(modePath)?.mode ??
+          (await fs.stat(fullPath).catch(() => null))?.mode;
+        if (incoming !== undefined && (incoming & 0o777) === base) {
+          await fs.chmod(fullPath, localMode).then(
+            () => modesPutBack.add(modePath),
+            () => undefined,
+          );
+        }
+      }
+
       // Handle deletions (paths come straight from the diff; no getFiles needed).
       // A file that cannot be removed (open in another program, a directory
       // in its place) does not stop the pull. It stays tracked, so it never
@@ -890,18 +941,44 @@ export async function pull(
       const stateTotal = changed.length;
       onProgress?.("Updating workspace state", 0, stateTotal);
 
+      // What the native pass reports it wrote, as each file was finished:
+      // a stat taken now would record an edit made since as the pulled
+      // version. Addons that report nothing leave the stat as the fallback.
+      const posix = process.platform !== "win32";
       const statResults = await Promise.all(
         changed.map(async (change) => {
+          const recorded = writtenByNative.get(change.path);
+          if (recorded) {
+            return {
+              change,
+              stat: { size: recorded.size, mtimeMs: recorded.mtimeMs },
+              mode: recorded.mode,
+            };
+          }
           const fullPath = path.join(workspace.localPath, change.path);
           try {
-            return { change, stat: await fs.stat(fullPath) };
+            const stat = await fs.stat(fullPath);
+            return {
+              change,
+              stat,
+              // The pulled version's mode, even where a local change was
+              // put back on top of it (that change stays pending).
+              mode: modesPutBack.has(change.path)
+                ? workspaceState.files[change.path]?.mode
+                : posix
+                  ? stat.mode & 0o777
+                  : undefined,
+            };
           } catch {
-            return { change, stat: null };
+            return { change, stat: null, mode: undefined };
           }
         }),
       );
       for (let i = 0; i < statResults.length; i++) {
-        const { change, stat } = statResults[i]!;
+        const { change, stat, mode: writtenMode } = statResults[i]!;
+        // The mode the pulled version has: what the pull applied, or (from
+        // an addon that does not say) the one it had before.
+        const mode = writtenMode ?? workspaceState.files[change.path]?.mode;
         const incoming = incomingBaselines.get(change.path);
         if (incoming) {
           newFiles[change.path] = {
@@ -910,6 +987,7 @@ export async function pull(
             md5: incoming.md5,
             size: incoming.size,
             mtime: incoming.mtime,
+            ...(mode !== undefined && { mode }),
           };
         } else if (stat) {
           newFiles[change.path] = {
@@ -918,6 +996,7 @@ export async function pull(
             md5: "",
             size: stat.size,
             mtime: stat.mtimeMs,
+            ...(mode !== undefined && { mode }),
           };
         }
         onProgress?.("Updating workspace state", i + 1, stateTotal);

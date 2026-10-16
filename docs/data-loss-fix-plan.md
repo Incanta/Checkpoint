@@ -36,10 +36,10 @@ Ordering rules:
 | R7 | DL-07, DL-19 | The daemon probes each workspace's volume and compares folded names where the volume folds | R6 (shared fold) | L | Done |
 | R8 | Backslash | One odd file name no longer fails the scan | | S | Done |
 | R9 | DL-20 | Racily clean baselines are checked by content | | M | Done |
-| R10 | DL-21 | Native pulls report each file's size and mtime as written | | M | Not started |
-| R11 | DL-24 | File modes are recorded at submit and kept on pull | | M | Not started |
-| R12 | DL-26 | The native include filter folds case like the daemon's | R3 (re-pull) | M | Not started |
-| R13 | DL-03, DL-17, DL-23 | Native pulls and submits refuse unsafe asset paths | R1 | S | Not started |
+| R10 | DL-21 | Native pulls report each file's size and mtime as written | | M | Done |
+| R11 | DL-24 | File modes are recorded at submit and kept on pull | | M | Done |
+| R12 | DL-26 | The native include filter folds case like the daemon's | R3 (re-pull) | M | Done |
+| R13 | DL-03, DL-17, DL-23 | Native pulls and submits refuse unsafe asset paths | R1 | S | Done |
 | **Phase 3** | | **Branches and merges** | | | |
 | R14 | DL-10, DL-11, DL-12 | Sync and pre-submit checks use the active branch; every submit carries bases | | L | Not started |
 | R15 | Gate | Staged files keep the branch they were staged to | R14 | M | Not started |

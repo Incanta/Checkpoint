@@ -52,7 +52,8 @@ const PATHS = Array.from({ length: 40 }, (_, i) => `dir${i % 5}/file${i}.txt`);
 
 function randomDelta(rand: () => number): StateDelta {
   const pick = () => PATHS[Math.floor(rand() * PATHS.length)]!;
-  const some = (n: number) => Array.from({ length: Math.floor(rand() * n) }, pick);
+  const some = (n: number) =>
+    Array.from({ length: Math.floor(rand() * n) }, pick);
   const file = (cl: number) => ({
     fileId: `id-${Math.floor(rand() * 1000)}`,
     changelist: cl,
@@ -74,12 +75,22 @@ function randomDelta(rand: () => number): StateDelta {
       const { branch: _branch, ...rest } = file(cl);
       return rand() < 0.5 ? { ...rest, artifactType: "editor" } : rest;
     };
-    delta.artifactFiles = rand() < 0.2
-      ? { replaceAll: Object.fromEntries(some(4).map((p) => [p, artifact(1)])) }
-      : { delete: some(2), upsert: Object.fromEntries(some(2).map((p) => [p, artifact(2)])) };
+    delta.artifactFiles =
+      rand() < 0.2
+        ? {
+            replaceAll: Object.fromEntries(
+              some(4).map((p) => [p, artifact(1)]),
+            ),
+          }
+        : {
+            delete: some(2),
+            upsert: Object.fromEntries(some(2).map((p) => [p, artifact(2)])),
+          };
   }
-  if (rand() < 0.4) delta.staged = { clear: rand() < 0.1, remove: some(3), add: some(3) };
-  if (rand() < 0.3) delta.markedForAdd = { clear: rand() < 0.1, remove: some(2), add: some(2) };
+  if (rand() < 0.4)
+    delta.staged = { clear: rand() < 0.1, remove: some(3), add: some(3) };
+  if (rand() < 0.3)
+    delta.markedForAdd = { clear: rand() < 0.1, remove: some(2), add: some(2) };
   if (rand() < 0.2) {
     delta.bisect = {
       clear: rand() < 0.2,
@@ -97,9 +108,15 @@ function randomDelta(rand: () => number): StateDelta {
       branchHeads: maybe({ "feature/x": Math.floor(rand() * 100) }),
       syncFilterHash: maybe(`hash-${Math.floor(rand() * 10)}`),
       lastBuiltChangelist: maybe(Math.floor(rand() * 100)),
-      lastScheduledSyncAt: maybe(new Date(Math.floor(rand() * 1e12)).toISOString()),
+      lastScheduledSyncAt: maybe(
+        new Date(Math.floor(rand() * 1e12)).toISOString(),
+      ),
       appliedArtifacts: maybe({
-        editor: { changelistNumber: 3, sourceChangelistNumber: 2, appliedAt: "x" },
+        editor: {
+          changelistNumber: 3,
+          sourceChangelistNumber: 2,
+          appliedAt: "x",
+        },
       }),
     };
   }
@@ -164,7 +181,9 @@ describe.each(["sqlite"] as const)("%s store: apply(delta)", (backend) => {
     const pullDelta: StateDelta = {
       files: {
         delete: [PATHS[1]!],
-        upsert: { [PATHS[2]!]: { fileId: "x", changelist: 2, md5: "", size: 2 } },
+        upsert: {
+          [PATHS[2]!]: { fileId: "x", changelist: 2, md5: "", size: 2 },
+        },
       },
       meta: { changelistNumber: 2 },
     };
@@ -173,7 +192,10 @@ describe.each(["sqlite"] as const)("%s store: apply(delta)", (backend) => {
 
   it("treats adding a path twice and removing an absent one as no-ops", async () => {
     const store = getStateStore(root, backend);
-    await store.apply({ staged: { add: ["a", "a"] }, markedForAdd: { add: ["b"] } });
+    await store.apply({
+      staged: { add: ["a", "a"] },
+      markedForAdd: { add: ["b"] },
+    });
     await store.apply({ staged: { add: ["a"], remove: ["missing"] } });
     const state = await store.load();
     expect(state.staged).toEqual(["a"]);
@@ -182,7 +204,9 @@ describe.each(["sqlite"] as const)("%s store: apply(delta)", (backend) => {
 
   it("removes a meta field on null and leaves it alone when absent", async () => {
     const store = getStateStore(root, backend);
-    await store.apply({ meta: { syncFilterHash: "h", lastBuiltChangelist: 4 } });
+    await store.apply({
+      meta: { syncFilterHash: "h", lastBuiltChangelist: 4 },
+    });
     await store.apply({ meta: { syncFilterHash: null } });
     const state = await store.load();
     expect(state.teamSync?.syncFilterHash).toBeUndefined();
@@ -194,7 +218,9 @@ describe("sqlite store", () => {
   it("writes nothing when a delta fails partway", async () => {
     const store = getStateStore(root, "sqlite");
     await store.apply({
-      files: { upsert: { a: { fileId: "a", changelist: 1, md5: "", size: 1 } } },
+      files: {
+        upsert: { a: { fileId: "a", changelist: 1, md5: "", size: 1 } },
+      },
       meta: { changelistNumber: 1 },
     });
 
@@ -203,7 +229,9 @@ describe("sqlite store", () => {
       store.apply({
         files: {
           delete: ["a"],
-          upsert: { b: { fileId: null as never, changelist: 2, md5: "", size: 1 } },
+          upsert: {
+            b: { fileId: null as never, changelist: 2, md5: "", size: 1 },
+          },
         },
         meta: { changelistNumber: 2 },
       }),
@@ -224,7 +252,9 @@ describe("sqlite store", () => {
 
     const other = new BetterSqlite3(path.join(root, ".checkpoint", "state.db"));
     other
-      .prepare("INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('changelistNumber', '9')")
+      .prepare(
+        "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('changelistNumber', '9')",
+      )
       .run();
     other.close();
 

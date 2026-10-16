@@ -283,7 +283,8 @@ class SqliteStateStore implements StateStore {
         size       INTEGER NOT NULL,
         mtime      REAL,
         branch     TEXT,
-        recorded_at REAL
+        recorded_at REAL,
+        mode       INTEGER
       );
       CREATE TABLE IF NOT EXISTS artifact_files (
         path          TEXT PRIMARY KEY,
@@ -344,6 +345,10 @@ class SqliteStateStore implements StateStore {
     // racily clean entry (written within one timestamp tick of being
     // recorded) from one whose size and mtime prove it unchanged.
     4: ["ALTER TABLE files ADD COLUMN recorded_at REAL"],
+    // Each file's mode (0644, 0755) as last pulled or submitted, so a
+    // mode-only change shows as pending on Linux and macOS and a Windows
+    // submit can keep the mode the file has at the head.
+    5: ["ALTER TABLE files ADD COLUMN mode INTEGER"],
   };
 
   private runMigrations(): void {
@@ -441,6 +446,7 @@ class SqliteStateStore implements StateStore {
       mtime: number | null;
       branch: string | null;
       recorded_at: number | null;
+      mode: number | null;
     }>;
     for (const r of fileRows) {
       files[r.path] = {
@@ -451,6 +457,7 @@ class SqliteStateStore implements StateStore {
         ...(r.mtime != null && { mtime: r.mtime }),
         ...(r.branch != null && { branch: r.branch }),
         ...(r.recorded_at != null && { recordedAt: r.recorded_at }),
+        ...(r.mode != null && { mode: r.mode }),
       };
     }
 
@@ -645,7 +652,7 @@ class SqliteStateStore implements StateStore {
       deleteMeta: db.prepare("DELETE FROM workspace_meta WHERE key = ?"),
       clearFiles: db.prepare("DELETE FROM files"),
       upsertFile: db.prepare(
-        "INSERT OR REPLACE INTO files (path, file_id, changelist, hash, size, mtime, branch, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO files (path, file_id, changelist, hash, size, mtime, branch, recorded_at, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ),
       deleteFile: db.prepare("DELETE FROM files WHERE path = ?"),
       clearArtifacts: db.prepare("DELETE FROM artifact_files"),
@@ -683,6 +690,7 @@ class SqliteStateStore implements StateStore {
         f.mtime ?? null,
         f.branch ?? null,
         f.recordedAt ?? null,
+        f.mode ?? null,
       );
     const artifactRow = (p: string, f: ArtifactStateFile) =>
       s.upsertArtifact.run(
@@ -809,6 +817,7 @@ class SqliteStateStore implements StateStore {
           f.mtime ?? null,
           f.branch ?? null,
           f.recordedAt ?? null,
+          f.mode ?? null,
         );
       }
 

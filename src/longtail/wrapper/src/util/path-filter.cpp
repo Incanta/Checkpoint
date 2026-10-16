@@ -7,6 +7,27 @@ namespace Checkpoint {
 namespace {
 
 /**
+ * ASCII letters folded to lower case; every other byte as it is. The daemon's
+ * own matcher (the `ignore` package) folds case, so this one must too, or a
+ * rule typed "content/maps/" would skip "Content/Maps" here while the daemon
+ * counts it as included. Non-ASCII letters are not folded: the daemon keeps
+ * rules that contain them away from this filter (see filter.ts).
+ */
+inline char FoldAscii(char c) {
+  return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+/** strncmp, folding ASCII case. */
+bool EqualsFolded(const char* a, const char* b, size_t n) {
+  for (size_t i = 0; i < n; ++i) {
+    if (FoldAscii(a[i]) != FoldAscii(b[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Glob-match [pat, pat_end) against [text, text_end).
  *   "*"  any run of characters except "/"
  *   "**" any run of characters including "/"
@@ -50,7 +71,7 @@ bool GlobMatch(const char* pat,
       if (*text == '/') {
         return false;
       }
-    } else if (*pat != *text) {
+    } else if (FoldAscii(*pat) != FoldAscii(*text)) {
       return false;
     }
 
@@ -140,7 +161,7 @@ bool PathFilter::Includes(const char* path) const {
       if (rule.anchored) {
         // A literal anchored rule is a plain prefix test, which is what nearly
         // every sync-category path looks like.
-        if (len >= n && std::strncmp(path, rule.text.c_str(), n) == 0 &&
+        if (len >= n && EqualsFolded(path, rule.text.c_str(), n) &&
             (len == n || path[n] == '/')) {
           return true;
         }
@@ -153,7 +174,7 @@ bool PathFilter::Includes(const char* path) const {
       for (size_t start = 0; start <= len;) {
         const size_t seg_end = SegmentEnd(path, len, start);
         if (seg_end - start == n &&
-            std::strncmp(path + start, rule.text.c_str(), n) == 0) {
+            EqualsFolded(path + start, rule.text.c_str(), n)) {
           matched = true;
           break;
         }

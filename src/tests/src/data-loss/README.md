@@ -6,7 +6,6 @@ Tests for scenarios that lose work during push (submit), pull (sync), merge, and
 cd src/tests
 yarn test:data-loss                                                     # the whole suite
 yarn vitest run --config vitest.data-loss.config.ts src/data-loss/pull.test.ts   # one file
-yarn test:data-loss:native     # native layer (real addon); the file-mode tests also need services, as src/integration does
 ```
 
 Status when written (2026-10-14, on `81ed16a`): 35 tests, 32 failing (the findings below), 3 passing (controls that show the harness reproduces the protections that do work). When a fix lands, its tests pass; move them into `src/api` or `src/daemon` so they guard against regressions in the main suite.
@@ -25,7 +24,7 @@ The other files use `../harness/stack.ts`, which runs a whole Checkpoint stack i
 - **Fake:** the native longtail addon. A submit stores each submitted file's bytes under a new version index name and records the changelist through the app; a version index holds only its own changelist's files, as the real format does. Selection pulls write exactly the selected paths; whole-index pulls write every file in the index. Also faked: the HTTP transport (an in-process adapter), storage tokens, the Team Sync config endpoint (so a test can make it fail), and the daemon's config and logger (so nothing reads or writes `~/.checkpoint`).
 - **Per OS:** `os.test.ts` probes the filesystem the workspaces live on (case and Unicode normalization sensitivity, 8.3 short names) instead of going by the OS's name, since macOS volumes can be case-sensitive and so can Windows directories. Its Windows file-sharing tests hold a real lock from a PowerShell process: `FileShare.Read`, the way the Unreal Editor holds a package it has loaded (others may read it, nobody may write or delete it), or `FileShare.None`, the way Office does. A test that does not apply is skipped, so each OS reports its own counts.
 - **Timestamps:** `overrides.writeTime` stamps every write the test and the fake native layer make with one mtime, the way writes within one tick of the filesystem's clock are stamped.
-- **Native layer:** `native/` uses the real addon, like `src/integration`, with its own config (`vitest.data-loss-native.config.ts`). The include-filter test needs only the addon. The file-mode tests also need running services and `CHECKPOINT_TEST_DAEMON_ID`; CI runs them in the `native` job of `data-loss.yaml` (Linux, against the addon built from the commit).
+- **Native layer:** the native findings are fixed, and their tests moved to `src/integration` (`file-modes.test.ts`, `include-filter.test.ts`, `native-written-files.test.ts`), which `test.yaml` runs against the addon built from the commit. One test here still loads the installed addon's include matcher (DL-26 in `os.test.ts`), so it stays red until an addon release with the fix is installed.
 - **Not verified here:** what the real native pull does with `..` paths (the fake writes with `path.join` and `fs.writeFile`, as any writer would). On Windows the addon writes through `\\?\` paths (`MakeLongPlatformPath` in `longtail_platform.c`), which do not resolve `..`, so its write probably fails there instead of escaping; on Linux and macOS it would follow `..`. Also from the source rather than a test: after one file fails to write, the fake writes the rest of the pull and then reports the failure, as the addon's parallel write jobs do. Node and the addon both use `\\?\` paths on Windows, so names ending in a dot or a space and reserved names are created as given by both, and `CHECKP~1` and `::$DATA` resolve through both (checked with Node on NTFS).
 - **Written on Windows:** the macOS normalization test, the Linux and macOS backslash test, and the native file-mode tests could not run where they were written. Their expected failures come from reading the code, and CI is their first run.
 
@@ -37,7 +36,7 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | --- | --- | --- | --- | --- |
 | DL-01 | Edits made after a submit vanish from pending changes at the next pull, then get overwritten | Pull | Critical | Fixed (R4) |
 | DL-02 | One failed Team Sync config read deletes most of the workspace, for good | Pull (Team Sync) | Critical | Fixed (R3) |
-| DL-03 | The server stores paths as sent; `../x` makes teammates' pulls delete files outside their workspace | Push, pull | Critical | Fixed in the server (R1) and daemon (R2); native check open (R13) |
+| DL-03 | The server stores paths as sent; `../x` makes teammates' pulls delete files outside their workspace | Push, pull | Critical | Fixed (R1, R2, R13) |
 | DL-04 | Narrowing the sync filter deletes locally edited files with no backup | Pull (Team Sync) | High | Fixed (R3) |
 | DL-05 | A pull that fails after writing files leaves local edits overwritten and unreported | Pull | High | Fixed (R5) |
 | DL-06 | The whole-index pull fallback overwrites edits the pull meant to skip | Pull | High | Fixed (R4) |
@@ -51,16 +50,16 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | DL-14 | A conflict resolved on the branch, as the error says to, never merges | Merge | Medium | Live |
 | DL-15 | Deleting a branch discards unmerged changelists with no confirmation | Branch | Medium | Live |
 | DL-16 | The app records changelists whose content does not exist | Push | Low | Empty index refused (R1); existence check open (R19) |
-| DL-17 | Names Windows cannot store are accepted; a `:` hides a file's content in an NTFS stream, and a Windows "submit everything" then deletes the file | Push, pull | High | Fixed in the server (R1) and daemon (R2); native check open (R13) |
+| DL-17 | Names Windows cannot store are accepted; a `:` hides a file's content in an NTFS stream, and a Windows "submit everything" then deletes the file | Push, pull | High | Fixed (R1, R2, R13) |
 | DL-18 | Names that differ only in Unicode normalization are accepted; on macOS they are one file | Push, pull | High | Fixed (R6, R7); the macOS test runs in CI |
 | DL-19 | On case-insensitive filesystems the daemon takes one file for two: deleting one spelling deletes both, phantom pending changes, Clean Workspace deletes tracked files | Pull, cleanup | High | Fixed (R7) |
 | DL-20 | A same-size edit within one timestamp tick of a pull is invisible, then overwritten | Pull | High | Fixed (R9) |
-| DL-21 | An edit made while a pull runs is recorded as the pulled version, then overwritten | Pull | High | Live (any OS) |
+| DL-21 | An edit made while a pull runs is recorded as the pulled version, then overwritten | Pull | High | Fixed (R10); users need an addon release |
 | DL-22 | A sync filter change that cannot remove one file leaves the files it did remove looking deleted | Pull (Team Sync) | High | Fixed (R3) |
-| DL-23 | A pull writes into the workspace's own `.checkpoint` directory; one changelist can wipe every teammate's workspace | Push, pull | High, and a security issue | Fixed in the server (R1) and daemon (R2); native check open (R13) |
-| DL-24 | Executable bits are dropped on submit and stripped on pull | Push, pull (native) | High | Live (Linux, macOS) |
+| DL-23 | A pull writes into the workspace's own `.checkpoint` directory; one changelist can wipe every teammate's workspace | Push, pull | High, and a security issue | Fixed (R1, R2, R13) |
+| DL-24 | Executable bits are dropped on submit and stripped on pull | Push, pull (native) | High | Fixed (R11); users need an addon release; its tests run on Linux in CI |
 | DL-25 | A failed pull stops putting edits back at the first file it cannot write | Pull | High | Fixed (R5) |
-| DL-26 | A Team Sync rule typed in another case silently stops a folder from syncing | Pull (Team Sync, native) | Medium | Live |
+| DL-26 | A Team Sync rule typed in another case silently stops a folder from syncing | Pull (Team Sync, native) | Medium | Fixed (R12); users need an addon release, and the in-process test here stays red until one is installed |
 | Gate | Modified files cannot be submitted to a feature branch at all | Push, branch | Functional, not data loss | Live |
 | Backslash | A file name with a backslash blocks every submit | Push | Functional, not data loss | Fixed (R8); its tests run on Linux and macOS in CI |
 
@@ -322,7 +321,7 @@ Recommended fix: on the server, refuse any path whose first segment folds (by ca
 
 ### DL-24: Executable bits are dropped on submit and stripped on pull (Linux, macOS)
 
-Tests: `native/file-modes.test.ts` "gives a teammate a script the submitter made executable, still executable" and "keeps a teammate's executable executable when it changes upstream" (Linux and macOS with services; skipped on Windows). Found by reading the native source; the `native` job in `data-loss.yaml` is their first run.
+Tests (now in `src/integration/file-modes.test.ts`): "gives a teammate a script the submitter made executable, still executable" and "keeps a teammate's executable executable when it changes upstream" (Linux and macOS with services; skipped on Windows).
 
 Scenario: `Setup.sh`, `GenerateProjectFiles.sh`, `RunUAT.sh`, and the binaries under `Engine/Binaries/Linux` must be executable. The native submit records every file as 0644 whatever its mode, and both native pulls apply the recorded permissions to every file they write. A script added from Linux or macOS reaches teammates non-executable, and a teammate who fixes it by hand loses the fix the next time the file changes. Linux build agents and Mac and Linux developers have to `chmod` after every sync.
 
@@ -344,7 +343,7 @@ Recommended fix: restore every file it can, skip files whose content already equ
 
 ### DL-26: A Team Sync rule typed in another case silently stops a folder from syncing
 
-Tests: `native/include-filter.test.ts` "includes everything the daemon's filter includes when a rule is typed in another case" (the real addon's matcher; needs no services) and `os.test.ts` "pulls a folder whose Team Sync rule was typed in another case" (the daemon with the real matcher plugged in; any OS where the addon loads).
+Tests: `src/integration/include-filter.test.ts` (the real addon's matcher against the daemon's, over case variants and every rule form; needs no services) and `os.test.ts` "pulls a folder whose Team Sync rule was typed in another case" (the daemon with the real matcher plugged in; any OS where the addon loads).
 
 Scenario: on Windows and macOS `content/maps/` and `Content/Maps/` name the same folder, so a custom include rule typed either way looks right. The daemon's own filter (the `ignore` package, which folds case by default) includes the folder; the native include filter it hands the same rule to compares bytes and does not. The pull skips the folder's files, records the workspace at the head anyway, and no later pull's diff mentions them again. The reconcile agrees the folder is included, so nothing reports anything missing. New files never arrive and changed ones stay stale; an edit to a stale file is refused by the server's base check, and pulling again does not help.
 

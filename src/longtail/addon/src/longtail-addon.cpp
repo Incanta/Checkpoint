@@ -286,6 +286,10 @@ static Napi::Value NapiSubmitAsync(const Napi::CallbackInfo& info) {
       ctx->modifications[i].OldPath = nullptr;
     }
 
+    Napi::Value modeVal = mod.Get("mode");
+    ctx->modifications[i].Mode =
+        modeVal.IsNumber() ? static_cast<uint16_t>(modeVal.As<Napi::Number>().Uint32Value() & 07777) : 0;
+
     // baseChangelist: a number, null (the file is new to the branch), or
     // absent (unspecified, not checked).
     Napi::Value baseVal = mod.Get("baseChangelist");

@@ -5,6 +5,8 @@
 #include "../util/existing-content.h"
 #include "../util/version-index-io.h"
 #include "../util/path-filter.h"
+#include "../util/asset-path.h"
+#include "../util/tracking-storage.h"
 #include "../util/progress.h"
 #include "main.h"
 
@@ -39,15 +41,32 @@ static const char* AssetPath(
 static uint32_t FilterVersionDiff(
     struct Longtail_VersionDiff* version_diff,
     const struct Longtail_VersionIndex* target_version_index,
-    const Checkpoint::PathFilter& filter) {
+    const Checkpoint::PathFilter& filter,
+    uint32_t* out_unsafe) {
   uint32_t dropped = 0;
+  // An asset the filter includes is still never written when its path could
+  // reach outside the workspace or into its .checkpoint directory.
+  auto keep = [&](const char* asset_path) {
+    if (!filter.Includes(asset_path)) {
+      return false;
+    }
+    const std::string unsafe = Checkpoint::UnsafeAssetPathReason(asset_path);
+    if (!unsafe.empty()) {
+      LONGTAIL_LOG(0, LONGTAIL_LOG_LEVEL_WARNING,
+                   "Skipping unsafe asset path %s: %s", asset_path,
+                   unsafe.c_str());
+      ++*out_unsafe;
+      return false;
+    }
+    return true;
+  };
 
   // Added assets carry only a target index.
   const uint32_t added_count = *version_diff->m_TargetAddedCount;
   uint32_t added_kept = 0;
   for (uint32_t i = 0; i < added_count; ++i) {
     const uint32_t target = version_diff->m_TargetAddedAssetIndexes[i];
-    if (!filter.Includes(AssetPath(target_version_index, target))) {
+    if (!keep(AssetPath(target_version_index, target))) {
       ++dropped;
       continue;
     }
@@ -60,7 +79,7 @@ static uint32_t FilterVersionDiff(
   uint32_t modified_kept = 0;
   for (uint32_t i = 0; i < modified_count; ++i) {
     const uint32_t target = version_diff->m_TargetContentModifiedAssetIndexes[i];
-    if (!filter.Includes(AssetPath(target_version_index, target))) {
+    if (!keep(AssetPath(target_version_index, target))) {
       ++dropped;
       continue;
     }
@@ -77,7 +96,7 @@ static uint32_t FilterVersionDiff(
   for (uint32_t i = 0; i < permissions_count; ++i) {
     const uint32_t target =
         version_diff->m_TargetPermissionsModifiedAssetIndexes[i];
-    if (!filter.Includes(AssetPath(target_version_index, target))) {
+    if (!keep(AssetPath(target_version_index, target))) {
       ++dropped;
       continue;
     }
@@ -115,7 +134,10 @@ int PullSync(
   struct Longtail_JobAPI* job_api = Longtail_CreateBikeshedJobAPI(Longtail_GetCPUCount(), 0);
   struct Longtail_CompressionRegistryAPI* compression_registry = Longtail_CreateFullCompressionRegistry();
 
-  struct Longtail_StorageAPI* file_storage_api = Longtail_CreateFSStorageAPI();
+  // Remembers each file's size and mtime as it is written (see
+  // tracking-storage.h); written out for the daemon once the pass succeeds.
+  struct Longtail_StorageAPI* file_storage_api =
+      CreateTrackingStorageAPI(Longtail_CreateFSStorageAPI());
   struct Longtail_StorageAPI* remote_storage_api;
   if (StorageType && strcmp(StorageType, "gateway") == 0) {
     remote_storage_api = CreateGatewayStorageAPI(GatewayUrl, JWT, handle, JWTExpirationMs);
@@ -351,9 +373,10 @@ int PullSync(
 
   // Apply the caller's include rules before anything reads the diff, so
   // excluded assets are never requested from the block store and never written.
-  if (!IncludeFilter.IsNoOp()) {
-    FilterVersionDiff(version_diff, remote_version_index, IncludeFilter);
-  }
+  // Unsafe asset paths are dropped whatever the filter, so this always runs.
+  uint32_t unsafe_assets = 0;
+  FilterVersionDiff(version_diff, remote_version_index, IncludeFilter,
+                    &unsafe_assets);
 
   if ((*version_diff->m_ModifiedContentCount == 0) &&
       (*version_diff->m_TargetAddedCount == 0) &&
@@ -489,6 +512,9 @@ int PullSync(
     SAFE_DISPOSE_API(job_api);
     return err;
   }
+
+  // Best effort: without the record the daemon stats the files itself.
+  WritePullRecord(file_storage_api, LocalRootPath);
 
   SetHandleStep(handle, "Completed");
   handle->error = 0;
