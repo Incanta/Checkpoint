@@ -48,7 +48,7 @@ Ordering rules:
 | R18 | DL-15 | Deleting a branch with unmerged work needs a flag, and deleted branches can be restored | | M | Done |
 | **Phase 4** | | **Integrity and the smaller observations** | | | |
 | R19 | DL-16 | The app records only version indexes that exist in the repo's storage | | M | Done |
-| R20 | Other observations | Revert, resolve, the empty-tree diff, the merge log, watcher gaps, OS litter, and long paths | | M | Not started |
+| R20 | Other observations | Revert, resolve, the empty-tree diff, the merge log, watcher gaps, OS litter, and long paths | | M | Done |
 
 By finding: DL-01: R4; DL-02: R3; DL-03: R1, R2, R13; DL-04: R3; DL-05: R5; DL-06: R4; DL-07: R7; DL-08: R6, R7; DL-09: R1, R6; DL-10: R14; DL-11: R14; DL-12: R14; DL-13: R16; DL-14: R17; DL-15: R18; DL-16: R1, R19; DL-17: R1, R2, R13; DL-18: R6, R7; DL-19: R7; DL-20: R9; DL-21: R10; DL-22: R3; DL-23: R1, R2, R13; DL-24: R11; DL-25: R5; DL-26: R12, R3; Gate: R15; Backslash: R8.
 
@@ -338,6 +338,8 @@ From the README's "Other observations". Each is small, they can land in any orde
 - **Watcher gaps.** A watcher event with no file name (how Windows reports an overflowed buffer) or a watcher error drops the cached pending list, forcing a full rescan, instead of being ignored (`daemon-manager.ts:1543`).
 - **OS litter.** Default ignore rules for `.DS_Store`, `._*`, `Thumbs.db`, and `desktop.ini`, so a Mac "submit everything" does not add them and Explorer holding `Thumbs.db` open cannot fail Windows pulls (DL-05, DL-25).
 - **Long paths.** Warn when a path plus the backup prefix (`.checkpoint/pull-backups/<timestamp>-cl<N>/`, about 50 characters) passes 260 characters, and shorten the prefix.
+
+**Status.** Done: revert keeps an added file (decision 15), `conflicts.resolve` skips and reports a file with no local changes, `diffStateTrees` refuses a target that does not exist, merge rows record `FileChange.sourceChangelistNumber` (decision 16, with a migration), a nameless watcher event or a watcher error drops the cached pending list, the four OS files are ignored by default (a project's ignore file can negate them), and the backup folder name is 16 characters shorter. Not done: a warning for paths past 260 characters. The watcher change has no test, since the harness runs no watcher.
 
 ## Moving tests and CI
 

@@ -10,6 +10,9 @@ import {
   saveWorkspaceConfig,
   type Workspace as UtilWorkspace,
 } from "../../../util/index.js";
+import { syncTargetBranch } from "../../../util/util.js";
+import { hasLocalChanges } from "../../../util/pull-local-changes.js";
+import { resolveInWorkspace } from "../../../util/workspace-path.js";
 import { TRPCError } from "@trpc/server";
 import { DaemonConfig } from "../../../daemon-config.js";
 
@@ -99,7 +102,7 @@ export const conflictsRouter = router({
         const client = await CreateApiClientAuth(workspace.daemonId);
         const branch = await client.branch.getBranch.query({
           repoId: workspace.repoId,
-          name: workspace.domainBranchName,
+          name: syncTargetBranch(workspace),
         });
 
         if (branch && branch.headNumber !== config.lastSyncStatusRemoteHead) {
@@ -155,6 +158,13 @@ export const conflictsRouter = router({
       );
 
       const resolvedPaths: string[] = [];
+      /**
+       * Files with no local changes: nothing to resolve. Marking one resolved
+       * would record the remote version as what is on disk while disk still
+       * holds the old one, and its next submit would revert the remote change.
+       * A pull brings the remote version instead.
+       */
+      const notModified: string[] = [];
       const resolved: Record<string, (typeof state.files)[string]> = {};
 
       for (const filePath of input.filePaths) {
@@ -164,6 +174,17 @@ export const conflictsRouter = router({
 
         const outdated = outdatedByPath.get(normalizedPath);
         const entry = state.files[normalizedPath];
+        if (
+          outdated &&
+          entry &&
+          !(await hasLocalChanges(
+            resolveInWorkspace(workspace.localPath, normalizedPath),
+            entry,
+          ))
+        ) {
+          notModified.push(normalizedPath);
+          continue;
+        }
         if (outdated && entry) {
           // Update the file's CL to match the remote, marking it as resolved
           resolved[normalizedPath] = {
@@ -190,7 +211,7 @@ export const conflictsRouter = router({
         await manager.refreshSyncStatus(workspace);
       }
 
-      return { resolvedPaths };
+      return { resolvedPaths, notModified };
     }),
 
   getResolveConfirmSuppressed: publicProcedure

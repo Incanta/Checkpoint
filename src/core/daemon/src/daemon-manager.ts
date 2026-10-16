@@ -1660,7 +1660,14 @@ export class DaemonManager {
       workspace.localPath,
       { recursive: true },
       async (eventType, filename) => {
-        if (!filename) return;
+        if (!filename) {
+          // No name is how Windows reports an overflowed change buffer (many
+          // files changed at once: a build, a level save). Some changes were
+          // not reported, so the cached pending list cannot be trusted: drop
+          // it, and the next refresh rescans.
+          this.workspacePendingChanges.delete(workspace.id);
+          return;
+        }
 
         const relativePath = toRelativeRepoPath(filename);
 
@@ -1707,6 +1714,9 @@ export class DaemonManager {
       Logger.warn(
         `[DaemonManager] Watcher error for workspace ${workspace.name}: ${err.message}`,
       );
+      // Changes made while no watcher runs are never reported, so the cached
+      // pending list cannot be trusted either: the next refresh rescans.
+      this.workspacePendingChanges.delete(workspace.id);
       // Remove the broken watcher and try to re-establish after a short delay.
       // The directory may have been temporarily removed (e.g. test cleanup).
       this.watchers.delete(workspace.id);

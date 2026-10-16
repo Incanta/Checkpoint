@@ -449,7 +449,20 @@ export async function diffStateTrees(
       added.push({ path, cl });
     }
   } else if (fromRoot) {
-    // Target has no tree: everything removed.
+    // A target with no tree reads as "every file removed", which a pull
+    // would act on by deleting the whole workspace. That is only right for a
+    // changelist that exists and is genuinely treeless (test fixtures); a
+    // target that does not exist must fail here, not depend on every caller
+    // having looked it up first.
+    const target = await db.changelist.findUnique({
+      where: { repoId_number: { repoId, number: toNumber } },
+      select: { number: true },
+    });
+    if (!target) {
+      throw new Error(
+        `Changelist ${toNumber} does not exist in repo ${repoId}; refusing to diff to it`,
+      );
+    }
     for (const [path] of await materializeTree(fromRoot, store)) {
       removed.push(path);
     }

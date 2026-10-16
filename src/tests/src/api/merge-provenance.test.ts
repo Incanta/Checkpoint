@@ -192,4 +192,32 @@ describe("merge provenance", () => {
     expect(found?.base).toBe(forked);
     expect(found?.incomingNumbers).toEqual([await head("feature")]);
   }, 300_000);
+
+  it("says where each merged file's content lives, so the log stays canonical", async () => {
+    await write("main", "a.txt");
+    await branchFrom("main", "feature");
+    const f = await write("feature", "b.txt");
+    const merged = await merge("feature", "main");
+
+    const rows = await testDb.client.fileChange.findMany({
+      where: { repoId, changelistNumber: merged.mergeChangelist.number },
+      include: { file: { select: { path: true } } },
+    });
+    expect(rows.map((r) => [r.file.path, r.sourceChangelistNumber])).toEqual([
+      ["b.txt", f],
+    ]);
+  });
+
+  it("refuses to diff to a changelist that does not exist", async () => {
+    // A target with no tree reads as "every file removed"; a pull acting on
+    // that would delete the whole workspace.
+    const a = await write("main", "a.txt");
+    await expect(
+      caller.changelist.diffChangelists({
+        repoId,
+        fromNumber: a,
+        toNumber: 9999,
+      }),
+    ).rejects.toThrow();
+  });
 });

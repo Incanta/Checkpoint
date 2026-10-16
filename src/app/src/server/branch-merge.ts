@@ -675,6 +675,7 @@ export async function mergeBranch(
                         ? FileChangeType.DELETE
                         : FileChangeType.MODIFY,
                     oldPath: source.oldPath,
+                    sourceChangelistNumber: change.incoming,
                   },
                 ]
               : [];
@@ -1044,6 +1045,7 @@ export async function updateBranchFromParent(
                     change.incoming === null
                       ? FileChangeType.DELETE
                       : FileChangeType.MODIFY,
+                  sourceChangelistNumber: change.incoming,
                 },
               ]
             : [];

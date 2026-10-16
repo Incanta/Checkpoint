@@ -651,6 +651,28 @@ const ids = (seat: Seat) => ({
  * directory), which claims each on the target branch, then submit that bucket
  * and wait for the background job the daemon runs it in.
  */
+/** The daemon's "Revert" on pending paths. */
+export async function revert(seat: Seat, paths: string[]) {
+  const { daemon } = await daemonModules();
+  return daemon.workspaces.pending.revertFiles({
+    ...ids(seat),
+    filePaths: paths.map(normalize),
+  });
+}
+
+/** The daemon's "Mark as resolved", after a fresh sync status. */
+export async function resolveConflicts(seat: Seat, paths: string[]) {
+  const { daemon } = await daemonModules();
+  await daemon.workspaces.sync.getSyncStatus({
+    ...ids(seat),
+    forceRefresh: true,
+  });
+  return daemon.workspaces.conflicts.resolve({
+    ...ids(seat),
+    filePaths: paths.map(normalize),
+  });
+}
+
 /** Stages pending paths without submitting them. */
 export async function stage(seat: Seat, paths: string[]): Promise<void> {
   const { daemon } = await daemonModules();

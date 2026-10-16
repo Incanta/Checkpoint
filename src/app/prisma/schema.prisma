@@ -472,6 +472,12 @@ model FileChange {
   type    FileChangeType
   oldPath String?
 
+  // Where the file's content lives when it is not this changelist's own: a
+  // merge changelist uploads nothing, so each row it writes names the
+  // changelist whose version index holds the file. Null means this
+  // changelist. Keeps the log canonical (any tree can be rebuilt from it).
+  sourceChangelistNumber Int?
+
   // Range scan over a changelist's file changes (used by merges and history).
   @@index([repoId, changelistNumber])
 }

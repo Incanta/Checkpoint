@@ -155,7 +155,11 @@ export class LocalChangeGuard {
     private readonly workspaceRoot: string,
     label: string,
   ) {
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    // Short: every backup path is the file's own path under this folder, and
+    // Explorer and many Windows tools stop at 260 characters. Milliseconds
+    // in base 36 (8 characters) instead of an ISO timestamp (24) keep the
+    // folders unique and ordered.
+    const stamp = Date.now().toString(36);
     this.backupRoot = path.join(
       workspaceRoot,
       ".checkpoint",

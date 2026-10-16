@@ -15,7 +15,10 @@ Longtail already content-addresses the bytes.
 
 - **The `FileChange` log is canonical.** Trees are a derived index; any tree is
   re-derivable from the log. This makes even the structural choice reversible
-  (rework, not data loss or a client break).
+  (rework, not data loss or a client break). A merge changelist uploads
+  nothing of its own, so its rows carry `sourceChangelistNumber`: the
+  changelist whose version index holds each merged file (null on every other
+  row, meaning the row's own changelist).
 - **The wire stays `path -> CL`** (and tree-diff results). Clients and the
   daemon never see tree internals, so storage is swappable.
 - **Frozen format**: the binary node layout (`codec.ts`), the hash function, and

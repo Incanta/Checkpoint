@@ -5,6 +5,20 @@ import { FileStatus } from "./types/index.js";
 import type { WorkspaceState } from "./util/index.js";
 
 export const IGNORE_FILE = ".chkignore";
+
+/**
+ * Files the OS writes on its own, ignored everywhere unless a project's
+ * .chkignore negates them: Finder's .DS_Store, the ._* AppleDouble files
+ * macOS writes on exFAT and SMB volumes, and Explorer's Thumbs.db and
+ * desktop.ini. A Mac "submit everything" would otherwise add them, and
+ * Explorer holding Thumbs.db open would fail Windows pulls that replace it.
+ */
+export const BUILTIN_IGNORE_PATTERNS = [
+  ".DS_Store",
+  "._*",
+  "Thumbs.db",
+  "desktop.ini",
+];
 export const HIDDEN_FILE = ".chkhidden";
 export const CHECKPOINT_DIR = ".checkpoint";
 
@@ -171,7 +185,10 @@ export async function scanWorkspaceIgnoreFiles(
   const hiddenEntries: IgnoreFileEntry[] = [];
 
   // Ignore patterns discovered so far, used to prune the walk as we descend.
-  const discovered: string[] = [`${CHECKPOINT_DIR}/`];
+  const discovered: string[] = [
+    `${CHECKPOINT_DIR}/`,
+    ...BUILTIN_IGNORE_PATTERNS,
+  ];
   let matcher: Ignore = ignore().add(discovered);
 
   const walk = async (relativeDir: string): Promise<void> => {
@@ -296,6 +313,8 @@ function flattenPatterns(
   if (addCheckpointDir) {
     patterns.push(".checkpoint/");
     patterns.push(".checkpoint/**");
+    // First, so a project's own ignore files can negate them.
+    patterns.push(...BUILTIN_IGNORE_PATTERNS);
   }
   for (const entry of entries) {
     patterns.push(...entry.patterns);

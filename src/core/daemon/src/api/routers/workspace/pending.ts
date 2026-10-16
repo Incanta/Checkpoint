@@ -1350,19 +1350,11 @@ export const pendingRouter = router({
             );
             await fs.copyFile(result.cachePath, localFilePath);
             restoredToBaseline.push(normalizedPath);
-          } else {
-            // File is not in any head version (locally added file).
-            // Delete it from disk so it reverts to "not existing".
-            const localFilePath = resolveInWorkspace(
-              workspace.localPath,
-              normalizedPath,
-            );
-            try {
-              await fs.unlink(localFilePath);
-            } catch {
-              // File may already be gone
-            }
           }
+          // A file in no head version (added locally) stays on disk: reverting
+          // an add takes it out of the next submit, as Perforce does, rather
+          // than deleting work that exists nowhere else. It is unmarked for
+          // add below and shows as untracked again.
 
           // Undo checkout if the file was checked out
           try {
