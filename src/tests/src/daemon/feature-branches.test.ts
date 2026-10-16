@@ -65,7 +65,10 @@ import {
 
 const FIVE_LINES = "one\ntwo\nthree\nfour\nfive\n";
 
-describe("feature branches", () => {
+// Each test runs two daemons' worth of submits and pulls (and the Windows
+// lock tests start a PowerShell), which hosted runners can take well past the
+// suite's default timeout on.
+describe("feature branches", { timeout: 120_000 }, () => {
   let testDb: TestDb;
   let scene: Scene | undefined;
 

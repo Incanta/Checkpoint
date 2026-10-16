@@ -178,9 +178,27 @@ describe("merge provenance", () => {
     await write("main", "x.txt");
     await branchFrom("main", "feature");
     const forked = await head("main");
-    for (let i = 0; i < 600; i++) {
-      await write("main", `m${i % 7}.txt`);
-    }
+    // 600 changelists on main, written straight to the table: the walk only
+    // follows parent links, and 600 real submits are minutes on a slow runner.
+    const owner = await testDb.client.changelist.findFirstOrThrow({
+      where: { repoId, number: forked },
+      select: { userId: true },
+    });
+    const first = forked + 1;
+    await testDb.client.changelist.createMany({
+      data: Array.from({ length: 600 }, (_, i) => ({
+        repoId,
+        number: first + i,
+        parentNumber: first + i - 1,
+        message: `main ${i}`,
+        versionIndex: "",
+        userId: owner.userId,
+      })),
+    });
+    await testDb.client.branch.updateMany({
+      where: { repoId, name: "main" },
+      data: { headNumber: first + 599 },
+    });
     await write("feature", "f.txt");
 
     const found = await findMergeBase(
@@ -191,7 +209,7 @@ describe("merge provenance", () => {
     );
     expect(found?.base).toBe(forked);
     expect(found?.incomingNumbers).toEqual([await head("feature")]);
-  }, 300_000);
+  });
 
   it("says where each merged file's content lives, so the log stays canonical", async () => {
     await write("main", "a.txt");

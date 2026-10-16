@@ -45,7 +45,9 @@ export function isSafeWorkspacePath(relativePath: string): boolean {
 export function resolveInWorkspace(root: string, relativePath: string): string {
   const reason = unsafePathReason(relativePath);
   if (reason) throw new UnsafePathError(relativePath, reason);
-  const resolved = path.resolve(root, relativePath);
+  // Repo paths use "/" (the server converts backslashes on the way in), so a
+  // backslash here is a separator on every OS, as the check above read it.
+  const resolved = path.resolve(root, relativePath.replace(/\\/g, "/"));
   const inside = path.relative(path.resolve(root), resolved);
   if (
     inside === "" ||

@@ -103,7 +103,10 @@ const repoConfig: TeamSyncConfig = {
 
 const windows = process.platform === "win32";
 
-describe("the Team Sync reconcile", () => {
+// Each test runs two daemons' worth of submits and pulls (and the Windows
+// lock tests start a PowerShell), which hosted runners can take well past the
+// suite's default timeout on.
+describe("the Team Sync reconcile", { timeout: 120_000 }, () => {
   let testDb: TestDb;
   let scene: Scene | undefined;
 
