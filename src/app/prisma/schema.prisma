@@ -334,6 +334,28 @@ model Branch {
   @@unique([repoId, name])
 }
 
+// A branch head that is gone from the branch list (deleted, or deleted by
+// its merge), kept so the branch can be restored and its changelists stay
+// reachable. Deleting a branch with work its parent never got needs an
+// explicit discard, and even then the head is kept here.
+model DeletedBranch {
+  id     String @id @default(cuid())
+  repoId String
+
+  name             String
+  headNumber       Int
+  type             BranchType
+  parentBranchName String?
+  domainBranchName String?
+  // Deleted by its merge into its parent, rather than discarded.
+  merged           Boolean
+
+  deletedById String?
+  deletedAt   DateTime @default(now())
+
+  @@index([repoId, name])
+}
+
 model Changelist {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())

@@ -162,6 +162,7 @@ export const repoRouter = createTRPCRouter({
           Logger.error(`Failed to create R2 bucket: ${JSON.stringify(error)}`);
           // rollback repo creation if bucket creation fails
           await ctx.db.repoRole.deleteMany({ where: { repoId: repo.id } });
+          await ctx.db.deletedBranch.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.branch.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.treeBlock.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.changelist.deleteMany({ where: { repoId: repo.id } });
@@ -182,6 +183,7 @@ export const repoRouter = createTRPCRouter({
           );
           // rollback repo creation if directory creation fails
           await ctx.db.repoRole.deleteMany({ where: { repoId: repo.id } });
+          await ctx.db.deletedBranch.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.branch.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.treeBlock.deleteMany({ where: { repoId: repo.id } });
           await ctx.db.changelist.deleteMany({ where: { repoId: repo.id } });

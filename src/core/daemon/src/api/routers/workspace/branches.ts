@@ -510,6 +510,8 @@ export const branchesRouter = router({
         daemonId: z.string(),
         workspaceId: z.string(),
         branchName: z.string(),
+        /** Discard changelists the parent never got (see branch.deleteBranch). */
+        discardUnmerged: z.boolean().default(false),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -535,6 +537,7 @@ export const branchesRouter = router({
       return await client.branch.deleteBranch.mutate({
         repoId: workspace.repoId,
         branchName: input.branchName,
+        discardUnmerged: input.discardUnmerged,
       });
     }),
 

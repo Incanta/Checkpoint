@@ -4,7 +4,11 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { RepoAccess } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
-import { mergeBranch, updateBranchFromParent } from "~/server/branch-merge";
+import {
+  findMergeBase,
+  mergeBranch,
+  updateBranchFromParent,
+} from "~/server/branch-merge";
 import { releaseClaimsForBranch } from "~/server/claims/claims";
 import { resolveDomainBranchName } from "~/server/claims/domain";
 
@@ -302,6 +306,12 @@ export const branchRouter = createTRPCRouter({
       z.object({
         repoId: z.string(),
         branchName: z.string(),
+        /**
+         * Delete even though the branch has changelists its parent never
+         * got. Without it such a delete is refused, listing them. The head
+         * is kept either way (see restoreBranch).
+         */
+        discardUnmerged: z.boolean().default(false),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -360,16 +370,154 @@ export const branchRouter = createTRPCRouter({
         });
       }
 
+      // Work the parent never got: the branch's own changelists that the
+      // parent's head cannot reach. Changelists that only brought the parent
+      // in (updateFromParent) carry nothing of the branch's own.
+      if (!input.discardUnmerged && branch.parentBranchName) {
+        const parent = await ctx.db.branch.findUnique({
+          where: {
+            repoId_name: {
+              repoId: input.repoId,
+              name: branch.parentBranchName,
+            },
+          },
+        });
+        if (parent) {
+          const mergeBase = await findMergeBase(
+            ctx.db,
+            input.repoId,
+            parent.headNumber,
+            branch.headNumber,
+          );
+          const own = mergeBase
+            ? await ctx.db.changelist.findMany({
+                where: {
+                  repoId: input.repoId,
+                  number: { in: mergeBase.incomingNumbers },
+                  mergedFromNumber: null,
+                },
+                orderBy: { number: "desc" },
+                select: { number: true, message: true },
+              })
+            : [];
+          if (own.length > 0) {
+            const listed = own
+              .slice(0, 20)
+              .map((cl) => `#${cl.number} ${cl.message.split("\n")[0]}`);
+            if (own.length > 20) listed.push(`and ${own.length - 20} more`);
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message:
+                `${input.branchName} has ${own.length} changelist(s) ${branch.parentBranchName} never got. ` +
+                `Merge it, or delete it with discardUnmerged to discard them (it can be restored):\n${listed.join("\n")}`,
+            });
+          }
+        }
+      }
+
       // Deleting a branch discards its work, so its claims release. Otherwise
       // the paths stay locked in the domain forever with nothing to unlock
       // them. The next claimant starts from the domain head, which does not
-      // contain the discarded work, and the freshness gate agrees.
-      await releaseClaimsForBranch(ctx.db, input.repoId, input.branchName, {
-        userId: ctx.session.user.id,
+      // contain the discarded work, and the freshness gate agrees. One
+      // transaction with the delete, and the head is kept so the branch can
+      // be restored.
+      return ctx.db.$transaction(async (tx) => {
+        await releaseClaimsForBranch(tx, input.repoId, input.branchName, {
+          userId: ctx.session.user.id,
+        });
+        await tx.deletedBranch.create({
+          data: {
+            repoId: input.repoId,
+            name: branch.name,
+            headNumber: branch.headNumber,
+            type: branch.type,
+            parentBranchName: branch.parentBranchName,
+            domainBranchName: branch.domainBranchName,
+            merged: false,
+            deletedById: ctx.session.user.id,
+          },
+        });
+        return tx.branch.delete({ where: { id: branch.id } });
       });
+    }),
 
-      return ctx.db.branch.delete({
-        where: { id: branch.id },
+  /** Branches deleted (or deleted by their merge), newest first. */
+  listDeletedBranches: protectedProcedure
+    .input(z.object({ repoId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
+      return ctx.db.deletedBranch.findMany({
+        where: { repoId: input.repoId },
+        orderBy: { deletedAt: "desc" },
+      });
+    }),
+
+  /**
+   * Recreates a deleted branch at the head it had, under its old name or the
+   * one given. Its parent must still exist (or another be named).
+   */
+  restoreBranch: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        deletedBranchId: z.string(),
+        name: z.string().min(1).optional(),
+        parentBranchName: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const deleted = await ctx.db.deletedBranch.findFirst({
+        where: { id: input.deletedBranchId, repoId: input.repoId },
+      });
+      if (!deleted) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Deleted branch not found",
+        });
+      }
+      const name = input.name ?? deleted.name;
+      const taken = await ctx.db.branch.findUnique({
+        where: { repoId_name: { repoId: input.repoId, name } },
+      });
+      if (taken) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `A branch named ${name} exists; restore under another name`,
+        });
+      }
+      const parentName = input.parentBranchName ?? deleted.parentBranchName;
+      const parent = parentName
+        ? await ctx.db.branch.findUnique({
+            where: { repoId_name: { repoId: input.repoId, name: parentName } },
+          })
+        : null;
+      if (parentName && !parent) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Its parent ${parentName} no longer exists; restore it onto another parent`,
+        });
+      }
+      return ctx.db.$transaction(async (tx) => {
+        const restored = await tx.branch.create({
+          data: {
+            repoId: input.repoId,
+            name,
+            headNumber: deleted.headNumber,
+            type: deleted.type,
+            parentBranchName: parentName,
+            isClaimDomainRoot: deleted.type !== "FEATURE",
+            domainBranchName:
+              deleted.type === "FEATURE"
+                ? (parent?.domainBranchName ??
+                  parent?.name ??
+                  deleted.domainBranchName)
+                : name,
+            createdById: ctx.session.user.id,
+          },
+        });
+        await tx.deletedBranch.delete({ where: { id: deleted.id } });
+        return restored;
       });
     }),
 

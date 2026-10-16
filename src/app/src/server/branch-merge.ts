@@ -717,7 +717,20 @@ export async function mergeBranch(
 
           await params.alsoInTransaction?.(tx, nextNumber);
 
-          // Delete the incoming branch (CLs are preserved)
+          // Delete the incoming branch (CLs are preserved), keeping its head
+          // so it can be restored.
+          await tx.deletedBranch.create({
+            data: {
+              repoId,
+              name: incomingBranch.name,
+              headNumber: incomingBranch.headNumber,
+              type: incomingBranch.type,
+              parentBranchName: incomingBranch.parentBranchName,
+              domainBranchName: incomingBranch.domainBranchName,
+              merged: true,
+              deletedById: userId,
+            },
+          });
           await tx.branch.delete({ where: { id: incomingBranch.id } });
 
           return created;

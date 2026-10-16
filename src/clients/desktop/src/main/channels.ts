@@ -72,7 +72,11 @@ export type Channels = {
   "workspace:unarchive-branch": { branchName: string };
   "workspace:unarchive-branch:success": null;
   "workspace:unarchive-branch:error": { message: string };
-  "workspace:delete-branch": { branchName: string };
+  "workspace:delete-branch": {
+    branchName: string;
+    /** Discard changelists the parent never got (asked for after a refusal). */
+    discardUnmerged?: boolean;
+  };
   "workspace:delete-branch:success": null;
   "workspace:delete-branch:error": { message: string };
   "workspace:merge-branch": { incomingBranchName: string };

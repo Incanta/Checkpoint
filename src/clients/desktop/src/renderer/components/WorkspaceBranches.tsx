@@ -70,6 +70,8 @@ export default function WorkspaceBranches() {
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const contextBranchRef = useRef<BranchEntry | null>(null);
+  // The branch a delete was last asked for, to ask again with a discard.
+  const deletingBranchRef = useRef<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
   // Create branch dialog
@@ -162,9 +164,29 @@ export default function WorkspaceBranches() {
       setDeleteDialogVisible(false);
       refreshBranches();
     });
-    const unsubDeleteError = ipc.on("workspace:delete-branch:error", () => {
-      setDeletePending(false);
-    });
+    const unsubDeleteError = ipc.on(
+      "workspace:delete-branch:error",
+      (data: unknown) => {
+        setDeletePending(false);
+        // A branch with changelists its parent never got is only deleted
+        // when asked again, explicitly. Its head is kept either way.
+        const message = (data as { message?: string } | null)?.message ?? "";
+        const branchName = deletingBranchRef.current;
+        if (
+          branchName &&
+          /never got/.test(message) &&
+          window.confirm(
+            `${message}\n\nDelete ${branchName} anyway and discard them? It can be restored later.`,
+          )
+        ) {
+          setDeletePending(true);
+          ipc.sendMessage("workspace:delete-branch", {
+            branchName,
+            discardUnmerged: true,
+          });
+        }
+      },
+    );
     const unsubMergeSuccess = ipc.on("workspace:merge-branch:success", () => {
       setMergePending(false);
       setMergeDialogVisible(false);
@@ -327,6 +349,7 @@ export default function WorkspaceBranches() {
   const handleDelete = useCallback(() => {
     if (!contextBranchRef.current) return;
     setDeletePending(true);
+    deletingBranchRef.current = contextBranchRef.current.name;
     ipc.sendMessage("workspace:delete-branch", {
       branchName: contextBranchRef.current.name,
     });

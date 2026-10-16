@@ -45,7 +45,7 @@ Ordering rules:
 | R15 | Gate | Staged files keep the branch they were staged to | R14 | M | Done |
 | R16 | DL-13 | Merge changelists record what they merged, and the merge base follows it | | M | Done |
 | R17 | DL-14 | Bring a branch's parent into it | R14, R16 | L | Done (desktop UI: follow-up) |
-| R18 | DL-15 | Deleting a branch with unmerged work needs a flag, and deleted branches can be restored | | M | Not started |
+| R18 | DL-15 | Deleting a branch with unmerged work needs a flag, and deleted branches can be restored | | M | Done |
 | **Phase 4** | | **Integrity and the smaller observations** | | | |
 | R19 | DL-16 | The app records only version indexes that exist in the repo's storage | | M | Not started |
 | R20 | Other observations | Revert, resolve, the empty-tree diff, the merge log, watcher gaps, OS litter, and long paths | | M | Not started |

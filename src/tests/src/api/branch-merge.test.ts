@@ -37,7 +37,8 @@ import { restackChildren } from "~/server/claims/domain";
 // The real implementation, wrapped so one test can make it fail inside the
 // merge transaction.
 vi.mock("~/server/claims/domain", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("~/server/claims/domain")>();
+  const actual =
+    await importOriginal<typeof import("~/server/claims/domain")>();
   return { ...actual, restackChildren: vi.fn(actual.restackChildren) };
 });
 
@@ -95,7 +96,10 @@ describe("mergeTrees", () => {
 
     expect(result.conflicts).toEqual([]);
     // a: target's edit. b: incoming's edit. c: target deleted. d: incoming deleted.
-    expect(Object.fromEntries(result.merged)).toEqual({ "a.txt": 7, "b.txt": 5 });
+    expect(Object.fromEntries(result.merged)).toEqual({
+      "a.txt": 7,
+      "b.txt": 5,
+    });
   });
 
   it("treats both sides deleting a file as agreement", () => {
@@ -107,8 +111,24 @@ describe("mergeTrees", () => {
 
   it.each([
     ["both modified", { "f.txt": 1 }, { "f.txt": 7 }, { "f.txt": 5 }, 1, 7, 5],
-    ["incoming modified, target deleted", { "f.txt": 1 }, {}, { "f.txt": 5 }, 1, null, 5],
-    ["incoming deleted, target modified", { "f.txt": 1 }, { "f.txt": 7 }, {}, 1, 7, null],
+    [
+      "incoming modified, target deleted",
+      { "f.txt": 1 },
+      {},
+      { "f.txt": 5 },
+      1,
+      null,
+      5,
+    ],
+    [
+      "incoming deleted, target modified",
+      { "f.txt": 1 },
+      { "f.txt": 7 },
+      {},
+      1,
+      7,
+      null,
+    ],
     ["both added", {}, { "f.txt": 7 }, { "f.txt": 5 }, null, 7, 5],
   ] as const)(
     "reports a conflict when %s",
@@ -147,7 +167,9 @@ describe("mergeTrees", () => {
     const base = tree({ "a.txt": 1, "b.txt": 1 });
     const incoming = tree({ "a.txt": 5, "c.txt": 6 });
     const result = mergeTrees(base, base, incoming);
-    expect(Object.fromEntries(result.merged)).toEqual(Object.fromEntries(incoming));
+    expect(Object.fromEntries(result.merged)).toEqual(
+      Object.fromEntries(incoming),
+    );
   });
 });
 
@@ -287,7 +309,10 @@ describe("branch merge", () => {
       await submit("main", { "main-a.txt": "write" });
       const f2 = await submit("feature", { "two.txt": "write" });
       await submit("main", { "main-b.txt": "write" });
-      const f3 = await submit("feature", { "three.txt": "write", "one.txt": "delete" });
+      const f3 = await submit("feature", {
+        "three.txt": "write",
+        "one.txt": "delete",
+      });
 
       const result = await merge("feature");
 
@@ -306,9 +331,10 @@ describe("branch merge", () => {
         where: { repoId, changelistNumber: result.mergeChangelist.number },
         include: { file: true },
       });
-      expect(
-        changes.map((c) => `${c.file.path}:${c.type}`).sort(),
-      ).toEqual(["three.txt:MODIFY", "two.txt:MODIFY"]);
+      expect(changes.map((c) => `${c.file.path}:${c.type}`).sort()).toEqual([
+        "three.txt:MODIFY",
+        "two.txt:MODIFY",
+      ]);
     });
 
     it("applies the branch's deletes and nothing more", async () => {
@@ -352,10 +378,14 @@ describe("branch merge", () => {
 
       expect(result.deletedBranch).toBe("feature");
       expect(
-        await testDb.client.branch.findFirst({ where: { repoId, name: "feature" } }),
+        await testDb.client.branch.findFirst({
+          where: { repoId, name: "feature" },
+        }),
       ).toBeNull();
       const mergeCl = await testDb.client.changelist.findUniqueOrThrow({
-        where: { repoId_number: { repoId, number: result.mergeChangelist.number } },
+        where: {
+          repoId_number: { repoId, number: result.mergeChangelist.number },
+        },
       });
       expect(mergeCl.parentNumber).toBe(targetHead);
     });
@@ -364,7 +394,9 @@ describe("branch merge", () => {
   describe("conflicts", () => {
     async function expectRefused(mention: string) {
       const before = await snapshot();
-      await expect(merge("feature")).rejects.toMatchObject({ code: "CONFLICT" });
+      await expect(merge("feature")).rejects.toMatchObject({
+        code: "CONFLICT",
+      });
       await expect(merge("feature")).rejects.toThrow(mention);
       expect(await snapshot()).toEqual(before);
     }
@@ -422,9 +454,15 @@ describe("branch merge", () => {
       await branchFrom("main", "feature");
       await submit("feature", { "both.txt": "write" });
       await submit("main", { "both.txt": "write" });
-      await expect(merge("feature")).rejects.toMatchObject({ code: "CONFLICT" });
+      await expect(merge("feature")).rejects.toMatchObject({
+        code: "CONFLICT",
+      });
 
-      await caller.branch.deleteBranch({ repoId, branchName: "feature" });
+      await caller.branch.deleteBranch({
+        repoId,
+        branchName: "feature",
+        discardUnmerged: true,
+      });
       await branchFrom("main", "feature");
       const resolved = await submit("feature", { "both.txt": "write" });
 
@@ -481,7 +519,9 @@ describe("branch merge", () => {
       await submit("feature", { "b.txt": "write" });
       const before = await snapshot();
 
-      vi.mocked(restackChildren).mockRejectedValueOnce(new Error("restack failed"));
+      vi.mocked(restackChildren).mockRejectedValueOnce(
+        new Error("restack failed"),
+      );
       await expect(merge("feature")).rejects.toThrow("restack failed");
 
       expect(await snapshot()).toEqual(before);
@@ -525,9 +565,14 @@ describe("branch merge", () => {
       await submit("main", { "a.txt": "write" });
       await branchFrom("main", "feature");
       await submit("feature", { "b.txt": "write" });
-      const before = await testDb.client.changelist.count({ where: { repoId } });
+      const before = await testDb.client.changelist.count({
+        where: { repoId },
+      });
 
-      const outcomes = await Promise.allSettled([merge("feature"), merge("feature")]);
+      const outcomes = await Promise.allSettled([
+        merge("feature"),
+        merge("feature"),
+      ]);
 
       expect(outcomes.filter((o) => o.status === "fulfilled").length).toBe(1);
       expect(await testDb.client.changelist.count({ where: { repoId } })).toBe(
@@ -598,10 +643,20 @@ describe("branch merge", () => {
       const m2 = await submit("main", { "other.txt": "write" });
       expect(f).toBeLessThan(m2);
 
-      const onMain = await resolveFileSource(testDb.client, repoId, "f.txt", m2);
+      const onMain = await resolveFileSource(
+        testDb.client,
+        repoId,
+        "f.txt",
+        m2,
+      );
       expect(onMain?.sourceChangelistNumber).toBe(m1);
 
-      const onFeature = await resolveFileSource(testDb.client, repoId, "f.txt", f);
+      const onFeature = await resolveFileSource(
+        testDb.client,
+        repoId,
+        "f.txt",
+        f,
+      );
       expect(onFeature?.sourceChangelistNumber).toBe(f);
     });
 
@@ -620,8 +675,18 @@ describe("branch merge", () => {
       });
       expect(mergeCl.versionIndex).toBe("");
 
-      const early = await resolveFileSource(testDb.client, repoId, "early.txt", merged);
-      const late = await resolveFileSource(testDb.client, repoId, "late.txt", merged);
+      const early = await resolveFileSource(
+        testDb.client,
+        repoId,
+        "early.txt",
+        merged,
+      );
+      const late = await resolveFileSource(
+        testDb.client,
+        repoId,
+        "late.txt",
+        merged,
+      );
       expect(early?.sourceChangelistNumber).toBe(f1);
       expect(late?.sourceChangelistNumber).toBe(f2);
       expect(early?.versionIndex).toContain("early.txt");
@@ -632,10 +697,15 @@ describe("branch merge", () => {
       const c1 = await submit("main", { "f.txt": "write" });
       const c2 = await submit("main", { "f.txt": "delete" });
 
-      expect(await resolveFileSource(testDb.client, repoId, "f.txt", c2)).toBeNull();
-      expect(await resolveFileSource(testDb.client, repoId, "nope.txt", c2)).toBeNull();
       expect(
-        (await resolveFileSource(testDb.client, repoId, "f.txt", c1))?.sourceChangelistNumber,
+        await resolveFileSource(testDb.client, repoId, "f.txt", c2),
+      ).toBeNull();
+      expect(
+        await resolveFileSource(testDb.client, repoId, "nope.txt", c2),
+      ).toBeNull();
+      expect(
+        (await resolveFileSource(testDb.client, repoId, "f.txt", c1))
+          ?.sourceChangelistNumber,
       ).toBe(c1);
     });
 
@@ -643,7 +713,8 @@ describe("branch merge", () => {
       const c = await submit("main", { "dir/f.txt": "write" });
       for (const spelling of ["dir/f.txt", "/dir/f.txt", "dir\\f.txt"]) {
         expect(
-          (await resolveFileSource(testDb.client, repoId, spelling, c))?.sourceChangelistNumber,
+          (await resolveFileSource(testDb.client, repoId, spelling, c))
+            ?.sourceChangelistNumber,
           spelling,
         ).toBe(c);
       }

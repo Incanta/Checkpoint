@@ -1672,6 +1672,7 @@ export default class DaemonHandler {
         daemonId: currentUser.daemonId,
         workspaceId: currentWorkspace.id,
         branchName: data.branchName,
+        discardUnmerged: data.discardUnmerged ?? false,
       });
 
       if (this.webContents) {
