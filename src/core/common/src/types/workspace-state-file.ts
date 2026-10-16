@@ -16,4 +16,12 @@ export interface WorkspaceStateFile {
    * stored twice; the server wins on disagreement.
    */
   branch?: string;
+  /**
+   * When this baseline was recorded, by the workspace filesystem's own clock
+   * (ms). A file whose mtime is not older than this, less the coarsest
+   * timestamp tick, may have been rewritten in the same tick at the same
+   * size, so its size and mtime prove nothing and its content decides (see
+   * compareWithBaseline). Absent on entries from older daemons.
+   */
+  recordedAt?: number;
 }

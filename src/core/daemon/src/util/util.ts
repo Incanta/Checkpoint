@@ -13,6 +13,7 @@ import {
   replaceWorkspaceState,
 } from "./state-store.js";
 import type { StateDelta } from "./state-delta.js";
+import { stampBaselines } from "./baseline.js";
 import { DaemonConfigType } from "../daemon-config.js";
 
 export function relativePath(from: string, to: string): string {
@@ -99,7 +100,7 @@ export type ArtifactStateFile = WorkspaceStateFile & {
   artifactType?: string;
 };
 
-export const WORKSPACE_STATE_VERSION = 3;
+export const WORKSPACE_STATE_VERSION = 4;
 
 export interface WorkspaceState {
   /** State schema version; absent = 1. Current: WORKSPACE_STATE_VERSION. */
@@ -311,6 +312,19 @@ export async function updateWorkspaceState(
   delta: StateDelta,
   backend?: DaemonConfigType["stateBackend"],
 ): Promise<void> {
+  // Each baseline recorded here gets the time it was recorded, so change
+  // detection can tell a racily clean file from an unchanged one.
+  if (delta.files?.upsert || delta.files?.replaceAll) {
+    delta = { ...delta, files: { ...delta.files } };
+    if (delta.files!.upsert) {
+      delta.files!.upsert = { ...delta.files!.upsert };
+      await stampBaselines(workspace.localPath, delta.files!.upsert);
+    }
+    if (delta.files!.replaceAll) {
+      delta.files!.replaceAll = { ...delta.files!.replaceAll };
+      await stampBaselines(workspace.localPath, delta.files!.replaceAll);
+    }
+  }
   try {
     await applyWorkspaceDelta(workspace.localPath, delta, backend);
   } catch (e) {

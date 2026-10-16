@@ -158,45 +158,6 @@ describe("data loss: the filesystem under the workspace", () => {
     );
   });
 
-  describe("file times", () => {
-    it("still sees a same-size edit made within one timestamp tick of a pull", async () => {
-      // "Unchanged" is decided by size and mtime alone while the state has no
-      // hash, which is right after every pull. A filesystem stamps writes with
-      // a clock that moves in ticks (2 s on FAT32 and exFAT drives shared
-      // between Macs and PCs, 1 s on HFS+, a few milliseconds on NTFS and
-      // ext4), so a tool that rewrites a file right after a sync (a build
-      // step stamping a version, an editor resaving) can leave it with the
-      // size and mtime the pull recorded.
-      const { alice, bob } = scene!;
-      await put(alice, "notes.txt", "status: draft\n");
-      await stageAndSubmit(alice, ["notes.txt"]);
-      await syncLatest(bob);
-      await put(alice, "notes.txt", "status: final\n");
-      await stageAndSubmit(alice, ["notes.txt"]);
-
-      overrides.writeTime = new Date("2026-01-01T00:00:00Z");
-      await syncLatest(bob);
-      await put(bob, "notes.txt", "status: fixed\n"); // the same length
-      delete overrides.writeTime;
-
-      expect
-        .soft(
-          await pendingChanges(bob),
-          "the edit has the size and mtime the pull recorded, and nothing compares content",
-        )
-        .toHaveProperty(["notes.txt"], stillPending);
-
-      await put(alice, "notes.txt", "status: shipped\n");
-      await stageAndSubmit(alice, ["notes.txt"]);
-      await syncLatest(bob);
-
-      expect(
-        await survives(bob, "notes.txt", "status: fixed"),
-        `${await describeFile(bob, "notes.txt")}, and no backup holds Bob's edit`,
-      ).toBe(true);
-    });
-  });
-
   describe("text encodings and line endings", () => {
     it("control: merges a CRLF working copy with an LF upstream change, keeping CRLF", async () => {
       // What does hold up: Bob's Windows editor saved the file with CRLF

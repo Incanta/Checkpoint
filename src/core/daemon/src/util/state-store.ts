@@ -282,7 +282,8 @@ class SqliteStateStore implements StateStore {
         hash       TEXT NOT NULL,
         size       INTEGER NOT NULL,
         mtime      REAL,
-        branch     TEXT
+        branch     TEXT,
+        recorded_at REAL
       );
       CREATE TABLE IF NOT EXISTS artifact_files (
         path          TEXT PRIMARY KEY,
@@ -339,6 +340,10 @@ class SqliteStateStore implements StateStore {
         path TEXT PRIMARY KEY
       )`,
     ],
+    // When each baseline was recorded, so change detection can tell a
+    // racily clean entry (written within one timestamp tick of being
+    // recorded) from one whose size and mtime prove it unchanged.
+    4: ["ALTER TABLE files ADD COLUMN recorded_at REAL"],
   };
 
   private runMigrations(): void {
@@ -435,6 +440,7 @@ class SqliteStateStore implements StateStore {
       size: number;
       mtime: number | null;
       branch: string | null;
+      recorded_at: number | null;
     }>;
     for (const r of fileRows) {
       files[r.path] = {
@@ -444,6 +450,7 @@ class SqliteStateStore implements StateStore {
         size: r.size,
         ...(r.mtime != null && { mtime: r.mtime }),
         ...(r.branch != null && { branch: r.branch }),
+        ...(r.recorded_at != null && { recordedAt: r.recorded_at }),
       };
     }
 
@@ -638,7 +645,7 @@ class SqliteStateStore implements StateStore {
       deleteMeta: db.prepare("DELETE FROM workspace_meta WHERE key = ?"),
       clearFiles: db.prepare("DELETE FROM files"),
       upsertFile: db.prepare(
-        "INSERT OR REPLACE INTO files (path, file_id, changelist, hash, size, mtime, branch) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO files (path, file_id, changelist, hash, size, mtime, branch, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       ),
       deleteFile: db.prepare("DELETE FROM files WHERE path = ?"),
       clearArtifacts: db.prepare("DELETE FROM artifact_files"),
@@ -675,6 +682,7 @@ class SqliteStateStore implements StateStore {
         f.size,
         f.mtime ?? null,
         f.branch ?? null,
+        f.recordedAt ?? null,
       );
     const artifactRow = (p: string, f: ArtifactStateFile) =>
       s.upsertArtifact.run(
@@ -800,6 +808,7 @@ class SqliteStateStore implements StateStore {
           f.size,
           f.mtime ?? null,
           f.branch ?? null,
+          f.recordedAt ?? null,
         );
       }
 

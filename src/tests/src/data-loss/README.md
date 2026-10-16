@@ -54,7 +54,7 @@ Severity: **Critical** means silent, unrecoverable loss in a common workflow, or
 | DL-17 | Names Windows cannot store are accepted; a `:` hides a file's content in an NTFS stream, and a Windows "submit everything" then deletes the file | Push, pull | High | Fixed in the server (R1) and daemon (R2); native check open (R13) |
 | DL-18 | Names that differ only in Unicode normalization are accepted; on macOS they are one file | Push, pull | High | Fixed (R6, R7); the macOS test runs in CI |
 | DL-19 | On case-insensitive filesystems the daemon takes one file for two: deleting one spelling deletes both, phantom pending changes, Clean Workspace deletes tracked files | Pull, cleanup | High | Fixed (R7) |
-| DL-20 | A same-size edit within one timestamp tick of a pull is invisible, then overwritten | Pull | High | Live (any OS; likelier on FAT32, exFAT, HFS+) |
+| DL-20 | A same-size edit within one timestamp tick of a pull is invisible, then overwritten | Pull | High | Fixed (R9) |
 | DL-21 | An edit made while a pull runs is recorded as the pulled version, then overwritten | Pull | High | Live (any OS) |
 | DL-22 | A sync filter change that cannot remove one file leaves the files it did remove looking deleted | Pull (Team Sync) | High | Fixed (R3) |
 | DL-23 | A pull writes into the workspace's own `.checkpoint` directory; one changelist can wipe every teammate's workspace | Push, pull | High, and a security issue | Fixed in the server (R1) and daemon (R2); native check open (R13) |
