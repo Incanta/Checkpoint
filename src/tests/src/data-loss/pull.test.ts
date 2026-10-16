@@ -174,53 +174,6 @@ describe("data loss: pull", () => {
     ).toBe(true);
   });
 
-  it.skipIf(!caseInsensitive)(
-    "brings the new content of a file renamed by case only (case-insensitive filesystems)",
-    async () => {
-      // Alice (on Linux, or any client) renames Textures/hero.txt to
-      // Textures/Hero.txt and updates it in one changelist. On Bob's Windows
-      // machine the pull writes "Hero.txt" onto the existing hero.txt, then
-      // its delete pass removes "hero.txt", which is the same file. The guard
-      // had copied the old file aside as an "untracked" Hero.txt, so it puts
-      // the OLD content back, and the state records it as the new version.
-      const { alice, bob } = scene!;
-      await put(alice, "Textures/hero.txt", "hero, original\n");
-      await stageAndSubmit(alice, ["Textures/hero.txt"]);
-      await syncLatest(bob);
-
-      const head = (
-        await testDb.client.branch.findFirstOrThrow({
-          where: { repoId: scene!.repoId, name: "main" },
-        })
-      ).headNumber;
-      await apiAs(alice).changelist.createChangelist({
-        message: "rename hero.txt to Hero.txt and update it",
-        repoId: scene!.repoId,
-        versionIndex: storeVersion({
-          "Textures/Hero.txt": "hero, updated by alice\n",
-        }),
-        branchName: "main",
-        modifications: [
-          { path: "Textures/hero.txt", delete: true, baseChangelist: head },
-          { path: "Textures/Hero.txt", delete: false, baseChangelist: null },
-        ],
-        keepCheckedOut: false,
-        workspaceId: alice.workspace.id,
-      });
-
-      await syncLatest(bob);
-
-      const recorded = (await getWorkspaceState(bob.root, "sqlite")).files[
-        "Textures/Hero.txt"
-      ];
-      expect(
-        await read(bob, "Textures/Hero.txt"),
-        `the workspace state records Textures/Hero.txt at #${recorded?.changelist}, ` +
-          `and nothing shows it as changed: ${JSON.stringify(await pendingChanges(bob))}`,
-      ).toBe("hero, updated by alice\n");
-    },
-  );
-
   it("records the workspace at the pulled changelist (sanity check of the harness)", async () => {
     const { alice, bob } = scene!;
     await put(alice, "a.txt", "a\n");

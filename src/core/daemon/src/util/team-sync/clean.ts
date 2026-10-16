@@ -7,6 +7,7 @@ import {
 } from "../util.js";
 import { DaemonConfig } from "../../daemon-config.js";
 import { Logger } from "../../logging.js";
+import { workspacePathKey, type PathKey } from "../volume.js";
 
 /**
  * A file on disk that is not part of the synced workspace state and is a
@@ -56,8 +57,36 @@ function isIntermediatePath(relPath: string): boolean {
  * (synced source file, applied artifact, or marked-for-add) and therefore must
  * never be offered as a clean candidate or deleted.
  */
-function isTracked(relPath: string, state: WorkspaceState): boolean {
+/**
+ * Tracked paths by the key under which the workspace's volume takes two
+ * spellings for one file (see volume.ts), or null where it tells them apart.
+ */
+type TrackedKeys = { key: PathKey; keys: Set<string> } | null;
+
+async function trackedKeysFor(
+  workspace: Workspace,
+  state: WorkspaceState,
+): Promise<TrackedKeys> {
+  const key = await workspacePathKey(workspace.localPath);
+  if (!key) return null;
+  const keys = new Set<string>();
+  for (const p of Object.keys(state.files)) keys.add(key(p));
+  for (const p of Object.keys(state.artifactFiles ?? {})) keys.add(key(p));
+  for (const p of state.markedForAdd ?? []) keys.add(key(p));
+  return { key, keys };
+}
+
+function isTracked(
+  relPath: string,
+  state: WorkspaceState,
+  folded: TrackedKeys = null,
+): boolean {
   if (Object.prototype.hasOwnProperty.call(state.files, relPath)) {
+    return true;
+  }
+  // The same file as a tracked path, spelled differently (the tree spells a
+  // directory two ways, say): deleting it deletes the tracked file.
+  if (folded && folded.keys.has(folded.key(relPath))) {
     return true;
   }
   if (
@@ -77,6 +106,7 @@ async function walk(
   relDir: string,
   state: WorkspaceState,
   out: CleanCandidate[],
+  folded: TrackedKeys = null,
 ): Promise<void> {
   let entries;
   try {
@@ -94,7 +124,7 @@ async function walk(
       if (relDir === "" && SKIP_DIRS.has(entry.name)) {
         continue;
       }
-      await walk(absPath, relPath, state, out);
+      await walk(absPath, relPath, state, out, folded);
       continue;
     }
 
@@ -102,7 +132,7 @@ async function walk(
       continue;
     }
 
-    if (isTracked(relPath, state)) {
+    if (isTracked(relPath, state, folded)) {
       continue;
     }
 
@@ -135,7 +165,13 @@ export async function previewClean(
   const state = await getWorkspaceState(workspace.localPath, backend);
 
   const out: CleanCandidate[] = [];
-  await walk(workspace.localPath, "", state, out);
+  await walk(
+    workspace.localPath,
+    "",
+    state,
+    out,
+    await trackedKeysFor(workspace, state),
+  );
   return out;
 }
 
@@ -183,6 +219,7 @@ export async function executeClean(
 ): Promise<{ deleted: number }> {
   const backend = (await DaemonConfig.Get()).stateBackend;
   const state = await getWorkspaceState(workspace.localPath, backend);
+  const folded = await trackedKeysFor(workspace, state);
 
   const root = path.resolve(workspace.localPath);
   // Guard against sibling-directory prefix collisions ("root" vs "root-x").
@@ -207,7 +244,7 @@ export async function executeClean(
       continue;
     }
 
-    if (isTracked(normalizedRel, state)) {
+    if (isTracked(normalizedRel, state, folded)) {
       // Still tracked in the current state; refuse to delete.
       continue;
     }

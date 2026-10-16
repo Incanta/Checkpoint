@@ -39,6 +39,7 @@ import { homedir } from "os";
 import { Logger } from "../logging.js";
 import { DaemonConfig } from "../daemon-config.js";
 import { StageTimer } from "./stage-timer.js";
+import { workspacePathKey } from "./volume.js";
 import {
   isSafeWorkspacePath,
   resolveInWorkspace,
@@ -330,6 +331,44 @@ export async function pull(
     ...diff.removed,
   ]);
 
+  // On a volume that takes two spellings for one file (see volume.ts), a
+  // removed path and an added one that fold together are a rename by case
+  // or normalization: the file is renamed in place before anything is
+  // written, so the write lands on it and no delete removes it afterwards.
+  // And a removed path is never deleted from disk while a path that stays in
+  // the tree still names the same file.
+  const pathKey = await workspacePathKey(workspace.localPath);
+  const renamedFrom = new Map<string, string>(); // new spelling -> old
+  const remainingKeys = new Set<string>();
+  if (pathKey) {
+    const removedSet = new Set(diff.removed);
+    for (const p of Object.keys(workspaceState.files)) {
+      if (!removedSet.has(p)) remainingKeys.add(pathKey(p));
+    }
+    for (const c of [...diff.added, ...diff.modified]) {
+      remainingKeys.add(pathKey(c.path));
+    }
+    const removedByKey = new Map(diff.removed.map((p) => [pathKey(p), p]));
+    for (const c of diff.added) {
+      const old = removedByKey.get(pathKey(c.path));
+      if (old !== undefined && old !== c.path && workspaceState.files[old]) {
+        renamedFrom.set(c.path, old);
+      }
+    }
+    for (const [to, from] of renamedFrom) {
+      const fromPath = resolveInWorkspace(workspace.localPath, from);
+      if (existsSync(fromPath)) {
+        await fs.rename(fromPath, resolveInWorkspace(workspace.localPath, to));
+      }
+    }
+    if (renamedFrom.size > 0) {
+      Logger.info(
+        `Pull: renamed ${renamedFrom.size} file(s) in place, by case or normalization only`,
+      );
+    }
+  }
+  const renamedAway = new Set(renamedFrom.values());
+
   // Pre-pull: copy aside every file the pull is about to overwrite or delete
   // that has local changes. See pull-local-changes.ts for what happens to
   // them afterwards. This runs before anything in the workspace is touched,
@@ -349,13 +388,17 @@ export async function pull(
     await guard.protect(change.path, "modified", localFile);
   }
   for (const change of diff.added) {
+    // A file renamed in place above is the tracked file under its new name.
+    const old = renamedFrom.get(change.path);
     await guard.protect(
       change.path,
-      "added",
-      workspaceState.files[change.path],
+      old !== undefined ? "modified" : "added",
+      workspaceState.files[change.path] ??
+        (old !== undefined ? workspaceState.files[old] : undefined),
     );
   }
   for (const removedPath of diff.removed) {
+    if (renamedAway.has(removedPath)) continue; // protected under its new name
     await guard.protect(
       removedPath,
       "removed",
@@ -640,7 +683,10 @@ export async function pull(
           workspaceState.files[p] !== undefined,
       );
       const removedNow: string[] = [];
-      const toRemove = [...retried, ...diff.removed];
+      const toRemove = [
+        ...retried,
+        ...diff.removed.filter((p) => !renamedAway.has(p)),
+      ];
       if (toRemove.length > 0) {
         onStep?.("Deleting removed files");
         let deletedCount = 0;
@@ -649,6 +695,16 @@ export async function pull(
 
         for (const removedPath of toRemove) {
           const filePath = resolveInWorkspace(workspace.localPath, removedPath);
+          if (
+            pathKey &&
+            deletedCount >= retried.length &&
+            remainingKeys.has(pathKey(removedPath))
+          ) {
+            // Another path in the tree names this same file here. Drop the
+            // removed spelling from the state; keep the file.
+            deletedCount++;
+            continue;
+          }
           const isRetry = deletedCount < retried.length;
           try {
             if (

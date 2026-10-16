@@ -38,6 +38,7 @@ import {
 import { runSyncPipeline } from "./util/team-sync/sync-pipeline.js";
 import { compareWithBaseline } from "./util/baseline.js";
 import { isSafeWorkspacePath } from "./util/workspace-path.js";
+import { groupByKey, workspacePathKey } from "./util/volume.js";
 import type { StateDelta } from "./util/state-delta.js";
 import { PathIndex, pathsUnderAny } from "./util/path-index.js";
 import {
@@ -1144,7 +1145,19 @@ export class DaemonManager {
       Logger.debug(
         `[DaemonManager] Incremental refresh for workspace ${workspace.name} (${dirty.size} dirty files)`,
       );
-      return this.incrementalRefresh(workspace, baselineState, cached, dirty);
+      const pathKey = await workspacePathKey(workspace.localPath);
+      const needsFoldedScan =
+        pathKey !== null &&
+        [...dirty].some((p) => {
+          if (baselineState.files[p]) return false;
+          const key = pathKey(p);
+          return Object.keys(baselineState.files).some(
+            (s) => s !== p && pathKey(s) === key,
+          );
+        });
+      if (!needsFoldedScan) {
+        return this.incrementalRefresh(workspace, baselineState, cached, dirty);
+      }
     }
 
     // Full refresh with tracked-directory optimisation
@@ -1177,6 +1190,26 @@ export class DaemonManager {
     const ignoreCache = this.getIgnoreCache(workspace.id);
     const markedForAdd = this.getMarkedForAdd(workspace.id);
 
+    // On a volume that takes two spellings for one file (volume.ts), the
+    // state's spelling and the one on disk can differ: the tree may spell a
+    // directory two ways ("Content/Maps" and "content/maps") while disk has
+    // one directory, or hold two spellings of one file. Compare by key there.
+    const pathKey = await workspacePathKey(workspace.localPath);
+    let trackedDirKeys: Set<string> | null = null;
+    if (pathKey) {
+      trackedDirKeys = new Set();
+      for (const p of Object.keys(baselineState.files)) {
+        for (let i = p.indexOf("/"); i >= 0; i = p.indexOf("/", i + 1)) {
+          trackedDirKeys.add(pathKey(p.slice(0, i)));
+        }
+      }
+    }
+    const stateByKey = pathKey
+      ? groupByKey(Object.keys(baselineState.files), pathKey)
+      : null;
+    /** Keys of tracked files found on disk under some spelling. */
+    const seenTrackedKeys = new Set<string>();
+
     // Walk recursively, skipping ignored/hidden paths.
     // Untracked directories get a single directory entry instead of recursion.
     // Accumulate every discovered file into one shared array. Pushing into a
@@ -1197,7 +1230,10 @@ export class DaemonManager {
         }
 
         if (entry.isDirectory()) {
-          if (!trackedDirs.has(relativePath)) {
+          if (
+            !trackedDirs.has(relativePath) &&
+            !(pathKey && trackedDirKeys!.has(pathKey(relativePath)))
+          ) {
             // Untracked directory: add as a single Local entry if it
             // contains at least one non-ignored file (don't recurse into it).
             if (
@@ -1263,15 +1299,30 @@ export class DaemonManager {
       }
 
       const stat = await fs.lstat(fullPath);
-      const baselineFile = baselineState.files[relativePath];
+      let trackedPath = relativePath;
+      let baselineFile = baselineState.files[relativePath];
+      if (!baselineFile && pathKey) {
+        // The same file under the state's spelling of its directories. A
+        // different spelling of the file name itself is a rename the user
+        // made, and shows as one (untracked here, deleted below).
+        const name = relativePath.slice(relativePath.lastIndexOf("/") + 1);
+        const match = stateByKey!
+          .get(pathKey(relativePath))
+          ?.find((p) => p.slice(p.lastIndexOf("/") + 1) === name);
+        if (match !== undefined) {
+          trackedPath = match;
+          baselineFile = baselineState.files[match];
+        }
+      }
 
       if (baselineFile) {
-        seenBaselineFiles.add(relativePath);
+        seenBaselineFiles.add(trackedPath);
+        if (pathKey) seenTrackedKeys.add(pathKey(trackedPath));
       }
 
       const pendingFile = await this.detectFileChange(
         workspace,
-        relativePath,
+        trackedPath,
         stat,
         baselineFile,
         checkedOutIds,
@@ -1279,7 +1330,7 @@ export class DaemonManager {
       );
 
       if (pendingFile) {
-        result.files[relativePath] = pendingFile;
+        result.files[trackedPath] = pendingFile;
         result.numChanges++;
       }
     });
@@ -1297,6 +1348,15 @@ export class DaemonManager {
       // it. Reporting it as deleted would let "submit everything" delete it
       // for the team.
       if (!isSafeWorkspacePath(relativePath)) continue;
+      // Another tracked spelling of this same file is on disk: the tree
+      // holds both, and they are one file here. Not deleted.
+      if (
+        pathKey &&
+        !seenBaselineFiles.has(relativePath) &&
+        seenTrackedKeys.has(pathKey(relativePath))
+      ) {
+        continue;
+      }
       if (!seenBaselineFiles.has(relativePath)) {
         result.files[relativePath] = {
           path: relativePath,

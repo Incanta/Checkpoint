@@ -4,6 +4,7 @@ import { z } from "zod";
 import fs from "fs/promises";
 import path from "path";
 import { resolveInWorkspace } from "../../../util/workspace-path.js";
+import { workspacePathKey } from "../../../util/volume.js";
 import {
   File,
   FileClaimInfo,
@@ -789,6 +790,30 @@ export const pendingRouter = router({
       const normalizedPaths = input.paths.map((p) =>
         p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
       );
+
+      // A rename by case or normalization only (Explorer, Finder) shows as
+      // the old spelling deleted and the new one untracked. On a volume
+      // where both are one file, staging either stages both, so the submit
+      // is a rename. Submitting just the new spelling would leave the old one
+      // in the tree beside it, which the server refuses.
+      const pathKey = await workspacePathKey(workspace.localPath);
+      if (pathKey) {
+        const pending =
+          manager.workspacePendingChanges.get(workspace.id) ??
+          (await manager.refreshWorkspaceContents(workspace));
+        const wanted = new Set(normalizedPaths.map(pathKey));
+        for (const file of Object.values(pending.files)) {
+          if (
+            (file.status === FileStatus.Deleted ||
+              file.status === FileStatus.Local ||
+              file.status === FileStatus.Added) &&
+            wanted.has(pathKey(file.path)) &&
+            !normalizedPaths.includes(file.path)
+          ) {
+            normalizedPaths.push(file.path);
+          }
+        }
+      }
 
       const client = await CreateApiClientAuth(input.daemonId);
 
