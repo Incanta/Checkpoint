@@ -12,6 +12,7 @@ A cross-platform C++ command-line client for interacting with the Checkpoint dae
 | `chk move -b <branch> <file...>` | Restage into another branch   | `chk move -b feature/hud hud.uasset`|
 | `chk restore --staged <file...>` | Unstage files                 | `chk restore --staged src/main.cpp` |
 | `chk restore <file...>`          | Revert files to head          | `chk restore src/main.cpp`          |
+| `chk chmod (+x\|-x) <file...>`   | Executable or not in the next submit (works on Windows, which has no executable bit) | `chk chmod +x tools/build.sh` |
 | `chk submit -m <message>`        | Submit staged files           | `chk submit -m "Fix bug"`           |
 | `chk submit -b <branch> -m <msg>`| Submit one branch's bucket    | `chk submit -b feature/hud -m "WIP"`|
 | `chk pull`                       | Sync changes from remote      | `chk pull`                          |

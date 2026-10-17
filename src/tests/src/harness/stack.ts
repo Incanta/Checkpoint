@@ -750,6 +750,41 @@ export async function pendingChanges(
   return out;
 }
 
+/** One pending entry as the daemon reports it, or undefined. */
+export async function pendingEntry(
+  seat: Seat,
+  relativePath: string,
+): Promise<{ status: string; executableChange?: boolean } | undefined> {
+  const { daemon } = await daemonModules();
+  const { FileStatus } =
+    await import("../../../core/daemon/src/types/index.js");
+  const result = await daemon.workspaces.pending.refresh(ids(seat));
+  const file = result?.files[normalize(relativePath)] as
+    | { status: number; executableChange?: boolean }
+    | undefined;
+  if (!file) return undefined;
+  return {
+    status: FileStatus[file.status] ?? String(file.status),
+    ...(file.executableChange !== undefined && {
+      executableChange: file.executableChange,
+    }),
+  };
+}
+
+/** The daemon's "Mark as executable" (or not) on pending paths. */
+export async function setExecutable(
+  seat: Seat,
+  paths: string[],
+  executable: boolean,
+) {
+  const { daemon } = await daemonModules();
+  return daemon.workspaces.pending.setExecutable({
+    ...ids(seat),
+    paths: paths.map(normalize),
+    executable,
+  });
+}
+
 /** Registers a version index directly, for tests that call the app API themselves. */
 export function storeVersion(files: Record<string, string | Buffer>): string {
   const name = `fake-${++versionCounter}.lvi`;

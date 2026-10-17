@@ -525,6 +525,35 @@ class SqliteStateStore implements StateStore {
       }
     }
 
+    const metaJson = (key: string): unknown => {
+      const row = db
+        .prepare("SELECT value FROM workspace_meta WHERE key = ?")
+        .get(key) as { value: string } | undefined;
+      if (!row) return undefined;
+      try {
+        return JSON.parse(row.value) as unknown;
+      } catch {
+        return undefined;
+      }
+    };
+    // Losing either only loses a retry: a directory rename the next pull
+    // would have finished shows as the user's, and a mode set from Windows
+    // has to be set again.
+    const dirRenames = metaJson("pendingDirRenames");
+    const pendingDirRenames =
+      Array.isArray(dirRenames) && dirRenames.length > 0
+        ? dirRenames.filter((p): p is string => typeof p === "string")
+        : undefined;
+    const modes = metaJson("pendingModes");
+    let pendingModes: Record<string, number> | undefined;
+    if (modes && typeof modes === "object" && !Array.isArray(modes)) {
+      pendingModes = {};
+      for (const [p, m] of Object.entries(modes)) {
+        if (typeof m === "number") pendingModes[p] = m;
+      }
+      if (Object.keys(pendingModes).length === 0) pendingModes = undefined;
+    }
+
     const teamSync = this.loadTeamSync(db);
 
     this.stats.loads++;
@@ -540,6 +569,8 @@ class SqliteStateStore implements StateStore {
       staged,
       ...(branchHeads !== undefined && { branchHeads }),
       ...(pendingRemovals !== undefined && { pendingRemovals }),
+      ...(pendingDirRenames !== undefined && { pendingDirRenames }),
+      ...(pendingModes !== undefined && { pendingModes }),
       ...(teamSync !== undefined && { teamSync }),
     };
   }
@@ -772,6 +803,18 @@ class SqliteStateStore implements StateStore {
             ? null
             : json(meta.pendingRemovals),
         );
+        setScalar(
+          "pendingDirRenames",
+          meta.pendingDirRenames?.length === 0
+            ? null
+            : json(meta.pendingDirRenames),
+        );
+        setScalar(
+          "pendingModes",
+          meta.pendingModes && Object.keys(meta.pendingModes).length === 0
+            ? null
+            : json(meta.pendingModes),
+        );
         setScalar("syncFilterHash", meta.syncFilterHash);
         setScalar(
           "lastBuiltChangelist",
@@ -862,6 +905,18 @@ class SqliteStateStore implements StateStore {
           "pendingRemovals",
           state.pendingRemovals?.length
             ? JSON.stringify(state.pendingRemovals)
+            : undefined,
+        ],
+        [
+          "pendingDirRenames",
+          state.pendingDirRenames?.length
+            ? JSON.stringify(state.pendingDirRenames)
+            : undefined,
+        ],
+        [
+          "pendingModes",
+          state.pendingModes && Object.keys(state.pendingModes).length > 0
+            ? JSON.stringify(state.pendingModes)
             : undefined,
         ],
         ["syncFilterHash", teamSync?.syncFilterHash],

@@ -145,6 +145,15 @@ export interface File {
    * but starts unstaged.
    */
   staged: boolean;
+
+  /**
+   * Whether the next submit makes the file executable (true) or not (false),
+   * when that differs from the version it is based on: a `chmod` on Linux or
+   * macOS, or `pending.setExecutable` on Windows (where a new file counts as
+   * 0644 until set). Absent when that does not change, and for new files on
+   * Linux and macOS, which are submitted with whatever mode they have.
+   */
+  executableChange?: boolean;
 }
 
 export interface Directory {

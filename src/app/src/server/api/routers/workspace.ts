@@ -107,6 +107,7 @@ export const workspaceRouter = createTRPCRouter({
       // chain. Validate that the client sent complete chains rather than
       // silently producing a tree that is missing a layer.
       const active = new Set(input.activeBranches);
+      const parents = new Map<string, string | null>();
       for (const branchName of input.activeBranches) {
         const branch = await ctx.db.branch.findUnique({
           where: { repoId_name: { repoId: workspace.repoId, name: branchName } },
@@ -118,6 +119,7 @@ export const workspaceRouter = createTRPCRouter({
             message: `Branch "${branchName}" not found`,
           });
         }
+        parents.set(branchName, branch.parentBranchName);
 
         const branchDomain = await resolveDomainBranchName(
           ctx.db,
@@ -143,6 +145,25 @@ export const workspaceRouter = createTRPCRouter({
           });
         }
       }
+
+      // And only one chain, ancestor first. The workspace syncs the last
+      // branch's head, which holds the branches beneath it; two siblings have
+      // no head that holds both, so a pull would take one's changes out and a
+      // submit would have no head to check its bases against.
+      input.activeBranches.forEach((branchName, i) => {
+        const beneath =
+          i === 0 ? input.domainBranchName : input.activeBranches[i - 1]!;
+        const parent = parents.get(branchName) ?? input.domainBranchName;
+        if (parent !== beneath) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              i === 0
+                ? `"${branchName}" is stacked on "${parent}", which must come before it`
+                : `"${branchName}" is not stacked on "${beneath}". A workspace has one chain of branches active: activate one of them at a time, or stack one on the other.`,
+          });
+        }
+      });
 
       // A cross-domain move cannot carry claims: they are anchored to the
       // domain they were taken in, and re-anchoring would silently validate

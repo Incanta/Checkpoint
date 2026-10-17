@@ -4,7 +4,7 @@ import { z } from "zod";
 import fs from "fs/promises";
 import path from "path";
 import { resolveInWorkspace } from "../../../util/workspace-path.js";
-import { workspacePathKey } from "../../../util/volume.js";
+import { groupByKey, workspacePathKey } from "../../../util/volume.js";
 import {
   File,
   FileClaimInfo,
@@ -810,16 +810,55 @@ export const pendingRouter = router({
         const pending =
           manager.workspacePendingChanges.get(workspace.id) ??
           (await manager.refreshWorkspaceContents(workspace));
-        const wanted = new Set(normalizedPaths.map(pathKey));
-        for (const file of Object.values(pending.files)) {
-          if (
-            (file.status === FileStatus.Deleted ||
-              file.status === FileStatus.Local ||
-              file.status === FileStatus.Added) &&
-            wanted.has(pathKey(file.path)) &&
-            !normalizedPaths.includes(file.path)
-          ) {
-            normalizedPaths.push(file.path);
+        const renameable = Object.values(pending.files).filter(
+          (file) =>
+            file.status === FileStatus.Deleted ||
+            file.status === FileStatus.Local ||
+            file.status === FileStatus.Added,
+        );
+        const byKey = groupByKey(
+          renameable.map((file) => file.path),
+          pathKey,
+        );
+        const isDeleted = new Set(
+          renameable
+            .filter((file) => file.status === FileStatus.Deleted)
+            .map((file) => file.path),
+        );
+        const staging = new Set(normalizedPaths);
+        const include = (p: string) => {
+          if (staging.has(p)) return;
+          staging.add(p);
+          normalizedPaths.push(p);
+        };
+        for (const p of [...normalizedPaths]) {
+          for (const other of byKey.get(pathKey(p)) ?? []) include(other);
+        }
+
+        // The same for a directory renamed that way: the server refuses a
+        // tree that keeps the old spelling beside the new one, so staging
+        // one file under it stages everything the rename moved. That is
+        // every file deleted under the old spelling, and the new spelling of
+        // each (other new files there stay as they are).
+        const movedFrom = new Set<string>();
+        for (const p of [...normalizedPaths]) {
+          if (!isDeleted.has(p)) continue;
+          for (const other of byKey.get(pathKey(p)) ?? []) {
+            if (isDeleted.has(other)) continue;
+            const from = p.split("/");
+            const to = other.split("/");
+            for (let i = 0; i < from.length - 1; i++) {
+              if (from[i]!.normalize("NFC") !== to[i]!.normalize("NFC")) {
+                movedFrom.add(from.slice(0, i + 1).join("/") + "/");
+              }
+            }
+          }
+        }
+        if (movedFrom.size > 0) {
+          for (const p of isDeleted) {
+            if (![...movedFrom].some((dir) => p.startsWith(dir))) continue;
+            include(p);
+            for (const other of byKey.get(pathKey(p)) ?? []) include(other);
           }
         }
       }
@@ -1349,6 +1388,13 @@ export const pendingRouter = router({
               normalizedPath,
             );
             await fs.copyFile(result.cachePath, localFilePath);
+            // The copy takes the cache file's mode; revert the mode too.
+            if (
+              process.platform !== "win32" &&
+              headFileInfo.mode !== undefined
+            ) {
+              await fs.chmod(localFilePath, headFileInfo.mode);
+            }
             restoredToBaseline.push(normalizedPath);
           }
           // A file in no head version (added locally) stays on disk: reverting
@@ -1386,8 +1432,44 @@ export const pendingRouter = router({
         .map((r) => r.filePath);
       if (revertedPaths.length > 0) {
         await manager.unmarkForAdd(workspace, revertedPaths);
+        // And any mode set for them from Windows.
+        await manager.dropPendingModes(workspace, revertedPaths);
       }
 
       return { results };
+    }),
+
+  /**
+   * Makes files executable (or not) in their next submit, as git's
+   * `update-index --chmod=+x` does, so a file can be marked executable from
+   * Windows, which has no executable bit. See DaemonManager.setExecutable.
+   */
+  setExecutable: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        paths: z.array(z.string()).min(1),
+        executable: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { manager, workspace } = resolveWorkspace(ctx, input);
+      const normalizedPaths = input.paths.map((p) =>
+        p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+      );
+      try {
+        const files = await manager.setExecutable(
+          workspace,
+          normalizedPaths,
+          input.executable,
+        );
+        return { success: true, files };
+      } catch (err) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
     }),
 });

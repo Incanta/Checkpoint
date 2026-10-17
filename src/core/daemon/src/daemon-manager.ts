@@ -29,6 +29,7 @@ import {
   saveWorkspaceConfig,
   closeAllStateStores,
   closeStateStore,
+  resolveBranchChain,
   type WorkspaceState,
 } from "./util/index.js";
 import {
@@ -39,6 +40,7 @@ import { runSyncPipeline } from "./util/team-sync/sync-pipeline.js";
 import { compareWithBaseline } from "./util/baseline.js";
 import {
   isSafeWorkspacePath,
+  resolveInWorkspace,
   toRelativeRepoPath,
   unsupportedNameReason,
 } from "./util/workspace-path.js";
@@ -293,13 +295,23 @@ export class DaemonManager {
         ? branch.name
         : (branch.domainBranchName ?? branch.name);
 
-      // A config that named a feature branch becomes root + that branch
-      // overlaid, which is the same tree described in the new vocabulary.
-      const activeBranches = branch.isClaimDomainRoot
-        ? (workspace.activeBranches ?? [])
-        : Array.from(
-            new Set([...(workspace.activeBranches ?? []), branch.name]),
-          );
+      // A config that named a feature branch becomes root + that branch's
+      // chain overlaid, which is the same tree described in the new
+      // vocabulary. Otherwise the overlay is the chain of its deepest branch,
+      // which is what the workspace syncs: a config that ended up with two
+      // siblings active (older daemons could do that here) keeps the one it
+      // was syncing.
+      const deepest = branch.isClaimDomainRoot
+        ? workspace.activeBranches?.at(-1)
+        : branch.name;
+      const activeBranches = deepest
+        ? await resolveBranchChain(client, workspace.repoId, deepest)
+        : [];
+      // The branch is gone (deleted, or merged and deleted): leave the
+      // workspace as it is rather than quietly dropping its overlay.
+      if (deepest && activeBranches.length === 0) {
+        return;
+      }
 
       await client.workspace.setBranchState.mutate({
         workspaceId: workspace.id,
@@ -997,12 +1009,33 @@ export class DaemonManager {
     }
 
     // A mode-only change (chmod +x) is a change on Linux and macOS, where the
-    // bit is real and is submitted with the file. Windows has no such bit.
+    // bit is real and is submitted with the file. Windows has no such bit, so
+    // a mode set with pending.setExecutable stands in for it there.
+    let modeNow: number | undefined;
+    if (process.platform === "win32") {
+      modeNow = this.workspaceStates.get(workspace.id)?.pendingModes?.[
+        relativePath
+      ];
+    } else if (baselineFile?.mode !== undefined) {
+      modeNow = stat.mode & 0o777;
+    }
+    // A file new to the repo is submitted from Windows as 0644 unless set.
+    const baseMode = baselineFile
+      ? (baselineFile.mode ?? 0o644)
+      : process.platform === "win32"
+        ? 0o644
+        : undefined;
+    const executableChange =
+      baseMode !== undefined &&
+      modeNow !== undefined &&
+      ((modeNow & 0o111) !== 0) !== ((baseMode & 0o111) !== 0)
+        ? (modeNow & 0o111) !== 0
+        : undefined;
     if (
       !hasChanged &&
-      baselineFile?.mode !== undefined &&
-      process.platform !== "win32" &&
-      (stat.mode & 0o777) !== baselineFile.mode
+      baseMode !== undefined &&
+      modeNow !== undefined &&
+      modeNow !== baseMode
     ) {
       hasChanged = true;
     }
@@ -1055,6 +1088,7 @@ export class DaemonManager {
       changelist: baselineFile?.changelist ?? null,
       claims: [],
       staged: false,
+      ...(executableChange !== undefined && { executableChange }),
     };
   }
 
@@ -1165,14 +1199,21 @@ export class DaemonManager {
         `[DaemonManager] Incremental refresh for workspace ${workspace.name} (${dirty.size} dirty files)`,
       );
       const pathKey = await workspacePathKey(workspace.localPath);
+      // A path that is another spelling of a tracked file or directory (a
+      // rename by case in Explorer or Finder, say) needs the full scan's
+      // folded comparison; the incremental one would take a renamed
+      // directory for an untracked one.
+      const trackedDirs = this.getTrackedDirSet(workspace.id);
       const needsFoldedScan =
         pathKey !== null &&
         [...dirty].some((p) => {
-          if (baselineState.files[p]) return false;
+          if (baselineState.files[p] || trackedDirs.has(p)) return false;
           const key = pathKey(p);
-          return Object.keys(baselineState.files).some(
-            (s) => s !== p && pathKey(s) === key,
-          );
+          return Object.keys(baselineState.files).some((s) => {
+            if (s === p || s.startsWith(p + "/")) return false;
+            const k = pathKey(s);
+            return k === key || k.startsWith(key + "/");
+          });
         });
       if (!needsFoldedScan) {
         return this.incrementalRefresh(workspace, baselineState, cached, dirty);
@@ -1214,18 +1255,49 @@ export class DaemonManager {
     // directory two ways ("Content/Maps" and "content/maps") while disk has
     // one directory, or hold two spellings of one file. Compare by key there.
     const pathKey = await workspacePathKey(workspace.localPath);
-    let trackedDirKeys: Set<string> | null = null;
+    /** Each tracked directory's key, with the spellings the state has for it. */
+    let trackedDirKeys: Map<string, Set<string>> | null = null;
     if (pathKey) {
-      trackedDirKeys = new Set();
+      trackedDirKeys = new Map();
       for (const p of Object.keys(baselineState.files)) {
         for (let i = p.indexOf("/"); i >= 0; i = p.indexOf("/", i + 1)) {
-          trackedDirKeys.add(pathKey(p.slice(0, i)));
+          const dir = p.slice(0, i);
+          const key = pathKey(dir);
+          const spellings = trackedDirKeys.get(key);
+          if (spellings) spellings.add(dir);
+          else trackedDirKeys.set(key, new Set([dir]));
         }
       }
     }
     const stateByKey = pathKey
       ? groupByKey(Object.keys(baselineState.files), pathKey)
       : null;
+    const pendingDirKeys = pathKey
+      ? new Set((baselineState.pendingDirRenames ?? []).map(pathKey))
+      : null;
+    /**
+     * Whether disk spells one of a tracked file's directories differently
+     * because the user renamed it (Explorer, Finder). Disk has one directory
+     * whatever the state calls it, so a different spelling is the user's
+     * only where the state has one spelling for it: where the tree spells it
+     * two ways, disk can only match one of them. A pull that could not
+     * rename it yet (pendingDirRenames) and a difference in normalization
+     * alone (HFS+ lists every name decomposed) are not renames either.
+     */
+    const dirRenamedOnDisk = (diskPath: string, trackedPath: string) => {
+      const disk = diskPath.split("/");
+      const tracked = trackedPath.split("/");
+      for (let i = 0; i < tracked.length - 1; i++) {
+        if (disk[i]!.normalize("NFC") === tracked[i]!.normalize("NFC")) {
+          continue;
+        }
+        const key = pathKey!(tracked.slice(0, i + 1).join("/"));
+        if (trackedDirKeys!.get(key)?.size === 1 && !pendingDirKeys!.has(key)) {
+          return true;
+        }
+      }
+      return false;
+    };
     /** Keys of tracked files found on disk under some spelling. */
     const seenTrackedKeys = new Set<string>();
 
@@ -1345,12 +1417,17 @@ export class DaemonManager {
       let baselineFile = baselineState.files[relativePath];
       if (!baselineFile && pathKey) {
         // The same file under the state's spelling of its directories. A
-        // different spelling of the file name itself is a rename the user
-        // made, and shows as one (untracked here, deleted below).
+        // different spelling of the file name itself, or of a directory the
+        // user renamed, is a rename the user made, and shows as one
+        // (untracked here, deleted below).
         const name = relativePath.slice(relativePath.lastIndexOf("/") + 1);
         const match = stateByKey!
           .get(pathKey(relativePath))
-          ?.find((p) => p.slice(p.lastIndexOf("/") + 1) === name);
+          ?.find(
+            (p) =>
+              p.slice(p.lastIndexOf("/") + 1) === name &&
+              !dirRenamedOnDisk(relativePath, p),
+          );
         if (match !== undefined) {
           trackedPath = match;
           baselineFile = baselineState.files[match];
@@ -1889,6 +1966,74 @@ export class DaemonManager {
     // folders collapse, so this needs a full refresh rather than a re-check.
     this.workspacePendingChanges.delete(workspace.id);
     this.pathIndexes.delete(workspace.id);
+  }
+
+  /**
+   * Makes files executable or not in their next submit, as git's
+   * `update-index --chmod=+x` does. On Linux and macOS that is the file's own
+   * mode, so this changes it on disk. Windows has no executable bit, so the
+   * mode is kept in the state (WorkspaceState.pendingModes) and sent with the
+   * file's next submit. Either way the file then shows as modified.
+   *
+   * Returns the mode each file will be submitted with.
+   */
+  public async setExecutable(
+    workspace: Workspace,
+    relativePaths: string[],
+    executable: boolean,
+  ): Promise<{ path: string; mode: number }[]> {
+    const toggle = (mode: number) =>
+      executable ? mode | ((mode & 0o444) >> 2) : mode & ~0o111;
+    const state =
+      this.workspaceStates.get(workspace.id) ??
+      (await getWorkspaceState(workspace.localPath, this.stateBackend));
+
+    const targets: { path: string; full: string }[] = [];
+    for (const relativePath of relativePaths) {
+      const full = resolveInWorkspace(workspace.localPath, relativePath);
+      const stat = await fs.stat(full).catch(() => null);
+      if (!stat?.isFile()) {
+        throw new Error(`${relativePath} is not a file in this workspace`);
+      }
+      targets.push({ path: relativePath, full });
+    }
+
+    const result: { path: string; mode: number }[] = [];
+    if (process.platform !== "win32") {
+      for (const { path: p, full } of targets) {
+        const mode = toggle((await fs.stat(full)).mode & 0o777);
+        await fs.chmod(full, mode);
+        result.push({ path: p, mode });
+      }
+    } else {
+      const next = { ...(state.pendingModes ?? {}) };
+      for (const { path: p } of targets) {
+        // A file new to the repo is submitted as 0644 unless set.
+        const base = state.files[p]?.mode ?? 0o644;
+        const mode = toggle(next[p] ?? base);
+        if (mode === base) delete next[p];
+        else next[p] = mode;
+        result.push({ path: p, mode });
+      }
+      await this.persistDelta(workspace, { meta: { pendingModes: next } });
+    }
+
+    // On Windows nothing on disk changed for the watcher to notice.
+    this.workspacePendingChanges.delete(workspace.id);
+    return result;
+  }
+
+  /** Forgets modes set with setExecutable for these files (a revert). */
+  public async dropPendingModes(
+    workspace: Workspace,
+    relativePaths: string[],
+  ): Promise<void> {
+    const current = this.workspaceStates.get(workspace.id)?.pendingModes;
+    if (!current || !relativePaths.some((p) => p in current)) return;
+    const next = { ...current };
+    for (const p of relativePaths) delete next[p];
+    await this.persistDelta(workspace, { meta: { pendingModes: next } });
+    this.workspacePendingChanges.delete(workspace.id);
   }
 
   /**

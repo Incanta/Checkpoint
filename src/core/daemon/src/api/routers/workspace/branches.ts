@@ -9,43 +9,11 @@ import {
   isBinaryFile,
   pull,
   getWorkspaceConfig,
+  resolveBranchChain,
   saveWorkspaceConfig,
   type Workspace as UtilWorkspace,
 } from "../../../util/index.js";
 import { TRPCError } from "@trpc/server";
-
-/**
- * Walks a feature branch up to its domain root, returning the chain in
- * ancestor-first order.
- *
- * Overlays are applied in this order, and a stacked branch is meaningless
- * without the branches beneath it, so activation always takes the whole chain
- * rather than a single name.
- */
-async function resolveBranchChain(
-  client: Awaited<ReturnType<typeof CreateApiClientAuth>>,
-  repoId: string,
-  branchName: string,
-): Promise<string[]> {
-  const chain: string[] = [];
-  let current: string | null = branchName;
-
-  for (let hops = 0; hops < 64 && current; hops++) {
-    const branch = await client.branch.getBranch.query({
-      repoId,
-      name: current,
-    });
-
-    if (!branch || branch.isClaimDomainRoot) {
-      break;
-    }
-
-    chain.unshift(branch.name);
-    current = branch.parentBranchName;
-  }
-
-  return chain;
-}
 
 export const branchesRouter = router({
   list: publicProcedure

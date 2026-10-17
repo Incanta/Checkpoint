@@ -72,7 +72,7 @@ Fixes DL-03, the `//`, leading `/`, and trailing `/` respellings of DL-09, DL-17
 - Grandfathering: the portability rules apply to paths a changelist adds (and to `oldPath`), not to edits or deletes of paths the head already has, so a repo that holds `aux.h` keeps working and can rename it. The always-on rules refuse edits too, since no existing path can break them legitimately. Deletes are always allowed.
 - Refuse an empty `versionIndex` when any modification is not a delete. This is the cheap half of DL-16; R19 does the rest.
 - Rollout: the always-on rules refuse from the first deploy. The portability rules (and R6's fold check) can start in a `log` mode for one deploy, like `state-tree.incremental`'s `verify`, so the logs show what real clients send before anything is refused.
-- `scripts/audit-repo-paths.mjs` lists every head path, per branch, that breaks a rule or collides under R6's fold, so existing problems are known before the rules ship (decision 5). It only reads.
+- An audit lists every head path, per branch, that breaks a rule or collides under R6's fold, so existing problems are known before the rules ship (decision 5). It only reads. (Built as the `repo.auditPaths` endpoint rather than a script.)
 
 **Clients.** The daemon already sends canonical paths (`expandDirectoriesForSubmit` normalizes them, `daemon-manager.ts:782`). Check the Horde client before turning refusal on, since it calls `artifact.attachToChangelist` directly (`src/clients/horde/src/Checkpoint.Api/CheckpointClient.cs:276`).
 
@@ -343,6 +343,14 @@ From the README's "Other observations". Each is small, they can land in any orde
 
 **Status.** Done: revert keeps an added file (decision 15), `conflicts.resolve` skips and reports a file with no local changes, `diffStateTrees` refuses a target that does not exist, merge rows record `FileChange.sourceChangelistNumber` (decision 16, with a migration), a nameless watcher event or a watcher error drops the cached pending list, the four OS files are ignored by default (a project's ignore file can negate them), and the backup folder name is 16 characters shorter. Pulled paths of 260 characters or more on Windows (as written, or under the backup folder) are logged and reported in the pull result's `longPaths`. The watcher change has no test, since the harness runs no watcher.
 
+## After the plan
+
+Three gaps found reviewing the shipped steps, fixed afterwards:
+
+- **One active chain, enforced everywhere (R14).** `branches.switch` already replaced the active set with one chain, but the daemon's repair of old configs (`reportBranchState`) added to it, and the server accepted siblings. The repair now takes the chain of the deepest active branch (so a config with two siblings keeps the one it was syncing), and `workspace.setBranchState` refuses any set that is not one chain, ancestor first (`api/workspace-branch-chain.test.ts`).
+- **Directory case renames (R7).** The scan mapped every file back to the state's spelling of its directories, so a directory renamed by case in Explorer or Finder showed nothing pending. Now a different spelling on disk is the user's rename wherever the state has one spelling for that directory (where the tree spells it two ways, disk can only match one). Staging one file under it stages everything the rename moved, since the server refuses both spellings side by side. A pull now renames a directory on disk when the tree renames it by case (files renamed into it used to keep the old directory name), and records one it cannot rename in `pendingDirRenames` for the next pull, so the scan does not take it for the user's (`daemon/folding-volumes.test.ts`).
+- **The executable bit from Windows (R11).** `pending.setExecutable` makes files executable or not in their next submit, as git's `update-index --chmod` does: on Linux and macOS it chmods the file, and on Windows the mode is kept in the state (`pendingModes`) and sent with the submit. The file shows as modified with `executableChange` until submitted; revert drops it, and a pull drops one the pulled version already has. The desktop file menu has "Executable", and the CLI has `chk chmod (+x|-x)` (`daemon/executable-bit.test.ts`). Revert on Linux and macOS now also restores the file's mode.
+
 ## Moving tests and CI
 
 **Status.** Done. The harness is `src/tests/src/harness/stack.ts`, with `repo-path-switch.ts` beside it (a mock factory that imports stack.ts deadlocks). In-process tests went to `src/tests/src/daemon/` and `src/tests/src/api/` (none needed a separate `os/` folder: they probe the filesystem and skip in place), and native ones to `src/tests/src/integration/`. `test.yaml` gained a macOS job for the filesystem-probing tests (decision 13), and `data-loss.yaml` lost its native job, whose tests now run in `test.yaml`'s integration step.
@@ -381,7 +389,7 @@ Each decision is also noted in its step; the first option is the recommendation.
   - The daemon's state schema goes to 5 (`recorded_at`, `mode`) through its stepwise migrations; nothing to run by hand.
   - Prisma migrations in both providers: the portability setting on `Repo` (R1, R6), `Changelist.mergedFromNumber` (R16), and `DeletedBranch` (R18). Author SQLite with `migrate diff` and Postgres by hand, then run `yarn --cwd src/app db:migrate:deploy` on every deployed database.
   - One addon release for R10 to R13 (and R11's submit change). Bump with `node scripts/set-addon-version.js <version>`, and publish before deploying the daemon. CI is unaffected, since it builds the addon from source.
-  - Run `scripts/audit-repo-paths.mjs` (R1) on each deployed repo before turning on the portability and fold rules.
+  - Run the `repo.auditPaths` endpoint (R1) on each deployed repo before turning on the portability and fold rules.
   - Deploy the core server's version check before turning on R19's check in the app.
   - The daemon's state schema changes (`recorded_at`, `mode`, the `staged` branch, `pending_removals`, and the volume probe) are stepwise migrations in `state-store.ts` (`MIGRATIONS`), so steps can land in any order. Nothing to deploy separately.
 

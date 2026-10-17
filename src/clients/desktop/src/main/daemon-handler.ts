@@ -2310,6 +2310,34 @@ export default class DaemonHandler {
       }
     });
 
+    // Make a file executable (or not) in its next submit. On Windows, which
+    // has no executable bit, this is the only way to.
+    ipcOn(this.ipcMain, "file:set-executable", async (_event, data) => {
+      const currentWorkspace = store.get(currentWorkspaceAtom);
+      if (!currentWorkspace || this.isMocked) return;
+
+      const currentUser = store.get(currentUserAtom);
+      if (!currentUser) return;
+
+      try {
+        const client = await CreateDaemonClient();
+        await client.workspaces.pending.setExecutable.mutate({
+          daemonId: currentUser.daemonId,
+          workspaceId: currentWorkspace.id,
+          paths: [data.path],
+          executable: data.executable,
+        });
+        this.workspaceRefresh();
+      } catch (error) {
+        console.error("Failed to set the executable bit:", error);
+        if (this.webContents) {
+          ipcSend(this.webContents, "file:set-executable:error", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    });
+
     // Mark directory contents as added
     ipcOn(
       this.ipcMain,

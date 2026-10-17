@@ -41,6 +41,7 @@ import { Logger } from "../logging.js";
 import { DaemonConfig } from "../daemon-config.js";
 import { StageTimer } from "./stage-timer.js";
 import { workspacePathKey } from "./volume.js";
+import { alignDirectorySpellings } from "./dir-spelling.js";
 import {
   clearPullRecord,
   takePullRecord,
@@ -951,6 +952,46 @@ export async function pull(
         }
       }
 
+      // A directory the tree renamed by case keeps its old spelling on disk
+      // (files renamed into it land in it as it is). Rename it to match, or
+      // the scan takes the difference for a rename the user made.
+      let pendingDirRenames: string[] | undefined;
+      if (
+        pathKey &&
+        (diff.added.length > 0 ||
+          (workspaceState.pendingDirRenames ?? []).length > 0)
+      ) {
+        const removedSet = new Set(diff.removed);
+        const aligned = await alignDirectorySpellings(
+          workspace.localPath,
+          pathKey,
+          {
+            before: Object.keys(workspaceState.files),
+            after: [
+              ...Object.keys(workspaceState.files).filter(
+                (p) => !removedSet.has(p),
+              ),
+              ...diff.added.map((c) => c.path),
+            ],
+            added: diff.added.map((c) => c.path),
+            retry: workspaceState.pendingDirRenames ?? [],
+          },
+        );
+        if (aligned.renamed.length > 0) {
+          Logger.info(
+            `Pull: renamed ${aligned.renamed.length} director${aligned.renamed.length === 1 ? "y" : "ies"} in place, by case or normalization only: ${aligned.renamed.join(", ")}`,
+          );
+        }
+        if (aligned.failed.length > 0) {
+          Logger.warn(
+            `Pull: could not rename ${aligned.failed.length} director${aligned.failed.length === 1 ? "y" : "ies"} to the tree's spelling; will retry: ${aligned.failed
+              .map((f) => `${f.path} (${f.error})`)
+              .join(", ")}`,
+          );
+        }
+        pendingDirRenames = aligned.failed.map((f) => f.path);
+      }
+
       // Update workspace state incrementally from the diff: start from the old
       // state, drop removed files, and re-record added/modified ones. Unchanged
       // files keep their existing entry (and hash). Hashes are deferred (md5 "");
@@ -1051,20 +1092,43 @@ export async function pull(
         }
       }
 
+      // A mode set from Windows (pending.setExecutable) that the pulled
+      // version already has, or for a file the pull removed, is done with;
+      // kept, it would undo a later upstream mode change on the next edit.
+      const deletedPaths = [
+        ...diff.removed.filter((p) => !stillPending.has(p)),
+        ...unsafeRemoved,
+        ...removedNow.filter((p) => !stillPending.has(p)),
+      ];
+      let pendingModes: Record<string, number> | undefined;
+      if (workspaceState.pendingModes) {
+        const next = { ...workspaceState.pendingModes };
+        for (const p of deletedPaths) delete next[p];
+        for (const [p, f] of Object.entries(newFiles)) {
+          if (next[p] !== undefined && next[p] === (f.mode ?? 0o644)) {
+            delete next[p];
+          }
+        }
+        if (
+          Object.keys(next).length !==
+          Object.keys(workspaceState.pendingModes).length
+        ) {
+          pendingModes = next;
+        }
+      }
+
       await updateWorkspaceState(
         workspace,
         {
           files: {
-            delete: [
-              ...diff.removed.filter((p) => !stillPending.has(p)),
-              ...unsafeRemoved,
-              ...removedNow.filter((p) => !stillPending.has(p)),
-            ],
+            delete: deletedPaths,
             upsert: newFiles,
           },
           meta: {
             changelistNumber: changelistResponse.number,
             pendingRemovals: [...stillPending],
+            ...(pendingDirRenames !== undefined && { pendingDirRenames }),
+            ...(pendingModes !== undefined && { pendingModes }),
           },
         },
         stateBackend,

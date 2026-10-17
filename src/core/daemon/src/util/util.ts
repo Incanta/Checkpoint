@@ -143,6 +143,21 @@ export interface WorkspaceState {
    * untracked files to add back, and the next pull tries again.
    */
   pendingRemovals?: string[];
+  /**
+   * Directories the tree renamed by case or normalization only that a pull
+   * could not rename on disk (a file inside was open, say), by their new
+   * spelling. Until the next pull manages it, the scan takes the old spelling
+   * on disk for this one rather than for a rename the user made.
+   */
+  pendingDirRenames?: string[];
+  /**
+   * File modes to submit that the file on disk cannot carry: set with
+   * `pending.setExecutable` on Windows, which has no executable bit. A file
+   * whose mode here differs from its baseline's shows as modified, and its
+   * next submit sends this mode. Never set on Linux or macOS, where the
+   * command changes the file itself.
+   */
+  pendingModes?: Record<string, number>;
   teamSync?: WorkspaceTeamSyncState;
 }
 
@@ -376,6 +391,41 @@ export function syncTargetBranch(
   return active.length > 0
     ? active[active.length - 1]!
     : workspace.domainBranchName;
+}
+
+/**
+ * Walks a feature branch up to its domain root, returning the chain in
+ * ancestor-first order.
+ *
+ * Overlays are applied in this order, and a stacked branch is meaningless
+ * without the branches beneath it, so activation always takes the whole chain
+ * rather than a single name. It is also the only set of branches a workspace
+ * may have active: two siblings have no one head that holds both, so there
+ * would be nothing to sync or to check a submit's bases against.
+ */
+export async function resolveBranchChain(
+  client: Awaited<ReturnType<typeof CreateApiClientAuth>>,
+  repoId: string,
+  branchName: string,
+): Promise<string[]> {
+  const chain: string[] = [];
+  let current: string | null = branchName;
+
+  for (let hops = 0; hops < 64 && current; hops++) {
+    const branch = await client.branch.getBranch.query({
+      repoId,
+      name: current,
+    });
+
+    if (!branch || branch.isClaimDomainRoot) {
+      break;
+    }
+
+    chain.unshift(branch.name);
+    current = branch.parentBranchName;
+  }
+
+  return chain;
 }
 
 export async function getLatestChangelistId(

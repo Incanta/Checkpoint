@@ -155,6 +155,9 @@ export type Channels = {
   "file:history:open-window": null;
   "file:mark-as-added": { path: string };
   "file:mark-directory-as-added": { path: string };
+  /** Executable (or not) in the next submit; the only way from Windows. */
+  "file:set-executable": { path: string; executable: boolean };
+  "file:set-executable:error": { message: string };
   "file:checkout": {
     path: string;
     /** Take an exclusive claim even on a mergeable file. */

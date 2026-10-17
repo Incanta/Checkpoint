@@ -9,6 +9,7 @@
  *   status                        Show pending changes
  *   add <file...>                 Stage files for submission
  *   restore [--staged] <file...>  Unstage or revert files
+ *   chmod (+x|-x) <file...>       Executable or not in the next submit
  *   submit --message <msg>        Submit staged files
  *   pull                          Sync changes from remote
  *   log                           Show version history
@@ -106,6 +107,24 @@ int main(int argc, char** argv) {
       .implicit_value(true);
   restoreCmd.add_argument("files")
       .help("File(s) to restore")
+      .nargs(argparse::nargs_pattern::at_least_one);
+
+  // chmod
+  argparse::ArgumentParser chmodCmd("chmod");
+  chmodCmd.add_description(
+      "Make files executable (+x) or not (-x) in their next submit; works on "
+      "Windows too");
+  chmodCmd.set_prefix_chars("-+");
+  chmodCmd.add_argument("+x")
+      .help("Make the files executable")
+      .default_value(false)
+      .implicit_value(true);
+  chmodCmd.add_argument("-x")
+      .help("Make the files not executable")
+      .default_value(false)
+      .implicit_value(true);
+  chmodCmd.add_argument("files")
+      .help("File(s) to change")
       .nargs(argparse::nargs_pattern::at_least_one);
 
   // submit
@@ -295,6 +314,7 @@ int main(int argc, char** argv) {
   program.add_subparser(addCmd);
   program.add_subparser(moveCmd);
   program.add_subparser(restoreCmd);
+  program.add_subparser(chmodCmd);
   program.add_subparser(submitCmd);
   program.add_subparser(pullCmd);
   program.add_subparser(cleanCmd);
@@ -425,6 +445,17 @@ int main(int argc, char** argv) {
       auto files = restoreCmd.get<std::vector<std::string>>("files");
       bool staged = restoreCmd.get<bool>("--staged");
       return checkpoint::cmdRestore(files, staged);
+    }
+
+    if (program.is_subcommand_used(chmodCmd)) {
+      bool on = chmodCmd.get<bool>("+x");
+      bool off = chmodCmd.get<bool>("-x");
+      if (on == off) {
+        std::cerr << "error: chmod takes exactly one of +x or -x." << std::endl;
+        return 1;
+      }
+      return checkpoint::cmdChmod(
+          on ? "+x" : "-x", chmodCmd.get<std::vector<std::string>>("files"));
     }
 
     if (program.is_subcommand_used(submitCmd)) {

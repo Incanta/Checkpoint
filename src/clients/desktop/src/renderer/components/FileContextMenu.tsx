@@ -134,8 +134,16 @@ export function useFileContextMenu() {
       setLockedWarningVisible(true);
     });
 
+    const unsubscribeExecutable = ipc.on(
+      "file:set-executable:error",
+      (data) => {
+        window.alert(`Could not change the executable bit: ${data.message}`);
+      },
+    );
+
     return () => {
       unsubscribe();
+      unsubscribeExecutable();
     };
   }, []);
 
@@ -215,6 +223,37 @@ export function useFileContextMenu() {
           path: file.relativePath,
         });
       },
+    });
+
+    // The executable bit, for the next submit. On Linux and macOS this is
+    // `chmod`; Windows has no such bit, so the daemon sends it with the file.
+    const canSetMode =
+      !file.isDirectory &&
+      status !== FileStatusValues.Deleted &&
+      status !== FileStatusValues.Ignored;
+    items.push({
+      label: "Executable",
+      disabled: !canSetMode,
+      items: [
+        {
+          label: "Mark as executable",
+          command: () => {
+            ipc.sendMessage("file:set-executable", {
+              path: file.relativePath,
+              executable: true,
+            });
+          },
+        },
+        {
+          label: "Remove executable bit",
+          command: () => {
+            ipc.sendMessage("file:set-executable", {
+              path: file.relativePath,
+              executable: false,
+            });
+          },
+        },
+      ],
     });
 
     // Checkout

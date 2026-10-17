@@ -38,6 +38,9 @@ export interface StateDelta {
     changelistNumber?: number;
     branchHeads?: Record<string, number> | null;
     pendingRemovals?: string[] | null;
+    pendingDirRenames?: string[] | null;
+    /** Replaces the whole record; empty or null clears it. */
+    pendingModes?: Record<string, number> | null;
     syncFilterHash?: string | null;
     lastBuiltChangelist?: number | null;
     lastScheduledSyncAt?: string | null;
@@ -130,6 +133,26 @@ export function applyDeltaToState(
       delete state.pendingRemovals;
     } else if (meta.pendingRemovals !== undefined) {
       state.pendingRemovals = meta.pendingRemovals;
+    }
+  }
+  if (meta && "pendingDirRenames" in meta) {
+    if (
+      meta.pendingDirRenames === null ||
+      meta.pendingDirRenames?.length === 0
+    ) {
+      delete state.pendingDirRenames;
+    } else if (meta.pendingDirRenames !== undefined) {
+      state.pendingDirRenames = meta.pendingDirRenames;
+    }
+  }
+  if (meta && "pendingModes" in meta) {
+    if (
+      meta.pendingModes === null ||
+      (meta.pendingModes && Object.keys(meta.pendingModes).length === 0)
+    ) {
+      delete state.pendingModes;
+    } else if (meta.pendingModes !== undefined) {
+      state.pendingModes = meta.pendingModes;
     }
   }
 

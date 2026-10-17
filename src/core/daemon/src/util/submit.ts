@@ -131,10 +131,14 @@ export async function submit(
   const windows = process.platform === "win32";
   const modificationsWithBase: SubmitModification[] = uniqueModifications.map(
     (mod) => {
+      // A mode set with pending.setExecutable wins; otherwise the mode the
+      // file has at its base, so an edit never strips +x.
       const withMode = (m: SubmitModification): SubmitModification => {
         if (!windows || m.delete || !baseState) return m;
+        const normalized = m.path.replace(/\\/g, "/").replace(/^\//, "");
         const known =
-          baseState.files[m.path.replace(/\\/g, "/").replace(/^\//, "")]?.mode;
+          baseState.pendingModes?.[normalized] ??
+          baseState.files[normalized]?.mode;
         return known !== undefined ? { ...m, mode: known } : m;
       };
       // This daemon sends a base for every file it tracks (null for one it
@@ -406,12 +410,25 @@ export async function submit(
       onProgress?.("Updating workspace state", processed, total);
     }
 
+    // Modes set from Windows are submitted now (or the file is gone).
+    const pendingModes = baseState?.pendingModes;
+    const modesLeft = pendingModes ? { ...pendingModes } : undefined;
+    if (modesLeft) {
+      for (const p of [...removed, ...Object.keys(upsert)]) delete modesLeft[p];
+    }
+    const modesChanged =
+      modesLeft !== undefined &&
+      Object.keys(modesLeft).length !== Object.keys(pendingModes!).length;
+
     await updateWorkspaceState(
       workspace,
       {
         files: { delete: removed, upsert },
-        ...(advanceTo !== undefined && {
-          meta: { changelistNumber: advanceTo },
+        ...((advanceTo !== undefined || modesChanged) && {
+          meta: {
+            ...(advanceTo !== undefined && { changelistNumber: advanceTo }),
+            ...(modesChanged && { pendingModes: modesLeft }),
+          },
         }),
       },
       stateBackend,

@@ -286,6 +286,116 @@ describe(
               (await getWorkspaceState(bob.root, "sqlite")).files,
             ).sort(),
           ).toEqual(["Docs/a.txt", "Docs/b.txt"]);
+          // The directory itself takes the new spelling, so the scan has no
+          // difference to take for a rename Bob made.
+          expect(await fsp.readdir(bob.root)).toContain("Docs");
+          expect(await fsp.readdir(bob.root)).not.toContain("docs");
+        },
+      );
+
+      it.runIf(caseInsensitive)(
+        "submits a directory renamed by case in Explorer or Finder as a rename",
+        async () => {
+          const { alice, bob } = scene!;
+          await put(alice, "content/maps/a.txt", "a\n");
+          await put(alice, "content/maps/b.txt", "b\n");
+          await put(alice, "content/top.txt", "top\n");
+          await stageAndSubmit(alice, [
+            "content/maps/a.txt",
+            "content/maps/b.txt",
+            "content/top.txt",
+          ]);
+          await syncLatest(bob);
+
+          await fsp.rename(fileIn(bob, "content"), fileIn(bob, "Content"));
+          expect(await pendingChanges(bob)).toEqual({
+            "content/maps/a.txt": "Deleted",
+            "content/maps/b.txt": "Deleted",
+            "content/top.txt": "Deleted",
+            "Content/maps/a.txt": "Local",
+            "Content/maps/b.txt": "Local",
+            "Content/top.txt": "Local",
+          });
+
+          // Staging one file stages everything the rename moved: the server
+          // refuses a tree with both spellings of the directory.
+          await stageAndSubmit(bob, ["Content/top.txt"]);
+          expect(
+            await pathsAtHead(testDb.client, scene!.repoId, "main"),
+          ).toEqual(["Content/maps/a.txt", "Content/maps/b.txt", "Content/top.txt"]);
+          expect(await pendingChanges(bob)).toEqual({});
+
+          // Alice's copy follows, directory and all, with nothing pending.
+          await syncLatest(alice);
+          expect(await fsp.readdir(alice.root)).toContain("Content");
+          expect(await read(alice, "Content/maps/b.txt")).toBe("b\n");
+          expect(await pendingChanges(alice)).toEqual({});
+        },
+      );
+
+      it.runIf(caseInsensitive)(
+        "leaves a new file in a directory renamed by case untracked",
+        async () => {
+          const { alice, bob } = scene!;
+          await put(alice, "docs/a.txt", "a\n");
+          await stageAndSubmit(alice, ["docs/a.txt"]);
+          await syncLatest(bob);
+
+          await fsp.rename(fileIn(bob, "docs"), fileIn(bob, "Docs"));
+          await put(bob, "Docs/notes.txt", "mine\n");
+          await stageAndSubmit(bob, ["Docs/a.txt"]);
+
+          expect(
+            await pathsAtHead(testDb.client, scene!.repoId, "main"),
+          ).toEqual(["Docs/a.txt"]);
+          expect(await pendingChanges(bob)).toEqual({ "Docs/notes.txt": "Local" });
+        },
+      );
+
+      it.runIf(caseInsensitive)(
+        "does not take a directory a pull could not rename for one Bob renamed",
+        async () => {
+          const { alice, bob } = scene!;
+          await put(alice, "docs/a.txt", "a\n");
+          await stageAndSubmit(alice, ["docs/a.txt"]);
+          await syncLatest(bob);
+
+          // Something holds the directory (a program with a file inside it
+          // open, say), so the pull cannot rename it this time.
+          const rename = fsp.rename.bind(fsp);
+          const spy = vi
+            .spyOn(fsp, "rename")
+            .mockImplementation(async (from, to) => {
+              if (path.basename(String(from)) === "docs") {
+                throw Object.assign(new Error("EBUSY: resource busy"), {
+                  code: "EBUSY",
+                });
+              }
+              return rename(from, to);
+            });
+          try {
+            await submitDirect(alice, {
+              write: { "Docs/a.txt": "a\n" },
+              remove: ["docs/a.txt"],
+            });
+            await syncLatest(bob);
+          } finally {
+            spy.mockRestore();
+          }
+          expect(await fsp.readdir(bob.root)).toContain("docs");
+          expect(await pendingChanges(bob)).toEqual({});
+          expect(
+            (await getWorkspaceState(bob.root, "sqlite")).pendingDirRenames,
+          ).toEqual(["Docs"]);
+
+          // The next pull finishes it.
+          await submitDirect(alice, { write: { "other.txt": "o\n" } });
+          await syncLatest(bob);
+          expect(await fsp.readdir(bob.root)).toContain("Docs");
+          expect(await pendingChanges(bob)).toEqual({});
+          expect(
+            (await getWorkspaceState(bob.root, "sqlite")).pendingDirRenames,
+          ).toBeUndefined();
         },
       );
 

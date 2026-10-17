@@ -742,6 +742,48 @@ inline int cmdMove(const std::vector<std::string>& files,
 }
 
 // ═════════════════════════════════════════════════════════════════
+//  COMMAND: chmod (+x / -x for the next submit)
+// ═════════════════════════════════════════════════════════════════
+
+// Like git's `update-index --chmod`. On Linux and macOS the daemon changes the
+// file's mode; Windows has no executable bit, so the daemon keeps the mode
+// and sends it with the file's next submit. Either way the file then shows as
+// modified until submitted.
+inline int cmdChmod(const std::string& mode,
+                    const std::vector<std::string>& files) {
+  if (mode != "+x" && mode != "-x") {
+    std::cerr << "error: chmod takes +x or -x, not \"" << mode << "\"."
+              << std::endl;
+    return 1;
+  }
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  std::vector<std::string> resolvedPaths;
+  for (auto& file : files) {
+    resolvedPaths.push_back(resolveWorkspacePath(ctx.root, file));
+  }
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"paths", resolvedPaths},
+      {"executable", mode == "+x"},
+  };
+  client.mutate("workspaces.pending.setExecutable", input);
+
+  for (auto& path : resolvedPaths) {
+    std::cout << color::yellow() << "  " << mode << " " << path
+              << color::reset() << std::endl;
+  }
+  std::cout << resolvedPaths.size() << " file(s) will be submitted "
+            << (mode == "+x" ? "executable" : "not executable") << "."
+            << std::endl;
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
 //  COMMAND: restore (unstage files, unmark for add, or revert)
 // ═════════════════════════════════════════════════════════════════
 
