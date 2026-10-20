@@ -435,13 +435,38 @@ int PullSync(
     return err;
   }
 
-  struct Longtail_StoreIndex* required_version_store_index;
-  err = SyncGetExistingContent(
-      store_block_store_api,
-      required_chunk_count,
-      required_chunk_hashes,
-      0,
-      &required_version_store_index);
+  // Find the blocks holding the required chunks. The version's block map
+  // (versions/<name>.lsi) names them directly; a version submitted before
+  // block maps falls back to the repo-wide store index, which storage
+  // protocol 3 no longer writes.
+  struct Longtail_StoreIndex* required_version_store_index = 0;
+  err = ENOENT;
+  {
+    std::string stem = VersionIndex;
+    if (stem.size() > 4 && stem.compare(stem.size() - 4, 4, ".lvi") == 0) {
+      stem = stem.substr(0, stem.size() - 4);
+    }
+    const std::string map_path = std::string(RemoteBasePath) + "/versions/" + stem + ".lsi";
+    struct Longtail_StoreIndex* block_map = 0;
+    if (remote_storage_api->IsFile(remote_storage_api, map_path.c_str()) &&
+        Longtail_ReadStoreIndex(remote_storage_api, map_path.c_str(), &block_map) == 0) {
+      err = Longtail_GetExistingStoreIndex(
+          block_map,
+          required_chunk_count,
+          required_chunk_hashes,
+          0,
+          &required_version_store_index);
+      Longtail_Free(block_map);
+    }
+  }
+  if (err) {
+    err = SyncGetExistingContent(
+        store_block_store_api,
+        required_chunk_count,
+        required_chunk_hashes,
+        0,
+        &required_version_store_index);
+  }
   if (err) {
     SetHandleStep(handle, "Failed to retarget the store index to the remote store");
     handle->error = err;
