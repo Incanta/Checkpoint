@@ -2,6 +2,7 @@ import config from "@incanta/config";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { db } from "~/server/db";
+import { authSecret } from "~/server/auth-secret";
 import { Logger } from "~/server/logging";
 import {
   consumeInvite,
@@ -101,7 +102,7 @@ async function getAuth() {
     database: prismaAdapter(db, {
       provider: config.get<"sqlite" | "postgresql">("db.provider"),
     }),
-    secret: await config.getWithSecrets<string>("auth.secret"),
+    secret: await authSecret(),
     trustedOrigins: ["*"],
     emailAndPassword: {
       enabled: config.get<boolean>("auth.email-password.enabled"),
@@ -179,3 +180,6 @@ async function getAuth() {
 }
 
 export const auth = getAuth();
+// Imported at build time too, when no auth secret is configured. Whoever
+// awaits it still gets the error; instrumentation.ts reports it at startup.
+auth.catch(() => undefined);

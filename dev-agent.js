@@ -25,7 +25,9 @@ const net = require("net");
 const os = require("os");
 const {
   devStorageSigningKey,
+  devAuthSecret,
   ENV_NAME: SIGNING_KEY_ENV,
+  AUTH_SECRET_ENV,
 } = require("./scripts/dev-signing-key.js");
 
 // ─── Constants ───────────────────────────────────────────────────
@@ -237,6 +239,8 @@ function spawnService(service) {
     FORCE_COLOR: "0",
     // The app and the server will not start without a shared signing key.
     [SIGNING_KEY_ENV]: devStorageSigningKey(),
+    // Nor the app without an auth secret.
+    [AUTH_SECRET_ENV]: devAuthSecret(),
     PATH: binDir + sep + (process.env.PATH || ""),
   };
 

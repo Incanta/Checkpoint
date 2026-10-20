@@ -274,6 +274,8 @@ const dbUrl = config.get<string>("db.url");
 
 **Storage signing key (required).** The web app signs storage tokens and the storage server verifies them with a shared HS256 key, `storage.jwt.signing-key`. It has no default, and both processes refuse to start unless it is a random value of at least 32 characters, because anyone who knows it can mint a write token for any repo. Generate one with `openssl rand -hex 32` and set the same value on both, either in each `storage.yaml` or with the `CHECKPOINT_STORAGE_SIGNING_KEY` environment variable (which takes precedence). `yarn dev` generates a per-checkout key for local development, so this only needs doing for a deployment or when starting the services by hand.
 
+**Auth secret (required).** The web app signs session cookies with `auth.secret`, so anyone who knows it can sign in as anyone. It works the same way: no default, and the app refuses to start unless it is a random value of at least 32 characters. Set it in `auth.yaml` (a secret reference such as `secret|betterauth_secret` works, as the Docker Compose config does) or with `CHECKPOINT_AUTH_SECRET`, which takes precedence. `yarn dev` generates one per checkout. Unless `security.encryption-key` is set, stored integration secrets (issue tracker tokens) are encrypted with a key derived from it, so changing it means re-entering those.
+
 ### Daemon: JSON-based Config
 
 The daemon uses its own JSON configuration system with multiple layers.

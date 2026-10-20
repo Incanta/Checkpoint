@@ -1,4 +1,10 @@
-secret: "betterauthsecretthatsatleast32characterslong"
+# Signs session cookies: whoever knows it can sign in as anyone. There is no
+# default, and the app refuses to start without a random value of at least 32
+# characters (for example: openssl rand -hex 32). Set it here, in an
+# environment's auth.yaml (a secret reference like "secret|betterauth_secret"
+# works), or with the CHECKPOINT_AUTH_SECRET environment variable, which wins.
+# `yarn dev` generates one for local use.
+secret: ""
 
 # Controls who may register a new account.
 #   "public" - anyone may register (the invite page is still available to

@@ -50,9 +50,12 @@ export async function register() {
     // Refuse to run with a missing or guessable storage signing key: every
     // storage token this app hands out would be forgeable. Checked before the
     // "[healthy]" line so nothing treats a misconfigured app as up.
+    // Likewise a missing or guessable auth secret: every session would be.
     const { storageSigningKey } = await import("~/server/storage-signing-key");
+    const { authSecret } = await import("~/server/auth-secret");
     try {
       storageSigningKey();
+      await authSecret();
     } catch (err) {
       Logger.error(err instanceof Error ? err.message : String(err));
       process.exit(1);

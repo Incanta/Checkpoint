@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import config from "@incanta/config";
 import { Logger } from "./logging";
+import { authSecret } from "./auth-secret";
 
 // AES-256-GCM encryption for third-party secrets stored at rest (e.g. issue
 // tracker API tokens). Payload format: "v1:<iv-b64>:<tag-b64>:<ct-b64>".
@@ -35,11 +36,10 @@ async function getEncryptionKey(): Promise<Buffer> {
       );
     }
   } else {
-    const authSecret = await config.getWithSecrets<string>("auth.secret");
     key = Buffer.from(
       crypto.hkdfSync(
         "sha256",
-        Buffer.from(authSecret),
+        Buffer.from(await authSecret()),
         Buffer.from("checkpoint-security-v1"),
         Buffer.from("issue-tracker-secrets"),
         32,

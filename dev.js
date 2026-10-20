@@ -26,7 +26,9 @@ const path = require("path");
 
 const {
   devStorageSigningKey,
+  devAuthSecret,
   ENV_NAME: SIGNING_KEY_ENV,
+  AUTH_SECRET_ENV,
 } = require("./scripts/dev-signing-key.js");
 
 const isCI = process.env.CI === "true";
@@ -188,6 +190,8 @@ function startService(service) {
       FORCE_COLOR: "1",
       // The app and the server will not start without a shared signing key.
       [SIGNING_KEY_ENV]: devStorageSigningKey(),
+      // Nor the app without an auth secret.
+      [AUTH_SECRET_ENV]: devAuthSecret(),
       ...service.env,
     },
     stdio: ["pipe", "pipe", "pipe"],
