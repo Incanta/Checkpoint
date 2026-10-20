@@ -1522,7 +1522,7 @@ __metadata:
     react: ^19.0.0
     react-dom: ^19.0.0
     superjson: ^2.2.6
-    zod: ^4.1.1
+    zod: ^4.5.4
   languageName: unknown
   linkType: soft
 
@@ -1580,7 +1580,7 @@ __metadata:
     pino: ^10.1.0
     pino-pretty: ^13.1.2
     superjson: ^2.2.6
-    zod: ^4.1.1
+    zod: ^4.5.4
   languageName: unknown
   linkType: soft
 
@@ -1605,7 +1605,7 @@ __metadata:
     react: "npm:^19.0.0"
     react-chartjs-2: "npm:^5.3.1"
     typescript: "npm:^7.0.2"
-    zod: "npm:^4.1.1"
+    zod: "npm:^4.5.4"
   languageName: unknown
   linkType: soft
 
@@ -1642,7 +1642,7 @@ __metadata:
     react-dom: "npm:^19.0.0"
     superjson: "npm:^2.2.6"
     typescript-eslint: "npm:^8.27.0"
-    zod: "npm:^4.1.1"
+    zod: "npm:^4.5.4"
   languageName: unknown
   linkType: soft
 
@@ -14637,10 +14637,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zod@npm:^4.1.1":
-  version: 4.3.6
-  resolution: "zod@npm:4.3.6"
-  checksum: 10c0/860d25a81ab41d33aa25f8d0d07b091a04acb426e605f396227a796e9e800c44723ed96d0f53a512b57be3d1520f45bf69c0cb3b378a232a00787a2609625307
+"zod@npm:^4.5.4":
+  version: 4.6.7
+  resolution: "zod@npm:4.6.7"
+  checksum: 10c0/4ce2eb14034317b7254e347ca37b5ad591cf8333147030cf05b9b5d31692d45073f7f2747aa50cf8c6b29012194d2b22978cecc89969cf34a0d18e89d0ee7d7b
   languageName: node
   linkType: hard
 
