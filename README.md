@@ -249,19 +249,28 @@ const dbUrl = config.get<string>("db.url");
 
 **Web App config** (`src/app/config/`):
 
-- `auth.yaml` - Authentication settings: JWT secrets, OAuth providers (Auth0, GitHub, GitLab, Discord, etc.), dev login toggle
+- `auth.yaml` - Authentication settings: the session secret, who may sign up (`invite-only`), OAuth providers (Auth0, GitHub, GitLab, Okta, Slack, Discord), dev login toggle
 - `db.yaml` - Database connection URL (SQLite for dev, PostgreSQL for prod)
-- `server.yaml` - Server port
-- `storage.yaml` - Storage signing keys, token expiration, backend URL, filer settings
+- `server.yaml` - Listen port and external URL
+- `storage.yaml` - Storage mode, signing key, token expiration, backend URLs, R2 account
 - `longtail.yaml` - How content is chunked, hashed, and compressed (chunk and block sizes, blake3, zstd), for the whole instance. Clients get it with their storage token, and each repo keeps the values from its first use
+- `state-tree.yaml` - Where state-tree blocks are stored, and their cache size
+- `binary-extensions.yaml` - File extensions treated as binary (never auto-merged)
+- `email.yaml` - SMTP settings for invites and notifications
+- `logging.yaml` - Log level, pretty-printing, optional log file, native Longtail log level
+- `secrets.yaml` - Where secret references (`secret|name`) are resolved: local file, Vault, AWS, Azure, or GCP
+- `security.yaml` - Encryption key for stored integration secrets
+- `updates.yaml` - Update checks, channel, and notification emails
+- `telemetry.yaml`, `newsletter.yaml`, `stripe.yaml` - Anonymous usage reporting, the newsletter signup, and billing (all off by default)
 - `environment.yaml` - Maps environment variables to config paths (e.g., `DATABASE_URL` to `db.url`), allowing env vars to override YAML values
 
 **Storage Server config** (`src/core/server/config/`):
 
-- `server.yaml` - Host, port, TLS settings
-- `seaweedfs.yaml` - SeaweedFS connection (master/filer hosts, ports), JWT signing keys, stub mode toggle for local dev
-- `longtail.yaml` - Native Longtail log level for the server's block-map work
+- `server.yaml` - Listen port
+- `storage.yaml` - Storage mode (local, s3, or r2), the local data directory or S3/R2 settings, and the signing key shared with the app
 - `checkpoint.yaml` - Web app API URL for callbacks
+- `logging.yaml` - Log level, pretty-printing, optional log file, native Longtail log level
+- `secrets.yaml` - Where secret references are resolved, as for the app
 
 **Storage signing key (required).** The web app signs storage tokens and the storage server verifies them with a shared HS256 key, `storage.jwt.signing-key`. It has no default, and both processes refuse to start unless it is a random value of at least 32 characters, because anyone who knows it can mint a write token for any repo. Generate one with `openssl rand -hex 32` and set the same value on both, either in each `storage.yaml` or with the `CHECKPOINT_STORAGE_SIGNING_KEY` environment variable (which takes precedence). `yarn dev` generates a per-checkout key for local development, so this only needs doing for a deployment or when starting the services by hand.
 

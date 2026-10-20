@@ -70,7 +70,9 @@ export async function storeBlockMap(
     remoteBasePath: basePath,
     versionIndex,
     blockMapBuffer,
-    logLevel: GetLogLevel(config.get<LongtailLogLevel>("longtail.log-level")),
+    logLevel: GetLogLevel(
+      config.get<LongtailLogLevel>("logging.longtail-level"),
+    ),
     ...(await buildServerStorageOptions(repoId)),
   } as Parameters<typeof storeBlockMapAsync>[0]);
   if (!handle) {
@@ -85,4 +87,3 @@ export async function storeBlockMap(
     freeHandle(handle);
   }
 }
-

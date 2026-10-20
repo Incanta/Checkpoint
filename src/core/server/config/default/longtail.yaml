@@ -1,4 +1,0 @@
-# Native Longtail logging for the server's own Longtail work (block maps).
-# How content is chunked, hashed, and compressed is set in the app's
-# config/longtail.yaml, which clients get with their storage token.
-log-level: "off"
