@@ -48,6 +48,11 @@ export interface DaemonConfigType {
     };
   };
   longtail: {
+    /*
+     * Chunk and block sizes, hashing, and compression: used only with servers
+     * that do not send a repo's own (storage.getToken `longtail`), which
+     * every current server does. The rest are this machine's to tune.
+     */
     targetChunkSize: number;
     targetBlockSize: number;
     maxChunksPerBlock: number;

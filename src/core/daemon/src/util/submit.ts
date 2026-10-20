@@ -182,15 +182,19 @@ export async function submit(
   console.log(`[submit]   workspaceId: ${workspaceId}`);
   console.log(`[submit]   modifications: ${uniqueModifications.length}`);
 
+  // The repo's format settings come from the server, so every teammate's
+  // changelists chunk and hash alike; servers before that leave them to
+  // this daemon's config.
+  const format = storageTokenResponse.longtail ?? daemonConfig.longtail;
   const submitOptions: SubmitAsyncOptions = {
     branchName,
     message,
-    targetChunkSize: daemonConfig.longtail.targetChunkSize,
-    targetBlockSize: daemonConfig.longtail.targetBlockSize,
-    maxChunksPerBlock: daemonConfig.longtail.maxChunksPerBlock,
-    minBlockUsagePercent: daemonConfig.longtail.minBlockUsagePercent,
-    hashingAlgo: daemonConfig.longtail.hashingAlgo,
-    compressionAlgo: daemonConfig.longtail.compressionAlgo,
+    targetChunkSize: format.targetChunkSize,
+    targetBlockSize: format.targetBlockSize,
+    maxChunksPerBlock: format.maxChunksPerBlock,
+    minBlockUsagePercent: format.minBlockUsagePercent,
+    hashingAlgo: format.hashingAlgo,
+    compressionAlgo: format.compressionAlgo,
     enableMmapIndexing: daemonConfig.longtail.enableMmapIndexing,
     enableMmapBlockStore: daemonConfig.longtail.enableMmapBlockStore,
     localRootPath: workspace.localPath,

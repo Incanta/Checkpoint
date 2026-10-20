@@ -7,6 +7,7 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { recordActivity } from "../activity";
+import { repoLongtailParams } from "~/server/longtail-params";
 import {
   isR2Enabled,
   getR2Endpoint,
@@ -80,6 +81,8 @@ export const storageRouter = createTRPCRouter({
       const serverUrlLan =
         config.tryGet<string>("storage.backend-url.external-lan") ?? null;
       const expiration = Math.floor(Date.now() / 1000) + expirationSeconds;
+      // What this repo's submits use, the same for every client.
+      const longtail = await repoLongtailParams(ctx.db, repo);
 
       // R2: the client talks to R2 directly with scoped STS temp credentials.
       if (isR2Enabled()) {
@@ -102,6 +105,7 @@ export const storageRouter = createTRPCRouter({
           expiration,
           serverUrl,
           serverUrlLan,
+          longtail,
           r2: {
             accessKeyId: creds.accessKeyId,
             secretAccessKey: creds.secretAccessKey,
@@ -120,6 +124,7 @@ export const storageRouter = createTRPCRouter({
         expiration,
         serverUrl,
         serverUrlLan,
+        longtail,
         gatewayUrl: `${serverUrl}/storage`,
         gatewayUrlLan: serverUrlLan ? `${serverUrlLan}/storage` : null,
       };

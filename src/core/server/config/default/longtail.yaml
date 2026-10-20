@@ -1,9 +1,4 @@
-target-chunk-size: 32768 # 32KB
-target-block-size: 8388608 # 8MB
-max-chunks-per-block: 1024
-min-block-usage-percent: 80
-hashing-algo: "blake3"
-compression-algo: "zstd"
-enable-mmap-indexing: false
-enable-mmap-block-store: false
+# Native Longtail logging for the server's own Longtail work (block maps).
+# How content is chunked, hashed, and compressed is set in the app's
+# config/longtail.yaml, which clients get with their storage token.
 log-level: "off"

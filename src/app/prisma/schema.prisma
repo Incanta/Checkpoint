@@ -247,6 +247,12 @@ model Repo {
   // teams that use nothing but Linux.
   pathPortability Boolean @default(true)
 
+  // The Longtail format settings every submit to this repo uses (JSON: chunk
+  // and block sizes, hashing, compression). Pinned from the instance's
+  // longtail config the first time the repo is used, so retuning the
+  // instance never mixes chunk sizes within one repo's history.
+  longtailParams String?
+
   files            File[]
   changelists      Changelist[]
   branches         Branch[]          @relation("RepoBranch")

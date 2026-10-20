@@ -65,6 +65,13 @@ function applyDefaults(): void {
   // No storage server runs, so changelists name versions that exist nowhere.
   // src/api/version-index.test.ts turns the check back on.
   setConfig("storage.verify-version-index", false);
+  // The instance's Longtail format (config/default/longtail.yaml).
+  setConfig("longtail.target-chunk-size", 32768);
+  setConfig("longtail.target-block-size", 8388608);
+  setConfig("longtail.max-chunks-per-block", 1024);
+  setConfig("longtail.min-block-usage-percent", 80);
+  setConfig("longtail.hashing-algo", "blake3");
+  setConfig("longtail.compression-algo", "zstd");
   // Tree blocks go to the TreeBlock table in tests (no storage server running).
   setConfig("state-tree.block-store", "postgres");
   setConfig("state-tree.block-cache-bytes", 64 * 1024 * 1024);

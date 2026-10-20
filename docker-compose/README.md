@@ -136,6 +136,7 @@ To restore, put back the configuration, then storage, then the database, and sta
 ## Notes
 
 - **Database:** Postgres is recommended and is the only documented setup here.
+- **Content chunking** (chunk and block sizes, hashing, and compression) is one setting for the whole instance, sent to every client, so teammates never need matching daemon configs. The defaults suit most teams. To tune it, add `config/app/longtail.yaml` with any of the keys from `src/app/config/default/longtail.yaml`. Each repo keeps the settings it was first used with, so a change applies to new repos only.
 - **Email** is disabled by default (`config/app/email.yaml`). Enable it and set `email_smtp_password` in `config/.secrets` to send invites/notifications.
 - **`restart: unless-stopped` is required.** Installing an update works by exiting so the container comes back on the new version; without a restart policy, Install stops the service instead of upgrading it.
 - **The `bundles` volume** holds downloaded versions and the record of which one should be running. Both services mount it, and deleting it forces a fresh download on next boot.

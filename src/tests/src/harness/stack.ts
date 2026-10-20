@@ -155,15 +155,22 @@ const normalize = (p: string) => p.replace(/\\/g, "/").replace(/^\/+/, "");
 
 // ── the daemon's API client ──────────────────────────────────────────
 
-const procedureOverrides: Record<string, Record<string, AnyFn>> = {
+const procedureOverrides: Record<
+  string,
+  Record<string, (input: unknown, real: AnyFn) => unknown>
+> = {
   storage: {
-    // No storage server runs; the fake addon ignores the token anyway.
-    getToken: async () => ({
+    // The app's own answer (access checks, the repo's longtail format), with
+    // addresses that go nowhere: no storage server runs, and the fake addon
+    // ignores them.
+    getToken: async (input, real) => ({
+      ...((await real(input)) as object),
       kind: "gateway",
       token: "fake.storage.jwt",
-      expiration: Math.floor(Date.now() / 1000) + 3600,
       serverUrl: "http://fake-storage.invalid",
+      serverUrlLan: null,
       gatewayUrl: "http://fake-storage.invalid/gateway",
+      gatewayUrlLan: null,
     }),
   },
   teamSync: {
@@ -181,16 +188,14 @@ function clientFor(identity: Identity): unknown {
       {
         get(_target, name) {
           if (typeof name !== "string" || name === "then") return undefined;
+          const real: AnyFn = (input) =>
+            (
+              identity.caller as unknown as Record<string, Record<string, AnyFn>>
+            )[router]![name]!(input);
+          const harness = procedureOverrides[router]?.[name];
           const fn: AnyFn =
             (overrides.procedures?.[router]?.[name] as AnyFn | undefined) ??
-            procedureOverrides[router]?.[name] ??
-            ((input) =>
-              (
-                identity.caller as unknown as Record<
-                  string,
-                  Record<string, AnyFn>
-                >
-              )[router]![name]!(input));
+            (harness ? async (input) => harness(input, real) : real);
           return { query: fn, mutate: fn };
         },
       },
@@ -344,6 +349,8 @@ interface SubmitOptions {
   apiJwt: string;
   keepCheckedOut: boolean;
   workspaceId: string;
+  targetChunkSize: number;
+  hashingAlgo: string;
   modifications: {
     path: string;
     delete: boolean;
@@ -355,8 +362,11 @@ interface SubmitOptions {
 /** The modifications the most recent fake submit sent to the app. */
 export const lastSubmit: {
   modifications: SubmitOptions["modifications"] | null;
+  /** The chunking and hashing it was asked to use. */
+  format: { targetChunkSize: number; hashingAlgo: string } | null;
 } = {
   modifications: null,
+  format: null,
 };
 
 export const fakeAddon = {
@@ -396,6 +406,10 @@ export const fakeAddon = {
         if (versionIndex) versions.set(versionIndex, files);
 
         lastSubmit.modifications = options.modifications;
+        lastSubmit.format = {
+          targetChunkSize: options.targetChunkSize,
+          hashingAlgo: options.hashingAlgo,
+        };
         try {
           const created = await identity.caller.changelist.createChangelist({
             message: options.message,

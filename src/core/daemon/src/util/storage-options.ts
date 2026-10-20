@@ -28,6 +28,19 @@ export interface StorageTokenResponse {
     endpoint: string;
     bucket: string;
   } | null;
+  /**
+   * How this repo's submits chunk, hash, and compress, set for the whole
+   * instance and pinned per repo. Absent from servers before it, where the
+   * daemon's own longtail config applies.
+   */
+  longtail?: {
+    targetChunkSize: number;
+    targetBlockSize: number;
+    maxChunksPerBlock: number;
+    minBlockUsagePercent: number;
+    hashingAlgo: string;
+    compressionAlgo: string;
+  };
 }
 
 /**

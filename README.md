@@ -252,13 +252,14 @@ const dbUrl = config.get<string>("db.url");
 - `db.yaml` - Database connection URL (SQLite for dev, PostgreSQL for prod)
 - `server.yaml` - Server port
 - `storage.yaml` - Storage signing keys, token expiration, backend URL, filer settings
+- `longtail.yaml` - How content is chunked, hashed, and compressed (chunk and block sizes, blake3, zstd), for the whole instance. Clients get it with their storage token, and each repo keeps the values from its first use
 - `environment.yaml` - Maps environment variables to config paths (e.g., `DATABASE_URL` to `db.url`), allowing env vars to override YAML values
 
 **Storage Server config** (`src/core/server/config/`):
 
 - `server.yaml` - Host, port, TLS settings
 - `seaweedfs.yaml` - SeaweedFS connection (master/filer hosts, ports), JWT signing keys, stub mode toggle for local dev
-- `longtail.yaml` - Chunking parameters (chunk/block sizes), hashing algorithm (blake3), compression (zstd)
+- `longtail.yaml` - Native Longtail log level for the server's block-map work
 - `checkpoint.yaml` - Web app API URL for callbacks
 
 **Storage signing key (required).** The web app signs storage tokens and the storage server verifies them with a shared HS256 key, `storage.jwt.signing-key`. It has no default, and both processes refuse to start unless it is a random value of at least 32 characters, because anyone who knows it can mint a write token for any repo. Generate one with `openssl rand -hex 32` and set the same value on both, either in each `storage.yaml` or with the `CHECKPOINT_STORAGE_SIGNING_KEY` environment variable (which takes precedence). `yarn dev` generates a per-checkout key for local development, so this only needs doing for a deployment or when starting the services by hand.

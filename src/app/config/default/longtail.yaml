@@ -1,0 +1,15 @@
+# How submitted content is chunked, hashed, and compressed. One setting for
+# the whole instance, handed to every client with its storage token, so a
+# team's daemons never disagree.
+#
+# Each repo pins these the first time it is used (Repo.longtailParams), so
+# changing them affects new repos only: a repo whose changelists were
+# chunked or hashed differently cannot be pulled in one pass.
+target-chunk-size: 32768 # 32 KiB
+target-block-size: 8388608 # 8 MiB
+max-chunks-per-block: 1024
+min-block-usage-percent: 80
+hashing-algo: "blake3" # blake2 | blake3 | meow
+# none | lz4 | zstd | zstd_min | zstd_low | zstd_high | zstd_max | brotli |
+# brotli_min | brotli_max | brotli_text | brotli_text_min | brotli_text_max
+compression-algo: "zstd"
