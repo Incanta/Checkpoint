@@ -16,6 +16,7 @@ import {
   getWorkspaceState,
   syncTargetBranch,
   updateWorkspaceState,
+  type InterruptedPull,
   type Workspace,
 } from "./util.js";
 import {
@@ -458,15 +459,22 @@ async function pullOnce(
   );
   timer.stage("protect");
   onStep?.("Protecting local changes");
+  // Written partway by a pull that failed, and left as it was: nothing to
+  // keep, and the pull writes it whole now.
+  const partial = workspaceState.interruptedPull?.partial;
+  const leftPartway = (p: string) =>
+    leftByFailedPull(resolveInWorkspace(workspace.localPath, p), partial, p);
   for (const change of diff.modified) {
     const localFile = workspaceState.files[change.path];
     // Already at the incoming changelist (this workspace submitted it): the
     // single pass leaves the file alone. Applying whole indexes rewrites it,
     // which protectAnomalies covers.
     if (localFile && localFile.changelist === change.cl) continue;
+    if (await leftPartway(change.path)) continue;
     await guard.protect(change.path, "modified", localFile);
   }
   for (const change of diff.added) {
+    if (await leftPartway(change.path)) continue;
     // A file renamed in place above is the tracked file under its new name.
     const old = renamedFrom.get(change.path);
     await guard.protect(
@@ -697,9 +705,8 @@ async function pullOnce(
       timer.count("selected", selections.length);
       timer.count("sources", sources.length);
       const { status, result } = await pollNative(handle);
-      if (status.error === 0) {
-        await takePullRecord(workspace.localPath, writtenByNative);
-      }
+      // A pass that stopped partway lists only the files it wrote whole.
+      await takePullRecord(workspace.localPath, writtenByNative);
       if (result) Logger.debug(`[pull-selection] ${JSON.stringify(result)}`);
       if (status.error !== 0) {
         if (/different hashing or chunk sizes/.test(status.currentStep)) {
@@ -1286,12 +1293,181 @@ async function pullOnce(
     // The workspace state was not advanced, so as far as it is concerned the
     // local versions are still the current ones. Put them back over whatever
     // the partial pull wrote.
+    const guarded = new Set(guard.files.map((f) => f.relativePath));
     const restore = await guard.restoreAll();
+    if (singlePass) {
+      await recordPartialPull(
+        workspace,
+        stateBackend,
+        selections,
+        writtenByNative,
+        guarded,
+        renamedFrom,
+        localModes,
+        workspaceState,
+        targetBranch !== workspace.domainBranchName ? targetBranch : undefined,
+        restore.failed.length === 0,
+      ).catch((e) =>
+        Logger.warn(`Could not record the files the failed pull wrote: ${e}`),
+      );
+    }
     throw new Error(describeFailedPull("Pull failed: " + lastStep, restore));
   }
 
   // Should not reach here: errored throws above, and !errored returns above
   return { cleanMerges: [], conflictMerges: [], localChangesSetAside: [] };
+}
+
+/**
+ * After a single pass that stopped partway (a file open in another program,
+ * say), with local edits already put back: records each file it wrote whole
+ * at its incoming changelist, as if that file had been pulled on its own, so
+ * it does not look like a local edit. The workspace changelist stays where it
+ * was, and the next pull brings in the rest.
+ *
+ * A selected file the pass changed without finishing (not in the record, and
+ * no longer matching its entry) had no local edits, or the guard would have
+ * kept it; it goes back to the version its entry names. Only once nothing is
+ * left that could pass for a local edit is the interrupted-pull record
+ * cleared, so submits are allowed again. Otherwise it stays, and submits wait
+ * for a pull that completes.
+ */
+async function recordPartialPull(
+  workspace: Workspace,
+  stateBackend: Parameters<typeof updateWorkspaceState>[2],
+  selections: { path: string; cl: number; fileId: string }[],
+  written: Map<string, WrittenFile>,
+  guarded: Set<string>,
+  renamedFrom: Map<string, string>,
+  localModes: Map<string, number>,
+  workspaceState: Awaited<ReturnType<typeof getWorkspaceState>>,
+  fromBranch: string | undefined,
+  restoredAll: boolean,
+): Promise<void> {
+  const upsert: Record<string, WorkspaceStateFile> = {};
+  const deleted: string[] = [];
+  const partial: NonNullable<InterruptedPull["partial"]> = [];
+  let settled = restoredAll;
+  for (const change of selections) {
+    if (guarded.has(change.path)) continue; // the local version is back
+    const fullPath = resolveInWorkspace(workspace.localPath, change.path);
+    const old = renamedFrom.get(change.path);
+    const before =
+      workspaceState.files[change.path] ??
+      (old !== undefined ? workspaceState.files[old] : undefined);
+    const recorded = written.get(change.path);
+    if (recorded?.md5) {
+      const mode = recorded.mode ?? before?.mode;
+      upsert[change.path] = {
+        fileId: change.fileId,
+        changelist: change.cl,
+        md5: recorded.md5,
+        size: recorded.size,
+        mtime: recorded.mtimeMs,
+        ...(mode !== undefined && { mode }),
+        ...(fromBranch && { branch: fromBranch }),
+      };
+      if (old !== undefined) deleted.push(old);
+      // A local mode change the incoming version did not touch goes back on
+      // top, as after a completed pull; it stays pending.
+      const localMode = localModes.get(change.path);
+      if (
+        localMode !== undefined &&
+        recorded.mode !== undefined &&
+        (recorded.mode & 0o777) === before?.mode
+      ) {
+        await fs.chmod(fullPath, localMode).catch(() => undefined);
+      }
+      continue;
+    }
+    if (!existsSync(fullPath)) continue; // never written
+    if (before && !(await hasLocalChanges(fullPath, before))) {
+      continue; // untouched
+    }
+    try {
+      if (before) {
+        const result = await readFileFromChangelist({
+          workspace,
+          filePath: old ?? change.path,
+          changelistNumber: before.changelist,
+        });
+        await fs.copyFile(result.cachePath, fullPath);
+        const restored = await fs.stat(fullPath);
+        upsert[old ?? change.path] = {
+          ...before,
+          md5: "",
+          size: restored.size,
+          mtime: restored.mtimeMs,
+        };
+      } else {
+        // Not there before the pull (an untracked file would have been kept
+        // by the guard): only the pull wrote it.
+        await fs.rm(fullPath, { force: true });
+      }
+    } catch (err) {
+      Logger.warn(
+        `Pull: could not undo the partial write of ${change.path}: ${err}`,
+      );
+      settled = false;
+      // Remembered as the pull left it, so the next pull does not take it
+      // for a local edit and merge with it.
+      const stat = await fs.stat(fullPath).catch(() => null);
+      if (stat) {
+        partial.push({
+          path: change.path,
+          size: stat.size,
+          mtime: stat.mtimeMs,
+        });
+      }
+    }
+  }
+  if (Object.keys(upsert).length > 0) {
+    Logger.info(
+      `Pull: recorded ${Object.keys(upsert).length} file(s) the failed pull finished writing`,
+    );
+  }
+  let interruptedPull: InterruptedPull | null | undefined;
+  if (settled) {
+    interruptedPull = null;
+  } else if (partial.length > 0) {
+    const record = (await getWorkspaceState(workspace.localPath, stateBackend))
+      .interruptedPull;
+    if (record) interruptedPull = { ...record, partial };
+  }
+  if (
+    Object.keys(upsert).length === 0 &&
+    deleted.length === 0 &&
+    interruptedPull === undefined
+  ) {
+    return;
+  }
+  await updateWorkspaceState(
+    workspace,
+    {
+      files: { delete: deleted, upsert },
+      ...(interruptedPull !== undefined && { meta: { interruptedPull } }),
+    },
+    stateBackend,
+  );
+}
+
+/**
+ * Whether a file is still as a failed pull left it partway written (see
+ * InterruptedPull.partial): it holds no local edits to keep.
+ */
+async function leftByFailedPull(
+  fullPath: string,
+  partial: InterruptedPull["partial"],
+  relativePath: string,
+): Promise<boolean> {
+  const left = Array.isArray(partial)
+    ? partial.find((p) => p.path === relativePath)
+    : undefined;
+  if (!left) return false;
+  const stat = await fs.stat(fullPath).catch(() => null);
+  return (
+    stat !== null && stat.size === left.size && stat.mtimeMs === left.mtime
+  );
 }
 
 /**

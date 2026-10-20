@@ -2,6 +2,10 @@
 
 #include <longtail.h>
 
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+
 /**
  * A storage API that forwards every call to `inner` (which it takes ownership
  * of) and remembers, for each file opened for writing, its size and mtime the
@@ -30,15 +34,25 @@ struct Longtail_StorageAPI* CreateTrackingStorageAPI(
  * "-" when none were applied), and the MD5 of the content as 32 lowercase hex
  * digits (or "-" when unknown), separated by tabs. Readers must accept lines
  * without the last column (addons before it). Returns 0 or an errno.
+ *
+ * With `complete_sizes` (relative path to the size the file should end up),
+ * only files known to be written whole are listed: a hash (so the writes
+ * covered the file in order) and the expected size. A pass that failed
+ * partway uses it, since a file it was writing when it stopped can be cut
+ * short.
  */
 int WriteTrackedFiles(
     struct Longtail_StorageAPI* tracking_api,
     const char* root,
-    const char* out_path);
+    const char* out_path,
+    const std::unordered_map<std::string, uint64_t>* complete_sizes = nullptr);
 
 /**
  * WriteTrackedFiles to the workspace's ".checkpoint/pull-written.tsv", where
  * the daemon reads it after each native pull pass. One VCS operation runs in a
  * workspace at a time, so a fixed name is enough.
  */
-int WritePullRecord(struct Longtail_StorageAPI* tracking_api, const char* root);
+int WritePullRecord(
+    struct Longtail_StorageAPI* tracking_api,
+    const char* root,
+    const std::unordered_map<std::string, uint64_t>* complete_sizes = nullptr);

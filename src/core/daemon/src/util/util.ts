@@ -165,7 +165,9 @@ export interface WorkspaceState {
    * partway (a crash, a reboot), and the local edits it backed up are put
    * back from `backupRoot` (see recoverInterruptedPull). Submits are refused
    * until a pull completes, since the files it wrote before dying look like
-   * local edits against the old baselines.
+   * local edits against the old baselines. A pull that fails without dying
+   * records what it wrote and clears this itself when it can (see
+   * recordPartialPull in pull.ts).
    */
   interruptedPull?: InterruptedPull;
   teamSync?: WorkspaceTeamSyncState;
@@ -181,6 +183,12 @@ export interface InterruptedPull {
   startedAt: string;
   /** Set once the backups have been put back. */
   restoredAt?: string;
+  /**
+   * Files the pull stopped writing partway and could not put back, as they
+   * were left. They hold no local edits, so the next pull overwrites them
+   * without keeping them, unless they have changed since.
+   */
+  partial?: { path: string; size: number; mtime: number }[];
 }
 
 export interface WorkspaceConfig {

@@ -162,7 +162,7 @@ int PullSelectionSync(
   apis.job_api = Longtail_CreateBikeshedJobAPI(Longtail_GetCPUCount(), 0);
   apis.compression_registry = Longtail_CreateFullCompressionRegistry();
   // Remembers each file's size and mtime as it is written (see
-  // tracking-storage.h); written out for the daemon once the pass succeeds.
+  // tracking-storage.h); written out for the daemon once the pass ends.
   apis.file_storage_api = CreateTrackingStorageAPI(Longtail_CreateFSStorageAPI());
   if (StorageType && strcmp(StorageType, "gateway") == 0) {
     apis.remote_storage_api = CreateGatewayStorageAPI(GatewayUrl, JWT, handle, JWTExpirationMs);
@@ -442,7 +442,18 @@ int PullSelectionSync(
       apis.block_store, apis.file_storage_api, hash_api, apis.job_api, progress, 0, 0,
       store_index.p, local.p, target.p, diff.p, LocalRootPath, 1);
   SAFE_DISPOSE_API(progress);
-  if (err) return Fail(handle, err, "Failed to update version");
+  if (err) {
+    // Stopped partway (a file open in another program, say). The files it
+    // did write whole are listed, so the daemon can record them as pulled
+    // instead of leaving them to look like local edits.
+    std::unordered_map<std::string, uint64_t> complete_sizes;
+    complete_sizes.reserve(asset_total);
+    for (uint32_t a = 0; a < asset_total; ++a) {
+      complete_sizes.emplace(asset_paths[a], asset_sizes[a]);
+    }
+    WritePullRecord(apis.file_storage_api, LocalRootPath, &complete_sizes);
+    return Fail(handle, err, "Failed to update version");
+  }
 
   // Best effort: without the record the daemon stats the files itself.
   WritePullRecord(apis.file_storage_api, LocalRootPath);

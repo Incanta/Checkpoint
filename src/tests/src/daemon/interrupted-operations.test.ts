@@ -297,6 +297,175 @@ describe("interrupted pulls and submits", { timeout: 120_000 }, () => {
     );
   });
 
+  /** Alice changes a.txt, b.txt, and level.umap, which Bob had pulled. */
+  async function setUpPartial() {
+    const { alice, bob } = scene!;
+    await put(alice, "a.txt", "a1\n");
+    await put(alice, "b.txt", "b1\n");
+    await put(alice, "level.umap", "level v1\n");
+    await stageAndSubmit(alice, ["a.txt", "b.txt", "level.umap"]);
+    await syncLatest(bob);
+
+    await put(alice, "a.txt", "a2\n");
+    await put(alice, "b.txt", "b2\n");
+    await put(alice, "level.umap", "level v2\n");
+    await stageAndSubmit(alice, ["a.txt", "b.txt", "level.umap"]);
+  }
+
+  describe("a pull that stops partway on its own", () => {
+    it("records the files it wrote, so submits still work while one is open elsewhere", async () => {
+      const { bob } = scene!;
+      await setUpPartial();
+      await put(bob, "d.txt", "bob's new file\n");
+
+      overrides.locked = ["level.umap"];
+      await expect(syncLatest(bob)).rejects.toThrow(/level\.umap/);
+
+      // As if a.txt and b.txt had each been pulled on their own.
+      expect(await read(bob, "a.txt")).toBe("a2\n");
+      expect(await read(bob, "b.txt")).toBe("b2\n");
+      expect(await read(bob, "level.umap")).toBe("level v1\n");
+      const after = await state(bob);
+      expect(after.interruptedPull).toBeUndefined();
+      expect(after.files["a.txt"]?.changelist).toBe(
+        after.files["level.umap"]!.changelist + 1,
+      );
+      expect(await pendingChanges(bob)).not.toHaveProperty("a.txt");
+      expect(await pendingChanges(bob)).not.toHaveProperty("b.txt");
+
+      await stageAndSubmit(bob, ["d.txt"]);
+      expect(
+        await contentAtHead(testDb.client, scene!.repoId, "main", "d.txt"),
+      ).toBe("bob's new file\n");
+
+      // An edit on top of a file the partial pull brought in is based on the
+      // version it brought in.
+      await put(bob, "a.txt", "a2, by bob\n");
+      await stageAndSubmit(bob, ["a.txt"]);
+      expect(
+        await contentAtHead(testDb.client, scene!.repoId, "main", "a.txt"),
+      ).toBe("a2, by bob\n");
+
+      delete overrides.locked;
+      await syncLatest(bob);
+      expect(await read(bob, "level.umap")).toBe("level v2\n");
+      expect(await read(bob, "a.txt")).toBe("a2, by bob\n");
+      expect(await pendingChanges(bob)).toEqual({});
+    });
+
+    it("keeps local edits it set aside, and records only the files without them", async () => {
+      const { bob } = scene!;
+      await setUpPartial();
+      await put(bob, "b.txt", "b1, by bob\n");
+
+      overrides.locked = ["level.umap"];
+      await expect(syncLatest(bob)).rejects.toThrow(/level\.umap/);
+
+      expect(await read(bob, "a.txt")).toBe("a2\n");
+      expect(await read(bob, "b.txt")).toBe("b1, by bob\n");
+      expect((await state(bob)).interruptedPull).toBeUndefined();
+      expect(Object.keys(await pendingChanges(bob))).toContain("b.txt");
+      expect(await pendingChanges(bob)).not.toHaveProperty("a.txt");
+
+      delete overrides.locked;
+      await syncLatest(bob);
+      expect(await read(bob, "level.umap")).toBe("level v2\n");
+      expect(await survives(bob, "b.txt", "b1, by bob")).toBe(true);
+    });
+
+    it("puts back a file it stopped writing partway", async () => {
+      const { bob } = scene!;
+      await setUpPartial();
+
+      overrides.cutShort = "a.txt";
+      await expect(syncLatest(bob)).rejects.toThrow(/a\.txt/);
+
+      expect(await read(bob, "a.txt")).toBe("a1\n");
+      expect(await read(bob, "b.txt")).toBe("b2\n");
+      expect((await state(bob)).interruptedPull).toBeUndefined();
+      expect(await pendingChanges(bob)).toEqual({});
+
+      delete overrides.cutShort;
+      await syncLatest(bob);
+      expect(await read(bob, "a.txt")).toBe("a2\n");
+      expect(await pendingChanges(bob)).toEqual({});
+    });
+
+    it("removes a new file it stopped writing partway", async () => {
+      const { alice, bob } = scene!;
+      await setUpPartial();
+      await put(alice, "new.txt", "brand new\n");
+      await stageAndSubmit(alice, ["new.txt"]);
+
+      overrides.cutShort = "new.txt";
+      await expect(syncLatest(bob)).rejects.toThrow(/new\.txt/);
+
+      await expect(read(bob, "new.txt")).rejects.toThrow();
+      expect((await state(bob)).interruptedPull).toBeUndefined();
+      expect(await pendingChanges(bob)).toEqual({});
+
+      delete overrides.cutShort;
+      await syncLatest(bob);
+      expect(await read(bob, "new.txt")).toBe("brand new\n");
+    });
+
+    it("puts back what an addon without partial records wrote", async () => {
+      const { bob } = scene!;
+      await setUpPartial();
+
+      overrides.locked = ["level.umap"];
+      overrides.noRecordOnFailure = true;
+      await expect(syncLatest(bob)).rejects.toThrow(/level\.umap/);
+
+      // Nothing vouches for what it wrote, so the old versions go back.
+      expect(await read(bob, "a.txt")).toBe("a1\n");
+      expect(await read(bob, "b.txt")).toBe("b1\n");
+      expect((await state(bob)).interruptedPull).toBeUndefined();
+      expect(await pendingChanges(bob)).toEqual({});
+      await put(bob, "d.txt", "bob's new file\n");
+      await stageAndSubmit(bob, ["d.txt"]);
+    });
+
+    it("still refuses submits when a file it stopped writing cannot be put back", async () => {
+      const { bob } = scene!;
+      await setUpPartial();
+      await put(bob, "d.txt", "bob's new file\n");
+
+      overrides.cutShort = "a.txt";
+      const copyFile = fsp.copyFile.bind(fsp);
+      vi.spyOn(fsp, "copyFile").mockImplementation(async (src, dest, mode) => {
+        if (
+          path.basename(String(dest)) === "a.txt" &&
+          !String(dest).includes("pull-backups")
+        ) {
+          throw Object.assign(new Error("EBUSY: resource busy or locked"), {
+            code: "EBUSY",
+          });
+        }
+        return copyFile(src, dest, mode);
+      });
+      await expect(syncLatest(bob)).rejects.toThrow(/a\.txt/);
+      vi.restoreAllMocks();
+
+      expect((await state(bob)).interruptedPull?.restoredAt).toBeDefined();
+      // Remembered as the pull left it, so the next pull overwrites it
+      // instead of merging with it as if it were an edit.
+      expect((await state(bob)).interruptedPull?.partial).toEqual([
+        expect.objectContaining({ path: "a.txt" }),
+      ]);
+      // b.txt was written whole and is recorded either way.
+      expect(await pendingChanges(bob)).not.toHaveProperty("b.txt");
+      await expect(stageAndSubmit(bob, ["d.txt"])).rejects.toThrow(
+        /did not finish/,
+      );
+
+      delete overrides.cutShort;
+      await syncLatest(bob);
+      expect(await read(bob, "a.txt")).toBe("a2\n");
+      await stageAndSubmit(bob, ["d.txt"]);
+    });
+  });
+
   it("settles a submit the server recorded but the daemon never did", async () => {
     const { alice, bob } = scene!;
     await put(alice, "b.txt", "b1\n");

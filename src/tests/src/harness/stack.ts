@@ -112,6 +112,21 @@ export interface StackOverrides {
    * files itself when it records the pull.
    */
   omitWriteHashes?: boolean;
+  /**
+   * A path the fake native layer stops partway through: half its bytes land,
+   * it is left out of the record, and the pass fails after the other files.
+   */
+  cutShort?: string;
+  /**
+   * Paths the fake native layer cannot open for writing, as when another
+   * program (an editor with the level loaded) holds them.
+   */
+  locked?: string[];
+  /**
+   * When set, a failed selection pass writes no record, as addons before
+   * partial records did.
+   */
+  noRecordOnFailure?: boolean;
 }
 
 export const overrides: StackOverrides = {};
@@ -131,6 +146,9 @@ export function resetStack(): void {
   delete overrides.duringPull;
   delete overrides.nativeFilter;
   delete overrides.omitWriteHashes;
+  delete overrides.cutShort;
+  delete overrides.locked;
+  delete overrides.noRecordOnFailure;
 }
 
 const normalize = (p: string) => p.replace(/\\/g, "/").replace(/^\/+/, "");
@@ -265,6 +283,8 @@ const errnoOf = (e: unknown): number =>
 async function writeAll(
   root: string,
   files: Iterable<[string, Buffer]>,
+  /** A selection pass lists what it wrote whole even when it fails. */
+  recordOnFailure = false,
 ): Promise<{ code: number; step: string } | null> {
   let failure: { code: number; step: string } | null = null;
   // What the real addon reports it wrote (tracking-storage.h): each file's
@@ -272,7 +292,20 @@ async function writeAll(
   // written to the workspace once the pass succeeds.
   const record: string[] = [];
   for (const [rel, bytes] of files) {
+    if (overrides.cutShort === normalize(rel)) {
+      // Stopped partway through this file: part of it is on disk, and it is
+      // not in the record.
+      await writeInto(root, rel, bytes.subarray(0, bytes.length >> 1));
+      failure ??= { code: 5, step: `Could not finish writing ${rel}` };
+      continue;
+    }
     try {
+      if (overrides.locked?.includes(normalize(rel))) {
+        throw Object.assign(
+          new Error(`EBUSY: resource busy or locked, open '${rel}'`),
+          { code: "EBUSY" },
+        );
+      }
       await writeInto(root, rel, bytes);
       const st = await stat(path.join(root, rel), { bigint: true });
       const ns = st.mtimeNs;
@@ -289,11 +322,15 @@ async function writeAll(
       };
     }
   }
-  if (!failure) {
+  if (!failure || recordOnFailure) {
     await mkdir(path.join(root, ".checkpoint"), { recursive: true });
     await writeFile(
       path.join(root, ".checkpoint", "pull-written.tsv"),
-      record.map((line) => `${line}\n`).join(""),
+      record
+        // After a failure, only files with a hash (written whole) are listed.
+        .filter((line) => !failure || !line.endsWith("\t-"))
+        .map((line) => `${line}\n`)
+        .join(""),
     );
   }
   return failure;
@@ -397,7 +434,11 @@ export const fakeAddon = {
           if (!bytes) return failed(2, `${rel} is not in ${name}`);
           files.push([rel, bytes]);
         }
-        const failure = await writeAll(options.localRootPath, files);
+        const failure = await writeAll(
+          options.localRootPath,
+          files,
+          !overrides.noRecordOnFailure,
+        );
         if (failure) return failed(failure.code, failure.step);
         if (overrides.duringPull) await overrides.duringPull();
         return ok({

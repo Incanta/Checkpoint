@@ -282,7 +282,8 @@ struct Longtail_StorageAPI* CreateTrackingStorageAPI(struct Longtail_StorageAPI*
 int WriteTrackedFiles(
     struct Longtail_StorageAPI* tracking_api,
     const char* root,
-    const char* out_path) {
+    const char* out_path,
+    const std::unordered_map<std::string, uint64_t>* complete_sizes) {
   if (!tracking_api || !root || !out_path) {
     return EINVAL;
   }
@@ -311,6 +312,12 @@ int WriteTrackedFiles(
       continue;
     }
     rel = rel.substr(prefix.size());
+    if (complete_sizes) {
+      auto expected = complete_sizes->find(rel);
+      if (!w.has_md5 || expected == complete_sizes->end() || expected->second != w.size) {
+        continue;
+      }
+    }
     char perms[16] = "-";
     if (w.has_permissions) {
       std::snprintf(perms, sizeof(perms), "%o", static_cast<unsigned>(w.permissions));
@@ -325,10 +332,13 @@ int WriteTrackedFiles(
   return std::fclose(out) == 0 ? 0 : EIO;
 }
 
-int WritePullRecord(struct Longtail_StorageAPI* tracking_api, const char* root) {
+int WritePullRecord(
+    struct Longtail_StorageAPI* tracking_api,
+    const char* root,
+    const std::unordered_map<std::string, uint64_t>* complete_sizes) {
   if (!root) {
     return EINVAL;
   }
   const std::string out = std::string(root) + "/.checkpoint/pull-written.tsv";
-  return WriteTrackedFiles(tracking_api, root, out.c_str());
+  return WriteTrackedFiles(tracking_api, root, out.c_str(), complete_sizes);
 }
