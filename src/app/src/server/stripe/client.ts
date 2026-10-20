@@ -21,7 +21,16 @@ export function isStripeEnabled(): boolean {
   }
 }
 
-export function getStripeClient(): Stripe {
+/**
+ * A Stripe config value, with a secret reference ("secret|<name>") resolved
+ * through the secrets provider.
+ */
+async function stripeSecret(key: string): Promise<string> {
+  const value = config.get<string>(key);
+  return value ? await config.processSecrets<string>(value) : "";
+}
+
+export async function getStripeClient(): Promise<Stripe> {
   const cached = globalForStripe[STRIPE_CLIENT_KEY];
   if (cached) return cached;
 
@@ -29,7 +38,7 @@ export function getStripeClient(): Stripe {
     throw new Error("Stripe is not enabled");
   }
 
-  const secretKey = config.get<string>("stripe.secret-key");
+  const secretKey = await stripeSecret("stripe.secret-key");
   if (!secretKey) {
     throw new Error("Stripe secret key is not configured");
   }
@@ -51,12 +60,14 @@ export function getStripeClient(): Stripe {
   return client;
 }
 
-export function getStripePublishableKey(): string {
-  return config.get<string>("stripe.publishable-key") || "";
+// Publishable keys are public (the browser's Stripe.js uses them), but an
+// operator may keep all the Stripe keys in the secrets provider together.
+export async function getStripePublishableKey(): Promise<string> {
+  return stripeSecret("stripe.publishable-key");
 }
 
-export function getStripeWebhookSecret(): string {
-  return config.get<string>("stripe.webhook-secret") || "";
+export async function getStripeWebhookSecret(): Promise<string> {
+  return stripeSecret("stripe.webhook-secret");
 }
 
 export function getStripeEnvironment(): string {

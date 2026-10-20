@@ -54,8 +54,41 @@ export const INDEX_KEY_ENV = "CHECKPOINT_STORAGE_INDEX_KEY";
 function indexKey(): string {
   const fromEnv = process.env[INDEX_KEY_ENV];
   if (fromEnv) return fromEnv;
-  const configured = config.get<string | undefined>("storage.index.signing-key");
+  let configured: string | undefined;
+  if (resolvedIndexKey) {
+    configured = resolvedIndexKey.value;
+  } else {
+    configured = config.get<string | undefined>("storage.index.signing-key");
+    if (configured?.includes("secret|")) {
+      // Never MAC with the reference text itself.
+      throw new Error(
+        "storage.index.signing-key is a secret reference that has not been resolved (call loadStorageIndexKey() at startup)",
+      );
+    }
+  }
   return configured || storageSigningKey();
+}
+
+// storage.index.signing-key may be a secret reference ("secret|<name>").
+// Segment names are MAC'd synchronously, so the reference is resolved once,
+// by loadStorageIndexKey() at startup, and the value kept here.
+let resolvedIndexKey: { value: string | undefined } | null = null;
+
+/** Resolves storage.index.signing-key through the secrets provider. */
+export async function loadStorageIndexKey(): Promise<void> {
+  const configured = config.get<string | undefined>(
+    "storage.index.signing-key",
+  );
+  resolvedIndexKey = {
+    value: configured?.includes("secret|")
+      ? await config.processSecrets<string>(configured)
+      : configured,
+  };
+}
+
+/** Forgets the key loadStorageIndexKey() resolved (for tests). */
+export function forgetLoadedStorageIndexKey(): void {
+  resolvedIndexKey = null;
 }
 
 function sha256(buffer: Buffer): string {
@@ -76,7 +109,11 @@ export function indexObjectName(repoId: string, buffer: Buffer): string {
 }
 
 /** Whether `buffer` is genuinely the object this server would name `name`. */
-export function verifyIndexObject(repoId: string, name: string, buffer: Buffer): boolean {
+export function verifyIndexObject(
+  repoId: string,
+  name: string,
+  buffer: Buffer,
+): boolean {
   const match = /^([0-9a-f]{64})-([0-9a-f]{16})\.lsi$/.exec(name);
   if (!match) return false;
   return match[1] === sha256(buffer) && match[2] === mac(repoId, match[1]!);
@@ -145,14 +182,18 @@ class RepoIndex {
         this.known.add(`${day}/${name}`);
         if (!buffer) return;
         if (!verifyIndexObject(this.repoId, name, buffer)) {
-          Logger.warn(`[index] ignoring segment that does not verify: ${prefix}/${name}`);
+          Logger.warn(
+            `[index] ignoring segment that does not verify: ${prefix}/${name}`,
+          );
           return;
         }
         try {
           this.add(buffer);
           this.segmentsSinceBase++;
         } catch (e) {
-          Logger.warn(`[index] ignoring unreadable segment ${prefix}/${name}: ${(e as Error).message}`);
+          Logger.warn(
+            `[index] ignoring unreadable segment ${prefix}/${name}: ${(e as Error).message}`,
+          );
         }
       });
     }
@@ -162,18 +203,24 @@ class RepoIndex {
   public async load(): Promise<void> {
     const started = Date.now();
     let watermark: string | null = null;
-    const baseInfo = await this.backend.getBuffer(`${this.basePath}/index/base.json`);
+    const baseInfo = await this.backend.getBuffer(
+      `${this.basePath}/index/base.json`,
+    );
     if (baseInfo) {
       try {
         const info = JSON.parse(baseInfo.toString("utf8")) as BaseInfo;
-        const base = await this.backend.getBuffer(`${this.basePath}/index/base/${info.base}`);
+        const base = await this.backend.getBuffer(
+          `${this.basePath}/index/base/${info.base}`,
+        );
         if (base && verifyIndexObject(this.repoId, info.base, base)) {
           this.add(base);
           watermark = info.watermarkDay;
           this.baseCreatedAt = info.createdAt;
         }
       } catch (e) {
-        Logger.warn(`[index] unreadable base.json for ${this.basePath}: ${(e as Error).message}`);
+        Logger.warn(
+          `[index] unreadable base.json for ${this.basePath}: ${(e as Error).message}`,
+        );
       }
     }
     if (watermark === null) {
@@ -190,7 +237,13 @@ class RepoIndex {
         .map((k) => k.split("/")[0]!)
         .filter((d) => /^\d{8}$/.test(d)),
     );
-    const from = watermark ? dayOf(Date.parse(`${watermark.slice(0, 4)}-${watermark.slice(4, 6)}-${watermark.slice(6)}T00:00:00Z`) - DAY_MS) : "";
+    const from = watermark
+      ? dayOf(
+          Date.parse(
+            `${watermark.slice(0, 4)}-${watermark.slice(4, 6)}-${watermark.slice(6)}T00:00:00Z`,
+          ) - DAY_MS,
+        )
+      : "";
     for (const day of [...days].sort()) {
       if (day >= from) await this.addDay(day);
     }
@@ -231,7 +284,10 @@ const BYTES_PER_CHUNK = 64;
 const repos = new Map<string, RepoIndex>();
 
 function maxCacheBytes(): number {
-  return config.get<number | undefined>("storage.index.cache-bytes") ?? 1024 * 1024 * 1024;
+  return (
+    config.get<number | undefined>("storage.index.cache-bytes") ??
+    1024 * 1024 * 1024
+  );
 }
 
 function evict(): void {
@@ -242,11 +298,17 @@ function evict(): void {
     if (total <= maxCacheBytes() || repos.size <= 1) break;
     total -= r.chunks * BYTES_PER_CHUNK;
     repos.delete(key);
-    Logger.info(`[index-cache] ${JSON.stringify({ op: "evict", key, chunks: r.chunks })}`);
+    Logger.info(
+      `[index-cache] ${JSON.stringify({ op: "evict", key, chunks: r.chunks })}`,
+    );
   }
 }
 
-function repoIndex(repoId: string, basePath: string, backend: StorageBackend): RepoIndex {
+function repoIndex(
+  repoId: string,
+  basePath: string,
+  backend: StorageBackend,
+): RepoIndex {
   const key = `${repoId}:${basePath}`;
   let r = repos.get(key);
   if (r) {
@@ -313,7 +375,9 @@ async function compactInBackground(
       { acquireTimeoutMs: 1 },
     );
   } catch (e) {
-    Logger.info(`[index-compact] ${basePath}: not run now (${(e as Error).message})`);
+    Logger.info(
+      `[index-compact] ${basePath}: not run now (${(e as Error).message})`,
+    );
   }
 }
 
@@ -361,7 +425,9 @@ export async function existingContent(
   const timeout = options.coldLoadTimeoutMs ?? 60_000;
   const ready = await Promise.race([
     index.loaded.then(() => true),
-    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeout)),
+    new Promise<boolean>((resolve) =>
+      setTimeout(() => resolve(false), timeout),
+    ),
   ]);
   if (!ready) {
     // An empty answer only means the client uploads its whole change.
@@ -369,7 +435,10 @@ export async function existingContent(
   }
   await index.catchUp();
   evict();
-  return { storeIndex: index.query(chunkHashes, minBlockUsagePercent), complete: true };
+  return {
+    storeIndex: index.query(chunkHashes, minBlockUsagePercent),
+    complete: true,
+  };
 }
 
 /**
@@ -421,6 +490,8 @@ export function needsCompaction(repoId: string, basePath: string): boolean {
   const index = repos.get(`${repoId}:${basePath}`);
   if (!index?.loaded) return false;
   if (index.segmentsSinceBase > 500) return true;
-  const age = index.baseCreatedAt ? Date.now() - Date.parse(index.baseCreatedAt) : Infinity;
+  const age = index.baseCreatedAt
+    ? Date.now() - Date.parse(index.baseCreatedAt)
+    : Infinity;
   return index.segmentsSinceBase > 0 && age > 7 * DAY_MS;
 }

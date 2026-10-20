@@ -5,10 +5,20 @@
  * User.twoFactorEnabled to match what the plugin writes, and the guards on
  * the passkey endpoints.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { createOTP } from "@better-auth/utils/otp";
 import { base32 } from "@better-auth/utils/base32";
 
+import { resetConfig, setConfig, testConfigShim } from "../harness/config";
 import { createTestDb, type TestDb } from "../harness/db";
 import { getMfaStatuses } from "~/server/auth/mfa";
 
@@ -39,12 +49,13 @@ describe("better-auth MFA flows", () => {
   let testDb: TestDb;
   let db: TestDb["client"];
   let auth: Awaited<AuthModule["auth"]>;
+  let actual: AuthModule;
 
   beforeAll(async () => {
     testDb = await createTestDb();
     db = testDb.client;
     globalThis.__checkpointTestDb = db;
-    const actual = await vi.importActual<AuthModule>("~/server/auth/config");
+    actual = await vi.importActual<AuthModule>("~/server/auth/config");
     auth = await actual.auth;
   }, 120_000);
 
@@ -131,6 +142,42 @@ describe("better-auth MFA flows", () => {
     expect(await db.session.count({ where: { userId } })).toBe(
       sessionsBefore + 1,
     );
+  });
+
+  describe("identity provider client secrets", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      resetConfig();
+    });
+
+    it("resolves secret references for the enabled providers only", async () => {
+      setConfig("auth.okta.enabled", true);
+      setConfig("auth.okta.client.secret", "secret|okta_client_secret");
+      setConfig("auth.google.enabled", true);
+      setConfig("auth.google.client.secret", "plain-google-secret");
+      setConfig("auth.keycloak.enabled", false);
+      setConfig("auth.keycloak.client.secret", "secret|keycloak_client_secret");
+      const resolve = vi
+        .spyOn(testConfigShim, "processSecrets")
+        .mockImplementation(async (value: string) =>
+          value === "secret|okta_client_secret" ? "resolved-okta" : value,
+        );
+
+      const secrets = await actual.resolveClientSecrets();
+
+      expect(secrets.okta).toBe("resolved-okta");
+      expect(secrets.google).toBe("plain-google-secret");
+      expect(secrets).not.toHaveProperty("keycloak");
+      expect(resolve).not.toHaveBeenCalledWith("secret|keycloak_client_secret");
+    });
+
+    it("leaves an enabled provider without a secret empty", async () => {
+      setConfig("auth.oidc.enabled", true);
+      setConfig("auth.oidc.client.secret", "");
+      const resolve = vi.spyOn(testConfigShim, "processSecrets");
+      expect((await actual.resolveClientSecrets()).oidc).toBe("");
+      expect(resolve).not.toHaveBeenCalled();
+    });
   });
 
   describe("passkey guards", () => {

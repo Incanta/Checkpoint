@@ -4,6 +4,7 @@ import { routes } from "./routes/index.js";
 import { Logger } from "./logging.js";
 import { startBundleWatcher } from "./bundle-watcher.js";
 import { loadStorageSigningKey } from "./utils/signing-key.js";
+import { loadStorageIndexKey } from "./storage/index-segments.js";
 import { SERVER_VERSION } from "@checkpointvcs/common";
 
 // beforeExit does NOT fire when process.exit() is called explicitly.
@@ -31,6 +32,7 @@ process.on("unhandledRejection", (reason) => {
 // before the port opens so a misconfigured server is never reachable.
 try {
   await loadStorageSigningKey();
+  await loadStorageIndexKey();
 } catch (err) {
   Logger.fatal((err as Error).message);
   originalExit.call(process, 1);

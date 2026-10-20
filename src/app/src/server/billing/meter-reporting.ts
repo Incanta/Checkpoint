@@ -121,7 +121,7 @@ export async function reportOrgMeters(
     const tier = org.subscriptionTier.toLowerCase() as keyof ServicePrices;
     const prices = seatPrices.cloud[tier];
     const { bucketPriceCents } = getStoragePricingConfig();
-    const stripe = getStripeClient();
+    const stripe = await getStripeClient();
     const minInvoice = getMinimumInvoiceCents();
 
     const userCharges = writeUsers * prices.write + readUsers * prices.read;

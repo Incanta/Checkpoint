@@ -47,7 +47,7 @@ export async function addCredits(
   }
 
   try {
-    const stripe = getStripeClient();
+    const stripe = await getStripeClient();
     // Negative amount = credit on Stripe Customer Balance
     await stripe.customers.createBalanceTransaction(org.stripeCustomerId, {
       amount: -amountCents,
@@ -110,7 +110,7 @@ export async function removeCredits(
   }
 
   try {
-    const stripe = getStripeClient();
+    const stripe = await getStripeClient();
     // Positive amount = debit on Stripe Customer Balance (reduces credit)
     await stripe.customers.createBalanceTransaction(org.stripeCustomerId, {
       amount: amountCents,
@@ -150,7 +150,7 @@ export async function syncCreditBalance(
   }
 
   try {
-    const stripe = getStripeClient();
+    const stripe = await getStripeClient();
     const customer = await stripe.customers.retrieve(stripeCustomerId);
 
     if (customer.deleted) {

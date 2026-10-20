@@ -132,7 +132,7 @@ async function checkCardExpiry(db: PrismaClient): Promise<void> {
   if (!isStripeEnabled()) return;
 
   const notifyDays = getCardExpiryNotifyDays();
-  const stripe = getStripeClient();
+  const stripe = await getStripeClient();
 
   const orgs = await db.org.findMany({
     where: {

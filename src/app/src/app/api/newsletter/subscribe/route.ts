@@ -20,13 +20,10 @@ export async function POST(request: Request) {
 
   const { email, name } = body;
   if (!email || typeof email !== "string") {
-    return NextResponse.json(
-      { error: "Email is required" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "Email is required" }, { status: 400 });
   }
 
-  const apiKey = config.get<string>("newsletter.kit.api-key");
+  const apiKey = await config.getWithSecrets<string>("newsletter.kit.api-key");
   if (!apiKey) {
     Logger.warn("[Newsletter] Kit API key not configured");
     return NextResponse.json(
@@ -59,9 +56,7 @@ export async function POST(request: Request) {
 
     if (!res.ok) {
       const text = await res.text();
-      Logger.warn(
-        `[Newsletter] Kit API returned ${res.status}: ${text}`,
-      );
+      Logger.warn(`[Newsletter] Kit API returned ${res.status}: ${text}`);
       return NextResponse.json(
         { error: "Failed to subscribe" },
         { status: 502 },
@@ -70,9 +65,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
-    Logger.error(
-      `[Newsletter] Failed to call Kit API: ${String(err)}`,
-    );
+    Logger.error(`[Newsletter] Failed to call Kit API: ${String(err)}`);
     return NextResponse.json(
       { error: "Newsletter service unavailable" },
       { status: 502 },

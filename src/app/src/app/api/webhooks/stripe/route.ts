@@ -32,8 +32,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing signature" }, { status: 401 });
   }
 
-  const stripe = getStripeClient();
-  const webhookSecret = getStripeWebhookSecret();
+  const stripe = await getStripeClient();
+  const webhookSecret = await getStripeWebhookSecret();
 
   let event: Stripe.Event;
   try {
@@ -109,7 +109,7 @@ async function applyScheduledTierChange(
   // Update Stripe subscription items to new tier's prices
   if (org.stripeSubscriptionId) {
     try {
-      const stripe = getStripeClient();
+      const stripe = await getStripeClient();
       const sub = await stripe.subscriptions.retrieve(org.stripeSubscriptionId);
       const prices = getStripePriceConfig();
       const tierKey = newTier.toLowerCase() as "basic" | "pro" | "studio";
@@ -225,7 +225,7 @@ async function handleCheckoutCompleted(
   // Sync billing cycle anchor from the Stripe subscription
   if (subscriptionId) {
     try {
-      const stripe = getStripeClient();
+      const stripe = await getStripeClient();
       const sub = await stripe.subscriptions.retrieve(subscriptionId);
       if (sub.billing_cycle_anchor) {
         const anchorDate = new Date(sub.billing_cycle_anchor * 1000);
@@ -321,7 +321,7 @@ async function handleResubscribe(
   // Sync billing cycle anchor from the new Stripe subscription
   if (subscriptionId) {
     try {
-      const stripe = getStripeClient();
+      const stripe = await getStripeClient();
       const sub = await stripe.subscriptions.retrieve(subscriptionId);
       if (sub.billing_cycle_anchor) {
         const anchorDate = new Date(sub.billing_cycle_anchor * 1000);

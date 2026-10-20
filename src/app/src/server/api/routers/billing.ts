@@ -42,13 +42,13 @@ function assertBillingRole(role: string) {
 
 export const billingRouter = createTRPCRouter({
   /** Get checkout settings for the frontend. */
-  getCheckoutSettings: protectedProcedure.query(() => {
+  getCheckoutSettings: protectedProcedure.query(async () => {
     if (!isLicenseManager()) {
       return { enabled: false, publishableKey: "", environment: "sandbox" };
     }
     return {
       enabled: isStripeEnabled(),
-      publishableKey: getStripePublishableKey(),
+      publishableKey: await getStripePublishableKey(),
       environment: getStripeEnvironment(),
     };
   }),
@@ -67,7 +67,7 @@ export const billingRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       assertBillingEnabled();
 
-      const stripe = getStripeClient();
+      const stripe = await getStripeClient();
 
       // Create Stripe Customer upfront (org doesn't exist yet)
       const customer = await stripe.customers.create({
@@ -167,7 +167,7 @@ export const billingRouter = createTRPCRouter({
         });
       }
 
-      const stripe = getStripeClient();
+      const stripe = await getStripeClient();
 
       // Reuse existing Stripe customer or create a new one
       let customerId = org.stripeCustomerId;
@@ -258,7 +258,7 @@ export const billingRouter = createTRPCRouter({
       let currentPeriodEnd: string | null = null;
       if (isStripeEnabled() && org.stripeSubscriptionId) {
         try {
-          const stripe = getStripeClient();
+          const stripe = await getStripeClient();
           const sub = await stripe.subscriptions.retrieve(
             org.stripeSubscriptionId,
           );
@@ -278,7 +278,7 @@ export const billingRouter = createTRPCRouter({
       const minInvoice = getMinimumInvoiceCents();
       if (minInvoice !== null && isStripeEnabled() && org.stripeCustomerId) {
         try {
-          const stripe = getStripeClient();
+          const stripe = await getStripeClient();
           const customer = await stripe.customers.retrieve(
             org.stripeCustomerId,
           );
@@ -449,7 +449,7 @@ export const billingRouter = createTRPCRouter({
         let scheduledAt: Date | null = null;
         if (isStripeEnabled() && org.stripeSubscriptionId) {
           try {
-            const stripe = getStripeClient();
+            const stripe = await getStripeClient();
             const sub = await stripe.subscriptions.retrieve(
               org.stripeSubscriptionId,
             );
@@ -481,7 +481,7 @@ export const billingRouter = createTRPCRouter({
       // Upgrade or trial downgrade → apply immediately
       if (isStripeEnabled() && org.stripeSubscriptionId) {
         try {
-          const stripe = getStripeClient();
+          const stripe = await getStripeClient();
           const sub = await stripe.subscriptions.retrieve(
             org.stripeSubscriptionId,
           );
@@ -647,7 +647,7 @@ export const billingRouter = createTRPCRouter({
       }
 
       try {
-        const stripe = getStripeClient();
+        const stripe = await getStripeClient();
         const session = await stripe.billingPortal.sessions.create({
           customer: org.stripeCustomerId,
           return_url: `${config.get<string>("server.external-url")}/${input.orgId}/settings/billing`,

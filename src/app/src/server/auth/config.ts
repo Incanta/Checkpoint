@@ -45,10 +45,36 @@ export interface IdentityProvider {
   name: string;
 }
 
-function clientConfig(key: string) {
+const IDENTITY_PROVIDER_KEYS = [
+  "okta",
+  "auth0",
+  "microsoft-entra-id",
+  "keycloak",
+  "oidc",
+  "google",
+];
+
+/** Each provider's client secret, by its auth.yaml key. */
+type ClientSecrets = Record<string, string>;
+
+/**
+ * The enabled providers' client secrets, with secret references
+ * ("secret|<name>") resolved through the secrets provider.
+ */
+export async function resolveClientSecrets(): Promise<ClientSecrets> {
+  const secrets: ClientSecrets = {};
+  for (const key of IDENTITY_PROVIDER_KEYS) {
+    if (!config.get<boolean>(`auth.${key}.enabled`)) continue;
+    const secret = config.get<string>(`auth.${key}.client.secret`);
+    secrets[key] = secret ? await config.processSecrets<string>(secret) : "";
+  }
+  return secrets;
+}
+
+function clientConfig(key: string, secrets: ClientSecrets) {
   return {
     clientId: config.get<string>(`auth.${key}.client.id`),
-    clientSecret: config.get<string>(`auth.${key}.client.secret`),
+    clientSecret: secrets[key] ?? "",
   };
 }
 
@@ -57,13 +83,13 @@ function clientConfig(key: string) {
  * (OIDC) configs. Google Workspace is a built-in social provider instead, see
  * buildSocialProviders.
  */
-function buildOAuthProviders(): GenericOAuthConfig[] {
+function buildOAuthProviders(secrets: ClientSecrets): GenericOAuthConfig[] {
   const providers: GenericOAuthConfig[] = [];
 
   if (config.get<boolean>("auth.okta.enabled")) {
     providers.push(
       okta({
-        ...clientConfig("okta"),
+        ...clientConfig("okta", secrets),
         issuer: config.get<string>("auth.okta.issuer"),
       }),
     );
@@ -72,7 +98,7 @@ function buildOAuthProviders(): GenericOAuthConfig[] {
   if (config.get<boolean>("auth.auth0.enabled")) {
     providers.push(
       auth0({
-        ...clientConfig("auth0"),
+        ...clientConfig("auth0", secrets),
         domain: config.get<string>("auth.auth0.issuer"),
       }),
     );
@@ -81,7 +107,7 @@ function buildOAuthProviders(): GenericOAuthConfig[] {
   if (config.get<boolean>("auth.microsoft-entra-id.enabled")) {
     providers.push(
       microsoftEntraId({
-        ...clientConfig("microsoft-entra-id"),
+        ...clientConfig("microsoft-entra-id", secrets),
         tenantId: config.get<string>("auth.microsoft-entra-id.tenant-id"),
       }),
     );
@@ -90,7 +116,7 @@ function buildOAuthProviders(): GenericOAuthConfig[] {
   if (config.get<boolean>("auth.keycloak.enabled")) {
     providers.push(
       keycloak({
-        ...clientConfig("keycloak"),
+        ...clientConfig("keycloak", secrets),
         issuer: config.get<string>("auth.keycloak.issuer"),
       }),
     );
@@ -100,7 +126,7 @@ function buildOAuthProviders(): GenericOAuthConfig[] {
     providers.push({
       providerId: "oidc",
       name: config.get<string>("auth.oidc.name"),
-      ...clientConfig("oidc"),
+      ...clientConfig("oidc", secrets),
       discoveryUrl: config.get<string>("auth.oidc.discovery-url"),
       scopes: config.get<string[]>("auth.oidc.scopes"),
       pkce: config.get<boolean>("auth.oidc.pkce"),
@@ -110,7 +136,7 @@ function buildOAuthProviders(): GenericOAuthConfig[] {
   return providers;
 }
 
-function buildSocialProviders() {
+function buildSocialProviders(secrets: ClientSecrets) {
   if (!config.get<boolean>("auth.google.enabled")) {
     return {};
   }
@@ -118,7 +144,7 @@ function buildSocialProviders() {
   const hostedDomain = config.get<string>("auth.google.hosted-domain");
   return {
     google: {
-      ...clientConfig("google"),
+      ...clientConfig("google", secrets),
       // better-auth checks the returned token's `hd` claim against this, so
       // it is a real restriction and not only an account-picker hint.
       ...(hostedDomain ? { hd: hostedDomain } : {}),
@@ -134,13 +160,16 @@ const PROVIDER_NAMES: Record<string, string> = {
   keycloak: "Keycloak",
 };
 
-/** Sign-in buttons for the enabled identity providers, in auth.yaml order. */
+/**
+ * Sign-in buttons for the enabled identity providers, in auth.yaml order.
+ * Built without the client secrets, which a button does not need.
+ */
 export const enabledIdentityProviders: IdentityProvider[] = [
-  ...buildOAuthProviders().map((p) => ({
+  ...buildOAuthProviders({}).map((p) => ({
     id: p.providerId,
     name: p.name ?? PROVIDER_NAMES[p.providerId] ?? p.providerId,
   })),
-  ...Object.keys(buildSocialProviders()).map((id) => ({
+  ...Object.keys(buildSocialProviders({})).map((id) => ({
     id,
     name: PROVIDER_NAMES[id] ?? id,
   })),
@@ -202,7 +231,8 @@ function serverOrigin(): URL {
 }
 
 async function getAuth() {
-  const oauthProviders = buildOAuthProviders();
+  const clientSecrets = await resolveClientSecrets();
+  const oauthProviders = buildOAuthProviders(clientSecrets);
 
   return betterAuth({
     appName: "Checkpoint",
@@ -215,7 +245,7 @@ async function getAuth() {
     emailAndPassword: {
       enabled: emailPasswordEnabled(),
     },
-    socialProviders: buildSocialProviders(),
+    socialProviders: buildSocialProviders(clientSecrets),
     plugins: [
       // TOTP only gates password sign-in; identity-provider sign-ins skip it.
       twoFactor({ issuer: "Checkpoint" }),

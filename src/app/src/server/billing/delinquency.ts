@@ -160,7 +160,7 @@ export async function resumeSubscription(
   // Reactivate Stripe subscription if it was canceled
   if (isStripeEnabled() && org.stripeSubscriptionId) {
     try {
-      const stripe = getStripeClient();
+      const stripe = await getStripeClient();
       const sub = await stripe.subscriptions.retrieve(org.stripeSubscriptionId);
 
       if (sub.cancel_at_period_end) {
@@ -253,7 +253,7 @@ export async function cancelSubscription(
   // Cancel Stripe subscription at period end
   if (isStripeEnabled() && org.stripeSubscriptionId) {
     try {
-      const stripe = getStripeClient();
+      const stripe = await getStripeClient();
       await stripe.subscriptions.update(org.stripeSubscriptionId, {
         cancel_at_period_end: true,
       });
