@@ -1,6 +1,6 @@
 {
   "name": "@checkpointvcs/longtail-addon",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "Node.js N-API addon for the Longtail C++ wrapper",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
