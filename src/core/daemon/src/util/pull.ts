@@ -42,6 +42,7 @@ import { DaemonConfig } from "../daemon-config.js";
 import { StageTimer } from "./stage-timer.js";
 import { workspacePathKey } from "./volume.js";
 import { alignDirectorySpellings } from "./dir-spelling.js";
+import { markPullRunning, recoverInterruptedPull } from "./interrupted-pull.js";
 import {
   clearPullRecord,
   takePullRecord,
@@ -108,7 +109,71 @@ export interface PullMergeResult {
   longPaths?: string[];
 }
 
+/** How far a pull got, for the cleanup around it (see pull). */
+interface PullProgress {
+  /** Set once the pull has recorded itself as interruptedPull. */
+  guard?: LocalChangeGuard;
+  committed: boolean;
+}
+
+/**
+ * Brings the workspace to `changelistNumber` (the target branch's head when
+ * null). A pull that died partway before (see interrupted-pull.ts) is
+ * recovered first.
+ */
 export async function pull(
+  ...args: Parameters<typeof pullOnce> extends [PullProgress, ...infer A]
+    ? A
+    : never
+): Promise<PullMergeResult> {
+  const [workspace] = args;
+  const stateBackend = (await DaemonConfig.Get()).stateBackend;
+
+  const recovered = await recoverInterruptedPull(workspace, stateBackend);
+  if (recovered && recovered.restore.failed.length > 0) {
+    // Pulling over them now would leave the local versions only in the old
+    // backup folder, with nothing pointing at them.
+    throw new Error(
+      describeFailedPull(
+        `Pull stopped: an earlier pull to changelist ${recovered.changelist} was interrupted, and some of your local changes it had set aside could not be put back yet. Close the programs using them and pull again`,
+        recovered.restore,
+      ),
+    );
+  }
+
+  const progress: PullProgress = { committed: false };
+  try {
+    return await pullOnce(progress, ...args);
+  } catch (err) {
+    const guard = progress.guard;
+    if (guard && !progress.committed && guard.files.length > 0) {
+      // A failure the steps after the native write did not handle
+      // themselves: put the local versions back, as they do.
+      const restore = await guard.restoreAll();
+      const cause = err instanceof Error ? err.message : String(err);
+      throw new Error(describeFailedPull(`Pull failed: ${cause}`, restore), {
+        cause: err,
+      });
+    }
+    throw err;
+  } finally {
+    const guard = progress.guard;
+    if (guard) {
+      markPullRunning(guard.backupRoot, false);
+      if (!progress.committed) {
+        // The record stays, so submits wait for a pull that completes: files
+        // the native pass wrote look like local changes until then. Marked
+        // restored once nothing is left in the journal to put back.
+        await recoverInterruptedPull(workspace, stateBackend).catch((e) =>
+          Logger.warn(`Could not settle the failed pull's record: ${e}`),
+        );
+      }
+    }
+  }
+}
+
+async function pullOnce(
+  progress: PullProgress,
   workspace: Workspace,
   orgId: string,
   changelistNumber: number | null,
@@ -472,6 +537,27 @@ export async function pull(
       `Pull will touch ${guard.files.length} file(s) with local changes; copies kept in ${guard.backupRoot}`,
     );
   }
+
+  // From here the pull writes to the workspace. Recorded before the first
+  // write and cleared with the state update that records what it wrote, so
+  // a pull that dies in between is put right on the next start (see
+  // interrupted-pull.ts).
+  markPullRunning(guard.backupRoot, true);
+  progress.guard = guard;
+  await updateWorkspaceState(
+    workspace,
+    {
+      meta: {
+        interruptedPull: {
+          changelist: changelistNumber,
+          backupRoot: guard.backupRoot,
+          pid: process.pid,
+          startedAt: new Date().toISOString(),
+        },
+      },
+    },
+    stateBackend,
+  );
 
   // Windows paths of 260 characters or more: Checkpoint writes them (through
   // \\?\ paths), but Explorer and many tools cannot open, move, or delete
@@ -1019,8 +1105,18 @@ export async function pull(
       // What the native pass reports it wrote, as each file was finished:
       // a stat taken now would record an edit made since as the pulled
       // version. Addons that report nothing leave the stat as the fallback.
+      // The hash the native pass took of the bytes it wrote is the pulled
+      // version's content, so recording it closes the gap a hash taken now
+      // (stampBaselines, for racily clean files) would leave: a same-size
+      // edit made since, in the same timestamp tick, would be hashed as the
+      // pulled version and never show as a change.
       const posix = process.platform !== "win32";
-      const statResults = await Promise.all(
+      const statResults: {
+        change: (typeof changed)[number];
+        stat: { size: number; mtimeMs: number } | null;
+        mode: number | undefined;
+        md5?: string;
+      }[] = await Promise.all(
         changed.map(async (change) => {
           const recorded = writtenByNative.get(change.path);
           if (recorded) {
@@ -1028,6 +1124,7 @@ export async function pull(
               change,
               stat: { size: recorded.size, mtimeMs: recorded.mtimeMs },
               mode: recorded.mode,
+              md5: recorded.md5,
             };
           }
           const fullPath = path.join(workspace.localPath, change.path);
@@ -1050,7 +1147,7 @@ export async function pull(
         }),
       );
       for (let i = 0; i < statResults.length; i++) {
-        const { change, stat, mode: writtenMode } = statResults[i]!;
+        const { change, stat, mode: writtenMode, md5 } = statResults[i]!;
         // The mode the pulled version has: what the pull applied, or (from
         // an addon that does not say) the one it had before.
         const mode = writtenMode ?? workspaceState.files[change.path]?.mode;
@@ -1069,7 +1166,8 @@ export async function pull(
           newFiles[change.path] = {
             fileId: change.fileId,
             changelist: change.cl,
-            md5: "",
+            // Unknown ("") is hashed by stampBaselines if racily clean.
+            md5: md5 ?? "",
             size: stat.size,
             mtime: stat.mtimeMs,
             ...(mode !== undefined && { mode }),
@@ -1129,10 +1227,13 @@ export async function pull(
             pendingRemovals: [...stillPending],
             ...(pendingDirRenames !== undefined && { pendingDirRenames }),
             ...(pendingModes !== undefined && { pendingModes }),
+            interruptedPull: null,
           },
         },
         stateBackend,
       );
+      progress.committed = true;
+      await guard.finish();
 
       timer.log("pull-timing");
       if (unsafePaths.length > 0) {
@@ -1170,6 +1271,8 @@ export async function pull(
       // it was, so the local versions are still the current ones: put them
       // back, as for a native failure.
       timer.log("pull-timing");
+      // Recorded already: the workspace copies are the current ones.
+      if (progress.committed) throw err;
       const restore = await guard.restoreAll();
       const cause = err instanceof Error ? err.message : String(err);
       throw new Error(describeFailedPull(`Pull failed: ${cause}`, restore), {

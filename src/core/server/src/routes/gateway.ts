@@ -132,6 +132,14 @@ function isStoreIndexKey(key: string): boolean {
   return parts.length === 4 && /^store[.]lsi/i.test(name);
 }
 
+/**
+ * A lock file the addon's gateway storage creates (`<path>.lock`) and deletes
+ * to release. The only object a client may delete.
+ */
+function isClientLockKey(key: string): boolean {
+  return /\.lock$/.test(key);
+}
+
 /** True when the key is spelled the one way a version index may be. */
 function isVersionIndexSpelling(key: string): boolean {
   return key.split("/")[3] === "versions";
@@ -273,6 +281,17 @@ export function routeGateway(): Router {
         res
           .status(403)
           .send("Forbidden: the store index is written by the server");
+        return;
+      }
+      // Content blocks are shared by every changelist that reuses them, so a
+      // client deleting one destroys data for the whole repo, and nothing a
+      // client does needs to: blocks are written in place, never renamed, and
+      // the server's own leases and index files go to the backend directly.
+      // The one client delete left is releasing a lock it took.
+      if (!isClientLockKey(key)) {
+        res
+          .status(403)
+          .send("Forbidden: storage objects cannot be deleted by clients");
         return;
       }
       const backend = await getStorageBackend();

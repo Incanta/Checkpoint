@@ -57,6 +57,10 @@ function toPublicConfig(
   };
 }
 
+function normalizeBaseUrl(url: string): string {
+  return url.trim().replace(/\/+$/, "").toLowerCase();
+}
+
 function trackerErrorToTRPC(err: unknown): TRPCError {
   if (err instanceof TrackerError) {
     return new TRPCError({
@@ -147,12 +151,33 @@ export const issueTrackerRouter = createTRPCRouter({
 
       const existing = await ctx.db.repoIssueTrackerConfig.findUnique({
         where: { repoId: input.repoId },
-        select: { encryptedToken: true },
+        select: { encryptedToken: true, jiraBaseUrl: true },
       });
 
       // A stored token belongs to the previously configured platform; never
       // reuse it after a platform switch.
       const platformChanged = input.platform !== repo.issuesPlatform;
+
+      // Nor after the host it is sent to changes. Otherwise anyone who can
+      // edit this config could point it at a server they run and have the
+      // next connection test hand them the stored credentials.
+      const hostChanged =
+        input.jiraBaseUrl !== undefined &&
+        normalizeBaseUrl(input.jiraBaseUrl) !==
+          normalizeBaseUrl(existing?.jiraBaseUrl ?? "");
+      if (
+        !platformChanged &&
+        hostChanged &&
+        existing?.encryptedToken &&
+        !input.token
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Re-enter the API token when changing the issue tracker's URL",
+        });
+      }
+
       const hasStoredToken = !!existing?.encryptedToken && !platformChanged;
 
       if (isExternalPlatform(input.platform)) {

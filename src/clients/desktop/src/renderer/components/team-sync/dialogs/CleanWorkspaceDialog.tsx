@@ -131,6 +131,10 @@ export default function CleanWorkspaceDialog({
       }
     >
       <div className="max-h-[26rem] overflow-auto p-5">
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Intermediate files are deleted. Untracked files are moved to
+          .checkpoint/clean-backups in the workspace, so they can be recovered.
+        </p>
         {loading ? (
           <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">
             Scanning workspace…

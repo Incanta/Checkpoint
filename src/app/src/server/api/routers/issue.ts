@@ -2,8 +2,8 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { type Prisma, RepoAccess } from "@prisma/client";
-import { getUserAndRepoWithAccess } from "../auth-utils";
+import { type Prisma, type PrismaClient, RepoAccess } from "@prisma/client";
+import { getUserAndRepoWithAccess, usersWithRepoRead } from "../auth-utils";
 import { recordActivity } from "../activity";
 import {
   subscribeToIssue,
@@ -12,6 +12,40 @@ import {
 
 function issueLink(orgName: string, repoName: string, number: number) {
   return `/${orgName}/${repoName}/issues/${number}`;
+}
+
+/** Labels are per repo; one from another repo would carry its name across. */
+async function assertLabelsInRepo(
+  db: PrismaClient,
+  repoId: string,
+  labelIds: string[],
+): Promise<void> {
+  if (labelIds.length === 0) return;
+  const found = await db.issueLabel.count({
+    where: { id: { in: labelIds }, repoId },
+  });
+  if (found !== new Set(labelIds).size) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Label not found" });
+  }
+}
+
+/**
+ * An assignee is subscribed and notified with the issue's title, so they have
+ * to be someone who can already read the repo.
+ */
+async function assertAssigneesCanRead(
+  db: PrismaClient,
+  repoId: string,
+  userIds: string[],
+): Promise<void> {
+  if (userIds.length === 0) return;
+  const allowed = await usersWithRepoRead(db, repoId, userIds);
+  if (userIds.some((id) => !allowed.has(id))) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "An assignee does not have access to this repository",
+    });
+  }
 }
 
 export const issueRouter = createTRPCRouter({
@@ -100,6 +134,7 @@ export const issueRouter = createTRPCRouter({
   countOpen: protectedProcedure
     .input(z.object({ repoId: z.string() }))
     .query(async ({ ctx, input }) => {
+      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
       return ctx.db.issue.count({
         where: { repoId: input.repoId, status: "OPEN" },
       });
@@ -194,6 +229,9 @@ export const issueRouter = createTRPCRouter({
         input.repoId,
         RepoAccess.WRITE,
       );
+
+      await assertLabelsInRepo(ctx.db, input.repoId, input.labelIds);
+      await assertAssigneesCanRead(ctx.db, input.repoId, input.assigneeIds);
 
       // Auto-increment issue number per repo
       const lastIssue = await ctx.db.issue.findFirst({
@@ -473,6 +511,7 @@ export const issueRouter = createTRPCRouter({
       if (!issue)
         throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
       await getUserAndRepoWithAccess(ctx, issue.repoId, RepoAccess.WRITE);
+      await assertLabelsInRepo(ctx.db, issue.repoId, [input.labelId]);
       return ctx.db.issueLabelLink.create({
         data: { issueId: input.issueId, labelId: input.labelId },
         include: { label: true },
@@ -515,6 +554,7 @@ export const issueRouter = createTRPCRouter({
       if (!issue)
         throw new TRPCError({ code: "NOT_FOUND", message: "Issue not found" });
       await getUserAndRepoWithAccess(ctx, issue.repoId, RepoAccess.WRITE);
+      await assertAssigneesCanRead(ctx.db, issue.repoId, [input.userId]);
 
       const result = await ctx.db.issueAssignee.create({
         data: { issueId: input.issueId, userId: input.userId },

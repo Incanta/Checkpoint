@@ -154,22 +154,74 @@ export class LocalChangeGuard {
   constructor(
     private readonly workspaceRoot: string,
     label: string,
+    /** An existing backup folder to take over (see fromJournal). */
+    backupRoot?: string,
   ) {
     // Short: every backup path is the file's own path under this folder, and
     // Explorer and many Windows tools stop at 260 characters. Milliseconds
     // in base 36 (8 characters) instead of an ISO timestamp (24) keep the
     // folders unique and ordered.
     const stamp = Date.now().toString(36);
-    this.backupRoot = path.join(
-      workspaceRoot,
-      ".checkpoint",
-      BACKUP_DIR,
-      `${stamp}-${label}`,
-    );
+    this.backupRoot =
+      backupRoot ??
+      path.join(workspaceRoot, ".checkpoint", BACKUP_DIR, `${stamp}-${label}`);
   }
 
   get files(): readonly ProtectedFile[] {
     return this.protectedFiles;
+  }
+
+  /**
+   * The guard of a pull that died partway, rebuilt from the journal its
+   * backups were listed in, so they can be put back (see restoreAll). Empty
+   * when the journal is gone: the pull backed nothing up, or it was settled.
+   */
+  static async fromJournal(
+    workspaceRoot: string,
+    backupRoot: string,
+  ): Promise<LocalChangeGuard> {
+    const guard = new LocalChangeGuard(workspaceRoot, "", backupRoot);
+    let entries: unknown;
+    try {
+      entries = JSON.parse(await fs.readFile(journalPath(backupRoot), "utf8"));
+    } catch {
+      return guard;
+    }
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const e = entry as Partial<ProtectedFile>;
+      if (typeof e.relativePath !== "string" || !e.kind) continue;
+      // Only a backup inside this pull's folder is trusted as one.
+      const backupPath = path.join(backupRoot, e.relativePath);
+      guard.protectedFiles.push({
+        relativePath: e.relativePath,
+        kind: e.kind,
+        baseCl: typeof e.baseCl === "number" ? e.baseCl : null,
+        backupPath,
+      });
+    }
+    return guard;
+  }
+
+  /**
+   * Lists the backups taken so far beside the backup folder, so a pull that
+   * dies before it settles them can still be put right (fromJournal). Written
+   * after each copy and before the pull overwrites anything.
+   */
+  private async writeJournal(
+    entries: readonly ProtectedFile[] = this.protectedFiles,
+  ): Promise<void> {
+    await fs.mkdir(path.dirname(this.backupRoot), { recursive: true });
+    const file = journalPath(this.backupRoot);
+    await fs.writeFile(`${file}.tmp`, JSON.stringify(entries));
+    await fs.rename(`${file}.tmp`, file);
+  }
+
+  /**
+   * Drops the journal once the pull has recorded its result: whatever
+   * backups remain are the set-aside ones it reported, not ones to restore.
+   */
+  async finish(): Promise<void> {
+    await fs.rm(journalPath(this.backupRoot), { force: true });
   }
 
   /**
@@ -198,6 +250,7 @@ export class LocalChangeGuard {
       baseCl: entry ? entry.changelist : null,
       backupPath,
     });
+    await this.writeJournal();
     return true;
   }
 
@@ -264,6 +317,7 @@ export class LocalChangeGuard {
     }
     await this.removeBackups(done);
     this.protectedFiles.length = 0;
+    if (result.failed.length === 0) await this.finish();
     return result;
   }
 
@@ -386,7 +440,21 @@ export class LocalChangeGuard {
     }
     // Drop the folder (and its parents up to the backup root) once empty.
     await removeEmptyDirs(this.backupRoot);
+    // The journal lists only backups still to settle, and goes with the last.
+    const removed = new Set(backupPaths);
+    const left = this.protectedFiles.filter(
+      (f) => !removed.has(f.backupPath) && existsSync(f.backupPath),
+    );
+    if (left.length === 0) {
+      await this.finish();
+    } else if (existsSync(journalPath(this.backupRoot))) {
+      await this.writeJournal(left);
+    }
   }
+}
+
+function journalPath(backupRoot: string): string {
+  return `${backupRoot}.journal.json`;
 }
 
 /** Removes `dir` and any of its subdirectories that contain no files. */

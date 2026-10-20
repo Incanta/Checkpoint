@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { RepoAccess } from "@prisma/client";
-import { getUserAndRepoWithAccess } from "../auth-utils";
+import { assertMergePermission, getUserAndRepoWithAccess } from "../auth-utils";
 import {
   findMergeBase,
   mergeBranch,
@@ -571,7 +571,20 @@ export const branchRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.WRITE,
+      );
+
+      // The same gate a merge request's merge applies. Without it a direct
+      // merge skipped the merge permissions entirely.
+      await assertMergePermission(ctx.db, {
+        repoId: input.repoId,
+        userId: ctx.session.user.id,
+        targetBranchName: input.targetBranchName,
+        mergePermissionsSame: repo.mergePermissionsSame,
+      });
 
       const merged = await mergeBranch(ctx.db, {
         repoId: input.repoId,

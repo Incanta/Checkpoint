@@ -48,6 +48,8 @@ vi.mock(
   async () => (await import("../harness/stack")).fakeLoggingModule,
 );
 
+import { createHash } from "node:crypto";
+
 import type { WorkspaceStateFile } from "@checkpointvcs/common";
 import { createTestDb, type TestDb } from "../harness/db";
 import { closeAllStateStores } from "../../../core/daemon/src/util/state-store.js";
@@ -198,8 +200,48 @@ describe("racily clean baselines", { timeout: 120_000 }, () => {
     expect(await pendingChanges(bob)).toEqual({});
   });
 
-  it("hashes only the files written within a tick of the recording", async () => {
+  it("still sees a same-size edit made after the native write but before the pull records it, in the same tick", async () => {
+    // R9's residual: hashing racily clean files when the pull records its
+    // baselines would hash this edit as the pulled version. The native layer
+    // hashes what it writes as it writes it (R10), so the edit shows.
     const { alice, bob } = scene!;
+    await put(alice, "notes.txt", "status: draft\n");
+    await stageAndSubmit(alice, ["notes.txt"]);
+    await syncLatest(bob);
+    await put(alice, "notes.txt", "status: final\n");
+    await stageAndSubmit(alice, ["notes.txt"]);
+
+    overrides.writeTime = recordingTick(2000);
+    overrides.duringPull = async () => {
+      await put(bob, "notes.txt", "status: fixed\n"); // the same length
+    };
+    await syncLatest(bob);
+    delete overrides.duringPull;
+    delete overrides.writeTime;
+
+    const state = await getWorkspaceState(bob.root, "sqlite");
+    // The baseline is the content the pull wrote, not the edit.
+    expect(state.files["notes.txt"]?.md5).toBe(
+      createHash("md5").update("status: final\n").digest("hex"),
+    );
+    expect(await pendingChanges(bob)).toHaveProperty(
+      ["notes.txt"],
+      stillPending,
+    );
+
+    await put(alice, "notes.txt", "status: shipped\n");
+    await stageAndSubmit(alice, ["notes.txt"]);
+    await syncLatest(bob);
+
+    expect(
+      await survives(bob, "notes.txt", "status: fixed"),
+      `${await describeFile(bob, "notes.txt")}, and no backup holds Bob's edit`,
+    ).toBe(true);
+  });
+
+  it("hashes only the files written within a tick of the recording, when the addon reports no hashes", async () => {
+    const { alice, bob } = scene!;
+    overrides.omitWriteHashes = true;
     await put(alice, "old.txt", "written long ago\n");
     await stageAndSubmit(alice, ["old.txt"]);
     overrides.writeTime = new Date("2026-01-01T00:00:00Z");

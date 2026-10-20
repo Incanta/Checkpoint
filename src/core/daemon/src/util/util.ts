@@ -158,7 +158,29 @@ export interface WorkspaceState {
    * command changes the file itself.
    */
   pendingModes?: Record<string, number>;
+  /**
+   * A pull that started writing to the workspace and has not finished: set
+   * before its first write, cleared in the same transaction that records
+   * what it wrote. Still here when the daemon starts means the pull died
+   * partway (a crash, a reboot), and the local edits it backed up are put
+   * back from `backupRoot` (see recoverInterruptedPull). Submits are refused
+   * until a pull completes, since the files it wrote before dying look like
+   * local edits against the old baselines.
+   */
+  interruptedPull?: InterruptedPull;
   teamSync?: WorkspaceTeamSyncState;
+}
+
+export interface InterruptedPull {
+  /** The changelist the pull was bringing the workspace to. */
+  changelist: number;
+  /** The pull's backup folder; its journal lists what it backed up. */
+  backupRoot: string;
+  /** The process that ran the pull, so a live one is not recovered under. */
+  pid: number;
+  startedAt: string;
+  /** Set once the backups have been put back. */
+  restoredAt?: string;
 }
 
 export interface WorkspaceConfig {

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { router, publicProcedure } from "../trpc.js";
+import { TRPCError } from "@trpc/server";
 import { getUpdater } from "../../updater.js";
+import { DaemonManager } from "../../daemon-manager.js";
 
 const updateChannel = z.enum(["release", "nightly"]);
 
@@ -29,6 +31,15 @@ export const updaterRouter = router({
   }),
 
   applyUpdate: publicProcedure.mutation(async () => {
+    // The installer stops this process. A pull it cut off would be
+    // recovered on the next start, but there is no reason to cut one off.
+    if (DaemonManager.Get().hasActiveVcsOperation()) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message:
+          "A pull, submit, or merge is running. Install the update once it finishes.",
+      });
+    }
     await getUpdater().applyUpdate();
     return { success: true };
   }),

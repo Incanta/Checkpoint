@@ -63,7 +63,12 @@ function parseArgs(argv: string[]): CliArgs {
   const args = parseArgs(process.argv.slice(2));
   const manager = DaemonManager.Get();
 
+  // A pull or submit still running gets a moment to finish. One cut off
+  // anyway is recovered on the next start (see interrupted-pull.ts).
+  const SHUTDOWN_GRACE_MS = 20_000;
+
   const shutdown = async (): Promise<void> => {
+    await manager.waitForVcsIdle(SHUTDOWN_GRACE_MS);
     await manager.shutdown();
     process.exit(0);
   };
@@ -135,6 +140,7 @@ function parseArgs(argv: string[]): CliArgs {
     updater.stop();
     versionChecker.stop();
     await McpManager.Get().stop();
+    await manager.waitForVcsIdle(SHUTDOWN_GRACE_MS);
     await manager.shutdown();
     process.exit(0);
   };

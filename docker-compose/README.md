@@ -113,6 +113,26 @@ To follow nightly builds instead, set `CHECKPOINT_BUNDLE_CHANNEL: nightly` on **
 
 To hold a fixed version, set `CHECKPOINT_BUNDLE_VERSION` on both services. The in-app update button turns itself off, because the version then belongs to this file rather than to the UI.
 
+## 6. Backups
+
+A Checkpoint instance keeps its state in three places. Back up all of them:
+
+| What | Where | Holds |
+| --- | --- | --- |
+| Database | the `app-data` volume (SQLite, the default), or your Postgres database | users, repos, branches, changelists, file history, claims |
+| Storage | the `storage-data` volume in **local** mode, or your bucket in **s3** and **r2** modes | file content (blocks and version indexes) |
+| Configuration | `config/` and `config/.secrets` | addresses, storage settings, and the signing secrets |
+
+**Back up the database first, then storage.** File content is only ever added to storage, never changed or removed (except when a repo is deleted), so a storage copy taken after the database copy holds everything that database refers to. The other order can miss content: a changelist submitted between the two copies would be in the database but not in storage, and pulling it after a restore would fail.
+
+- **SQLite:** stop the app (`docker compose stop app`) and copy the `app-data` volume, or copy it while running with `sqlite3 /app/data/<db file> ".backup /app/data/backup.db"` inside the container. A plain file copy of a live SQLite database can be torn.
+- **Postgres:** `pg_dump` (for example `docker compose exec postgres pg_dump -U checkpoint checkpoint > checkpoint.sql`).
+- **Local storage:** copy the `storage-data` volume, for example with `docker run --rm -v checkpoint_storage-data:/data -v "$PWD":/backup alpine tar czf /backup/storage.tgz -C /data .` (the volume name is prefixed with your Compose project name).
+- **S3 and R2:** turn on the provider's versioning or replication, or sync the bucket to another one, after the database backup.
+- **Secrets:** keep `config/.secrets` with the backups. Without the same `betterauth_secret` and `storage_signing_key`, sessions, device tokens, and storage tokens issued before the restore stop working.
+
+To restore, put back the configuration, then storage, then the database, and start the services. A workspace that synced changelists newer than the backup is ahead of the restored server, which the daemon does not expect. After restoring an older backup, have people copy out any unsubmitted work and make fresh workspaces.
+
 ## Notes
 
 - **Database:** Postgres is recommended and is the only documented setup here.

@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 
-import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import {
+  createTRPCRouter,
+  licenseManagerAdminProcedure,
+  protectedProcedure,
+} from "~/server/api/trpc";
 import { createOrgDirectory } from "~/server/storage-service";
 import { RepoAccess } from "@prisma/client";
 import {
@@ -77,13 +81,17 @@ export const orgRouter = createTRPCRouter({
       });
 
       if (!orgUser) {
-        // Return only public repos if user is not a member
+        // Return only public repos if user is not a member, and none of
+        // their per-user grants: those name the org's members and what each
+        // may do.
         return {
           id: org.id,
           name: org.name,
           defaultRepoAccess: RepoAccess.NONE,
           defaultCanCreateRepos: false,
-          repos: org.repos?.filter((repo) => repo.public) || [],
+          repos: (org.repos ?? [])
+            .filter((repo) => repo.public && !repo.deletedAt)
+            .map((repo) => ({ ...repo, additionalRoles: [] })),
           users: [],
         };
       }
@@ -410,7 +418,10 @@ export const orgRouter = createTRPCRouter({
       return { activities, summary };
     }),
 
-  updateSubscription: protectedProcedure
+  // Sets an org's tier with no payment, so it is for Checkpoint staff only.
+  // Org admins and billing managers change tiers through billing.changeTier,
+  // which goes through Stripe.
+  updateSubscription: licenseManagerAdminProcedure
     .input(
       z.object({
         orgId: z.string(),
@@ -418,35 +429,6 @@ export const orgRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Only available on license manager instances
-      const { isLicenseManager } = await import("~/server/license-utils");
-      if (!isLicenseManager()) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message:
-            "Subscription changes are only available on the cloud instance",
-        });
-      }
-
-      // Must be org admin or billing role
-      const orgUser = await ctx.db.orgUser.findFirst({
-        where: {
-          orgId: input.orgId,
-          userId: ctx.session.user.id,
-        },
-      });
-
-      if (
-        !orgUser ||
-        (orgUser.role !== "ADMIN" && orgUser.role !== "BILLING")
-      ) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message:
-            "Only org admins or billing managers can change subscriptions",
-        });
-      }
-
       // Update org tier
       const org = await ctx.db.org.update({
         where: { id: input.orgId },

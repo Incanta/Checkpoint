@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { usersWithRepoRead } from "~/server/api/auth-utils";
 
 /**
  * Extract @username mentions from text.
@@ -99,10 +100,22 @@ export async function notifyIssueSubscribers(
   }
 
   // Get all subscribers except the actor
-  const subs = await db.issueSubscription.findMany({
+  const allSubs = await db.issueSubscription.findMany({
     where: { issueId, userId: { not: actorId } },
-    select: { userId: true },
+    select: { userId: true, issue: { select: { repoId: true } } },
   });
+
+  // Only those who can read the repo now. A subscription outlives the
+  // access it was made under, and a mention reaches any user by name.
+  const repoId = allSubs[0]?.issue.repoId;
+  const readers = repoId
+    ? await usersWithRepoRead(
+        db,
+        repoId,
+        allSubs.map((s) => s.userId),
+      )
+    : new Set<string>();
+  const subs = allSubs.filter((s) => readers.has(s.userId));
 
   if (subs.length === 0) return;
 
@@ -141,10 +154,21 @@ export async function notifyMRSubscribers(
   }
 
   // Get all subscribers except the actor
-  const subs = await db.mergeRequestSubscription.findMany({
+  const allSubs = await db.mergeRequestSubscription.findMany({
     where: { mergeRequestId, userId: { not: actorId } },
-    select: { userId: true },
+    select: { userId: true, mergeRequest: { select: { repoId: true } } },
   });
+
+  // Only those who can read the repo now (see notifyIssueSubscribers).
+  const repoId = allSubs[0]?.mergeRequest.repoId;
+  const readers = repoId
+    ? await usersWithRepoRead(
+        db,
+        repoId,
+        allSubs.map((s) => s.userId),
+      )
+    : new Set<string>();
+  const subs = allSubs.filter((s) => readers.has(s.userId));
 
   if (subs.length === 0) return;
 

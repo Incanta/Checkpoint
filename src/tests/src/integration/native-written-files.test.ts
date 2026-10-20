@@ -9,11 +9,39 @@
  * - The submit never reads (and uploads) a path that climbs out of the
  *   workspace or names its .checkpoint directory (DL-03, DL-23).
  */
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+import type { WrittenFile } from "../../../core/daemon/src/util/pull-record.js";
+
+// Every record a native pass leaves, as the daemon read it, one map per
+// pass: the pull consumes the record file, and the state alone cannot tell a
+// hash the addon reported from one the daemon took when recording (it hashes
+// racily clean files itself when the addon reports none).
+const passRecords: Map<string, WrittenFile>[] = [];
+vi.mock(
+  "../../../core/daemon/src/util/pull-record.js",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../../core/daemon/src/util/pull-record.js")
+      >();
+    return {
+      ...actual,
+      takePullRecord: async (root: string, into: Map<string, WrittenFile>) => {
+        const pass = new Map<string, WrittenFile>();
+        const found = await actual.takePullRecord(root, pass);
+        passRecords.push(pass);
+        for (const [p, w] of pass) into.set(p, w);
+        return found;
+      },
+    };
+  },
+);
 
 import { pull } from "../../../core/daemon/src/util/pull.js";
 import { closeAllStateStores } from "../../../core/daemon/src/util/state-store.js";
@@ -27,8 +55,22 @@ import {
   createContext,
   enabled,
   headChangelistNumber,
+  nativeSubmit,
   type IntegrationContext,
 } from "./harness.js";
+
+const md5 = (bytes: Buffer) => createHash("md5").update(bytes).digest("hex");
+
+/** Bytes that do not repeat, so every chunk of a large file is distinct. */
+function noise(size: number, seed: number): Buffer {
+  const out = Buffer.alloc(size);
+  let x = seed >>> 0;
+  for (let i = 0; i < size; i++) {
+    x = (Math.imul(x, 1103515245) + 12345) >>> 0;
+    out[i] = x >>> 24;
+  }
+  return out;
+}
 
 interface Seat {
   workspace: Workspace;
@@ -73,7 +115,11 @@ describe.skipIf(!enabled)("what the native layer writes", () => {
     return created;
   }
 
-  async function put(s: Seat, relativePath: string, content: string) {
+  async function put(
+    s: Seat,
+    relativePath: string,
+    content: string | Buffer,
+  ) {
     const full = path.join(s.root, relativePath);
     await mkdir(path.dirname(full), { recursive: true });
     await writeFile(full, content);
@@ -105,6 +151,88 @@ describe.skipIf(!enabled)("what the native layer writes", () => {
         mtime: st.mtimeMs,
       });
     }
+  });
+
+  /**
+   * That each path the passes wrote was reported with the md5 of the bytes
+   * now on disk, and that the state recorded it as the baseline.
+   */
+  async function expectReportedHashes(s: Seat, paths: string[]) {
+    const reported = new Map<string, WrittenFile>();
+    for (const pass of passRecords) {
+      for (const [p, w] of pass) reported.set(p, w);
+    }
+    const state = await getWorkspaceState(s.root, "sqlite");
+    for (const f of paths) {
+      const bytes = await readFile(path.join(s.root, f));
+      expect(reported.get(f)?.md5, `${f} as the addon reported it`).toBe(
+        md5(bytes),
+      );
+      expect(state.files[f]?.md5, `${f} in the workspace state`).toBe(
+        md5(bytes),
+      );
+    }
+  }
+
+  it("reports the md5 of each file a single-pass pull wrote, small, empty, and spanning blocks", async () => {
+    const alice = await seat("hash-alice");
+    const files: Record<string, Buffer> = {
+      // Paths of their own: the earlier test's changelist shares the repo.
+      "Hashed/small.txt": Buffer.from("small\n".repeat(20)),
+      "Hashed/empty.txt": Buffer.alloc(0),
+      "Hashed/naïve.txt": Buffer.from("accented\n"),
+      // Past the 8 MiB block size: written from several blocks, in partial
+      // writes from separate jobs.
+      "Hashed/Content/big.bin": noise(20 * 1024 * 1024 + 123, 7),
+    };
+    for (const [f, bytes] of Object.entries(files)) await put(alice, f, bytes);
+    await send(alice, Object.keys(files));
+
+    const bob = await seat("hash-bob");
+    passRecords.length = 0;
+    await pull(bob.workspace, ctx.orgId, await headChangelistNumber(ctx));
+
+    expect(passRecords.length).toBe(1);
+    await expectReportedHashes(bob, Object.keys(files));
+  });
+
+  it("reports the md5 of each file whole-index pulls wrote, including a path two indexes write", async () => {
+    const alice = await seat("whole-alice");
+    await put(alice, "first.txt", "only in the first changelist\n");
+    await put(alice, "shared.bin", noise(3 * 1024 * 1024, 1));
+    await send(alice, ["first.txt", "shared.bin"]);
+
+    // Chunked differently from the first, so the two cannot share one
+    // selection index: the daemon applies each changelist's whole index in
+    // turn, and both write shared.bin.
+    await put(alice, "shared.bin", noise(3 * 1024 * 1024 + 17, 2));
+    await put(alice, "second.txt", "only in the second changelist\n");
+    const outcome = await nativeSubmit(
+      ctx,
+      { root: alice.root, workspaceId: alice.workspace.id, cleanup: async () => {} },
+      [
+        { path: "shared.bin", delete: false },
+        { path: "second.txt", delete: false },
+      ],
+      "chunked differently",
+      { targetChunkSize: 65536 },
+    );
+    expect(outcome.error, outcome.step).toBe(0);
+
+    const bob = await seat("whole-bob");
+    passRecords.length = 0;
+    await pull(bob.workspace, ctx.orgId, await headChangelistNumber(ctx));
+
+    // The declined selection pass reports nothing; then one record per index
+    // (the repo also holds the earlier tests' changelists), and exactly two
+    // of them wrote shared.bin, each its own version.
+    const written = passRecords.filter((r) => r.has("shared.bin"));
+    expect(written.length).toBe(2);
+    expect(written[0]!.get("shared.bin")?.md5).toMatch(/^[0-9a-f]{32}$/);
+    expect(written[0]!.get("shared.bin")?.md5).not.toBe(
+      written[1]!.get("shared.bin")?.md5,
+    );
+    await expectReportedHashes(bob, ["first.txt", "shared.bin", "second.txt"]);
   });
 
   it.each(["../outside.txt", ".checkpoint/workspace.json"])(

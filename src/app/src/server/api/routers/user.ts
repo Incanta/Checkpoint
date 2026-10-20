@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { getCheckpointUser } from "../auth-utils";
@@ -24,8 +25,18 @@ export const userRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { id, ...updateData } = input;
 
+      // Only your own profile. The id is still accepted so existing clients
+      // keep working, but it has to be yours: with any id, anyone could
+      // change another user's email and take the account over.
+      if (id !== ctx.session.user.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You can only update your own profile",
+        });
+      }
+
       return ctx.db.user.update({
-        where: { id },
+        where: { id: ctx.session.user.id },
         data: updateData,
       });
     }),

@@ -400,7 +400,7 @@ export const changelistRouter = createTRPCRouter({
         input.repoId,
         RepoAccess.WRITE,
       );
-      await assertWorkspaceOwnership(ctx, input.workspaceId);
+      await assertWorkspaceOwnership(ctx, input.workspaceId, input.repoId);
 
       // Every lookup below (claims, File rows, the tree, the base check) keys
       // on one canonical spelling, and nothing stored can climb out of a

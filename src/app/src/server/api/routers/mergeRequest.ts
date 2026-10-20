@@ -4,7 +4,11 @@ import type { Changelist } from "@prisma/client";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { FileChangeType, RepoAccess } from "@prisma/client";
-import { getUserAndRepoWithAccess } from "../auth-utils";
+import {
+  assertMergePermission,
+  getUserAndRepoWithAccess,
+  usersWithRepoRead,
+} from "../auth-utils";
 import { findMergeBase, mergeBranch } from "~/server/branch-merge";
 import { recordActivity } from "../activity";
 import { subscribeToMR, notifyMRSubscribers } from "~/server/notifications";
@@ -412,40 +416,12 @@ export const mergeRequestRouter = createTRPCRouter({
       }
 
       // Check merge permissions
-      const targetBranch = await ctx.db.branch.findUnique({
-        where: {
-          repoId_name: { repoId: input.repoId, name: mr.targetBranchName },
-        },
+      await assertMergePermission(ctx.db, {
+        repoId: input.repoId,
+        userId: ctx.session.user.id,
+        targetBranchName: mr.targetBranchName,
+        mergePermissionsSame: mr.repo.mergePermissionsSame,
       });
-      if (!targetBranch) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Target branch no longer exists",
-        });
-      }
-
-      const permType = mr.repo.mergePermissionsSame
-        ? "MAINLINE"
-        : targetBranch.type === "RELEASE"
-          ? "RELEASE"
-          : "MAINLINE";
-
-      const permissions = await ctx.db.mergePermission.findMany({
-        where: { repoId: input.repoId, type: permType },
-      });
-
-      // Empty list = all authorized
-      if (permissions.length > 0) {
-        const authorized = permissions.some(
-          (p) => p.userId === ctx.session.user.id,
-        );
-        if (!authorized) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "You are not authorized to merge into this branch",
-          });
-        }
-      }
 
       // Validate source branch still exists
       const sourceBranch = await ctx.db.branch.findUnique({
@@ -670,6 +646,25 @@ export const mergeRequestRouter = createTRPCRouter({
         });
       }
 
+      // A reviewer has to be able to see the repo: requesting a review
+      // subscribes and notifies them with the MR's title.
+      if (
+        input.reviewerId !== ctx.session.user.id &&
+        !(
+          await usersWithRepoRead(ctx.db, input.repoId, [input.reviewerId])
+        ).has(input.reviewerId)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "The reviewer does not have access to this repository",
+        });
+      }
+
+      // Requesting a review from someone else only adds them. It must not
+      // reset a verdict they already gave, or anyone with write access (the
+      // author included) could clear a REQUEST_CHANGES and merge past it.
+      const ownReview = input.reviewerId === ctx.session.user.id;
+
       const review = await ctx.db.mergeRequestReview.upsert({
         where: {
           mergeRequestId_reviewerId: {
@@ -682,9 +677,7 @@ export const mergeRequestRouter = createTRPCRouter({
           reviewerId: input.reviewerId,
           state: input.state,
         },
-        update: {
-          state: input.state,
-        },
+        update: ownReview ? { state: input.state } : {},
         include: {
           reviewer: {
             select: { id: true, name: true, email: true, image: true },

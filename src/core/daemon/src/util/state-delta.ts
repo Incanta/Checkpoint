@@ -3,6 +3,7 @@ import type {
   AppliedArtifactInfo,
   ArtifactStateFile,
   BisectVerdict,
+  InterruptedPull,
   WorkspaceState,
 } from "./util.js";
 
@@ -41,6 +42,7 @@ export interface StateDelta {
     pendingDirRenames?: string[] | null;
     /** Replaces the whole record; empty or null clears it. */
     pendingModes?: Record<string, number> | null;
+    interruptedPull?: InterruptedPull | null;
     syncFilterHash?: string | null;
     lastBuiltChangelist?: number | null;
     lastScheduledSyncAt?: string | null;
@@ -154,6 +156,11 @@ export function applyDeltaToState(
     } else if (meta.pendingModes !== undefined) {
       state.pendingModes = meta.pendingModes;
     }
+  }
+  if (meta && "interruptedPull" in meta) {
+    if (meta.interruptedPull === null) delete state.interruptedPull;
+    else if (meta.interruptedPull !== undefined)
+      state.interruptedPull = meta.interruptedPull;
   }
 
   const teamSync = { ...(state.teamSync ?? {}) };

@@ -38,6 +38,7 @@ import {
 } from "./util/team-sync/scheduler.js";
 import { runSyncPipeline } from "./util/team-sync/sync-pipeline.js";
 import { compareWithBaseline } from "./util/baseline.js";
+import { recoverInterruptedPull } from "./util/interrupted-pull.js";
 import {
   isSafeWorkspacePath,
   resolveInWorkspace,
@@ -63,6 +64,13 @@ import { checkSyncStatus, type SyncStatus } from "./util/sync-status.js";
 import { hasConflictMarkers } from "./util/auto-merge.js";
 import { getBinaryExtensions, isBinaryFile } from "./util/binary-extensions.js";
 
+/** Whether a repo-relative path is the workspace's .checkpoint directory or inside it. */
+function isCheckpointDirPath(relativePath: string): boolean {
+  return (
+    relativePath === ".checkpoint" || relativePath.startsWith(".checkpoint/")
+  );
+}
+
 export class DaemonManager {
   private static instance: DaemonManager | null = null;
 
@@ -83,6 +91,18 @@ export class DaemonManager {
   private stateBackend: DaemonConfigType["stateBackend"] = "json";
 
   private watchers: Map<string, FSWatcher> = new Map();
+
+  /** Pending restarts of watchers that failed, keyed by workspace.id */
+  private watcherRetries: Map<string, ReturnType<typeof setTimeout>> =
+    new Map();
+
+  /**
+   * Delay (ms) before restarting a failed watcher. It doubles on each failed
+   * attempt, up to {@link WATCHER_RETRY_MAX_MS}. Not readonly so tests can
+   * shorten it.
+   */
+  public static watcherRetryMs = 5000;
+  private static readonly WATCHER_RETRY_MAX_MS = 60_000;
 
   /** Cached sync status per workspace, keyed by workspace.id */
   private syncStatuses: Map<string, SyncStatus> = new Map();
@@ -349,6 +369,13 @@ export class DaemonManager {
     }
     this.workspaces.set(workspace.daemonId, existing);
 
+    // A pull this daemon was running when it died (a crash, a reboot) put
+    // the local edits it had backed up back, before anything reads the state.
+    await recoverInterruptedPull(workspace, this.stateBackend).catch((err) =>
+      Logger.warn(
+        `Could not recover an interrupted pull in ${workspace.localPath}: ${err}`,
+      ),
+    );
     await this.loadWorkspaceState(workspace);
     await this.scanIgnoreFiles(workspace);
     void this.reportBranchState(workspace);
@@ -360,6 +387,8 @@ export class DaemonManager {
 
   public async shutdown(): Promise<void> {
     this.stopSyncPolling();
+    this.watcherRetries.forEach((timer) => clearTimeout(timer));
+    this.watcherRetries.clear();
     this.watchers.forEach((watcher) => watcher.close());
     this.watchers.clear();
     closeAllStateStores();
@@ -370,7 +399,9 @@ export class DaemonManager {
    * Does NOT delete the .checkpoint directory on disk.
    */
   public unlinkWorkspace(workspaceId: string, daemonId: string): void {
-    // Close file watcher
+    // Close file watcher, and cancel any pending restart of a failed one (it
+    // would otherwise start watching the unlinked workspace again).
+    this.cancelWatcherRetry(workspaceId);
     const watcher = this.watchers.get(workspaceId);
     if (watcher) {
       watcher.close();
@@ -1177,7 +1208,13 @@ export class DaemonManager {
       }
     }
 
-    const cached = this.workspacePendingChanges.get(workspace.id);
+    // The cache is only as current as the watcher's reports. With no watcher
+    // running (never started, or failed and not yet restarted) nothing tells
+    // the daemon what changed on disk, so an empty dirty set proves nothing
+    // and the cache cannot be trusted: rescan.
+    const cached = this.watchers.has(workspace.id)
+      ? this.workspacePendingChanges.get(workspace.id)
+      : undefined;
 
     // Fast path: nothing changed since last refresh – return cached result
     if (!forceFullRefresh && cached && dirty && dirty.size === 0) {
@@ -1560,7 +1597,9 @@ export class DaemonManager {
     const checkedOutIds = new Set(checkouts.map((c) => c.fileId));
 
     for (const relativePath of expandedDirty) {
-      if (relativePath.startsWith(".checkpoint")) continue;
+      // Only the .checkpoint directory, as in the full scan: a file named
+      // ".checkpointrc" is the user's.
+      if (isCheckpointDirPath(relativePath)) continue;
 
       // Skip ignored / hidden paths. The dirty set has no type information,
       // so probe both the file and the directory form of the path.
@@ -1718,93 +1757,204 @@ export class DaemonManager {
     return result;
   }
 
-  public watchWorkspace(workspace: Workspace): void {
+  /**
+   * Starts (or restarts) the filesystem watcher for a workspace. Returns
+   * whether a watcher is now running.
+   */
+  public watchWorkspace(workspace: Workspace): boolean {
+    this.cancelWatcherRetry(workspace.id);
+
     // Check if the workspace path exists before watching
     if (!existsSync(workspace.localPath)) {
       Logger.warn(
         `[DaemonManager] Workspace path does not exist, skipping watch: ${workspace.localPath}`,
       );
-      return;
+      return false;
     }
 
     // Close existing watcher if any
     const existingWatcher = this.watchers.get(workspace.id);
     if (existingWatcher) {
       existingWatcher.close();
+      this.watchers.delete(workspace.id);
     }
 
-    const watcher = watch(
-      workspace.localPath,
-      { recursive: true },
-      async (eventType, filename) => {
-        if (!filename) {
-          // No name is how Windows reports an overflowed change buffer (many
-          // files changed at once: a build, a level save). Some changes were
-          // not reported, so the cached pending list cannot be trusted: drop
-          // it, and the next refresh rescans.
-          this.workspacePendingChanges.delete(workspace.id);
-          return;
-        }
-
-        const relativePath = toRelativeRepoPath(filename);
-
-        // Skip .checkpoint directory
-        if (relativePath.startsWith(".checkpoint")) {
-          return;
-        }
-
-        // During VCS operations (pull/submit/merge) buffer events instead
-        // of marking dirty. This prevents mid-operation queries from seeing
-        // transient false pending-changes, while still capturing legitimate
-        // user edits that happen concurrently (e.g. editing file D while
-        // pulling files A, B, C). Buffered events are replayed in
-        // endVcsOperation() after the baseline state is reloaded.
-        if (this.vcsOperationActive.get(workspace.id)) {
-          const buffer = this.vcsBufferedEvents.get(workspace.id);
-          if (buffer) {
-            buffer.add(relativePath);
-          }
-          return;
-        }
-
-        Logger.debug(
-          `[DaemonManager] Detected change in workspace ${workspace.name} (${eventType} on ${relativePath})`,
-        );
-
-        // If an ignore/hidden file changed, rebuild the cached patterns
-        // and force a full refresh so new ignore rules take effect.
-        const baseName = path.basename(relativePath);
-        if (baseName === IGNORE_FILE || baseName === HIDDEN_FILE) {
-          await this.handleIgnoreFileChange(workspace, relativePath);
-          this.workspacePendingChanges.delete(workspace.id);
-        }
-
-        // Mark file as dirty for incremental refresh
-        const dirty = this.dirtyFiles.get(workspace.id);
-        if (dirty) {
-          dirty.add(relativePath);
-        }
-      },
-    );
+    let watcher: FSWatcher;
+    try {
+      watcher = watch(
+        workspace.localPath,
+        { recursive: true },
+        (eventType, filename) => {
+          void this.handleWatchEvent(workspace, eventType, filename);
+        },
+      );
+    } catch (err) {
+      // fs.watch can throw instead of emitting "error": ENOSPC on Linux when
+      // the inotify watch limit is reached, EPERM or EACCES on a directory it
+      // may not read. Uncaught, this failed registration (and, from a retry
+      // timer, crashed the daemon). Treat it like a watcher error.
+      this.handleWatchError(workspace, err);
+      return false;
+    }
 
     watcher.on("error", (err) => {
-      Logger.warn(
-        `[DaemonManager] Watcher error for workspace ${workspace.name}: ${err.message}`,
-      );
-      // Changes made while no watcher runs are never reported, so the cached
-      // pending list cannot be trusted either: the next refresh rescans.
-      this.workspacePendingChanges.delete(workspace.id);
-      // Remove the broken watcher and try to re-establish after a short delay.
-      // The directory may have been temporarily removed (e.g. test cleanup).
-      this.watchers.delete(workspace.id);
-      setTimeout(() => {
-        if (!this.watchers.has(workspace.id)) {
-          this.watchWorkspace(workspace);
-        }
-      }, 5000);
+      // A watcher that was already replaced must not tear down its successor.
+      if (this.watchers.get(workspace.id) !== watcher) return;
+      this.handleWatchError(workspace, err);
     });
 
     this.watchers.set(workspace.id, watcher);
+    // Nothing reported the changes made while no watcher ran (before this
+    // one started, or between a failed watcher and this restart), so a
+    // pending list cached before now cannot be trusted.
+    this.workspacePendingChanges.delete(workspace.id);
+    return true;
+  }
+
+  /**
+   * Applies one filesystem watcher event: marks the path dirty for the next
+   * incremental refresh, buffers it during a VCS operation, or drops the
+   * cached pending list when the event says changes went unreported.
+   * Public so tests can feed it events the OS cannot be made to produce on
+   * demand (an overflowed change buffer).
+   */
+  public async handleWatchEvent(
+    workspace: Workspace,
+    eventType: string,
+    filename: string | Buffer | null,
+  ): Promise<void> {
+    if (!filename) {
+      // No name is how Windows reports an overflowed change buffer (many
+      // files changed at once: a build, a level save). Some changes were
+      // not reported, so the cached pending list cannot be trusted: drop
+      // it, and the next refresh rescans.
+      this.workspacePendingChanges.delete(workspace.id);
+      return;
+    }
+
+    const relativePath = toRelativeRepoPath(filename.toString());
+
+    // Skip the .checkpoint directory (only it, as in the full scan: a file
+    // named ".checkpointrc" is the user's).
+    if (isCheckpointDirPath(relativePath)) {
+      return;
+    }
+
+    // During VCS operations (pull/submit/merge) buffer events instead
+    // of marking dirty. This prevents mid-operation queries from seeing
+    // transient false pending-changes, while still capturing legitimate
+    // user edits that happen concurrently (e.g. editing file D while
+    // pulling files A, B, C). Buffered events are replayed in
+    // endVcsOperation() after the baseline state is reloaded.
+    if (this.vcsOperationActive.get(workspace.id)) {
+      const buffer = this.vcsBufferedEvents.get(workspace.id);
+      if (buffer) {
+        buffer.add(relativePath);
+      } else {
+        // No buffer to replay from: the event would be lost.
+        this.workspacePendingChanges.delete(workspace.id);
+      }
+      return;
+    }
+
+    Logger.debug(
+      `[DaemonManager] Detected change in workspace ${workspace.name} (${eventType} on ${relativePath})`,
+    );
+
+    const dirty = this.dirtyFiles.get(workspace.id);
+
+    // If an ignore/hidden file changed, rebuild the cached patterns
+    // and force a full refresh so new ignore rules take effect. The path is
+    // marked dirty first, so a refresh that runs while the rescan is in
+    // flight sees the change and rescans the ignore files itself.
+    const baseName = path.basename(relativePath);
+    if (baseName === IGNORE_FILE || baseName === HIDDEN_FILE) {
+      dirty?.add(relativePath);
+      try {
+        await this.handleIgnoreFileChange(workspace, relativePath);
+      } catch (err) {
+        Logger.warn(
+          `[DaemonManager] Could not rescan ignore files for workspace ${workspace.name}: ${(err as Error).message}`,
+        );
+      }
+      this.workspacePendingChanges.delete(workspace.id);
+      return;
+    }
+
+    // An ignored or hidden path never shows as pending (the incremental
+    // refresh skips it with the same test), so marking it dirty only costs:
+    // a build writing thousands of files into Intermediate/ would push the
+    // dirty set past the incremental threshold and force full rescans. A
+    // change to the ignore rules drops the cache, so a path these rules
+    // ignore but new ones would not is still picked up by the rescan.
+    if (
+      isIgnoredOrHidden(this.getIgnoreCache(workspace.id), relativePath, true)
+    ) {
+      return;
+    }
+
+    // Mark file as dirty for incremental refresh
+    dirty?.add(relativePath);
+  }
+
+  /**
+   * Handles a failed watcher: drops the cached pending list (changes made
+   * while no watcher runs are never reported) and schedules a restart.
+   * Public so tests can simulate a failure (Linux out of inotify watches).
+   */
+  public handleWatchError(workspace: Workspace, err: unknown): void {
+    Logger.warn(
+      `[DaemonManager] Watcher error for workspace ${workspace.name}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    this.workspacePendingChanges.delete(workspace.id);
+
+    // Remove the broken watcher and try to re-establish after a short delay.
+    // The directory may have been temporarily removed (e.g. test cleanup).
+    const broken = this.watchers.get(workspace.id);
+    this.watchers.delete(workspace.id);
+    try {
+      broken?.close();
+    } catch {
+      // Already closed by the failure
+    }
+    this.scheduleWatcherRetry(workspace, 0);
+  }
+
+  /** Whether a filesystem watcher is currently running for the workspace. */
+  public isWatching(workspaceId: string): boolean {
+    return this.watchers.has(workspaceId);
+  }
+
+  private scheduleWatcherRetry(workspace: Workspace, attempt: number): void {
+    if (this.watcherRetries.has(workspace.id)) return;
+    const delay = Math.min(
+      DaemonManager.watcherRetryMs * 2 ** attempt,
+      DaemonManager.WATCHER_RETRY_MAX_MS,
+    );
+    const timer = setTimeout(() => {
+      this.watcherRetries.delete(workspace.id);
+      // Unlinked (or shut down) in the meantime, or already watched again.
+      if (!this.findWorkspaceById(workspace.id)) return;
+      if (this.watchers.has(workspace.id)) return;
+      // Retried once and gave up before, so a workspace whose directory was
+      // still missing after 5 s went unwatched until the daemon restarted.
+      if (!this.watchWorkspace(workspace)) {
+        // A throwing watch() has already scheduled attempt 0; back off instead.
+        this.cancelWatcherRetry(workspace.id);
+        this.scheduleWatcherRetry(workspace, attempt + 1);
+      }
+    }, delay);
+    // A pending restart must not keep the process alive on its own.
+    timer.unref?.();
+    this.watcherRetries.set(workspace.id, timer);
+  }
+
+  private cancelWatcherRetry(workspaceId: string): void {
+    const timer = this.watcherRetries.get(workspaceId);
+    if (timer) {
+      clearTimeout(timer);
+      this.watcherRetries.delete(workspaceId);
+    }
   }
 
   /**
@@ -2112,6 +2262,25 @@ export class DaemonManager {
   }
 
   // ─── VCS Operation Guard ─────────────────────────────────────────
+
+  /** Whether a pull, submit, or merge is running in any workspace. */
+  public hasActiveVcsOperation(): boolean {
+    return [...this.vcsOperationActive.values()].some(Boolean);
+  }
+
+  /**
+   * Waits until no VCS operation is running, or `timeoutMs` passes. For a
+   * shutdown: a pull that is cut off is recovered on the next start (see
+   * interrupted-pull.ts), but one that finishes needs no recovery.
+   */
+  public async waitForVcsIdle(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.hasActiveVcsOperation()) {
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return true;
+  }
 
   /**
    * Begins buffering file-watcher events for a workspace while a VCS

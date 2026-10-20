@@ -6,6 +6,7 @@ import {
   WORKSPACE_STATE_VERSION,
   type ArtifactStateFile,
   type BisectVerdict,
+  type InterruptedPull,
   type WorkspaceTeamSyncState,
   type WorkspaceState,
 } from "./util.js";
@@ -553,6 +554,15 @@ class SqliteStateStore implements StateStore {
       }
       if (Object.keys(pendingModes).length === 0) pendingModes = undefined;
     }
+    const pullRecord = metaJson("interruptedPull") as
+      | Partial<InterruptedPull>
+      | undefined;
+    const interruptedPull =
+      pullRecord &&
+      typeof pullRecord.changelist === "number" &&
+      typeof pullRecord.backupRoot === "string"
+        ? (pullRecord as InterruptedPull)
+        : undefined;
 
     const teamSync = this.loadTeamSync(db);
 
@@ -571,6 +581,7 @@ class SqliteStateStore implements StateStore {
       ...(pendingRemovals !== undefined && { pendingRemovals }),
       ...(pendingDirRenames !== undefined && { pendingDirRenames }),
       ...(pendingModes !== undefined && { pendingModes }),
+      ...(interruptedPull !== undefined && { interruptedPull }),
       ...(teamSync !== undefined && { teamSync }),
     };
   }
@@ -815,6 +826,7 @@ class SqliteStateStore implements StateStore {
             ? null
             : json(meta.pendingModes),
         );
+        setScalar("interruptedPull", json(meta.interruptedPull));
         setScalar("syncFilterHash", meta.syncFilterHash);
         setScalar(
           "lastBuiltChangelist",
@@ -917,6 +929,12 @@ class SqliteStateStore implements StateStore {
           "pendingModes",
           state.pendingModes && Object.keys(state.pendingModes).length > 0
             ? JSON.stringify(state.pendingModes)
+            : undefined,
+        ],
+        [
+          "interruptedPull",
+          state.interruptedPull !== undefined
+            ? JSON.stringify(state.interruptedPull)
             : undefined,
         ],
         ["syncFilterHash", teamSync?.syncFilterHash],

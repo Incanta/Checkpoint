@@ -8,6 +8,9 @@ import {
   publicProcedure,
 } from "~/server/api/trpc";
 
+/** How long after approval a device can collect its token with the code. */
+export const DEVICE_CODE_LIFETIME_MS = 10 * 60 * 1000;
+
 export const apiTokenRouter = createTRPCRouter({
   getCode: publicProcedure.query(async ({ ctx }) => {
     const codeLength = 6;
@@ -18,7 +21,7 @@ export const apiTokenRouter = createTRPCRouter({
       code = "";
 
       for (let i = 0; i < codeLength; i++) {
-        code += codeDict.charAt(Math.floor(Math.random() * codeDict.length));
+        code += codeDict.charAt(crypto.randomInt(codeDict.length));
       }
 
       const numTokens = await ctx.db.apiToken.count({
@@ -44,38 +47,35 @@ export const apiTokenRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Find the Checkpoint user associated with this NextAuth user
-      const apiToken = await ctx.db.apiToken.findUnique({
-        where: {
-          deviceCode: input.code,
-          OR: [
-            {
-              expiresAt: null,
-            },
-            {
-              expiresAt: {
-                gte: new Date(),
-              },
-            },
-          ],
-        },
+      // The pairing code is six characters and this route is unauthenticated,
+      // so a code is only good for a short while after the token is approved
+      // (the device is already polling by then), and only once.
+      const notFound = new TRPCError({
+        code: "NOT_FOUND",
+        message: "API token not found for this device code",
       });
+      const where = {
+        deviceCode: input.code,
+        createdAt: {
+          gte: new Date(Date.now() - DEVICE_CODE_LIFETIME_MS),
+        },
+        OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+      };
 
+      const apiToken = await ctx.db.apiToken.findFirst({ where });
       if (!apiToken) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "API token not found for this device code",
-        });
+        throw notFound;
       }
 
-      await ctx.db.apiToken.update({
-        where: {
-          id: apiToken.id,
-        },
-        data: {
-          deviceCode: null, // one time use code
-        },
+      // Consume the code in the same statement that checks it is still
+      // there, so two concurrent requests cannot both receive the token.
+      const consumed = await ctx.db.apiToken.updateMany({
+        where: { ...where, id: apiToken.id },
+        data: { deviceCode: null },
       });
+      if (consumed.count !== 1) {
+        throw notFound;
+      }
 
       return {
         apiToken: apiToken.token,

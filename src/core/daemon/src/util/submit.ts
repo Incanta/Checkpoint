@@ -22,6 +22,7 @@ import {
   resolveStorageEndpoints,
   STORAGE_PROTOCOL,
 } from "./storage-options.js";
+import { interruptedPullMessage } from "./interrupted-pull.js";
 import path from "path";
 import { promises as fs } from "fs";
 import { DaemonConfig } from "../daemon-config.js";
@@ -128,6 +129,9 @@ export async function submit(
   const baseState = isArtifactSubmit
     ? null
     : await getWorkspaceState(workspace.localPath, stateBackend);
+  if (baseState?.interruptedPull) {
+    throw new Error(interruptedPullMessage(baseState.interruptedPull));
+  }
   const windows = process.platform === "win32";
   const modificationsWithBase: SubmitModification[] = uniqueModifications.map(
     (mod) => {

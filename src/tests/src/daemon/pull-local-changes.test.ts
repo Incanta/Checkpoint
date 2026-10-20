@@ -95,7 +95,8 @@ describe("pull: local changes", () => {
     const walk = async (d: string) => {
       for (const entry of await readdir(d, { withFileTypes: true })) {
         if (entry.isDirectory()) await walk(path.join(d, entry.name));
-        else count++;
+        // The journal lists backups (see fromJournal); it is not one.
+        else if (!entry.name.endsWith(".journal.json")) count++;
       }
     };
     await walk(dir);
@@ -509,6 +510,12 @@ describe("pull: local changes", () => {
       );
       expect(guard.files.map((f) => f.relativePath)).toEqual(["other.txt"]);
       expect(await backupCount()).toBe(1);
+      // A pull that died now would put back only what is still backed up.
+      const recovered = await LocalChangeGuard.fromJournal(
+        root,
+        guard.backupRoot,
+      );
+      expect(recovered.files.map((f) => f.relativePath)).toEqual(["other.txt"]);
     });
 
     it("recreates the file if the correction removed it", async () => {

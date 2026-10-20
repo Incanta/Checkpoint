@@ -18,7 +18,10 @@ import {
   submit,
   checkConflicts,
   pullTextFilesForSubmit,
+  getWorkspaceState,
 } from "../../../util/index.js";
+import { interruptedPullMessage } from "../../../util/interrupted-pull.js";
+import { DaemonConfig } from "../../../daemon-config.js";
 import { TRPCError } from "@trpc/server";
 import { JobManager } from "../../../job-manager.js";
 import { DaemonManager } from "../../../daemon-manager.js";
@@ -516,6 +519,19 @@ export const pendingRouter = router({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: `Nothing staged for "${targetBranch}". Stage files before submitting.`,
+        });
+      }
+
+      const unfinishedPull = (
+        await getWorkspaceState(
+          workspace.localPath,
+          (await DaemonConfig.Get()).stateBackend,
+        )
+      ).interruptedPull;
+      if (unfinishedPull) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: interruptedPullMessage(unfinishedPull),
         });
       }
 

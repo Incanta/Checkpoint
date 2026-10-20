@@ -23,6 +23,7 @@
  * nothing reads or writes ~/.checkpoint), and its logger.
  */
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -104,6 +105,13 @@ export interface StackOverrides {
    * needs the real matcher passes the real addon's function here.
    */
   nativeFilter?: (includeRules: string[], paths: string[]) => boolean[];
+  /**
+   * When set, the fake native pull reports no md5 for what it wrote ("-"),
+   * as an addon that could not vouch for the writes (or one from before
+   * hash-on-write) does, so the daemon falls back to hashing racily clean
+   * files itself when it records the pull.
+   */
+  omitWriteHashes?: boolean;
 }
 
 export const overrides: StackOverrides = {};
@@ -122,6 +130,7 @@ export function resetStack(): void {
   delete overrides.writeTime;
   delete overrides.duringPull;
   delete overrides.nativeFilter;
+  delete overrides.omitWriteHashes;
 }
 
 const normalize = (p: string) => p.replace(/\\/g, "/").replace(/^\/+/, "");
@@ -259,16 +268,19 @@ async function writeAll(
 ): Promise<{ code: number; step: string } | null> {
   let failure: { code: number; step: string } | null = null;
   // What the real addon reports it wrote (tracking-storage.h): each file's
-  // size and mtime as its write finished, written to the workspace once the
-  // pass succeeds.
+  // size and mtime as its write finished, and the md5 of the bytes it wrote,
+  // written to the workspace once the pass succeeds.
   const record: string[] = [];
   for (const [rel, bytes] of files) {
     try {
       await writeInto(root, rel, bytes);
       const st = await stat(path.join(root, rel), { bigint: true });
       const ns = st.mtimeNs;
+      const md5 = overrides.omitWriteHashes
+        ? "-"
+        : createHash("md5").update(bytes).digest("hex");
       record.push(
-        `${normalize(rel)}\t${st.size}\t${ns / 1_000_000_000n}\t${ns % 1_000_000_000n}\t-`,
+        `${normalize(rel)}\t${st.size}\t${ns / 1_000_000_000n}\t${ns % 1_000_000_000n}\t-\t${md5}`,
       );
     } catch (e) {
       failure ??= {

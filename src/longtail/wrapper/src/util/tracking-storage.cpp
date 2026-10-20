@@ -4,9 +4,12 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+
+#include "md5.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -23,13 +26,32 @@ struct Written {
   int has_stat = 0;
   int has_permissions = 0;
   uint16_t permissions = 0;
+  int has_md5 = 0;
+  char md5[33] = {0};
+};
+
+/**
+ * A file open for writing, and the MD5 of what has been written to it so far.
+ * The hash only describes the file if the writes covered it in order, from
+ * offset 0 to its final size, with no gap and nothing written twice, so any
+ * other pattern makes it unknown. Longtail writes each asset that way: a
+ * block asset in one job, and a large asset in partial jobs that each start
+ * the next only after their own writes (WritePartialAssetFromBlocks), so
+ * in practice every pulled file gets a hash.
+ */
+struct OpenWrite {
+  std::string path;
+  std::mutex lock;  // writes to one file are sequential, but not on one thread
+  checkpoint_md5::Context md5;
+  uint64_t next_offset = 0;
+  bool hashable = true;
 };
 
 struct TrackingStorageAPI {
   struct Longtail_StorageAPI m_API;  // must come first
   struct Longtail_StorageAPI* m_Inner;
   std::mutex* m_Lock;
-  std::unordered_map<Longtail_StorageAPI_HOpenFile, std::string>* m_OpenWrites;
+  std::unordered_map<Longtail_StorageAPI_HOpenFile, std::unique_ptr<OpenWrite>>* m_OpenWrites;
   std::map<std::string, Written>* m_Written;
 };
 
@@ -107,13 +129,48 @@ int OpenWriteFile(struct Longtail_StorageAPI* a, const char* path, uint64_t init
   TrackingStorageAPI* self = Self(a);
   int err = self->m_Inner->OpenWriteFile(self->m_Inner, path, initial_size, f);
   if (err == 0) {
-    std::lock_guard<std::mutex> lock(*self->m_Lock);
-    (*self->m_OpenWrites)[*f] = path;
+    auto open = std::make_unique<OpenWrite>();
+    open->path = path;
+    checkpoint_md5::Init(&open->md5);    std::lock_guard<std::mutex> lock(*self->m_Lock);
+    // Open for writing through another handle too: neither handle's writes
+    // alone say what the file holds, so neither gets a hash. (A path opened
+    // again after an earlier handle closed is fine: the new handle's writes
+    // must cover the whole file to be hashed, whatever the open left in it.)
+    for (auto& [handle, other] : *self->m_OpenWrites) {
+      if (other->path == open->path) {
+        std::lock_guard<std::mutex> other_lock(other->lock);
+        other->hashable = false;
+        open->hashable = false;
+      }
+    }
+    (*self->m_OpenWrites)[*f] = std::move(open);
   }
   return err;
 }
 int Write(struct Longtail_StorageAPI* a, Longtail_StorageAPI_HOpenFile f, uint64_t o, uint64_t l, const void* in) {
-  return Self(a)->m_Inner->Write(Self(a)->m_Inner, f, o, l, in);
+  TrackingStorageAPI* self = Self(a);
+  int err = self->m_Inner->Write(self->m_Inner, f, o, l, in);
+  OpenWrite* open = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(*self->m_Lock);
+    auto it = self->m_OpenWrites->find(f);
+    if (it != self->m_OpenWrites->end()) {
+      open = it->second.get();
+    }
+  }
+  if (open) {
+    // Hashed outside the API's lock, so files written in parallel hash in
+    // parallel. The entry lives until this handle closes, which cannot
+    // happen during a write to it.
+    std::lock_guard<std::mutex> lock(open->lock);
+    if (err != 0 || o != open->next_offset) {
+      open->hashable = false;
+    } else if (open->hashable) {
+      checkpoint_md5::Update(&open->md5, in, static_cast<size_t>(l));
+      open->next_offset += l;
+    }
+  }
+  return err;
 }
 int SetSize(struct Longtail_StorageAPI* a, Longtail_StorageAPI_HOpenFile f, uint64_t l) {
   return Self(a)->m_Inner->SetSize(Self(a)->m_Inner, f, l);
@@ -136,19 +193,29 @@ int GetPermissions(struct Longtail_StorageAPI* a, const char* path, uint16_t* ou
 }
 void CloseFile(struct Longtail_StorageAPI* a, Longtail_StorageAPI_HOpenFile f) {
   TrackingStorageAPI* self = Self(a);
-  std::string path;
+  std::unique_ptr<OpenWrite> open;
   {
     std::lock_guard<std::mutex> lock(*self->m_Lock);
     auto it = self->m_OpenWrites->find(f);
     if (it != self->m_OpenWrites->end()) {
-      path = it->second;
+      open = std::move(it->second);
       self->m_OpenWrites->erase(it);
     }
   }
   self->m_Inner->CloseFile(self->m_Inner, f);
-  if (!path.empty()) {
+  if (open) {
+    const std::string& path = open->path;
     Written w;
     if (StatFile(path, &w)) {
+      // The hash describes the file only if the writes ended where the file
+      // does (a write past the end, a truncation, or a gap left by an
+      // initial size would all leave bytes it did not see).
+      if (open->hashable && open->next_offset == w.size) {
+        unsigned char digest[16];
+        checkpoint_md5::Final(digest, &open->md5);
+        checkpoint_md5::ToHex(digest, w.md5);
+        w.has_md5 = 1;
+      }
       std::lock_guard<std::mutex> lock(*self->m_Lock);
       // Rewritten (a path whole indexes write twice): the last write wins.
       (*self->m_Written)[path] = w;
@@ -207,7 +274,7 @@ struct Longtail_StorageAPI* CreateTrackingStorageAPI(struct Longtail_StorageAPI*
   self->m_Inner = inner;
   self->m_Lock = new std::mutex();
   self->m_OpenWrites =
-      new std::unordered_map<Longtail_StorageAPI_HOpenFile, std::string>();
+      new std::unordered_map<Longtail_StorageAPI_HOpenFile, std::unique_ptr<OpenWrite>>();
   self->m_Written = new std::map<std::string, Written>();
   return api;
 }
@@ -244,18 +311,16 @@ int WriteTrackedFiles(
       continue;
     }
     rel = rel.substr(prefix.size());
+    char perms[16] = "-";
     if (w.has_permissions) {
-      std::fprintf(out, "%s\t%llu\t%lld\t%lld\t%o\n", rel.c_str(),
-                   static_cast<unsigned long long>(w.size),
-                   static_cast<long long>(w.mtime_sec),
-                   static_cast<long long>(w.mtime_nsec),
-                   static_cast<unsigned>(w.permissions));
-    } else {
-      std::fprintf(out, "%s\t%llu\t%lld\t%lld\t-\n", rel.c_str(),
-                   static_cast<unsigned long long>(w.size),
-                   static_cast<long long>(w.mtime_sec),
-                   static_cast<long long>(w.mtime_nsec));
+      std::snprintf(perms, sizeof(perms), "%o", static_cast<unsigned>(w.permissions));
     }
+    std::fprintf(out, "%s\t%llu\t%lld\t%lld\t%s\t%s\n", rel.c_str(),
+                 static_cast<unsigned long long>(w.size),
+                 static_cast<long long>(w.mtime_sec),
+                 static_cast<long long>(w.mtime_nsec),
+                 perms,
+                 w.has_md5 ? w.md5 : "-");
   }
   return std::fclose(out) == 0 ? 0 : EIO;
 }

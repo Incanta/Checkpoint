@@ -8,8 +8,11 @@ import {
   GetLogLevel,
 } from "@checkpointvcs/longtail-addon";
 
+import { TRPCError } from "@trpc/server";
+
 import { getSession } from "~/server/auth";
 import { db } from "~/server/db";
+import { getUserAndRepoWithAccess } from "~/server/api/auth-utils";
 import { buildAddonStorageOptions } from "~/server/storage-options";
 
 export async function GET(request: NextRequest) {
@@ -30,13 +33,21 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Verify access
-  const repo = await db.repo.findUnique({
-    where: { id: repoId },
-    include: { org: true },
-  });
-
-  if (!repo) {
+  // Verify access: the same READ rule the tRPC routes apply. This used to
+  // check only that the repo existed, so any signed-in user could download
+  // any repo's files by id.
+  let repo: Awaited<ReturnType<typeof getUserAndRepoWithAccess>>["repo"];
+  try {
+    ({ repo } = await getUserAndRepoWithAccess(
+      { db, session, headers: request.headers },
+      repoId,
+      "READ",
+    ));
+  } catch (error) {
+    if (!(error instanceof TRPCError)) throw error;
+    if (error.code === "FORBIDDEN") {
+      return Response.json({ error: error.message }, { status: 403 });
+    }
     return Response.json({ error: "Repo not found" }, { status: 404 });
   }
 

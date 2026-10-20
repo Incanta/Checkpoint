@@ -50,8 +50,11 @@ export const fileRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
+      // Scoped to the repo the access check was for: ids alone would return
+      // any repo's files to anyone who can read some repo.
       return ctx.db.file.findMany({
         where: {
+          repoId: input.repoId,
           id: {
             in: input.ids,
           },
@@ -93,7 +96,7 @@ export const fileRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
-      await assertWorkspaceOwnership(ctx, input.workspaceId);
+      await assertWorkspaceOwnership(ctx, input.workspaceId, input.repoId);
 
       const claims = await ctx.db.fileClaim.findMany({
         where: {
@@ -247,7 +250,7 @@ export const fileRouter = createTRPCRouter({
         input.repoId,
         RepoAccess.WRITE,
       );
-      await assertWorkspaceOwnership(ctx, input.workspaceId);
+      await assertWorkspaceOwnership(ctx, input.workspaceId, input.repoId);
 
       const normalizedPath = input.filePath.replaceAll("\\", "/");
 
@@ -319,7 +322,7 @@ export const fileRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.WRITE);
-      await assertWorkspaceOwnership(ctx, input.workspaceId);
+      await assertWorkspaceOwnership(ctx, input.workspaceId, input.repoId);
 
       const normalizedPath = input.filePath.replaceAll("\\", "/");
 
