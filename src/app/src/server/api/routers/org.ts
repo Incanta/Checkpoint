@@ -7,7 +7,13 @@ import {
   protectedProcedure,
 } from "~/server/api/trpc";
 import { createOrgDirectory } from "~/server/storage-service";
-import { RepoAccess } from "@prisma/client";
+import { RepoAccess, type OrgRole, type PrismaClient } from "@prisma/client";
+import {
+  assertOrgMfa,
+  getMfaStatuses,
+  isMfaCompliant,
+  type MfaMethod,
+} from "~/server/auth/mfa";
 import {
   getDefaultBinaryExtensions,
   resolveBinaryExtensions,
@@ -15,9 +21,101 @@ import {
 import { Logger } from "~/server/logging";
 import { getBillingPeriod } from "~/server/billing/billing-period";
 
+async function assertOrgAdmin(
+  db: PrismaClient,
+  orgId: string,
+  userId: string,
+): Promise<void> {
+  const orgUser = await db.orgUser.findFirst({ where: { orgId, userId } });
+  if (orgUser?.role !== "ADMIN") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "You do not have permission to manage this organization",
+    });
+  }
+}
+
+export interface MfaReportEntry {
+  userId: string;
+  name: string | null;
+  email: string;
+  image: string | null;
+  /** Org role, or null for someone who only holds a per-repo grant. */
+  role: OrgRole | null;
+  compliant: boolean;
+  method: MfaMethod | null;
+  identityProviders: string[];
+}
+
+async function buildMfaReport(
+  db: PrismaClient,
+  orgId: string,
+  viewerId: string,
+) {
+  const org = await db.org.findUniqueOrThrow({
+    where: { id: orgId },
+    select: {
+      requireMfa: true,
+      requireMfaEnabledAt: true,
+      requireMfaEnabledBy: true,
+    },
+  });
+
+  const userSelect = { id: true, name: true, email: true, image: true };
+  const [members, collaborators] = await Promise.all([
+    db.orgUser.findMany({
+      where: { orgId },
+      include: { user: { select: userSelect } },
+    }),
+    // People granted a repo without being org members lose it too.
+    db.repoRole.findMany({
+      where: {
+        repo: { orgId, deletedAt: null },
+        access: { not: "NONE" },
+        user: { orgs: { none: { orgId } } },
+      },
+      distinct: ["userId"],
+      include: { user: { select: userSelect } },
+    }),
+  ]);
+
+  const people = [
+    ...members.map((m) => ({ user: m.user, role: m.role })),
+    ...collaborators.map((c) => ({ user: c.user, role: null })),
+  ];
+  const statuses = await getMfaStatuses(
+    db,
+    people.map((p) => p.user.id),
+  );
+
+  const entries: MfaReportEntry[] = people.map(({ user, role }) => {
+    const status = statuses.get(user.id);
+    return {
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      image: user.image,
+      role,
+      compliant: status?.compliant ?? false,
+      method: status?.method ?? null,
+      identityProviders: status?.identityProviders ?? [],
+    };
+  });
+  entries.sort((a, b) => (a.name ?? a.email).localeCompare(b.name ?? b.email));
+
+  return {
+    requireMfa: org.requireMfa,
+    requireMfaEnabledAt: org.requireMfaEnabledAt,
+    requireMfaEnabledBy: org.requireMfaEnabledBy,
+    viewerCompliant: statuses.get(viewerId)?.compliant ?? false,
+    entries,
+    nonCompliant: entries.filter((e) => !e.compliant),
+  };
+}
+
 export const orgRouter = createTRPCRouter({
   myOrgs: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.db.org.findMany({
+    const orgs = await ctx.db.org.findMany({
       where: {
         deletedAt: null,
         users: {
@@ -41,6 +139,20 @@ export const orgRouter = createTRPCRouter({
           select: { role: true },
         },
       },
+    });
+
+    // Members an org's MFA requirement locks out still see the org listed,
+    // flagged, so the UI can tell them why it is empty; its repos are hidden.
+    const compliant = orgs.some((o) => o.requireMfa)
+      ? await isMfaCompliant(ctx.db, ctx.session.user.id)
+      : true;
+    return orgs.map((org) => {
+      const mfaBlocked = org.requireMfa && !compliant;
+      return {
+        ...org,
+        repos: mfaBlocked ? [] : org.repos,
+        mfaBlocked,
+      };
     });
   }),
 
@@ -80,19 +192,26 @@ export const orgRouter = createTRPCRouter({
         },
       });
 
-      if (!orgUser) {
+      const mfaBlocked =
+        !!orgUser &&
+        org.requireMfa &&
+        !(await isMfaCompliant(ctx.db, ctx.session.user.id));
+
+      if (!orgUser || mfaBlocked) {
         // Return only public repos if user is not a member, and none of
         // their per-user grants: those name the org's members and what each
-        // may do.
+        // may do. A member locked out by the MFA requirement gets the same.
         return {
           id: org.id,
           name: org.name,
           defaultRepoAccess: RepoAccess.NONE,
           defaultCanCreateRepos: false,
+          requireMfa: org.requireMfa,
           repos: (org.repos ?? [])
             .filter((repo) => repo.public && !repo.deletedAt)
             .map((repo) => ({ ...repo, additionalRoles: [] })),
           users: [],
+          mfaBlocked,
         };
       }
 
@@ -111,6 +230,7 @@ export const orgRouter = createTRPCRouter({
       return {
         ...org,
         repos: filteredRepos,
+        mfaBlocked: false,
       };
     }),
 
@@ -130,6 +250,7 @@ export const orgRouter = createTRPCRouter({
           message: "You do not have permission to view this organization",
         });
       }
+      await assertOrgMfa(ctx.db, input.id, ctx.session.user.id);
 
       const repos = await ctx.db.repo.findMany({
         where: { orgId: input.id, deletedAt: null },
@@ -171,6 +292,8 @@ export const orgRouter = createTRPCRouter({
           message: "You do not have access to this organization",
         });
       }
+      // Deliberately not behind the org's MFA requirement: a locked-out
+      // member needs to know which admins to ask.
 
       const admins = await ctx.db.orgUser.findMany({
         where: { orgId: input.orgId, role: "ADMIN" },
@@ -249,6 +372,7 @@ export const orgRouter = createTRPCRouter({
           message: "You do not have permission to update this organization",
         });
       }
+      await assertOrgMfa(ctx.db, id, ctx.session.user.id);
 
       return ctx.db.org.update({
         where: { id },
@@ -276,6 +400,7 @@ export const orgRouter = createTRPCRouter({
           message: "You do not have permission to delete this organization",
         });
       }
+      await assertOrgMfa(ctx.db, input.id, ctx.session.user.id);
 
       return ctx.db.org.update({
         where: { id: input.id },
@@ -310,6 +435,7 @@ export const orgRouter = createTRPCRouter({
             "You do not have permission to add users to this organization",
         });
       }
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
 
       // Find the user to add by email
       const userToAdd = await ctx.db.user.findUnique({
@@ -373,6 +499,7 @@ export const orgRouter = createTRPCRouter({
           message: "You do not have access to this organization",
         });
       }
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
 
       const org = await ctx.db.org.findUnique({
         where: { id: input.orgId },
@@ -449,6 +576,58 @@ export const orgRouter = createTRPCRouter({
       return org;
     }),
 
+  /**
+   * Every member and repo collaborator of the org with how (or whether) they
+   * meet the "require MFA" rule. Admin only; the settings page lists the
+   * people who would lose, or have lost, access.
+   */
+  getMfaReport: protectedProcedure
+    .input(z.object({ orgId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      await assertOrgAdmin(ctx.db, input.orgId, ctx.session.user.id);
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
+      return buildMfaReport(ctx.db, input.orgId, ctx.session.user.id);
+    }),
+
+  setRequireMfa: protectedProcedure
+    .input(z.object({ orgId: z.string(), enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id;
+      await assertOrgAdmin(ctx.db, input.orgId, userId);
+      await assertOrgMfa(ctx.db, input.orgId, userId);
+
+      // Turning it on without MFA would lock the caller out of the page they
+      // are on, with nobody left who can turn it back off.
+      if (input.enabled && !(await isMfaCompliant(ctx.db, userId))) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "Turn on two-factor authentication for your own account before requiring it for the organization.",
+        });
+      }
+
+      await ctx.db.org.update({
+        where: { id: input.orgId },
+        data: input.enabled
+          ? {
+              requireMfa: true,
+              requireMfaEnabledAt: new Date(),
+              requireMfaEnabledBy: userId,
+            }
+          : {
+              requireMfa: false,
+              requireMfaEnabledAt: null,
+              requireMfaEnabledBy: null,
+            },
+      });
+
+      const report = await buildMfaReport(ctx.db, input.orgId, userId);
+      Logger.info(
+        `[Org] ${userId} ${input.enabled ? "enabled" : "disabled"} required MFA for org ${input.orgId}; ${report.nonCompliant.length} user(s) without MFA`,
+      );
+      return report;
+    }),
+
   getBinaryExtensions: protectedProcedure
     .input(
       z.object({
@@ -469,6 +648,7 @@ export const orgRouter = createTRPCRouter({
           message: "You do not have access to this organization",
         });
       }
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
 
       const org = await ctx.db.org.findUnique({
         where: { id: input.orgId },

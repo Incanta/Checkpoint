@@ -7,8 +7,9 @@ import {
   deleteRepoDirectory,
 } from "~/server/storage-service";
 import { isR2Enabled, createR2Bucket } from "~/server/r2-service";
-import { RepoAccess } from "@prisma/client";
+import { RepoAccess, type OrgUser, type RepoRole } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
+import { assertOrgMfa, isMfaCompliant } from "~/server/auth/mfa";
 import { Logger } from "~/server/logging";
 import { buildStateTreeBlocks } from "~/server/state-tree";
 import { auditRepoPaths } from "~/server/repo-path-audit";
@@ -51,8 +52,19 @@ export const repoRouter = createTRPCRouter({
         });
       }
 
-      const orgUser = repo.org.users[0];
-      const repoRole = repo.additionalRoles[0];
+      let orgUser: OrgUser | undefined = repo.org.users[0];
+      let repoRole: RepoRole | undefined = repo.additionalRoles[0];
+
+      // Mirrors getUserAndRepoWithAccess, so the UI does not offer actions
+      // the server will refuse.
+      const mfaBlocked =
+        repo.org.requireMfa &&
+        !!(orgUser || repoRole) &&
+        !(await isMfaCompliant(ctx.db, userId));
+      if (mfaBlocked) {
+        orgUser = undefined;
+        repoRole = undefined;
+      }
 
       const isMember = !!orgUser;
 
@@ -72,7 +84,7 @@ export const repoRouter = createTRPCRouter({
           repoRole?.access === "ADMIN")
       );
 
-      return { isMember, canWrite, isAdmin };
+      return { isMember, canWrite, isAdmin, mfaBlocked };
     }),
 
   createRepo: protectedProcedure
@@ -102,6 +114,7 @@ export const repoRouter = createTRPCRouter({
           message: "User does not have permission to create a repo",
         });
       }
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
 
       const repo = await ctx.db.repo.create({
         data: {
@@ -328,6 +341,7 @@ export const repoRouter = createTRPCRouter({
           message: "User does not have access to this organization",
         });
       }
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
 
       const repos = await ctx.db.repo.findMany({
         where: {

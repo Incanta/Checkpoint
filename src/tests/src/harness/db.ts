@@ -73,6 +73,8 @@ const tableOrder = [
   "Org",
   "Session",
   "Account",
+  "TwoFactor",
+  "Passkey",
   "Verification",
   "User",
 ];

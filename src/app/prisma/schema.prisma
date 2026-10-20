@@ -54,8 +54,13 @@ model User {
   mrSubscriptions    MergeRequestSubscription[]
 
   // Auth
-  accounts Account[]
-  sessions Session[]
+  accounts   Account[]
+  sessions   Session[]
+  twoFactors TwoFactor[]
+  passkeys   Passkey[]
+
+  // Set by better-auth's twoFactor plugin once TOTP is verified.
+  twoFactorEnabled Boolean? @default(false)
 
   emailPreferences EmailPreferences?
 
@@ -177,6 +182,13 @@ model Org {
   defaultCanCreateRepos Boolean    @default(true)
 
   binaryExtensions String @default("")
+
+  // When set, members who can sign in with a password but have no second
+  // factor keep their membership but lose access to the org's data until
+  // they enable TOTP or drop the password (see server/auth/mfa.ts).
+  requireMfa          Boolean   @default(false)
+  requireMfaEnabledAt DateTime?
+  requireMfaEnabledBy String?
 
   subscriptionTier LicenseTier @default(BASIC)
 
@@ -1249,6 +1261,42 @@ model Verification {
   expiresAt  DateTime
   createdAt  DateTime? @default(now())
   updatedAt  DateTime? @updatedAt
+}
+
+// better-auth twoFactor plugin (TOTP secret and backup codes, both encrypted).
+model TwoFactor {
+  id                      String    @id @default(cuid())
+  secret                  String
+  backupCodes             String
+  userId                  String
+  verified                Boolean?  @default(true)
+  failedVerificationCount Int?      @default(0)
+  lockedUntil             DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([secret])
+  @@index([userId])
+}
+
+// better-auth passkey plugin (WebAuthn credentials).
+model Passkey {
+  id           String    @id @default(cuid())
+  name         String?
+  publicKey    String
+  userId       String
+  credentialID String
+  counter      Int
+  deviceType   String
+  backedUp     Boolean
+  transports   String?
+  createdAt    DateTime? @default(now())
+  aaguid       String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([credentialID])
 }
 
 // ── Instance Settings (singleton) ────────────────────────────────

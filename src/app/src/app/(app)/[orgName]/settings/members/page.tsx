@@ -57,6 +57,14 @@ export default function OrgMembersPage() {
     { enabled: !!org?.id },
   );
 
+  const { data: mfaReport } = api.org.getMfaReport.useQuery(
+    { orgId: org?.id ?? "" },
+    { enabled: !!org?.id },
+  );
+  const withoutMfa = new Set(
+    mfaReport?.nonCompliant.map((entry) => entry.userId) ?? [],
+  );
+
   const addUser = api.org.addUserToOrg.useMutation({
     onSuccess: () => {
       setNewEmail("");
@@ -212,6 +220,13 @@ export default function OrgMembersPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {withoutMfa.has(member.user.id) && (
+                      <Badge
+                        variant={mfaReport?.requireMfa ? "danger" : "warning"}
+                      >
+                        {mfaReport?.requireMfa ? "Blocked: no MFA" : "No MFA"}
+                      </Badge>
+                    )}
                     {activity && activity.writeCount > 0 && (
                       <Badge variant="accent">AWU</Badge>
                     )}

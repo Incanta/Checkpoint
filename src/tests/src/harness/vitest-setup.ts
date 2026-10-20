@@ -98,8 +98,16 @@ vi.mock("~/server/auth/config", () => ({
     api: {
       getSession: vi.fn().mockResolvedValue(null),
     },
+    // Stands in for better-auth's scrypt hashing: a stored hash of
+    // "hashed:<password>" verifies against <password>.
+    $context: Promise.resolve({
+      password: {
+        verify: async ({ password, hash }: { password: string; hash: string }) =>
+          hash === `hashed:${password}`,
+      },
+    }),
   }),
-  enabledProviderIds: [],
+  enabledIdentityProviders: [],
 }));
 
 // Premium-only modules — virtual on main (vitest creates the mock even

@@ -19,43 +19,73 @@ dev:
   # This allows automated tests to create API tokens without OAuth flow
   allow-dev-login: false
 
+# Accounts that live in Checkpoint itself, for teams without an identity
+# provider. Password users can add a TOTP authenticator app as a second factor
+# and register passkeys (passkeys need server.external-url to be the https
+# origin users browse to, or http://localhost).
 email-password:
   enabled: true
+  passkeys: true
 
-auth0:
-  enabled: false
-  client:
-    id: ""
-    secret: ""
-  issuer: ""
-
-github:
-  enabled: false
-  client:
-    id: ""
-    secret: ""
-
-gitlab:
-  enabled: false
-  client:
-    id: ""
-    secret: ""
+# Enterprise identity providers. Each one that is enabled gets a "Sign in with"
+# button. The callback URL to register with the provider is
+# <server.external-url>/api/auth/callback/<id>, where <id> is the key below
+# (for example "okta", "microsoft-entra-id", or "oidc").
+# Members who sign in only through one of these are exempt from an org's
+# "require MFA" setting: their identity provider is responsible for MFA.
 
 okta:
   enabled: false
   client:
     id: ""
     secret: ""
+  # For example https://your-org.okta.com/oauth2/default
   issuer: ""
 
-slack:
+auth0:
   enabled: false
   client:
     id: ""
     secret: ""
+  # Your Auth0 domain, for example https://your-tenant.us.auth0.com
+  issuer: ""
 
-discord:
+# Google Workspace.
+google:
   enabled: false
   client:
     id: ""
     secret: ""
+  # Only accept accounts from this Workspace domain (for example
+  # "example.com"), checked against the token Google returns. "*" accepts any
+  # Workspace domain. Leaving it empty accepts personal Google accounts too.
+  hosted-domain: ""
+
+microsoft-entra-id:
+  enabled: false
+  client:
+    id: ""
+    secret: ""
+  # The directory (tenant) id GUID of your Entra ID tenant.
+  tenant-id: ""
+
+keycloak:
+  enabled: false
+  client:
+    id: ""
+    secret: ""
+  # The realm URL, for example https://keycloak.example.com/realms/checkpoint
+  issuer: ""
+
+# Any other OpenID Connect provider.
+oidc:
+  enabled: false
+  # Shown on the sign-in button: "Sign in with <name>".
+  name: "SSO"
+  client:
+    id: ""
+    secret: ""
+  # For example https://idp.example.com/.well-known/openid-configuration
+  discovery-url: ""
+  scopes: ["openid", "email", "profile"]
+  pkce: true

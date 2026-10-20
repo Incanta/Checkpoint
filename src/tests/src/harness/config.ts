@@ -43,11 +43,13 @@ function applyDefaults(): void {
   setConfig("auth.dev.allow-dev-login", true);
   setConfig("auth.secret", "test-better-auth-secret-min-32-chars-long");
   setConfig("auth.email-password.enabled", true);
-  setConfig("auth.discord.enabled", false);
-  setConfig("auth.github.enabled", false);
-  setConfig("auth.gitlab.enabled", false);
+  setConfig("auth.email-password.passkeys", true);
   setConfig("auth.okta.enabled", false);
   setConfig("auth.auth0.enabled", false);
+  setConfig("auth.google.enabled", false);
+  setConfig("auth.microsoft-entra-id.enabled", false);
+  setConfig("auth.keycloak.enabled", false);
+  setConfig("auth.oidc.enabled", false);
 
   // Database
   setConfig("db.provider", "sqlite");

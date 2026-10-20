@@ -244,7 +244,10 @@ export function AppHeader() {
           </div>
           <DropdownDivider />
           <DropdownItem href="/settings">Profile & Settings</DropdownItem>
-          <DropdownItem href="/settings/notifications">Notifications</DropdownItem>
+          <DropdownItem href="/settings/security">Security</DropdownItem>
+          <DropdownItem href="/settings/notifications">
+            Notifications
+          </DropdownItem>
           <DropdownItem href="/settings/devices">Devices & Tokens</DropdownItem>
           {user?.checkpointAdmin && (
             <>

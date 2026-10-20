@@ -1,25 +1,12 @@
 import { NextResponse } from "next/server";
 import config from "@incanta/config";
-import { enabledProviderIds } from "~/server/auth/config";
+import { enabledIdentityProviders } from "~/server/auth/config";
+import { emailPasswordEnabled, passkeysEnabled } from "~/server/auth/methods";
 import { db } from "~/server/db";
 import { isLicenseManager } from "~/server/license-utils";
 import { getInviteMode } from "~/server/invites";
 
-const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  discord: "Discord",
-  github: "GitHub",
-  gitlab: "GitLab",
-  auth0: "Auth0",
-  okta: "Okta",
-  slack: "Slack",
-};
-
 export async function GET() {
-  const providers = enabledProviderIds.map((id) => ({
-    id,
-    name: PROVIDER_DISPLAY_NAMES[id] ?? id,
-  }));
-
   const [userCount, settings] = await Promise.all([
     db.user.count(),
     db.instanceSettings.findUnique({ where: { id: "default" } }),
@@ -35,5 +22,11 @@ export async function GET() {
   const showNewsletter =
     isLicenseManager() && config.get<boolean>("newsletter.kit.enabled");
 
-  return NextResponse.json({ providers, registrationOpen, showNewsletter });
+  return NextResponse.json({
+    providers: enabledIdentityProviders,
+    emailPassword: emailPasswordEnabled(),
+    passkeys: passkeysEnabled(),
+    registrationOpen,
+    showNewsletter,
+  });
 }

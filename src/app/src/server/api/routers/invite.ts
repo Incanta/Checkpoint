@@ -8,6 +8,7 @@ import {
   publicProcedure,
 } from "~/server/api/trpc";
 import { getCheckpointUser } from "~/server/api/auth-utils";
+import { isMfaCompliant } from "~/server/auth/mfa";
 import { getInviteMode, normalizeEmail } from "~/server/invites";
 import { isLicenseManager } from "~/server/license-utils";
 import { sendEmail, isEmailEnabled, inviteToSignupEmail } from "~/server/email";
@@ -58,12 +59,35 @@ async function getGrantableScope(
     where: { userId, role: "ADMIN" },
     include: {
       org: {
-        include: { repos: { where: { deletedAt: null }, select: { id: true } } },
+        include: {
+          repos: { where: { deletedAt: null }, select: { id: true } },
+        },
       },
     },
   });
+  // An org's MFA requirement takes away the admin rights of anyone who does
+  // not meet it, including the right to invite.
+  const adminRepoRoles = await db.repoRole.findMany({
+    where: { userId, access: "ADMIN" },
+    include: {
+      repo: {
+        select: {
+          id: true,
+          deletedAt: true,
+          org: { select: { requireMfa: true } },
+        },
+      },
+    },
+  });
+  const compliant =
+    adminMemberships.some((m) => m.org.requireMfa) ||
+    adminRepoRoles.some((rr) => rr.repo.org.requireMfa)
+      ? await isMfaCompliant(db, userId)
+      : true;
+
   for (const m of adminMemberships) {
     if (m.org.deletedAt) continue;
+    if (m.org.requireMfa && !compliant) continue;
     orgIds.add(m.orgId);
     for (const repo of m.org.repos) {
       repoIds.add(repo.id);
@@ -71,14 +95,10 @@ async function getGrantableScope(
   }
 
   // Repos the user has explicit ADMIN access to.
-  const adminRepoRoles = await db.repoRole.findMany({
-    where: { userId, access: "ADMIN" },
-    include: { repo: { select: { id: true, deletedAt: true } } },
-  });
   for (const rr of adminRepoRoles) {
-    if (!rr.repo.deletedAt) {
-      repoIds.add(rr.repoId);
-    }
+    if (rr.repo.deletedAt) continue;
+    if (rr.repo.org.requireMfa && !compliant) continue;
+    repoIds.add(rr.repoId);
   }
 
   return { orgIds, repoIds };
@@ -263,7 +283,8 @@ export const inviteRouter = createTRPCRouter({
         if (!orgIds.has(orgRole.orgId)) {
           throw new TRPCError({
             code: "FORBIDDEN",
-            message: "You cannot grant access to one of the selected organizations",
+            message:
+              "You cannot grant access to one of the selected organizations",
           });
         }
       }
@@ -271,7 +292,8 @@ export const inviteRouter = createTRPCRouter({
         if (!repoIds.has(repoRole.repoId)) {
           throw new TRPCError({
             code: "FORBIDDEN",
-            message: "You cannot grant access to one of the selected repositories",
+            message:
+              "You cannot grant access to one of the selected repositories",
           });
         }
       }
@@ -399,8 +421,7 @@ async function maybeSendInviteEmail(
     return false;
   }
   const summaryParts = [...orgNames, ...repoNames];
-  const summary =
-    summaryParts.length > 0 ? summaryParts.join(", ") : undefined;
+  const summary = summaryParts.length > 0 ? summaryParts.join(", ") : undefined;
   try {
     return await sendEmail({
       to,

@@ -9,6 +9,11 @@ import type {
 } from "@prisma/client";
 import type { TRPCContextPrivate } from "./trpc";
 import { TRPCError } from "@trpc/server";
+import {
+  getMfaStatuses,
+  isMfaCompliant,
+  mfaRequiredError,
+} from "~/server/auth/mfa";
 
 type RepoWithOrg = Repo & {
   org: Org & { users: OrgUser[] };
@@ -83,16 +88,32 @@ export async function getUserAndRepoWithAccess(
     });
   }
 
-  const orgUser = repo.org.users[0];
-  const repoRole = repo.additionalRoles[0];
+  let orgUser: OrgUser | undefined = repo.org.users[0];
+  let repoRole: RepoRole | undefined = repo.additionalRoles[0];
   let isAdmin = false;
+
+  // An org that requires MFA treats a member without it as an outsider: the
+  // membership and grants stay, but only public repos remain readable.
+  const mfaBlocked =
+    repo.org.requireMfa &&
+    !!(orgUser || repoRole) &&
+    !(await isMfaCompliant(ctx.db, userId));
+  if (mfaBlocked) {
+    orgUser = undefined;
+    repoRole = undefined;
+  }
+
+  const denied = () =>
+    mfaBlocked
+      ? mfaRequiredError(repo.org.name)
+      : new TRPCError({
+          code: "FORBIDDEN",
+          message: "You do not have access to this repository",
+        });
 
   if (access === "READ") {
     if (!hasReadAccess(repo, orgUser, repoRole)) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "You do not have access to this repository",
-      });
+      throw denied();
     }
   } else if (access === "WRITE") {
     const hasWriteAccess =
@@ -104,10 +125,7 @@ export async function getUserAndRepoWithAccess(
           (repoRole.access === "WRITE" || repoRole.access === "ADMIN")));
 
     if (!hasWriteAccess) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "You do not have access to this repository",
-      });
+      throw denied();
     }
   } else if (access === "ADMIN") {
     isAdmin = !!(
@@ -118,10 +136,7 @@ export async function getUserAndRepoWithAccess(
     );
 
     if (!isAdmin) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "You do not have access to this repository",
-      });
+      throw denied();
     }
   }
 
@@ -174,9 +189,17 @@ export async function usersWithRepoRead(
   });
   if (!repo || repo.deletedAt || repo.org.deletedAt) return allowed;
 
+  const mfaStatuses = repo.org.requireMfa
+    ? await getMfaStatuses(db, userIds)
+    : null;
+
   for (const userId of userIds) {
-    const orgUser = repo.org.users.find((u) => u.userId === userId);
-    const repoRole = repo.additionalRoles.find((r) => r.userId === userId);
+    let orgUser = repo.org.users.find((u) => u.userId === userId);
+    let repoRole = repo.additionalRoles.find((r) => r.userId === userId);
+    if (mfaStatuses && !mfaStatuses.get(userId)?.compliant) {
+      orgUser = undefined;
+      repoRole = undefined;
+    }
     if (hasReadAccess(repo, orgUser, repoRole)) {
       allowed.add(userId);
     }

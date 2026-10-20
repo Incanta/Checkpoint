@@ -20,6 +20,7 @@ import {
   calculateStorageCharge,
 } from "~/server/billing";
 import { Logger } from "~/server/logging";
+import { assertOrgMfa } from "~/server/auth/mfa";
 
 function assertBillingEnabled() {
   if (!isLicenseManager() || !isStripeEnabled()) {
@@ -146,6 +147,7 @@ export const billingRouter = createTRPCRouter({
         },
       });
       if (!orgUser) throw new TRPCError({ code: "FORBIDDEN" });
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
       assertBillingRole(orgUser.role);
 
       const org = await ctx.db.org.findUniqueOrThrow({
@@ -187,7 +189,8 @@ export const billingRouter = createTRPCRouter({
       const cloudPrices = prices.cloud;
       const writeKey = `${tierKey}-write` as keyof typeof cloudPrices;
       const readKey = `${tierKey}-read` as keyof typeof cloudPrices;
-      if (cloudPrices[writeKey]) lineItems.push({ price: cloudPrices[writeKey] });
+      if (cloudPrices[writeKey])
+        lineItems.push({ price: cloudPrices[writeKey] });
       if (cloudPrices[readKey]) lineItems.push({ price: cloudPrices[readKey] });
       if (cloudPrices.storage) lineItems.push({ price: cloudPrices.storage });
       if (minInvoice !== null && cloudPrices["minimum-due"])
@@ -233,6 +236,7 @@ export const billingRouter = createTRPCRouter({
       if (!orgUser) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
 
       const org = await ctx.db.org.findUniqueOrThrow({
         where: { id: input.orgId },
@@ -325,6 +329,7 @@ export const billingRouter = createTRPCRouter({
       if (!orgUser) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
 
       const invoices = await ctx.db.invoice.findMany({
         where: { orgId: input.orgId },
@@ -360,6 +365,7 @@ export const billingRouter = createTRPCRouter({
       if (!orgUser) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
+      await assertOrgMfa(ctx.db, invoice.orgId, ctx.session.user.id);
 
       return invoice;
     }),
@@ -376,6 +382,7 @@ export const billingRouter = createTRPCRouter({
         },
       });
       if (!orgUser) throw new TRPCError({ code: "FORBIDDEN" });
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
       assertBillingRole(orgUser.role);
 
       await cancelSubscription(input.orgId, ctx.db);
@@ -394,6 +401,7 @@ export const billingRouter = createTRPCRouter({
         },
       });
       if (!orgUser) throw new TRPCError({ code: "FORBIDDEN" });
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
       assertBillingRole(orgUser.role);
 
       return await resumeSubscription(input.orgId, ctx.db);
@@ -417,6 +425,7 @@ export const billingRouter = createTRPCRouter({
         },
       });
       if (!orgUser) throw new TRPCError({ code: "FORBIDDEN" });
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
       assertBillingRole(orgUser.role);
 
       const org = await ctx.db.org.findUniqueOrThrow({
@@ -562,6 +571,7 @@ export const billingRouter = createTRPCRouter({
         },
       });
       if (!orgUser) throw new TRPCError({ code: "FORBIDDEN" });
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
       assertBillingRole(orgUser.role);
 
       await ctx.db.org.update({
@@ -592,6 +602,7 @@ export const billingRouter = createTRPCRouter({
         },
       });
       if (!orgUser) throw new TRPCError({ code: "FORBIDDEN" });
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
       assertBillingRole(orgUser.role);
 
       const result = await startTrial(
@@ -623,6 +634,7 @@ export const billingRouter = createTRPCRouter({
         },
       });
       if (!orgUser) throw new TRPCError({ code: "FORBIDDEN" });
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
       assertBillingRole(orgUser.role);
 
       const org = await ctx.db.org.findUniqueOrThrow({
@@ -668,6 +680,7 @@ export const billingRouter = createTRPCRouter({
       if (!orgUser) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not a member" });
       }
+      await assertOrgMfa(ctx.db, input.orgId, ctx.session.user.id);
 
       const lm = isLicenseManager();
 

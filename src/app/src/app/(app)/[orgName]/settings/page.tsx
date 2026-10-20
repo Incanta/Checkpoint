@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter, notFound } from "next/navigation";
 import { api } from "~/trpc/react";
@@ -8,6 +9,7 @@ import { Button, Card, PageHeader } from "~/app/_components/ui";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 import { DeleteEntityModal } from "~/app/_components/delete-entity-modal";
 import { SettingsTabs } from "./_components/settings-tabs";
+import { RequireMfaCard } from "./_components/require-mfa-card";
 
 export default function OrgSettingsPage() {
   const params = useParams<{ orgName: string }>();
@@ -25,7 +27,11 @@ export default function OrgSettingsPage() {
   const currentOrgUser = org?.users?.find(
     (u: { userId: string }) => u.userId === session?.user?.id,
   );
-  if (org && (!currentOrgUser || currentOrgUser.role !== "ADMIN")) {
+  if (
+    org &&
+    !org.mfaBlocked &&
+    (!currentOrgUser || currentOrgUser.role !== "ADMIN")
+  ) {
     notFound();
   }
 
@@ -59,6 +65,26 @@ export default function OrgSettingsPage() {
   });
 
   const [showDelete, setShowDelete] = useState(false);
+
+  if (org?.mfaBlocked) {
+    return (
+      <div className="mx-auto max-w-2xl">
+        <PageHeader title={`${orgName} settings`} />
+        <Card>
+          <p className="text-sm text-[var(--color-text-primary)]">
+            {orgName} requires two-factor authentication. Set it up in your{" "}
+            <Link
+              href="/settings/security"
+              className="text-[var(--color-info)] hover:underline"
+            >
+              security settings
+            </Link>{" "}
+            to manage this organization.
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,6 +182,8 @@ export default function OrgSettingsPage() {
             </div>
           </form>
         </Card>
+
+        {org && <RequireMfaCard orgId={org.id} />}
 
         {org && <BinaryExtensionsCard orgId={org.id} />}
 

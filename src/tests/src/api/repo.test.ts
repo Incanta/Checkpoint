@@ -143,7 +143,12 @@ describe("repo router", () => {
       const caller = await makeAppCaller({ asUser: admin });
 
       const access = await caller.repo.getMyRepoAccess({ repoId: repo.id });
-      expect(access).toEqual({ isMember: true, canWrite: true, isAdmin: true });
+      expect(access).toEqual({
+        isMember: true,
+        canWrite: true,
+        isAdmin: true,
+        mfaBlocked: false,
+      });
     });
 
     it("returns canWrite for MEMBER when defaultRepoAccess is WRITE", async () => {
@@ -161,6 +166,7 @@ describe("repo router", () => {
         isMember: true,
         canWrite: true,
         isAdmin: false,
+        mfaBlocked: false,
       });
     });
 
@@ -179,6 +185,7 @@ describe("repo router", () => {
         isMember: true,
         canWrite: false,
         isAdmin: false,
+        mfaBlocked: false,
       });
     });
 
@@ -194,6 +201,7 @@ describe("repo router", () => {
         isMember: false,
         canWrite: false,
         isAdmin: false,
+        mfaBlocked: false,
       });
     });
 

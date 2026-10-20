@@ -249,7 +249,7 @@ const dbUrl = config.get<string>("db.url");
 
 **Web App config** (`src/app/config/`):
 
-- `auth.yaml` - Authentication settings: the session secret, who may sign up (`invite-only`), OAuth providers (Auth0, GitHub, GitLab, Okta, Slack, Discord), dev login toggle
+- `auth.yaml` - Authentication settings: the session secret, who may sign up (`invite-only`), email and password accounts (with optional TOTP authenticator apps and passkeys), enterprise identity providers (Okta, Auth0, Google Workspace, Microsoft Entra ID, Keycloak, or any OpenID Connect provider), dev login toggle. Org admins can require members who sign in with a password to use a second factor; members who sign in only through an identity provider are left to that provider's MFA policy
 - `db.yaml` - Database connection URL (SQLite for dev, PostgreSQL for prod)
 - `server.yaml` - Listen port and external URL
 - `storage.yaml` - Storage mode, signing key, token expiration, backend URLs, R2 account
