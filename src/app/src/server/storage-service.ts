@@ -13,7 +13,10 @@ interface SystemJWTClaims {
  * Creates a system JWT token for making authorized requests to the Bun storage server.
  * These tokens have a special `system: true` claim that indicates they are from the API server.
  */
-export function createSystemToken(action: string, path: string): string {
+export async function createSystemToken(
+  action: string,
+  path: string,
+): Promise<string> {
   const token = njwt.create(
     {
       iss: "checkpoint-api",
@@ -21,7 +24,7 @@ export function createSystemToken(action: string, path: string): string {
       action,
       path,
     } satisfies SystemJWTClaims,
-    storageSigningKey(),
+    await storageSigningKey(),
   );
 
   token.setExpiration(
@@ -37,7 +40,7 @@ export function createSystemToken(action: string, path: string): string {
  */
 export async function createStorageDirectory(path: string): Promise<void> {
   const backendUrl = config.get<string>("storage.backend-url.internal");
-  const token = createSystemToken("mkdir", path);
+  const token = await createSystemToken("mkdir", path);
 
   let response: Response;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -86,7 +89,7 @@ export async function createRepoDirectory(
  */
 export async function deleteStorageDirectory(path: string): Promise<void> {
   const backendUrl = config.get<string>("storage.backend-url.internal");
-  const token = createSystemToken("rmdir", path);
+  const token = await createSystemToken("rmdir", path);
 
   let response: Response;
   for (let attempt = 0; attempt < 3; attempt++) {

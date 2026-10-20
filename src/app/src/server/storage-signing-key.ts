@@ -46,12 +46,17 @@ export function signingKeyProblem(key: unknown): string | null {
   return null;
 }
 
-function configuredKey(): unknown {
+async function configuredKey(): Promise<unknown> {
   const fromEnv = process.env[SIGNING_KEY_ENV];
   if (fromEnv) {
     return fromEnv;
   }
-  return config.get<string>("storage.jwt.signing-key");
+  // The config value may be a secret reference ("secret|<name>"); resolve it
+  // to the key itself before checking it.
+  const key = config.get<string>("storage.jwt.signing-key");
+  return typeof key === "string" && key.length > 0
+    ? await config.processSecrets<string>(key)
+    : key;
 }
 
 export const SIGNING_KEY_HELP =
@@ -59,8 +64,8 @@ export const SIGNING_KEY_HELP =
   `the same on the app and the core server. For example: openssl rand -hex 32`;
 
 /** The key to sign storage tokens with. Throws if it is unusable. */
-export function storageSigningKey(): string {
-  const key = configuredKey();
+export async function storageSigningKey(): Promise<string> {
+  const key = await configuredKey();
   const problem = signingKeyProblem(key);
   if (problem) {
     throw new Error(

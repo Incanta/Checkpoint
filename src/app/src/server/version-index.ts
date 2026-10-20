@@ -45,7 +45,7 @@ export async function versionIndexProblem(
 
   const path = `/${repo.orgId}/${repoId}/versions/${versionIndex}`;
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${createSystemToken("version-head", path)}`,
+    Authorization: `Bearer ${await createSystemToken("version-head", path)}`,
     "x-checkpoint-path": path,
   };
   if (repo.r2BucketName) headers["x-checkpoint-bucket"] = repo.r2BucketName;

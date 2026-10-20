@@ -57,7 +57,7 @@ export async function buildAddonStorageOptions(
       mode: write ? "write" : "read",
       basePath: `/${repo.orgId}/${repo.id}`,
     },
-    storageSigningKey(),
+    await storageSigningKey(),
   );
   token.setExpiration(expirationMs);
 

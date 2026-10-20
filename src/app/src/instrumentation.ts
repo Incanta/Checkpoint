@@ -54,7 +54,7 @@ export async function register() {
     const { storageSigningKey } = await import("~/server/storage-signing-key");
     const { authSecret } = await import("~/server/auth-secret");
     try {
-      storageSigningKey();
+      await storageSigningKey();
       await authSecret();
     } catch (err) {
       Logger.error(err instanceof Error ? err.message : String(err));

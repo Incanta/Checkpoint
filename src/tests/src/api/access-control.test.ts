@@ -883,7 +883,10 @@ describe("access control", () => {
       expect(verifyRepoToken(`Bearer ${read.token}`, true).ok).toBe(false);
 
       // And a token past its expiry is refused.
-      const expired = njwt.create({ ...verified.claims }, storageSigningKey());
+      const expired = njwt.create(
+        { ...verified.claims },
+        await storageSigningKey(),
+      );
       expired.setExpiration(Date.now() - 1000);
       expect(verifyRepoToken(`Bearer ${expired.compact()}`, false).ok).toBe(
         false,
@@ -893,7 +896,7 @@ describe("access control", () => {
     it("control: a system token is not a repo token", async () => {
       const system = njwt.create(
         { iss: "checkpoint-api", system: true, action: "mkdir", path: "/x" },
-        storageSigningKey(),
+        await storageSigningKey(),
       );
       expect(verifyRepoToken(`Bearer ${system.compact()}`, false).ok).toBe(
         false,

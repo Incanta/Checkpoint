@@ -46,12 +46,50 @@ export function signingKeyProblem(key: unknown): string | null {
   return null;
 }
 
+// storage.jwt.signing-key may be a secret reference ("secret|<name>"). Tokens
+// are verified synchronously on every request, so the reference is resolved
+// once, by loadStorageSigningKey() at startup, and the value kept here.
+let resolvedConfigKey: { value: unknown } | null = null;
+
+function isSecretReference(value: unknown): boolean {
+  return typeof value === "string" && value.includes("secret|");
+}
+
 function configuredKey(): unknown {
   const fromEnv = process.env[SIGNING_KEY_ENV];
   if (fromEnv) {
     return fromEnv;
   }
-  return config.get<string>("storage.jwt.signing-key");
+  if (resolvedConfigKey) {
+    return resolvedConfigKey.value;
+  }
+  const key = config.get<string>("storage.jwt.signing-key");
+  if (isSecretReference(key)) {
+    // Never sign or verify with the reference text itself.
+    throw new Error(
+      "Refusing to use storage tokens: storage.jwt.signing-key is a secret reference that has not been resolved (call loadStorageSigningKey() at startup)",
+    );
+  }
+  return key;
+}
+
+/**
+ * Resolves storage.jwt.signing-key through the secrets provider, keeps the
+ * result for storageSigningKey(), and checks it. Throws if it is unusable.
+ */
+export async function loadStorageSigningKey(): Promise<string> {
+  const key = config.get<string>("storage.jwt.signing-key");
+  resolvedConfigKey = {
+    value: isSecretReference(key)
+      ? await config.processSecrets<string>(key)
+      : key,
+  };
+  return storageSigningKey();
+}
+
+/** Forgets the key loadStorageSigningKey() resolved (for tests). */
+export function forgetLoadedStorageSigningKey(): void {
+  resolvedConfigKey = null;
 }
 
 export const SIGNING_KEY_HELP =

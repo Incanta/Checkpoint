@@ -62,7 +62,7 @@ vi.mock("~/server/db", () => ({
 }));
 
 vi.mock("~/server/storage-service", () => ({
-  createSystemToken: vi.fn().mockReturnValue("test.system.token"),
+  createSystemToken: vi.fn().mockResolvedValue("test.system.token"),
   createOrgDirectory: vi.fn().mockResolvedValue(undefined),
   createRepoDirectory: vi.fn().mockResolvedValue(undefined),
   deleteOrgDirectory: vi.fn().mockResolvedValue(undefined),

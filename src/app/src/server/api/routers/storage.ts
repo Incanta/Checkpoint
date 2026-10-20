@@ -66,7 +66,7 @@ export const storageRouter = createTRPCRouter({
           mode: input.write ? "write" : "read",
           basePath: `/${repo.orgId}/${repo.id}`,
         },
-        storageSigningKey(),
+        await storageSigningKey(),
       );
 
       const expirationSeconds = config.get<number>(

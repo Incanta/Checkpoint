@@ -3,7 +3,7 @@ import config from "@incanta/config";
 import { routes } from "./routes/index.js";
 import { Logger } from "./logging.js";
 import { startBundleWatcher } from "./bundle-watcher.js";
-import { storageSigningKey } from "./utils/signing-key.js";
+import { loadStorageSigningKey } from "./utils/signing-key.js";
 import { SERVER_VERSION } from "@checkpointvcs/common";
 
 // beforeExit does NOT fire when process.exit() is called explicitly.
@@ -30,7 +30,7 @@ process.on("unhandledRejection", (reason) => {
 // Refuse to serve storage with a missing or guessable signing key. Checked
 // before the port opens so a misconfigured server is never reachable.
 try {
-  storageSigningKey();
+  await loadStorageSigningKey();
 } catch (err) {
   Logger.fatal((err as Error).message);
   originalExit.call(process, 1);

@@ -4,7 +4,9 @@
  * over HTTP (src/integration/gateway-scope.test.ts), covered here so they run
  * on every platform without services.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { resetConfig, setConfig, testConfigShim } from "../harness/config";
 
 import {
   isCanonicalKey,
@@ -14,10 +16,15 @@ import {
 } from "../../../core/server/src/utils/storage-key.js";
 import {
   SIGNING_KEY_ENV,
+  forgetLoadedStorageSigningKey,
+  loadStorageSigningKey,
   signingKeyProblem,
   storageSigningKey,
 } from "../../../core/server/src/utils/signing-key.js";
-import { signingKeyProblem as appSigningKeyProblem } from "~/server/storage-signing-key";
+import {
+  signingKeyProblem as appSigningKeyProblem,
+  storageSigningKey as appStorageSigningKey,
+} from "~/server/storage-signing-key";
 
 describe("storage keys", () => {
   it.each([
@@ -134,5 +141,106 @@ describe("storage signing key", () => {
   it("names the setting to change in the error", () => {
     process.env[SIGNING_KEY_ENV] = "secret";
     expect(() => storageSigningKey()).toThrow(/CHECKPOINT_STORAGE_SIGNING_KEY/);
+  });
+});
+
+describe("the core server's signing key from a secret reference", () => {
+  const good = "3f9c1e7ab4d2805566f0c1e2a9b8d7f4a1c3e5b7092d4f6a8c0e1b3d5f7a9c2e";
+  const saved = process.env[SIGNING_KEY_ENV];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetConfig();
+    forgetLoadedStorageSigningKey();
+    if (saved === undefined) delete process.env[SIGNING_KEY_ENV];
+    else process.env[SIGNING_KEY_ENV] = saved;
+  });
+
+  it("refuses to use a reference that was never resolved", () => {
+    delete process.env[SIGNING_KEY_ENV];
+    setConfig(
+      "storage.jwt.signing-key",
+      "secret|a_reference_name_long_enough_to_pass_the_length_check",
+    );
+    expect(() => storageSigningKey()).toThrow(/secret reference/);
+  });
+
+  it("resolves the reference at startup and keeps the value for every use", async () => {
+    delete process.env[SIGNING_KEY_ENV];
+    setConfig("storage.jwt.signing-key", "secret|storage_signing_key");
+    const resolve = vi
+      .spyOn(testConfigShim, "processSecrets")
+      .mockImplementation(async (value: string) =>
+        value === "secret|storage_signing_key" ? good : value,
+      );
+    expect(await loadStorageSigningKey()).toBe(good);
+    expect(storageSigningKey()).toBe(good);
+    expect(storageSigningKey()).toBe(good);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks the resolved value, not the reference", async () => {
+    delete process.env[SIGNING_KEY_ENV];
+    setConfig("storage.jwt.signing-key", "secret|storage_signing_key");
+    vi.spyOn(testConfigShim, "processSecrets").mockResolvedValue("changeme");
+    await expect(loadStorageSigningKey()).rejects.toThrow(/placeholder/);
+  });
+
+  it("still lets the environment variable win", async () => {
+    delete process.env[SIGNING_KEY_ENV];
+    setConfig("storage.jwt.signing-key", "secret|storage_signing_key");
+    vi.spyOn(testConfigShim, "processSecrets").mockResolvedValue(
+      "a".repeat(8) + good,
+    );
+    await loadStorageSigningKey();
+    process.env[SIGNING_KEY_ENV] = good;
+    expect(storageSigningKey()).toBe(good);
+  });
+
+  it("loads a plain configured key without the secrets provider", async () => {
+    delete process.env[SIGNING_KEY_ENV];
+    setConfig("storage.jwt.signing-key", good);
+    const resolve = vi.spyOn(testConfigShim, "processSecrets");
+    expect(await loadStorageSigningKey()).toBe(good);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+});
+
+describe("the app's signing key", () => {
+  const good = "3f9c1e7ab4d2805566f0c1e2a9b8d7f4a1c3e5b7092d4f6a8c0e1b3d5f7a9c2e";
+  const saved = process.env[SIGNING_KEY_ENV];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetConfig();
+    if (saved === undefined) delete process.env[SIGNING_KEY_ENV];
+    else process.env[SIGNING_KEY_ENV] = saved;
+  });
+
+  it("resolves a secret reference in storage.jwt.signing-key", async () => {
+    delete process.env[SIGNING_KEY_ENV];
+    setConfig("storage.jwt.signing-key", "secret|storage_signing_key");
+    const resolve = vi
+      .spyOn(testConfigShim, "processSecrets")
+      .mockImplementation(async (value: string) =>
+        value === "secret|storage_signing_key" ? good : value,
+      );
+    expect(await appStorageSigningKey()).toBe(good);
+    expect(resolve).toHaveBeenCalledWith("secret|storage_signing_key");
+  });
+
+  it("checks the resolved value, not the reference", async () => {
+    delete process.env[SIGNING_KEY_ENV];
+    setConfig("storage.jwt.signing-key", "secret|storage_signing_key");
+    vi.spyOn(testConfigShim, "processSecrets").mockResolvedValue("changeme");
+    await expect(appStorageSigningKey()).rejects.toThrow(/placeholder/);
+  });
+
+  it("prefers the environment variable", async () => {
+    process.env[SIGNING_KEY_ENV] = good;
+    setConfig("storage.jwt.signing-key", "secret|storage_signing_key");
+    const resolve = vi.spyOn(testConfigShim, "processSecrets");
+    expect(await appStorageSigningKey()).toBe(good);
+    expect(resolve).not.toHaveBeenCalled();
   });
 });

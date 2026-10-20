@@ -44,7 +44,7 @@ export class StorageBlockStore implements BlockStore {
     const { orgId, bucket } = await this.repoInfo();
     const path = this.path(orgId, hash);
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${createSystemToken("blob-put", path)}`,
+      Authorization: `Bearer ${await createSystemToken("blob-put", path)}`,
       "x-checkpoint-path": path,
       "Content-Type": "application/octet-stream",
     };
@@ -65,7 +65,7 @@ export class StorageBlockStore implements BlockStore {
     const { orgId, bucket } = await this.repoInfo();
     const path = this.path(orgId, hash);
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${createSystemToken("blob-get", path)}`,
+      Authorization: `Bearer ${await createSystemToken("blob-get", path)}`,
       "x-checkpoint-path": path,
     };
     if (bucket) headers["x-checkpoint-bucket"] = bucket;
