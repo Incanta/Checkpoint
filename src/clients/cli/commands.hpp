@@ -2361,6 +2361,88 @@ inline void printMcpStatus(const nlohmann::json& status) {
   }
 }
 
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: bug-report (collect a redacted log bundle)
+// ═════════════════════════════════════════════════════════════════
+
+/**
+ * The daemon to collect from: the resident one when it runs (it holds the
+ * workspace state and recent job errors), else an ephemeral daemon scoped to
+ * the workspace under the current directory, else a workspace-less one.
+ */
+inline std::string resolveDiagnosticsBaseUrl() {
+  try {
+    fs::path root = findWorkspaceRoot(fs::current_path());
+    // ~/.checkpoint also has this name; only a real workspace has this file.
+    if (fs::exists(root / ".checkpoint" / "workspace.json")) {
+      return resolveDaemonBaseUrl(root);
+    }
+  } catch (...) {
+    // Not in a workspace.
+  }
+  return resolveGlobalDaemonBaseUrl();
+}
+
+inline int cmdBugReport() {
+  DaemonClient client(resolveDiagnosticsBaseUrl());
+
+  auto result = client.mutate("diagnostics.collectBugReport",
+                              nlohmann::json::object());
+  if (!result.is_object() || !result.contains("path") ||
+      !result["path"].is_string()) {
+    std::cerr << "error: daemon returned unexpected bug report payload"
+              << std::endl;
+    return 1;
+  }
+
+  std::cout << color::green() << "Bug report bundle written:" << color::reset()
+            << std::endl;
+  std::cout << "  " << result["path"].get<std::string>() << std::endl;
+  if (result.contains("truncatedLogs") && result["truncatedLogs"].is_array() &&
+      !result["truncatedLogs"].empty()) {
+    std::cout << color::dim() << "  Older logs were left out to keep it small ("
+              << result["truncatedLogs"].size() << " file(s))."
+              << color::reset() << std::endl;
+  }
+  std::cout << color::dim()
+            << "Tokens, passwords, email addresses, and your username are "
+               "redacted (see README.txt inside). Look it over, then attach it "
+               "to your bug report."
+            << color::reset() << std::endl;
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: redact (write a redacted copy of a log file)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdRedact(const std::string& input, const std::string& output) {
+  fs::path inputPath = fs::absolute(fs::path(input));
+  if (!fs::exists(inputPath) || !fs::is_regular_file(inputPath)) {
+    std::cerr << "error: no such file: " << inputPath.string() << std::endl;
+    return 1;
+  }
+
+  nlohmann::json body = {{"inputPath", inputPath.string()}};
+  if (!output.empty()) {
+    body["outputPath"] = fs::absolute(fs::path(output)).string();
+  }
+
+  DaemonClient client(resolveGlobalDaemonBaseUrl());
+  auto result = client.mutate("diagnostics.redactFile", body);
+  if (!result.is_object() || !result.contains("path") ||
+      !result["path"].is_string()) {
+    std::cerr << "error: daemon returned unexpected redact payload"
+              << std::endl;
+    return 1;
+  }
+
+  std::cout << color::green() << "Redacted copy written:" << color::reset()
+            << std::endl;
+  std::cout << "  " << result["path"].get<std::string>() << std::endl;
+  return 0;
+}
+
 inline int cmdMcpStatus() {
   int port = getDaemonPort();
   std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);

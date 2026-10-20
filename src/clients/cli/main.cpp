@@ -26,6 +26,8 @@
  *   logout                        Remove authentication for a Checkpoint server
  *   artifact upload <cl> <files>  Upload artifacts for a changelist
  *   mcp [status|enable|disable]   Manage the daemon's MCP server
+ *   bug-report                    Collect a redacted log bundle for a bug report
+ *   redact <file> [-o out]        Write a redacted copy of a log file
  */
 
 #include <algorithm>
@@ -299,6 +301,23 @@ int main(int argc, char** argv) {
       .default_value(false)
       .implicit_value(true);
 
+  // bug-report
+  argparse::ArgumentParser bugReportCmd("bug-report");
+  bugReportCmd.add_description(
+      "Collect the daemon's logs, versions, and workspace summaries into a "
+      "redacted zip to attach to a bug report");
+
+  // redact
+  argparse::ArgumentParser redactCmd("redact");
+  redactCmd.add_description(
+      "Write a redacted copy of a log file (for example `docker compose logs` "
+      "output from a self-hosted server) using the bug-report redaction rules");
+  redactCmd.add_argument("file")
+      .help("File to redact (left unchanged)");
+  redactCmd.add_argument("--output", "-o")
+      .help("Where to write the copy (default: <name>.redacted<ext> beside it)")
+      .default_value(std::string(""));
+
   // ─── Register sub-commands ─────────────────────────────────────
 
   program.add_subparser(statusCmd);
@@ -334,6 +353,8 @@ int main(int argc, char** argv) {
   program.add_subparser(configCmd);
   program.add_subparser(mcpCmd);
   program.add_subparser(updateCmd);
+  program.add_subparser(bugReportCmd);
+  program.add_subparser(redactCmd);
 
   // ─── Parse arguments ──────────────────────────────────────────
 
@@ -393,6 +414,10 @@ int main(int argc, char** argv) {
         std::cerr << mcpCmd;
       } else if (cmd == "update") {
         std::cerr << updateCmd;
+      } else if (cmd == "bug-report") {
+        std::cerr << bugReportCmd;
+      } else if (cmd == "redact") {
+        std::cerr << redactCmd;
       } else {
         std::cerr << program;
       }
@@ -408,8 +433,11 @@ int main(int argc, char** argv) {
   try {
     // Check CLI ↔ Daemon API version compatibility before any command,
     // EXCEPT `update`, which is how the user recovers from a bad version
-    // mismatch in the first place.
-    if (!program.is_subcommand_used(updateCmd)) {
+    // mismatch in the first place, and the diagnostics commands, which must
+    // still work when something is wrong.
+    if (!program.is_subcommand_used(updateCmd) &&
+        !program.is_subcommand_used(bugReportCmd) &&
+        !program.is_subcommand_used(redactCmd)) {
       int versionResult = checkpoint::checkDaemonVersion();
       if (versionResult != 0) return versionResult;
     }
@@ -617,6 +645,15 @@ int main(int argc, char** argv) {
                   << "'. Use 'check' or 'install'." << std::endl;
         return 1;
       }
+    }
+
+    if (program.is_subcommand_used(bugReportCmd)) {
+      return checkpoint::cmdBugReport();
+    }
+
+    if (program.is_subcommand_used(redactCmd)) {
+      return checkpoint::cmdRedact(redactCmd.get<std::string>("file"),
+                                   redactCmd.get<std::string>("--output"));
     }
 
     // No command specified: show help

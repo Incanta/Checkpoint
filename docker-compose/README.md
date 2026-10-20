@@ -133,6 +133,22 @@ A Checkpoint instance keeps its state in three places. Back up all of them:
 
 To restore, put back the configuration, then storage, then the database, and start the services. A workspace that synced changelists newer than the backup is ahead of the restored server, which the daemon does not expect. After restoring an older backup, have people copy out any unsubmitted work and make fresh workspaces.
 
+## 7. Collecting server logs for a bug report
+
+The app and the storage server log to the container's stdout (file logging is off in `config/*/logging.yaml`), so Docker holds their logs. Export the last day of both:
+
+```bash
+docker compose logs --no-color --since 24h app server > logs.txt
+```
+
+Widen `--since` (for example `72h`) if the problem started earlier. Then make a redacted copy with the Checkpoint CLI, on this machine or any machine with Checkpoint installed:
+
+```bash
+chk redact logs.txt   # writes logs.redacted.txt beside it
+```
+
+It applies the same rules as the client bug-report bundle: bearer tokens, Authorization and Cookie headers, JWTs (storage and session tokens), API tokens and other 64+ character hex strings (such as a `storage_signing_key` made with `openssl rand -hex 32`), S3 and R2 keys, passwords in URLs such as `database_url`, sensitive query parameters, values of keys named like password, secret, token, or apiKey, email addresses (replaced with `[email-1]` and so on, consistently through the file), and the username in home-directory paths. Hostnames, IP addresses, repo paths, and ids are kept. Look the redacted copy over before attaching it, and never attach `config/.secrets`.
+
 ## Notes
 
 - **Database:** Postgres is recommended and is the only documented setup here.

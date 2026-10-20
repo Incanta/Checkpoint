@@ -90,6 +90,9 @@ export class DaemonManager {
   /** Resolved state backend from daemon config (set during init) */
   private stateBackend: DaemonConfigType["stateBackend"] = "json";
 
+  /** Whether this is a short-lived, CLI-spawned daemon (initEphemeral). */
+  public ephemeral = false;
+
   private watchers: Map<string, FSWatcher> = new Map();
 
   /** Pending restarts of watchers that failed, keyed by workspace.id */
@@ -245,8 +248,9 @@ export class DaemonManager {
 
     const config = await DaemonConfig.Get();
     this.stateBackend = config.stateBackend;
+    this.ephemeral = true;
 
-    await InitLogger();
+    await InitLogger({ ephemeral: true });
 
     if (!workspacePath) {
       // Auth/version-only ephemeral daemon: nothing further to register.

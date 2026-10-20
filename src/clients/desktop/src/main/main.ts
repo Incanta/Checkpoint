@@ -8,6 +8,7 @@ import { setupApplicationMenu } from "./menu";
 import { ipcOn } from "./channels";
 import { registerSettingsHandlers } from "./settings-handler";
 import { getZoomFactor } from "./app-config";
+import { initMainLogFile } from "./log-file";
 import {
   MIN_WIDTH,
   MIN_HEIGHT,
@@ -83,6 +84,10 @@ const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
   app.quit();
 } else {
+  // Only the instance that keeps running owns the log file; a second launch
+  // that quits straight away must not rotate it.
+  initMainLogFile();
+
   app.on("second-instance", () => {
     if (!win) return;
     if (win.isMinimized()) win.restore();

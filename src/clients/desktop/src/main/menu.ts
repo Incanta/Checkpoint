@@ -1,4 +1,5 @@
 import { shell, Menu, type MenuItemConstructorOptions } from "electron";
+import { collectBugReport } from "./settings-handler";
 
 const isMac = process.platform === "darwin";
 
@@ -44,6 +45,12 @@ function buildMacTemplate(): MenuItemConstructorOptions[] {
           label: "Report an Issue",
           click: (): void => {
             void shell.openExternal(ISSUES_URL);
+          },
+        },
+        {
+          label: "Collect Logs for a Bug Report",
+          click: (): void => {
+            void collectBugReport();
           },
         },
       ],

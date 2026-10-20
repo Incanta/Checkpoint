@@ -9,6 +9,7 @@ import { repoRouter } from "./routers/repo.js";
 import { jobsRouter } from "./routers/jobs.js";
 import { updaterRouter } from "./routers/updater.js";
 import { versionRouter } from "./routers/version.js";
+import { diagnosticsRouter } from "./routers/diagnostics.js";
 import net from "net";
 import path from "path";
 import { homedir } from "os";
@@ -45,6 +46,7 @@ const appRouter = router({
   updater: updaterRouter,
   version: versionRouter,
   mcp: mcpRouter,
+  diagnostics: diagnosticsRouter,
 });
 
 // Export type router type signature,

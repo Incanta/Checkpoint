@@ -331,6 +331,11 @@ export type InvokeChannels = {
     request: { factor: number };
     response: { factor: number };
   };
+  // Collect a redacted log bundle (daemon + this app) and reveal it.
+  "settings:collect-bug-report": {
+    request: null;
+    response: { path: string } | { error: string };
+  };
 };
 
 export function ipcSend<T extends keyof Channels>(

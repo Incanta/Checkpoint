@@ -20,14 +20,18 @@ const t = initTRPC.context<TRPCContext>().create({
  * Hard-block middleware: when any connected server reports the daemon below
  * its min_server_api (verdict from ApiVersionChecker), every procedure
  * returns FORBIDDEN, EXCEPT updater.* and version.*, which clients need to
- * recover from this state.
+ * recover from this state, and diagnostics.*, so a daemon in this state can
+ * still collect logs for a bug report.
  *
  * The literal "update required" substring is matched by the CLI's top-level
  * catch (src/clients/cli/main.cpp) to render a friendlier prompt instead of a
  * raw error.
  */
 const versionGateMiddleware = t.middleware(({ next, path }) => {
-  const isExempt = path.startsWith("updater.") || path.startsWith("version.");
+  const isExempt =
+    path.startsWith("updater.") ||
+    path.startsWith("version.") ||
+    path.startsWith("diagnostics.");
   if (!isExempt) {
     for (const status of ApiVersionChecker.Get().getStatuses()) {
       if (status.result.status === "incompatible") {

@@ -7,6 +7,7 @@ Checkpoint is a version control system designed for large files and binary asset
 - [Quickstart (Development)](#quickstart-development)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
+- [Reporting a Bug](#reporting-a-bug)
 - [License](#license)
 
 ## Quickstart (Development)
@@ -283,7 +284,9 @@ Created automatically on first run. Controls global daemon behavior:
     "logFile": {
       "enabled": true,
       "level": "info",
-      "path": "logs/daemon.log"
+      "path": "logs/daemon.log",
+      "maxArchivedFiles": 10,
+      "maxFileSizeMB": 20
     }
   },
   "daemonPort": 13010
@@ -314,6 +317,19 @@ Each workspace tracked by Checkpoint has a `.checkpoint/` directory at its root 
 ```
 
 **`.checkpoint/state.json`** - Tracks the current changelist number and the full inventory of tracked files with their hashes, sizes, and modification times. This file is managed by the daemon and should not be edited manually.
+
+## Reporting a Bug
+
+Attach a log bundle to your bug report. It is a zip of the daemon's logs, the desktop app's logs, version information, your redacted `daemon.json`, and a summary of each workspace (its changelist, whether a pull was interrupted, counts of tracked and pending files, and recent pull and submit errors). It never contains `~/.checkpoint/auth.json`, any token, or the contents of your files.
+
+- **Desktop app:** Settings, Troubleshooting, **Collect logs**. On macOS it is also under Help, **Collect Logs for a Bug Report**. The folder holding the zip opens when it is ready.
+- **CLI:** `chk bug-report` prints the path of the zip.
+
+Bundles are written to `~/.checkpoint/bug-reports/` (the newest 10 are kept). Tokens, passwords, keys, cookies, email addresses (each replaced with a stable placeholder such as `[email-1]`), and the username in home-directory paths are redacted. Repo and workspace-relative paths are kept, since they are needed to debug; `README.txt` inside the zip lists exactly what is redacted and kept. Look the bundle over before you share it.
+
+The daemon always writes its log to `~/.checkpoint/logs/daemon.log` at `info` level. Each start archives the previous log, a log larger than `logging.logFile.maxFileSizeMB` (20 MB) is archived too, and `maxArchivedFiles` (10) archives are kept. Daemons the CLI starts on its own (headless mode) log to `ephemeral-daemon.log` beside it.
+
+For a self-hosted server's app and storage server logs, see [Collecting server logs for a bug report](docker-compose/README.md#collecting-server-logs-for-a-bug-report).
 
 ## License
 

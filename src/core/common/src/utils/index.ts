@@ -3,3 +3,4 @@ export * from "./diff.js";
 export * from "./api.js";
 export * from "./hash.js";
 export * from "./issue-refs.js";
+export * from "./redact.js";

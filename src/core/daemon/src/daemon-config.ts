@@ -41,10 +41,13 @@ export interface DaemonConfigType {
       singleLine: boolean;
     };
     logFile: {
+      /** Ignored: the daemon always writes its log file (see logging.ts). */
       enabled: boolean;
       level: string;
       path: string;
       maxArchivedFiles: number;
+      /** The log is archived and a new one started past this size. 0 = never. */
+      maxFileSizeMB: number;
     };
   };
   longtail: {
@@ -136,6 +139,7 @@ export class DaemonConfig {
           level: "info",
           path: "logs/daemon.log",
           maxArchivedFiles: 10,
+          maxFileSizeMB: 20,
         },
       },
       longtail: {

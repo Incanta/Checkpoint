@@ -21,6 +21,8 @@ A cross-platform C++ command-line client for interacting with the Checkpoint dae
 | `chk checkout <file>`            | Check out a controlled file   | `chk checkout src/main.cpp`         |
 | `chk checkout -x <file>`         | Check out with an exclusive claim, even on a mergeable file | `chk checkout -x notes.md` |
 | `chk revert <file...>`           | Revert files to head version  | `chk revert src/main.cpp`           |
+| `chk bug-report`                 | Collect a redacted log bundle (zip) for a bug report and print its path | `chk bug-report` |
+| `chk redact <file> [-o out]`     | Write a redacted copy of a log file, e.g. `docker compose logs` output | `chk redact logs.txt` |
 | `chk diff <file>`                | Show diff for a file          | `chk diff src/main.cpp`             |
 
 ## Build

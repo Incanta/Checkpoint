@@ -1,7 +1,32 @@
-import { app, type BrowserWindow, type IpcMain } from "electron";
+import { app, shell, type BrowserWindow, type IpcMain } from "electron";
 import { CreateDaemonClient } from "@checkpointvcs/daemon";
 import { ipcHandle, ipcOn } from "./channels";
 import { getZoomFactor, setZoomFactor } from "./app-config";
+import { readMainLogFiles } from "./log-file";
+
+/**
+ * Asks the daemon for a redacted bug-report bundle, adding this app's own
+ * main-process logs (the daemon redacts them with everything else), and
+ * reveals the zip in the file manager.
+ */
+export async function collectBugReport(): Promise<
+  { path: string } | { error: string }
+> {
+  try {
+    const client = await CreateDaemonClient();
+    const result = await client.diagnostics.collectBugReport.mutate({
+      clientLogs: readMainLogFiles(),
+    });
+    shell.showItemInFolder(result.path);
+    return { path: result.path };
+  } catch (error) {
+    console.error("Failed to collect a bug report bundle:", error);
+    return {
+      error:
+        "Could not collect logs. Is the Checkpoint daemon running and up to date?",
+    };
+  }
+}
 
 /**
  * Registers IPC handlers backing the Settings dialog: the daemon's MCP server
@@ -45,6 +70,10 @@ export function registerSettingsHandlers(
       electron: process.versions.electron ?? "",
       chrome: process.versions.chrome ?? "",
     };
+  });
+
+  ipcHandle(ipcMain, "settings:collect-bug-report", async () => {
+    return collectBugReport();
   });
 
   ipcHandle(ipcMain, "settings:zoom:get", async () => {

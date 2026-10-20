@@ -231,6 +231,12 @@ export default function SettingsDialog({
     available: boolean;
   } | null>(null);
   const [mcpBusy, setMcpBusy] = useState(false);
+  const [bugReport, setBugReport] = useState<
+    | { state: "idle" }
+    | { state: "busy" }
+    | { state: "done"; path: string }
+    | { state: "error"; message: string }
+  >({ state: "idle" });
   const [zoom, setZoom] = useState(1);
   const [appInfo, setAppInfo] = useState<{
     appVersion: string;
@@ -265,6 +271,20 @@ export default function SettingsDialog({
       setMcp(next);
     } finally {
       setMcpBusy(false);
+    }
+  };
+
+  const collectBugReport = async (): Promise<void> => {
+    setBugReport({ state: "busy" });
+    try {
+      const result = await ipc.invoke("settings:collect-bug-report", null);
+      setBugReport(
+        "path" in result
+          ? { state: "done", path: result.path }
+          : { state: "error", message: result.error },
+      );
+    } catch {
+      setBugReport({ state: "error", message: "Could not collect logs." });
     }
   };
 
@@ -343,6 +363,33 @@ export default function SettingsDialog({
           <Row label="Zoom">
             <ZoomStepper value={zoom} onChange={changeZoom} />
           </Row>
+        </Section>
+
+        <Section title="Troubleshooting">
+          <Row
+            label="Collect logs for a bug report"
+            hint="Zips the daemon and app logs with tokens, passwords, emails, and your username removed"
+          >
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={bugReport.state === "busy"}
+              onClick={collectBugReport}
+            >
+              {bugReport.state === "busy" ? "Collecting…" : "Collect logs"}
+            </Button>
+          </Row>
+          {bugReport.state === "done" && (
+            <div className="break-all text-xs text-[var(--color-text-muted)]">
+              Saved to {bugReport.path}. Look it over, then attach it to your
+              report.
+            </div>
+          )}
+          {bugReport.state === "error" && (
+            <div className="text-xs text-[var(--color-danger)]">
+              {bugReport.message}
+            </div>
+          )}
         </Section>
 
         <Section title="About">
