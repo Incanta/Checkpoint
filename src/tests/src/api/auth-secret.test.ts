@@ -43,6 +43,21 @@ describe("authSecretProblem", () => {
 describe("authSecret", () => {
   afterEach(() => {
     delete process.env[AUTH_SECRET_ENV];
+    delete process.env.NEXT_PHASE;
+  });
+
+  it("does not need a secret during next build, and uses a random one there", async () => {
+    setConfig("auth.secret", "");
+    process.env.NEXT_PHASE = "phase-production-build";
+    const secret = await authSecret();
+    expect(authSecretProblem(secret)).toBeNull();
+    expect(secret).not.toBe(GOOD);
+  });
+
+  it("still refuses an unset secret once the server runs", async () => {
+    setConfig("auth.secret", "");
+    process.env.NEXT_PHASE = "phase-production-server";
+    await expect(authSecret()).rejects.toThrow(/no auth secret is configured/);
   });
 
   it("reads auth.secret", async () => {

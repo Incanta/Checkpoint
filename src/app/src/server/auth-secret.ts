@@ -1,4 +1,5 @@
 import config from "@incanta/config";
+import { randomBytes } from "node:crypto";
 
 // The auth secret signs every session cookie, so whoever knows it can sign in
 // as anyone. It also keys stored integration secrets (issue tracker tokens)
@@ -47,8 +48,18 @@ export function authSecretProblem(secret: unknown): string | null {
 
 export const AUTH_SECRET_HELP = `Set ${AUTH_SECRET_ENV} (or auth.secret) to a random value of at least ${MIN_LENGTH} characters. For example: openssl rand -hex 32`;
 
+// `next build` evaluates the auth config while prerendering pages, but signs
+// nothing, and the build machine should not need the deployment's secret. It
+// gets a random value of its own; the running server re-evaluates the config
+// and checks the real secret at startup (instrumentation.ts).
+let buildSecret: string | undefined;
+
 /** The secret sessions are signed with. Throws if it is unusable. */
 export async function authSecret(): Promise<string> {
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    buildSecret ??= randomBytes(32).toString("hex");
+    return buildSecret;
+  }
   const secret =
     process.env[AUTH_SECRET_ENV] ||
     (await config.getWithSecrets<string>("auth.secret"));
