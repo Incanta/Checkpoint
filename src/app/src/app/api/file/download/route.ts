@@ -97,7 +97,13 @@ export async function GET(request: NextRequest) {
     const fileName = path.basename(filePath);
     const buffer = data && size > 0 ? data : Buffer.alloc(0);
 
-    return new Response(buffer as unknown as BodyInit, {
+    // A view, not a copy: files can be large.
+    const body = new Uint8Array(
+      buffer.buffer as ArrayBuffer,
+      buffer.byteOffset,
+      buffer.length,
+    );
+    return new Response(body, {
       headers: {
         "Content-Type": "application/octet-stream",
         "Content-Disposition": `attachment; filename="${fileName}"`,
