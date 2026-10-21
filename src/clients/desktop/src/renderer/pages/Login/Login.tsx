@@ -64,7 +64,7 @@ export default function Login(): React.ReactElement {
                 <div className="text-base font-semibold">
                   Authorize this device
                 </div>
-                <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                <p className="mt-1.5 mb-0 text-sm leading-relaxed text-[var(--color-text-secondary)]">
                   Open the authorization page and confirm the code below to
                   finish signing in.
                 </p>
@@ -97,7 +97,7 @@ export default function Login(): React.ReactElement {
                 <div className="text-lg font-semibold">
                   Sign in to Checkpoint
                 </div>
-                <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                <p className="mt-1.5 mb-0 text-sm leading-relaxed text-[var(--color-text-secondary)]">
                   Connect to your Checkpoint server to get started.
                 </p>
               </div>

@@ -89,7 +89,7 @@ export default function UpdateNotification(): React.ReactElement | null {
       }}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-semibold" style={{ color: tint }}>
+        <p className="m-0 text-sm font-semibold" style={{ color: tint }}>
           {title}
         </p>
         <DismissButton onClick={dismiss} />
@@ -97,7 +97,7 @@ export default function UpdateNotification(): React.ReactElement | null {
 
       {updateState.status === "available" && (
         <>
-          <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+          <p className="mt-1 mb-0 text-xs text-[var(--color-text-secondary)]">
             Version {updateState.latestVersion} is ready to download.
           </p>
           <div className="mt-3 flex gap-2">
@@ -144,7 +144,7 @@ export default function UpdateNotification(): React.ReactElement | null {
 
       {updateState.status === "ready" && (
         <>
-          <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+          <p className="mt-1 mb-0 text-xs text-[var(--color-text-secondary)]">
             Version {updateState.latestVersion} has been downloaded. Restart to
             apply.
           </p>
@@ -161,7 +161,7 @@ export default function UpdateNotification(): React.ReactElement | null {
 
       {updateState.status === "error" && (
         <>
-          <p className="mt-1 text-xs break-words text-[var(--color-text-secondary)]">
+          <p className="mt-1 mb-0 text-xs break-words text-[var(--color-text-secondary)]">
             {updateState.errorMessage}
           </p>
           <div className="mt-3 flex gap-2">

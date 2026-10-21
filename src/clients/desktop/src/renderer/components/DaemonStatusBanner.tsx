@@ -27,10 +27,10 @@ export default function DaemonStatusBanner(): React.ReactElement | null {
           "color-mix(in srgb, var(--color-warning) 30%, var(--color-bg-secondary))",
       }}
     >
-      <p className="text-sm font-semibold text-[var(--color-warning)]">
+      <p className="m-0 text-sm font-semibold text-[var(--color-warning)]">
         Reconnecting to Checkpoint…
       </p>
-      <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
+      <p className="mt-0.5 mb-0 text-xs text-[var(--color-text-secondary)]">
         The local Checkpoint daemon stopped responding. It&apos;s being
         restarted; if it was stopped on purpose, start it from the tray icon.
       </p>

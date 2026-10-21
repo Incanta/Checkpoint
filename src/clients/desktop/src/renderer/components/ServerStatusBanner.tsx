@@ -47,10 +47,10 @@ export default function ServerStatusBanner(): React.ReactElement | null {
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex-1">
-          <p className="text-sm font-semibold text-[var(--color-warning)]">
+          <p className="m-0 text-sm font-semibold text-[var(--color-warning)]">
             Server unreachable
           </p>
-          <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
+          <p className="mt-0.5 mb-0 text-xs text-[var(--color-text-secondary)]">
             Showing your last-known data. Pulling, submitting, and other server
             actions won&apos;t work until the connection is restored.
           </p>
