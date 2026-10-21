@@ -10,32 +10,13 @@ import { jobsRouter } from "./routers/jobs.js";
 import { updaterRouter } from "./routers/updater.js";
 import { versionRouter } from "./routers/version.js";
 import { diagnosticsRouter } from "./routers/diagnostics.js";
-import net from "net";
 import path from "path";
 import { homedir } from "os";
 import { promises as fs } from "fs";
 import { DaemonManager } from "../daemon-manager.js";
 import { DaemonConfig } from "../daemon-config.js";
 import { DAEMON_API, MIN_DAEMON_API } from "../api-version.js";
-
-function tryListen(port: number, host: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const tester = net
-      .createServer()
-      .once("error", () => resolve(false))
-      .once("listening", () => {
-        tester.close(() => resolve(true));
-      })
-      .listen(port, host);
-  });
-}
-
-async function isPortAvailable(port: number): Promise<boolean> {
-  const free0 = await tryListen(port, "0.0.0.0");
-  if (!free0) return false;
-  const free127 = await tryListen(port, "127.0.0.1");
-  return free127;
-}
+import { DAEMON_HOST, findListenPort } from "./listen-port.js";
 
 const appRouter = router({
   auth: authRouter,
@@ -89,28 +70,23 @@ export async function InitApi(opts: InitApiOptions = {}): Promise<number> {
     // Bind exactly what was asked for (0 → OS picks a free ephemeral port).
     // No port scan and no writeback to the shared daemon.json.
     const requested = opts.port ?? 0;
-    await new Promise<void>((resolve) => server.listen(requested, resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(requested, DAEMON_HOST, resolve),
+    );
     const address = server.address();
     listenPort =
       typeof address === "object" && address ? address.port : requested;
   } else {
-    listenPort = (await DaemonConfig.Get()).daemonPort;
+    const config = await DaemonConfig.Get();
+    const mcpPort = config.mcp?.port ?? 13011;
+    listenPort = await findListenPort(
+      config.daemonPort,
+      mcpPort > 0 ? [mcpPort] : [],
+    );
 
-    const maxAttempts = 100;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      if (await isPortAvailable(listenPort)) {
-        break;
-      }
-      console.log(`Port ${listenPort} is in use, trying ${listenPort + 1}...`);
-      listenPort++;
-      if (attempt === maxAttempts - 1) {
-        throw new Error(
-          `Could not find an available port after ${maxAttempts} attempts`,
-        );
-      }
-    }
-
-    await new Promise<void>((resolve) => server.listen(listenPort, resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(listenPort, DAEMON_HOST, resolve),
+    );
 
     DaemonConfig.Ensure().vars.daemonPort = listenPort;
     await DaemonConfig.Save();
