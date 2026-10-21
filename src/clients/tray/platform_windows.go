@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -158,6 +160,56 @@ func daemonExePath() (string, error) {
 	return "", fmt.Errorf("checkpoint-daemon.exe not found")
 }
 
+const (
+	daemonProcessLogName = "daemon-process.log"
+	// Matches the daemon's own daemon.log archive count.
+	maxDaemonProcessArchives = 10
+)
+
+// daemonProcessArchiveRe matches the archives archiveDaemonProcessLog writes,
+// which use the same timestamp format as the daemon's daemon.log archives.
+var daemonProcessArchiveRe = regexp.MustCompile(
+	`^daemon-process-\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}(\.\d{3})?\.log$`,
+)
+
+// archiveDaemonProcessLog moves the previous launch's capture aside as
+// daemon-process-<timestamp>.log and keeps the newest
+// maxDaemonProcessArchives, the same scheme the daemon uses for daemon.log.
+// Failures are ignored: a capture still held open by an orphaned daemon is
+// simply appended to, as before.
+func archiveDaemonProcessLog(logPath string) {
+	if st, err := os.Stat(logPath); err != nil || st.Size() == 0 {
+		return
+	}
+
+	dir := filepath.Dir(logPath)
+	now := time.Now()
+	archived := filepath.Join(dir, "daemon-process-"+now.Format("2006.01.02-15.04.05")+".log")
+	if _, err := os.Stat(archived); err == nil {
+		archived = filepath.Join(dir, "daemon-process-"+now.Format("2006.01.02-15.04.05.000")+".log")
+	}
+	if err := os.Rename(logPath, archived); err != nil {
+		logTray("could not archive %s: %v", daemonProcessLogName, err)
+		return
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	var archives []string
+	for _, e := range entries {
+		if !e.IsDir() && daemonProcessArchiveRe.MatchString(e.Name()) {
+			archives = append(archives, e.Name())
+		}
+	}
+	sort.Strings(archives)
+	for len(archives) > maxDaemonProcessArchives {
+		_ = os.Remove(filepath.Join(dir, archives[0]))
+		archives = archives[1:]
+	}
+}
+
 // startDaemonService launches the daemon as a detached child process. On
 // Windows the daemon is a per-user process, NOT a Windows service: it is a
 // portable Node.js runtime (checkpoint-daemon.exe) running daemon-bundle.cjs, a
@@ -184,8 +236,10 @@ func startDaemonService() error {
 
 	dir := logsDir()
 	_ = os.MkdirAll(dir, 0o755)
+	logPath := filepath.Join(dir, daemonProcessLogName)
+	archiveDaemonProcessLog(logPath)
 	logFile, err := os.OpenFile(
-		filepath.Join(dir, "daemon-process.log"),
+		logPath,
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
 		0o644,
 	)
@@ -197,6 +251,9 @@ func startDaemonService() error {
 	// it runs daemon-bundle.cjs, which ships alongside it in the daemon dir.
 	bundle := filepath.Join(filepath.Dir(exe), "daemon-bundle.cjs")
 	cmd := exec.Command(exe, bundle)
+	// daemon.log already has the full log; keep this capture to problems and
+	// native crash output so it stays small over a long-running session.
+	cmd.Env = append(os.Environ(), "CHECKPOINT_CONSOLE_LOG_LEVEL=warn")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	// CREATE_NO_WINDOW: the tray is a GUI app (-H windowsgui); don't pop a

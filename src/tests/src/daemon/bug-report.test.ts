@@ -131,6 +131,31 @@ describe("the daemon's rotating log file", () => {
     expect(archives).not.toContain("daemon-2020.01.01-00.00.00.log");
   });
 
+  it("neither counts nor prunes the tray's daemon-process logs as archives", async () => {
+    const file = path.join(dir, "daemon.log");
+    const siblings = [
+      "daemon-process.log",
+      "daemon-process-2019.01.01-00.00.00.log",
+      "daemon-process-2019.01.02-00.00.00.log",
+      "daemon-notes.log",
+    ];
+    for (const name of siblings) await writeFile(path.join(dir, name), "x");
+    await writeFile(path.join(dir, "daemon-2020.01.01-00.00.00.log"), "old");
+    await writeFile(path.join(dir, "daemon-2020.01.02-00.00.00.000.log"), "old");
+
+    const log = new RotatingLogFile(file, 10, 2);
+    log.write("0123456789\n");
+
+    const names = await readdir(dir);
+    for (const name of siblings) expect(names).toContain(name);
+    const archives = names.filter((n) => /^daemon-\d/.test(n));
+    // Only real archives count toward the cap: the oldest one goes, and the
+    // millisecond-suffixed archive is recognised as one.
+    expect(archives.length).toBe(2);
+    expect(archives).not.toContain("daemon-2020.01.01-00.00.00.log");
+    expect(archives).toContain("daemon-2020.01.02-00.00.00.000.log");
+  });
+
   it("never rotates with a cap of 0", async () => {
     const file = path.join(dir, "daemon.log");
     const log = new RotatingLogFile(file, 0, 2);

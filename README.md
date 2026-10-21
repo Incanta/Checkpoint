@@ -338,7 +338,7 @@ Attach a log bundle to your bug report. It is a zip of the daemon's logs, the de
 
 Bundles are written to `~/.checkpoint/bug-reports/` (the newest 10 are kept). Tokens, passwords, keys, cookies, email addresses (each replaced with a stable placeholder such as `[email-1]`), and the username in home-directory paths are redacted. Repo and workspace-relative paths are kept, since they are needed to debug; `README.txt` inside the zip lists exactly what is redacted and kept. Look the bundle over before you share it.
 
-The daemon always writes its log to `~/.checkpoint/logs/daemon.log` at `info` level. Each start archives the previous log, a log larger than `logging.logFile.maxFileSizeMB` (20 MB) is archived too, and `maxArchivedFiles` (10) archives are kept. Daemons the CLI starts on its own (headless mode) log to `ephemeral-daemon.log` beside it.
+The daemon always writes its log to `~/.checkpoint/logs/daemon.log` at `info` level. Each start archives the previous log, a log larger than `logging.logFile.maxFileSizeMB` (20 MB) is archived too, and `maxArchivedFiles` (10) archives are kept. Daemons the CLI starts on its own (headless mode) log to `ephemeral-daemon.log` beside it. On Windows the tray also captures the daemon's console output (warnings, errors, and native crash output) to `daemon-process.log`, archiving it on each launch and keeping 10 archives.
 
 For a self-hosted server's app and storage server logs, see [Collecting server logs for a bug report](docker-compose/README.md#collecting-server-logs-for-a-bug-report).
 

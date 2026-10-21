@@ -97,12 +97,29 @@ function archiveName(logFilePath: string): string {
     : archived;
 }
 
+/**
+ * Matches only this log's own timestamped archives (see archiveName), so
+ * siblings that share the prefix, such as the tray's daemon-process.log and
+ * its archives, are never counted or pruned as daemon.log archives.
+ */
+function isArchiveOf(logFilePath: string, fileName: string): boolean {
+  const extName = path.extname(logFilePath);
+  const stem = path.basename(logFilePath, extName);
+  if (!fileName.startsWith(`${stem}-`) || !fileName.endsWith(extName)) {
+    return false;
+  }
+  const stamp = fileName.slice(
+    stem.length + 1,
+    fileName.length - extName.length,
+  );
+  return /^\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}(\.\d{3})?$/.test(stamp);
+}
+
 function pruneArchives(logFilePath: string, maxArchivedFiles: number): void {
   if (maxArchivedFiles < 0) return;
-  const extName = path.extname(logFilePath);
   const logFiles = fs
     .readdirSync(path.dirname(logFilePath))
-    .filter((f) => f.startsWith(`${path.basename(logFilePath, extName)}-`));
+    .filter((f) => isArchiveOf(logFilePath, f));
 
   const numToRemove = logFiles.length - maxArchivedFiles;
   const filesToRemove = logFiles.sort().slice(0, numToRemove);
@@ -170,9 +187,19 @@ export async function InitLogger(
 
   const include = config.logging.prettify.include;
 
+  // A launcher that captures stdout to a file of its own (the Windows tray's
+  // daemon-process.log) sets this so the capture holds problems and native
+  // crash output rather than a second copy of daemon.log.
+  const consoleLevelOverride = process.env["CHECKPOINT_CONSOLE_LOG_LEVEL"];
+  const normalLevel = (
+    consoleLevelOverride && consoleLevelOverride in pino.levels.values
+      ? consoleLevelOverride
+      : config.logging.level
+  ) as LevelNames;
+
   const streams: (pino.DestinationStream | pino.StreamEntry<LevelNames>)[] = [
     {
-      level: config.logging.level as LevelNames,
+      level: normalLevel,
       stream: config.logging.prettify.enabled
         ? pretty({
             colorize: config.logging.prettify.colorize,
@@ -227,7 +254,6 @@ export async function InitLogger(
     });
   }
 
-  const normalLevel = config.logging.level as LevelNames;
   const fileLevel = config.logging.logFile.level as LevelNames;
 
   const normalLevelNum = pino.levels.values[normalLevel];
