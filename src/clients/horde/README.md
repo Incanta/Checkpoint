@@ -22,6 +22,8 @@ $env:HORDE_ENGINE_DIR = "E:/epic/engine/UE_Incanta"
 ./jobdriver/build.ps1    # patched JobDriver -> artifacts/jobdriver/JobDriver
 ```
 
+To produce the full release zip in one step, drop the CD-built CLI zip at `artifacts/checkpoint-cli-win32-x64.zip` and run `./scripts/build-release.ps1 -EngineDir E:/epic/engine/UE_Incanta`. It cleans `artifacts/` (keeping `checkpoint-cli-*.zip`), bundles the CLI into the JobDriver, runs both builds, and calls `package-release.ps1`. The Horde version defaults to the engine's `Build.version` Major.Minor; override it with `-HordeVersion`.
+
 `Checkpoint.Api` builds standalone (no engine needed):
 
 ```powershell

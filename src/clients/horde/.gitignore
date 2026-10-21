@@ -3,3 +3,4 @@ obj/
 artifacts/
 jobdriver/work/
 *.user
+*.zip
