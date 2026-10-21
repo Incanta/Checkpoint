@@ -22,7 +22,7 @@ $env:HORDE_ENGINE_DIR = "E:/epic/engine/UE_Incanta"
 ./jobdriver/build.ps1    # patched JobDriver -> artifacts/jobdriver/JobDriver
 ```
 
-To produce the full release zip in one step, drop the CD-built CLI zip at `artifacts/checkpoint-cli-win32-x64.zip` and run `./scripts/build-release.ps1 -EngineDir E:/epic/engine/UE_Incanta`. It cleans `artifacts/` (keeping `checkpoint-cli-*.zip`), bundles the CLI into the JobDriver, runs both builds, and calls `package-release.ps1`. The Horde version defaults to the engine's `Build.version` Major.Minor; override it with `-HordeVersion`.
+To build everything in one step, drop the CD-built CLI zip at `artifacts/checkpoint-cli-win32-x64.zip` and run `./scripts/build-release.ps1 -EngineDir E:/epic/engine/UE_Incanta`. It cleans `artifacts/` (keeping `checkpoint-cli-*.zip`), runs both builds, and bundles the CLI into the JobDriver. Copy the two DLLs from `artifacts/server` to the Horde server, and run `repack-agent.ps1` (which reads `artifacts/jobdriver/JobDriver` directly) for agents. Add `-Package` to also produce the distributable release zip via `package-release.ps1`; its Horde version defaults to the engine's `Build.version` Major.Minor (override with `-HordeVersion`).
 
 `Checkpoint.Api` builds standalone (no engine needed):
 
@@ -30,6 +30,32 @@ To produce the full release zip in one step, drop the CD-built CLI zip at `artif
 dotnet build src/Checkpoint.Api/Checkpoint.Api.csproj
 dotnet test tests/Checkpoint.Api.Tests/Checkpoint.Api.Tests.csproj
 ```
+
+## Deploying to a Docker Horde server
+
+The recommended path for a containerized (usually Linux) Horde server is to bind-mount the two plugin DLLs into the container. The assemblies are portable .NET, so building them on a Windows workstation is fine. Horde's image runs `dotnet HordeServer.dll` from `/app` and only scans that directory for `HordeServer.*.dll`, so mount each file individually into `/app`. Do not mount a directory over `/app`, which would hide the server itself.
+
+Copy `artifacts/server/*.dll` to the host (for example with `scp` to `/opt/horde/plugins`), then mount them read-only:
+
+```yaml
+# docker-compose.yml
+services:
+  horde-server:
+    volumes:
+      - /opt/horde/plugins/HordeServer.Checkpoint.dll:/app/HordeServer.Checkpoint.dll:ro
+      - /opt/horde/plugins/Checkpoint.Api.dll:/app/Checkpoint.Api.dll:ro
+```
+
+or with `docker run`:
+
+```sh
+docker run ... \
+  -v /opt/horde/plugins/HordeServer.Checkpoint.dll:/app/HordeServer.Checkpoint.dll:ro \
+  -v /opt/horde/plugins/Checkpoint.Api.dll:/app/Checkpoint.Api.dll:ro \
+  <horde-server-image>
+```
+
+Then enable the plugin in the server config and set `CHECKPOINT_API_TOKEN` in the container environment (see `website/docusaurus/docs/horde.md`), and recreate the container. The plugin binds Horde's assemblies exactly, so when you upgrade the Horde image, rebuild the DLLs against the matching engine checkout and replace the files on the host before restarting.
 
 ## Integration tests
 

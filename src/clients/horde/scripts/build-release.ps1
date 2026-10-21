@@ -1,11 +1,13 @@
 <#
 .SYNOPSIS
-Builds the full Checkpoint Horde integration release zip in one step.
+Builds the full Checkpoint Horde integration (server plugin + JobDriver with bundled CLI) in one step.
 
 .DESCRIPTION
 Cleans previous build outputs from artifacts/ (keeping any checkpoint-cli-*.zip), extracts the
-prebuilt Checkpoint CLI zip, builds the server plugin, builds the Checkpoint JobDriver with the
-CLI bundled into its tools/ folder, and packages everything with package-release.ps1.
+prebuilt Checkpoint CLI zip, builds the server plugin into artifacts/server, and builds the
+Checkpoint JobDriver with the CLI bundled into its tools/ folder at artifacts/jobdriver/JobDriver.
+repack-agent.ps1 consumes that folder directly. Pass -Package to also produce the distributable
+release zip via package-release.ps1.
 
 The CLI zip is the CD artifact (e.g. checkpoint-cli-win32-x64.zip). Its contents are bundled
 as-is: the CLI finds its daemon at <exeDir>/resources/daemon, so the layout needs no changes.
@@ -16,11 +18,15 @@ Path to the Unreal Engine checkout root containing Horde source (e.g. E:/epic/en
 Defaults to the HORDE_ENGINE_DIR environment variable.
 
 .PARAMETER HordeVersion
-Horde release the artifacts are built against (e.g. 5.8). Defaults to the engine's
-Major.Minor version from Engine/Build/Build.version.
+Horde release the artifacts are built against (e.g. 5.8), used in the release zip name with
+-Package. Defaults to the engine's Major.Minor version from Engine/Build/Build.version.
 
 .PARAMETER CliZip
 Prebuilt Checkpoint CLI zip to bundle. Defaults to artifacts/checkpoint-cli-win32-x64.zip.
+
+.PARAMETER Package
+Also bundle the outputs into checkpoint-horde-<clientVersion>_horde-<HordeVersion>.zip for
+distribution to people who can't build from source.
 
 .EXAMPLE
 ./scripts/build-release.ps1 -EngineDir E:/epic/engine/UE_Incanta
@@ -28,7 +34,8 @@ Prebuilt Checkpoint CLI zip to bundle. Defaults to artifacts/checkpoint-cli-win3
 param(
   [string]$EngineDir = $env:HORDE_ENGINE_DIR,
   [string]$HordeVersion = "",
-  [string]$CliZip = ""
+  [string]$CliZip = "",
+  [switch]$Package
 )
 
 $ErrorActionPreference = "Stop"
@@ -79,7 +86,9 @@ try {
 
   & (Join-Path $root "build.ps1") -HordeEngineDir $EngineDir
   & (Join-Path $root "jobdriver/build.ps1") -HordeEngineDir $EngineDir -CheckpointCliDir $cliDir
-  & (Join-Path $PSScriptRoot "package-release.ps1") -HordeVersion $HordeVersion
+  if ($Package) {
+    & (Join-Path $PSScriptRoot "package-release.ps1") -HordeVersion $HordeVersion
+  }
 }
 finally {
   if (Test-Path $cliStage) { Remove-Item $cliStage -Recurse -Force }
