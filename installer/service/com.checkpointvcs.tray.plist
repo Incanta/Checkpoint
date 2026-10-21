@@ -10,7 +10,13 @@
     </array>
     <key>RunAtLoad</key>
     <true/>
+    <!-- Relaunch the tray if it crashes. A duplicate tray started while one is
+         already running exits 0 (single-instance lock), which this does not
+         restart. -->
     <key>KeepAlive</key>
-    <false/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
 </dict>
 </plist>

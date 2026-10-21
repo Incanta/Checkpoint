@@ -10,6 +10,12 @@ import (
 	"strings"
 )
 
+// systemd restarts a crashed daemon itself (Restart=on-failure in the unit),
+// and a systemctl start from here would prompt for polkit authentication.
+const supervisesDaemon = false
+
+func daemonLaunchPending() bool { return false }
+
 func serviceUnit() string {
 	if u, err := user.Current(); err == nil && u.Username != "root" {
 		return fmt.Sprintf("checkpoint-daemon@%s", u.Username)

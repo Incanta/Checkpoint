@@ -76,7 +76,8 @@ const teamSyncHandler = new TeamSyncHandler(ipcMain);
 // The app deliberately has no tray icon of its own. Checkpoint's tray presence
 // is the standalone Go tray (src/clients/tray), which outlives this app and
 // already owns the daemon lifecycle, updates, and the Team Sync status/"Sync
-// Latest" actions. A second Electron tray would just duplicate it.
+// Latest" actions. A second Electron tray would just duplicate it. This app
+// only relaunches that tray when it's missing (see tray-launcher.ts).
 
 // Single-instance: focus the existing window instead of launching a second
 // copy (which would fight over the daemon).

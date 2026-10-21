@@ -9,9 +9,22 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
+
+// The tray is the only thing that launches the daemon on Windows, so it is
+// also the thing that has to bring it back. See supervisor.go.
+const supervisesDaemon = true
+
+// daemonChildren counts daemon processes this tray launched that have not
+// exited yet.
+var daemonChildren atomic.Int32
+
+// daemonLaunchPending reports whether a daemon this tray launched is still
+// alive, even if it isn't answering yet (it takes a few seconds to listen).
+func daemonLaunchPending() bool { return daemonChildren.Load() > 0 }
 
 // installMarker mirrors the JSON the daemon writes to
 // ~/.checkpoint/updates/.installing in updater.applyUpdate, immediately before
@@ -196,12 +209,14 @@ func startDaemonService() error {
 	}
 
 	logTray("start: launched %s (pid %d); output -> daemon-process.log", exe, cmd.Process.Pid)
+	daemonChildren.Add(1)
 
 	// Observe the child so an immediate crash is recorded (we don't otherwise
 	// wait on it; the daemon is meant to be long-running). The log file is
 	// closed only after the process exits so its final output is captured.
 	go func() {
 		waitErr := cmd.Wait()
+		daemonChildren.Add(-1)
 		logFile.Close()
 		if waitErr != nil {
 			logTray("daemon process exited: %v (see daemon-process.log)", waitErr)

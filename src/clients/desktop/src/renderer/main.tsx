@@ -21,6 +21,7 @@ import ChangelistChanges from "./components/ChangelistChanges";
 import UpdateNotification from "./components/UpdateNotification";
 import VersionNotification from "./components/VersionNotification";
 import ServerStatusBanner from "./components/ServerStatusBanner";
+import DaemonStatusBanner from "./components/DaemonStatusBanner";
 
 // Bridges main-process navigation requests into react-router. The app uses a
 // MemoryRouter, so we must navigate via the router rather than mutating
@@ -79,6 +80,7 @@ if (popoutType === "file-history") {
             <UpdateNotification />
             <VersionNotification />
             <ServerStatusBanner />
+            <DaemonStatusBanner />
           </Router>
         </ThemeProvider>
       </Provider>

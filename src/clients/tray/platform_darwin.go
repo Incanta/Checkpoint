@@ -12,6 +12,11 @@ import (
 
 const plistLabel = "com.checkpointvcs.daemon"
 
+// launchd restarts a crashed daemon itself (KeepAlive in the daemon plist).
+const supervisesDaemon = false
+
+func daemonLaunchPending() bool { return false }
+
 func plistPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "Library", "LaunchAgents", plistLabel+".plist")

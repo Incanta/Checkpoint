@@ -1,6 +1,9 @@
 import React, { useState } from "react";
 import { useAtomValue } from "jotai";
-import { serverReachableAtom } from "../../common/state/daemon";
+import {
+  daemonConnectionAtom,
+  serverReachableAtom,
+} from "../../common/state/daemon";
 import { currentUserAtom } from "../../common/state/auth";
 import { ipc } from "../pages/ipc";
 
@@ -11,10 +14,13 @@ import { ipc } from "../pages/ipc";
 // where there's no account context.
 export default function ServerStatusBanner(): React.ReactElement | null {
   const reachable = useAtomValue(serverReachableAtom);
+  const connection = useAtomValue(daemonConnectionAtom);
   const currentUser = useAtomValue(currentUserAtom);
   const [retrying, setRetrying] = useState(false);
 
-  if (reachable || !currentUser) {
+  // With the daemon itself unreachable, the server status is stale and
+  // DaemonStatusBanner (same spot) explains the real problem.
+  if (reachable || !currentUser || connection === "reconnecting") {
     return null;
   }
 

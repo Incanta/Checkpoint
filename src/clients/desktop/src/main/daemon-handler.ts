@@ -47,6 +47,7 @@ import { versionCheckAtom } from "../common/state/version";
 import type { File, Workspace } from "@checkpointvcs/daemon";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { ensureTrayRunning } from "./tray-launcher";
 
 const execAsync = promisify(exec);
 
@@ -55,6 +56,33 @@ const JOB_POLL_INTERVAL_MS = 500;
 // How long to wait between attempts to reach the daemon while it is
 // unreachable. The renderer shows a "connecting" screen during this time.
 const DAEMON_CONNECT_RETRY_MS = 1500;
+
+// Once connected, how often to confirm the daemon is still there, how long one
+// check may take, and how many checks in a row must fail before we call the
+// connection lost. Two failures keep one slow answer (a busy daemon) from
+// flashing the "reconnecting" banner.
+const DAEMON_HEALTH_INTERVAL_MS = 5000;
+const DAEMON_HEALTH_TIMEOUT_MS = 5000;
+const DAEMON_HEALTH_FAILURES_BEFORE_LOST = 2;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`timed out after ${ms}ms`)),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 interface DaemonJobResult {
   status: string;
@@ -119,6 +147,7 @@ export default class DaemonHandler {
   private isMocked: boolean;
   private ipcMain: IpcMain;
   private webContents: Electron.WebContents | null = null;
+  private healthTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ipcMain: IpcMain) {
     this.isMocked = process.env.USE_MOCK_DATA === "true";
@@ -379,34 +408,89 @@ export default class DaemonHandler {
   /**
    * Connects to the local daemon and loads the user list. Retries
    * indefinitely while the daemon is unreachable so the app recovers
-   * automatically once the daemon is started (e.g. from the tray). The
-   * renderer observes `daemonConnectionAtom` to show a connecting screen.
+   * automatically once the daemon is started. The renderer observes
+   * `daemonConnectionAtom` to show a connecting screen on startup, or a
+   * banner when an established connection was lost (`reconnect`).
+   *
+   * Opening the app should make sure Checkpoint is running, so the tray is
+   * (re)launched up front and again while the daemon stays unreachable. On
+   * Windows the tray is also what starts the daemon.
    */
-  private async connectToDaemon(): Promise<void> {
+  private async connectToDaemon(reconnect = false): Promise<void> {
     if (this.isMocked) {
       store.set(usersAtom, []);
       store.set(daemonConnectionAtom, "connected");
       return;
     }
 
-    store.set(daemonConnectionAtom, "connecting");
+    store.set(daemonConnectionAtom, reconnect ? "reconnecting" : "connecting");
+    ensureTrayRunning();
 
     for (;;) {
       try {
         const client = await CreateDaemonClient();
 
         await this.loadUsers(client);
-        await this.restoreLastOpenedWorkspace(client);
+        if (reconnect) {
+          // The user is already somewhere in the app; refresh what they're
+          // looking at instead of re-routing them.
+          void this.workspaceRefresh();
+        } else {
+          await this.restoreLastOpenedWorkspace(client);
+        }
 
         store.set(daemonConnectionAtom, "connected");
+        this.startDaemonHealthMonitor();
         return;
       } catch (error) {
         console.error("Could not reach the daemon, retrying shortly:", error);
+        // Throttled inside, so this relaunches at most every few seconds.
+        ensureTrayRunning();
         await new Promise((resolve) =>
           setTimeout(resolve, DAEMON_CONNECT_RETRY_MS),
         );
       }
     }
+  }
+
+  /**
+   * Watches an established daemon connection and falls back to
+   * `connectToDaemon(true)` once the daemon stops answering, so a crashed or
+   * stopped daemon is noticed (and the tray relaunched) instead of every
+   * action silently failing.
+   */
+  private startDaemonHealthMonitor(): void {
+    if (this.healthTimer) return;
+
+    let failures = 0;
+
+    const check = async (): Promise<void> => {
+      try {
+        const client = await CreateDaemonClient();
+        await withTimeout(
+          client.version.check.query(),
+          DAEMON_HEALTH_TIMEOUT_MS,
+        );
+        failures = 0;
+      } catch (error) {
+        failures++;
+        if (failures >= DAEMON_HEALTH_FAILURES_BEFORE_LOST) {
+          console.error("Lost the connection to the daemon:", error);
+          this.healthTimer = null;
+          void this.connectToDaemon(true);
+          return;
+        }
+      }
+      this.healthTimer = setTimeout(
+        () => void check(),
+        DAEMON_HEALTH_INTERVAL_MS,
+      );
+    };
+
+    this.healthTimer = setTimeout(
+      () => void check(),
+      DAEMON_HEALTH_INTERVAL_MS,
+    );
   }
 
   /**

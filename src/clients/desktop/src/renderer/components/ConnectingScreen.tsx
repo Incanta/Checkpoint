@@ -17,8 +17,10 @@ export default function ConnectingScreen(): React.ReactElement {
 
   // Only show the "is the daemon running?" hint once we've been stuck in the
   // connecting state for a while. Reset the timer if we leave that state.
+  const isConnecting = connection !== "connected";
+
   useEffect(() => {
-    if (connection !== "connecting") {
+    if (!isConnecting) {
       setIsSlow(false);
       return;
     }
@@ -27,9 +29,7 @@ export default function ConnectingScreen(): React.ReactElement {
     return (): void => {
       clearTimeout(timer);
     };
-  }, [connection]);
-
-  const isConnecting = connection === "connecting";
+  }, [isConnecting]);
 
   return (
     <div
@@ -67,7 +67,7 @@ export default function ConnectingScreen(): React.ReactElement {
           }}
         >
           {isConnecting
-            ? "Reaching the local Checkpoint daemon…"
+            ? "Starting the Checkpoint background service…"
             : "Loading your workspace…"}
         </div>
       </div>
@@ -103,8 +103,8 @@ export default function ConnectingScreen(): React.ReactElement {
               color: "var(--color-text-secondary)",
             }}
           >
-            Make sure the Checkpoint daemon is running. You can start it from
-            the Checkpoint icon in your system tray.
+            Checkpoint usually starts on its own. If the daemon was stopped,
+            start it from the Checkpoint icon in your system tray.
           </p>
           <button
             onClick={() =>

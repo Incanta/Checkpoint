@@ -71,6 +71,13 @@ type updateStatus struct {
 }
 
 func main() {
+	// The Desktop app launches the tray every time it starts or loses the
+	// daemon, without checking whether one is already running; this is what
+	// makes that safe. Exiting 0 also keeps launchd's KeepAlive (which only
+	// restarts on a failed exit) from relaunching the duplicate.
+	if !acquireSingleInstance() {
+		return
+	}
 	systray.Run(onReady, onExit)
 }
 
@@ -111,8 +118,10 @@ func onReady() {
 	systray.AddSeparator()
 	mOpenDesktop := systray.AddMenuItem("Open Desktop App", "Open Checkpoint Desktop")
 	mViewLogs := systray.AddMenuItem("View Logs", "Open the Checkpoint log folder")
-	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Quit", "Quit the tray application")
+	// There is deliberately no Quit item. The icon is the visible sign that
+	// Checkpoint is running, and on Windows the tray is also what keeps the
+	// daemon alive. Stopping the daemon is still available above; installers
+	// and the updater end the tray process directly.
 
 	// On Windows the daemon is launched and supervised by the tray (there is no
 	// Windows service), so start it if it isn't already running. On macOS/Linux
@@ -132,6 +141,10 @@ func onReady() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
+			if superviseDaemon() {
+				mStatus.SetTitle("Daemon: Restarting...")
+				continue
+			}
 			updateDaemonStatus()
 		}
 	}()
@@ -157,8 +170,6 @@ func onReady() {
 				go openDesktopApp()
 			case <-mViewLogs.ClickedCh:
 				go openLogs()
-			case <-mQuit.ClickedCh:
-				systray.Quit()
 			}
 		}
 	}()
@@ -170,6 +181,7 @@ func handleStart() {
 	mStart.Disable()
 	mStatus.SetTitle("Daemon: Starting...")
 	logTray("start: requested")
+	setDaemonStopRequested(false)
 	if err := startDaemonService(); err != nil {
 		if errors.Is(err, errUpdateInstalling) {
 			// Not an error: starting now is exactly what breaks the install.
@@ -191,6 +203,9 @@ func handleStop() {
 	mStop.Disable()
 	mRestart.Disable()
 	mStatus.SetTitle("Daemon: Stopping...")
+	// Set before stopping so the supervisor can't restart the daemon in the
+	// gap between the kill and the next status refresh.
+	setDaemonStopRequested(true)
 	if err := stopDaemonService(); err != nil {
 		logTray("stop daemon failed: %v", err)
 		mStatus.SetTitle("Daemon: Error")
@@ -207,6 +222,7 @@ func handleRestart() {
 	mStop.Disable()
 	mStart.Disable()
 	mStatus.SetTitle("Daemon: Restarting...")
+	setDaemonStopRequested(false)
 	if err := restartDaemonService(); err != nil {
 		logTray("restart daemon failed: %v", err)
 		mStatus.SetTitle("Daemon: Error")
