@@ -45,10 +45,14 @@ export enum FileStatus {
   Unknown = 0,
   /** This file exists in a directory that doesn't share the workspace root as an ancestor */
   NotInWorkspaceRoot = 1,
-  /** This file was locally added but has correlation to the controlled workspace */
+  /**
+   * This file exists locally but is not controlled (untracked). Staging it is
+   * what makes it part of the next submit.
+   */
   Local = 2,
-  /** This file was locally added and is marked for add for a pending submission */
-  Added = 3,
+  // 3 was Added (an untracked file marked for add). Marking for add was
+  // removed; staging alone says a new file should be submitted. The value
+  // stays reserved because clients cast statuses straight from the wire.
   /** This file is controlled and was moved or renamed locally */
   Renamed = 4,
   /** This file is controlled and was deleted locally */

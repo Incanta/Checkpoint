@@ -257,7 +257,7 @@ export interface ReconcileResult {
   removed: number;
   /**
    * Files the filter excludes that were kept, because they hold local work:
-   * edited, staged, marked for add, or claimed by this workspace. They stay
+   * edited, staged, or claimed by this workspace. They stay
    * tracked, so they keep showing as pending changes.
    */
   kept: string[];
@@ -326,10 +326,7 @@ async function reconcileSyncFilter(
 
   if (excluded.length > 0) {
     onStep?.("Applying sync filter");
-    const keep = new Set([
-      ...(state.staged ?? []),
-      ...(state.markedForAdd ?? []),
-    ]);
+    const keep = new Set(state.staged ?? []);
     let claimed: Set<string> | null = new Set();
     try {
       const client = await CreateApiClientAuth(workspace.daemonId);

@@ -52,7 +52,6 @@ export type GroupId = string;
 
 export const GROUP_CONFLICTS = "conflicts";
 export const GROUP_UNSTAGED = "unstaged";
-export const GROUP_LOCAL = "local";
 
 export function branchGroupId(branchName: string): GroupId {
   return `branch:${branchName}`;
@@ -102,13 +101,6 @@ interface StatusInfo {
 }
 
 const STATUS_INFO: Partial<Record<FileStatus, StatusInfo>> = {
-  [FileStatus.Added]: {
-    group: GROUP_UNSTAGED,
-    label: "Added",
-    contextValue: "added",
-    badge: "A",
-    colorId: "checkpointDecoration.addedResourceForeground",
-  },
   [FileStatus.Renamed]: {
     group: GROUP_UNSTAGED,
     label: "Renamed",
@@ -159,16 +151,34 @@ const STATUS_INFO: Partial<Record<FileStatus, StatusInfo>> = {
     colorId: "checkpointDecoration.conflictResourceForeground",
   },
   [FileStatus.Local]: {
-    group: GROUP_LOCAL,
-    label: "Local (Untracked)",
-    contextValue: "local",
+    group: GROUP_UNSTAGED,
+    label: "Untracked",
+    contextValue: "untracked",
     badge: "U",
     colorId: "checkpointDecoration.untrackedResourceForeground",
   },
 };
 
-export function getStatusInfo(status: FileStatus): StatusInfo | undefined {
-  return STATUS_INFO[status];
+/**
+ * An untracked file once it is staged. Staging is the only way a new file
+ * joins a submit, so a staged one reads as added, as in git.
+ */
+const ADDED_INFO: StatusInfo = {
+  group: GROUP_UNSTAGED,
+  label: "Added",
+  contextValue: "added",
+  badge: "A",
+  colorId: "checkpointDecoration.addedResourceForeground",
+};
+
+export function getStatusInfo(file: {
+  status: FileStatus;
+  staged?: boolean;
+}): StatusInfo | undefined {
+  if (file.status === FileStatus.Local && file.staged) {
+    return ADDED_INFO;
+  }
+  return STATUS_INFO[file.status];
 }
 
 export class CheckpointResource implements vscode.SourceControlResourceState {
@@ -192,17 +202,18 @@ export class CheckpointResource implements vscode.SourceControlResourceState {
   }
 
   public get contextValue(): string {
-    return getStatusInfo(this.file.status)?.contextValue ?? "unknown";
+    return getStatusInfo(this.file)?.contextValue ?? "unknown";
   }
 
   public get decorations(): vscode.SourceControlResourceDecorations {
-    const info = getStatusInfo(this.file.status);
+    const info = getStatusInfo(this.file);
     return {
       strikeThrough: this.file.status === FileStatus.Deleted,
       faded: false,
       tooltip: info?.label,
-      // The daemon reports pending directories (an untracked or marked-for-add
-      // folder with no pending files of its own) as single rows. The SCM view
+      // The daemon reports an untracked folder with no tracked files as a
+      // single row, which stays one when it is too large to list file by
+      // file (see expandUntrackedFolders). The SCM view
       // can't render them as collapsible folders, but without an explicit icon
       // the file icon theme resolves them as extension-less files and draws the
       // generic "unknown file" glyph. Force a folder codicon, tinted to match
@@ -241,8 +252,8 @@ export class CheckpointRepository implements vscode.Disposable {
    * groups). syncGroups keeps it in the desktop app's order: for each
    * branch, its default changelist (a branch bucket, `branch:<name>`, shown
    * only while it holds files) followed by its numbered changelists (shown
-   * even when empty, so a new one can be moved into), then Unstaged Changes
-   * and Local Files.
+   * even when empty, so a new one can be moved into), then Unstaged Changes,
+   * which holds untracked files too.
    */
   private orderedGroups = new Map<GroupId, vscode.SourceControlResourceGroup>();
   /** The daemon's pending changelists as of the last refresh. */
@@ -570,14 +581,14 @@ export class CheckpointRepository implements vscode.Disposable {
    * The daemon reports a folder holding no tracked files as one row, which
    * the SCM view can only draw as a file and which can only be acted on as a
    * whole. Listing its files instead lets the tree view show a real folder
-   * and lets single files be marked for add, staged, or moved into a
-   * changelist. The listing comes from the same one-level
-   * `getDirectoryPending` the desktop app uses to expand a folder, walked
-   * level by level (each level is one batched request).
+   * and lets single files be staged or moved into a changelist. The listing
+   * comes from the same one-level `getDirectoryPending` the desktop app uses
+   * to expand a folder, walked level by level (each level is one batched
+   * request).
    *
-   * Only `Local` folders are expanded. A folder marked for add as a whole
-   * stays one row: its files are not individually marked, so listing them
-   * would show actions that do not apply to them.
+   * Only unstaged folders are expanded. A folder staged as a whole (from the
+   * desktop app or the CLI) stays one row: its files are not individually
+   * staged, so listing them would show them as unstaged.
    */
   private async expandUntrackedFolders(
     client: DaemonClient,
@@ -590,7 +601,9 @@ export class CheckpointRepository implements vscode.Disposable {
     const folders = [...files]
       .filter(
         ([, file]) =>
-          file.type === FileType.Directory && file.status === FileStatus.Local,
+          file.type === FileType.Directory &&
+          file.status === FileStatus.Local &&
+          !file.staged,
       )
       .map(([relPath]) => relPath);
 
@@ -968,13 +981,12 @@ export class CheckpointRepository implements vscode.Disposable {
       }
     }
 
-    order.push(GROUP_UNSTAGED, GROUP_LOCAL);
+    order.push(GROUP_UNSTAGED);
     return order;
   }
 
   private groupLabel(groupId: GroupId): string {
     if (groupId === GROUP_UNSTAGED) return "Unstaged Changes";
-    if (groupId === GROUP_LOCAL) return "Local Files";
     const branchName = branchFromGroupId(groupId);
     if (branchName !== undefined) return this.branchGroupLabel(branchName);
     const target = this.targetForGroup(groupId);
@@ -1004,7 +1016,7 @@ export class CheckpointRepository implements vscode.Disposable {
     file: File,
     changelists: PendingChangelistState,
   ): GroupId | undefined {
-    const info = getStatusInfo(file.status);
+    const info = getStatusInfo(file);
     if (!info) return undefined;
     if (info.group === GROUP_CONFLICTS) return GROUP_CONFLICTS;
     if (!file.staged) return info.group;
@@ -1842,44 +1854,6 @@ export class CheckpointRepository implements vscode.Disposable {
     } catch (error) {
       void vscode.window.showErrorMessage(
         `Checkpoint: undo checkout failed. ${errorMessage(error)}`,
-      );
-    }
-    await this.refresh();
-  }
-
-  public async markForAdd(relPaths: string[]): Promise<void> {
-    if (relPaths.length === 0) {
-      return;
-    }
-    try {
-      const client = await this.model.getClient();
-      await client.workspaces.pending.markForAdd.mutate({
-        daemonId: this.daemonId,
-        workspaceId: this.workspaceId,
-        paths: relPaths,
-      });
-    } catch (error) {
-      void vscode.window.showErrorMessage(
-        `Checkpoint: mark for add failed. ${errorMessage(error)}`,
-      );
-    }
-    await this.refresh();
-  }
-
-  public async unmarkForAdd(relPaths: string[]): Promise<void> {
-    if (relPaths.length === 0) {
-      return;
-    }
-    try {
-      const client = await this.model.getClient();
-      await client.workspaces.pending.unmarkForAdd.mutate({
-        daemonId: this.daemonId,
-        workspaceId: this.workspaceId,
-        paths: relPaths,
-      });
-    } catch (error) {
-      void vscode.window.showErrorMessage(
-        `Checkpoint: unmark for add failed. ${errorMessage(error)}`,
       );
     }
     await this.refresh();

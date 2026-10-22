@@ -4,13 +4,13 @@ A VS Code SCM extension for [Checkpoint](https://checkpointvcs.com). Like every 
 
 ## Features
 
-- Source Control view with Checkpoint pending changes, split into Conflicts, Pending Changes, and Local Files groups
+- Source Control view with Checkpoint pending changes: Conflicts, then each branch's default and numbered pending changelists, then Unstaged Changes (untracked files show as `U`, and as `A` once staged)
 - Submit from the SCM input box (Ctrl+Enter), with job progress reporting
 - Pull latest with auto-merge results and conflict reporting
 - Quick diff gutter and head-vs-working diffs backed by the daemon's Longtail storage
 - File decorations (badges and colors) in the explorer and editor tabs
 - Status bar items for the current branch (switch branches) and sync status (pull)
-- Check out and lock files, undo checkouts, mark and unmark files for add, revert changes
+- Stage files (including new ones) into pending changelists, check out and lock files, undo checkouts, revert changes
 - Changelist and per-file history browsing with diffs
 - Branch switching and creation
 - Sign in via device code or API token
@@ -41,3 +41,4 @@ To produce a `.vsix` package: `yarn package`.
 - `checkpoint.autoRefresh`: refresh pending changes on file system events (default `true`)
 - `checkpoint.syncStatusInterval`: seconds between remote sync status checks (default `60`)
 - `checkpoint.daemonPort`: override the daemon port (`0` reads `~/.checkpoint/daemon.json`)
+- `checkpoint.untrackedFolderFileLimit`: untracked folders with up to this many entries are listed file by file in the Source Control view (default `5000`, `0` never lists them)

@@ -200,7 +200,6 @@ function summarizeState(state: WorkspaceState): Record<string, unknown> {
     branchHeads: state.branchHeads ?? {},
     trackedFiles: Object.keys(state.files ?? {}).length,
     artifactFiles: Object.keys(state.artifactFiles ?? {}).length,
-    markedForAdd: state.markedForAdd?.length ?? 0,
     staged: state.staged?.length ?? 0,
     pendingRemovals: state.pendingRemovals?.length ?? 0,
     pendingDirRenames: state.pendingDirRenames?.length ?? 0,

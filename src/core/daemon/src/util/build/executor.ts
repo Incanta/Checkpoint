@@ -67,7 +67,10 @@ function buildScriptPath(engineDir: string): string {
 /** Absolute path to the host RunUAT script for the current OS. */
 function runUatScriptPath(engineDir: string): string {
   const base = path.join(engineDir, "Engine", "Build", "BatchFiles");
-  return path.join(base, process.platform === "win32" ? "RunUAT.bat" : "RunUAT.sh");
+  return path.join(
+    base,
+    process.platform === "win32" ? "RunUAT.bat" : "RunUAT.sh",
+  );
 }
 
 /**
@@ -87,7 +90,9 @@ export async function spawnStreaming(
   onLine?: (stream: "out" | "err", line: string) => void,
 ): Promise<number> {
   const jobManager = JobManager.Get();
-  const fullCommand = [cmd, ...args].filter((token) => token.length > 0).join(" ");
+  const fullCommand = [cmd, ...args]
+    .filter((token) => token.length > 0)
+    .join(" ");
 
   return new Promise<number>((resolve) => {
     const child =
@@ -225,19 +230,18 @@ export async function runBuild(
   const projectInfo = unrealConfig
     ? await getProjectInfo(workspace, state)
     : null;
-  const hasUnreal = Boolean(
-    projectInfo?.engine && projectInfo?.uprojectPath,
-  );
+  const hasUnreal = Boolean(projectInfo?.engine && projectInfo?.uprojectPath);
 
   const editorTarget =
-    projectInfo?.editorTargetName ?? unrealConfig?.editorTarget ?? "UnrealEditor";
+    projectInfo?.editorTargetName ??
+    unrealConfig?.editorTarget ??
+    "UnrealEditor";
 
   // Merge default + repo-config + custom steps, apply overrides, filter, order.
   // The UBT defaults are contributed only by an opted-in Unreal repo.
-  const defaults =
-    unrealConfig?.defaultBuildSteps
-      ? getUnrealDefaultBuildSteps(editorTarget)
-      : [];
+  const defaults = unrealConfig?.defaultBuildSteps
+    ? getUnrealDefaultBuildSteps(editorTarget)
+    : [];
 
   const merged = mergeBuildSteps(
     defaults,
@@ -328,10 +332,7 @@ export async function runBuild(
 
   // Serialize log-file writes so lines are not interleaved out of order.
   let logChain: Promise<unknown> = Promise.resolve();
-  const writeLogLine = (
-    stream: "out" | "err" | "sys",
-    line: string,
-  ): void => {
+  const writeLogLine = (stream: "out" | "err" | "sys", line: string): void => {
     logChain = logChain
       .then(() => logHandle.write(`[${stream}] ${line}\n`))
       .catch(() => {
@@ -449,7 +450,13 @@ export async function runBuild(
       sysLog(`Running step "${step.name}": ${[cmd, ...args].join(" ")}`);
       ranSteps.push(step.id);
 
-      const exitCode = await spawnStreaming(jobId, cmd, args, cwd, writeLogLine);
+      const exitCode = await spawnStreaming(
+        jobId,
+        cmd,
+        args,
+        cwd,
+        writeLogLine,
+      );
       const durationMs = Date.now() - startedAt;
 
       // A cancel during the step surfaces as a killed process; record it as

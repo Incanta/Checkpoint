@@ -1278,6 +1278,32 @@ export default class DaemonHandler {
     }
   }
 
+  /**
+   * The untracked pending rows at or under `rawPath`, for staging from the
+   * workspace explorer, which cannot tell a new folder from a tracked one.
+   *
+   * The daemon reports an untracked folder as one collapsed row, so a path
+   * at or inside such a row is returned as is (staging a folder stages its
+   * non-ignored contents); otherwise every untracked row below it is. Tracked
+   * files are left out: staging one is a decision about a change, not about
+   * whether the file belongs in the repo.
+   */
+  private untrackedPathsAt(rawPath: string): string[] {
+    const files = store.get(workspacePendingChangesAtom)?.files ?? {};
+    const target = rawPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    const isUntrackedRow = (p: string) =>
+      files[p]?.status === FileStatus.Local && !files[p]?.staged;
+
+    for (let p = target; p; p = p.slice(0, Math.max(0, p.lastIndexOf("/")))) {
+      if (isUntrackedRow(p)) return [target];
+    }
+
+    const prefix = `${target}/`;
+    return Object.keys(files).filter(
+      (p) => (target === "" || p.startsWith(prefix)) && isUntrackedRow(p),
+    );
+  }
+
   /** Re-reads the workspace's pending changelists into their atom. */
   private async refreshPendingChangelists(): Promise<void> {
     const currentWorkspace = store.get(currentWorkspaceAtom);
@@ -2523,24 +2549,12 @@ export default class DaemonHandler {
       }
     });
 
-    // Mark file as added
-    ipcOn(this.ipcMain, "file:mark-as-added", async (_event, data) => {
-      const currentWorkspace = store.get(currentWorkspaceAtom);
-      if (!currentWorkspace || this.isMocked) return;
-
-      const currentUser = store.get(currentUserAtom);
-      if (!currentUser) return;
-
-      try {
-        const client = await CreateDaemonClient();
-        await client.workspaces.pending.markForAdd.mutate({
-          daemonId: currentUser.daemonId,
-          workspaceId: currentWorkspace.id,
-          paths: [data.path],
-        });
-        this.workspaceRefresh();
-      } catch (error) {
-        console.error("Failed to mark as added:", error);
+    // Stage the new (untracked) files at a path, from the workspace explorer.
+    // Staging is the only way a new file joins a submit.
+    ipcOn(this.ipcMain, "file:stage-new", async (_event, data) => {
+      const paths = this.untrackedPathsAt(data.path);
+      if (paths.length > 0) {
+        await this.workspaceStage({ paths });
       }
     });
 
@@ -2571,54 +2585,6 @@ export default class DaemonHandler {
         }
       }
     });
-
-    // Mark directory contents as added
-    ipcOn(
-      this.ipcMain,
-      "file:mark-directory-as-added",
-      async (_event, data) => {
-        const currentWorkspace = store.get(currentWorkspaceAtom);
-        if (!currentWorkspace || this.isMocked) return;
-
-        const currentUser = store.get(currentUserAtom);
-        if (!currentUser) return;
-
-        try {
-          // Gather all file paths in the pending changes that start with the directory path
-          const pendingChanges = store.get(workspacePendingChangesAtom);
-          const dirPrefix = data.path.endsWith("/")
-            ? data.path
-            : data.path + "/";
-          const filePaths: string[] = [];
-
-          if (pendingChanges?.files) {
-            for (const [filePath, file] of Object.entries(
-              pendingChanges.files,
-            )) {
-              if (
-                filePath.startsWith(dirPrefix) &&
-                file.status === FileStatus.Local
-              ) {
-                filePaths.push(filePath);
-              }
-            }
-          }
-
-          if (filePaths.length > 0) {
-            const client = await CreateDaemonClient();
-            await client.workspaces.pending.markForAdd.mutate({
-              daemonId: currentUser.daemonId,
-              workspaceId: currentWorkspace.id,
-              paths: filePaths,
-            });
-          }
-
-          this.workspaceRefresh();
-        } catch (error) {
-          console.error("Failed to mark directory as added:", error);
-        }
-      },
-    );
 
     // Checkout file
     ipcOn(this.ipcMain, "file:checkout", async (_event, data) => {

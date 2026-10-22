@@ -73,7 +73,8 @@ public:
 
 /**
  * Worker for the MarkForAdd operation.
- * Marks untracked files for addition.
+ * Unreal requires this name; Checkpoint has no "mark for add", so it stages
+ * the untracked files instead, which is what makes a submit take them.
  */
 class FCheckpointMarkForAddWorker final
   : public ICheckpointSourceControlWorker {
@@ -90,6 +91,9 @@ public:
   virtual bool UpdateStates() override;
 
   TArray<FString> AddedFiles;
+
+  /** The changelist the files were staged into */
+  FCheckpointSourceControlChangelist DestinationChangelist;
 };
 
 /**
@@ -151,6 +155,9 @@ public:
 
   /** File states discovered after sync */
   TMap<FString, ECheckpointFileStatus::Type> FileStates;
+
+  /** The subset of FileStates the daemon has staged */
+  TSet<FString> StagedFiles;
 };
 
 /**
@@ -173,6 +180,9 @@ public:
 
   /** States discovered during execution */
   TMap<FString, ECheckpointFileStatus::Type> FileStates;
+
+  /** The subset of FileStates the daemon has staged */
+  TSet<FString> StagedFiles;
 
   /** History entries per file */
   TMap<
@@ -258,6 +268,9 @@ public:
     FCheckpointSourceControlChangelist,
     TMap<FString, ECheckpointFileStatus::Type>>
     ChangelistFiles;
+
+  /** Absolute paths of the files in ChangelistFiles the daemon has staged */
+  TSet<FString> StagedFiles;
 
   /** Whether file membership was fetched, so ChangelistFiles is complete */
   bool bUpdatedFiles = false;

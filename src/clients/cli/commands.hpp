@@ -50,8 +50,6 @@ inline std::string white() { return "\033[37m"; }
 
 inline std::string statusColor(FileStatus status) {
   switch (status) {
-    case FileStatus::Added:
-      return green();
     case FileStatus::Local:
       return red();
     case FileStatus::Deleted:
@@ -484,10 +482,14 @@ inline int cmdStatus() {
     }
   }
 
+  // Only staged files are printed here. A staged untracked file is a new file
+  // going in, so it shows as an add rather than as untracked.
   auto printEntries = [](const Entries& entries) {
     for (auto& [path, status] : entries) {
-      std::cout << "  " << color::statusColor(status)
-                << fileStatusSymbol(status) << " " << path
+      bool isNew = status == FileStatus::Local;
+      std::cout << "  "
+                << (isNew ? color::green() : color::statusColor(status))
+                << (isNew ? "+" : fileStatusSymbol(status)) << " " << path
                 << color::reset() << std::endl;
     }
   };
@@ -575,7 +577,6 @@ inline int cmdAdd(const std::vector<std::string>& files,
   };
   auto refreshResult = client.query("workspaces.pending.refresh", refreshInput);
 
-  std::vector<std::string> localPaths;
   std::vector<std::string> expandedPaths;
 
   if (!refreshResult.is_null()) {
@@ -587,10 +588,6 @@ inline int cmdAdd(const std::vector<std::string>& files,
       if (it != pending.files.end()) {
         // Direct match in pending changes
         expandedPaths.push_back(p);
-        auto status = static_cast<FileStatus>(it->second.status);
-        if (status == FileStatus::Local) {
-          localPaths.push_back(p);
-        }
         continue;
       }
 
@@ -616,10 +613,6 @@ inline int cmdAdd(const std::vector<std::string>& files,
         if (filePath.compare(0, prefix.size(), prefix) == 0) {
           foundChildren = true;
           expandedPaths.push_back(filePath);
-          auto status = static_cast<FileStatus>(fileInfo.status);
-          if (status == FileStatus::Local) {
-            localPaths.push_back(filePath);
-          }
         }
       }
 
@@ -627,31 +620,9 @@ inline int cmdAdd(const std::vector<std::string>& files,
         continue;
       }
 
-      // Still no match, the file may live inside a collapsed untracked
-      // directory.  Walk ancestor paths to detect this case.
+      // Still no match: the file may live inside a collapsed untracked
+      // directory. Stage the path as given and let the daemon resolve it.
       expandedPaths.push_back(p);
-      std::string ancestor = p;
-      while (true) {
-        auto slash = ancestor.rfind('/');
-        if (slash == std::string::npos) break;
-        ancestor = ancestor.substr(0, slash);
-        auto ait = pending.files.find(ancestor);
-        if (ait != pending.files.end() &&
-            static_cast<FileStatus>(ait->second.status) == FileStatus::Local &&
-            static_cast<FileType>(ait->second.type) == FileType::Directory) {
-          localPaths.push_back(p);
-          break;
-        }
-      }
-    }
-
-    if (!localPaths.empty()) {
-      nlohmann::json markInput = {
-          {"daemonId", ws.daemonId},
-          {"workspaceId", ws.id},
-          {"paths", localPaths},
-      };
-      client.mutate("workspaces.pending.markForAdd", markInput);
     }
   } else {
     expandedPaths = resolvedPaths;
@@ -1030,7 +1001,7 @@ inline int cmdChmod(const std::string& mode,
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  COMMAND: restore (unstage files, unmark for add, or revert)
+//  COMMAND: restore (unstage files, or revert)
 // ═════════════════════════════════════════════════════════════════
 
 inline int cmdRestore(const std::vector<std::string>& files, bool staged) {
@@ -1045,38 +1016,6 @@ inline int cmdRestore(const std::vector<std::string>& files, bool staged) {
   }
 
   if (staged) {
-    // For files that were Added (Local + markForAdd), tell daemon to unmarkForAdd
-    nlohmann::json refreshInput = {
-        {"daemonId", ws.daemonId},
-        {"workspaceId", ws.id},
-    };
-    auto refreshResult = client.query("workspaces.pending.refresh", refreshInput);
-
-    if (!refreshResult.is_null()) {
-      PendingChanges pending;
-      from_json(refreshResult, pending);
-
-      std::vector<std::string> addedPaths;
-      for (auto& path : resolvedPaths) {
-        auto it = pending.files.find(path);
-        if (it != pending.files.end()) {
-          auto status = static_cast<FileStatus>(it->second.status);
-          if (status == FileStatus::Added) {
-            addedPaths.push_back(path);
-          }
-        }
-      }
-
-      if (!addedPaths.empty()) {
-        nlohmann::json unmarkInput = {
-            {"daemonId", ws.daemonId},
-            {"workspaceId", ws.id},
-            {"paths", addedPaths},
-        };
-        client.mutate("workspaces.pending.unmarkForAdd", unmarkInput);
-      }
-    }
-
     nlohmann::json unstageInput = {
         {"daemonId", ws.daemonId},
         {"workspaceId", ws.id},

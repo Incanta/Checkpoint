@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCheck } from "@fortawesome/free-solid-svg-icons/faCheck";
 import { faPen } from "@fortawesome/free-solid-svg-icons/faPen";
@@ -242,12 +248,19 @@ function selectionOf(
   };
 }
 
-/** Single-letter marker, matching the vocabulary used elsewhere in the app. */
-function statusMarker(status: FileStatus): { label: string; color: string } {
-  switch (status) {
-    case FileStatus.Added:
+/**
+ * Single-letter marker, matching the vocabulary used elsewhere in the app. A
+ * new file is untracked (U) until it is staged, which is what adds it (A).
+ */
+function statusMarker(file: { status: FileStatus; staged: boolean }): {
+  label: string;
+  color: string;
+} {
+  switch (file.status) {
     case FileStatus.Local:
-      return { label: "A", color: "var(--color-success)" };
+      return file.staged
+        ? { label: "A", color: "var(--color-success)" }
+        : { label: "U", color: "var(--color-success)" };
     case FileStatus.Deleted:
       return { label: "D", color: "var(--color-danger)" };
     case FileStatus.Renamed:
@@ -289,7 +302,7 @@ function Row(props: RowProps) {
   // Directories are containers, not changes: no status, however the daemon
   // labelled the row.
   const marker =
-    node.file && !node.isDirectory ? statusMarker(node.file.status) : null;
+    node.file && !node.isDirectory ? statusMarker(node.file) : null;
   const expandable = canExpand(node);
 
   return (
@@ -849,9 +862,7 @@ export default function StagedChangesTree({
                 selection?.bucketId === bucket.id && selectedRows.has(p)
               }
               onRowClick={(e, node) => handleRowClick(e, bucket, node)}
-              onRowContextMenu={(e, node) =>
-                handleContextMenu(e, bucket, node)
-              }
+              onRowContextMenu={(e, node) => handleContextMenu(e, bucket, node)}
               onRowDragStart={
                 disabled
                   ? undefined

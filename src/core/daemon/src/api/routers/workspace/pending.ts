@@ -417,15 +417,17 @@ export const pendingRouter = router({
       );
       // Check if any children have changes (pending change statuses)
       const pendingStatuses = [
-        FileStatus.Added,
         FileStatus.Renamed,
         FileStatus.Deleted,
         FileStatus.ChangedCheckedOut,
         FileStatus.ChangedNotCheckedOut,
         FileStatus.NotChangedCheckedOut,
       ];
-      const containsChanges = children.some((child) =>
-        pendingStatuses.includes(child.status),
+      // An untracked file counts once it is staged, as an Added file did.
+      const containsChanges = children.some(
+        (child) =>
+          pendingStatuses.includes(child.status) ||
+          (child.status === FileStatus.Local && child.staged),
       );
 
       return {
@@ -723,9 +725,6 @@ export const pendingRouter = router({
             workspace,
             onlyEditsTracked ? submittedPaths : undefined,
           );
-          if (submittedPaths.length > 0) {
-            await manager.unmarkForAdd(workspace, submittedPaths);
-          }
 
           // Assignments are keyed by the pending row, which for a collapsed
           // untracked folder is the folder rather than its expanded files.
@@ -910,8 +909,7 @@ export const pendingRouter = router({
         const renameable = Object.values(pending.files).filter(
           (file) =>
             file.status === FileStatus.Deleted ||
-            file.status === FileStatus.Local ||
-            file.status === FileStatus.Added,
+            file.status === FileStatus.Local,
         );
         const byKey = groupByKey(
           renameable.map((file) => file.path),
@@ -1535,72 +1533,6 @@ export const pendingRouter = router({
       };
     }),
 
-  markForAdd: publicProcedure
-    .input(
-      z.object({
-        daemonId: z.string(),
-        workspaceId: z.string(),
-        paths: z.array(z.string()).min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const manager = ctx.manager;
-      const workspaces = manager.workspaces.get(input.daemonId);
-
-      if (!workspaces) {
-        throw new Error(
-          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
-        );
-      }
-
-      const workspace = workspaces.find((w) => w.id === input.workspaceId);
-
-      if (!workspace) {
-        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
-      }
-
-      const normalizedPaths = input.paths.map((p) =>
-        p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
-      );
-
-      await manager.markForAdd(workspace, normalizedPaths);
-
-      return { success: true, paths: normalizedPaths };
-    }),
-
-  unmarkForAdd: publicProcedure
-    .input(
-      z.object({
-        daemonId: z.string(),
-        workspaceId: z.string(),
-        paths: z.array(z.string()).min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const manager = ctx.manager;
-      const workspaces = manager.workspaces.get(input.daemonId);
-
-      if (!workspaces) {
-        throw new Error(
-          `Could not find any workspaces locally for daemon ID ${input.daemonId}`,
-        );
-      }
-
-      const workspace = workspaces.find((w) => w.id === input.workspaceId);
-
-      if (!workspace) {
-        throw new Error(`Could not find workspace ID ${input.workspaceId}`);
-      }
-
-      const normalizedPaths = input.paths.map((p) =>
-        p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
-      );
-
-      await manager.unmarkForAdd(workspace, normalizedPaths);
-
-      return { success: true, paths: normalizedPaths };
-    }),
-
   getClaimsForFiles: publicProcedure
     .input(
       z.object({
@@ -1675,6 +1607,8 @@ export const pendingRouter = router({
       }[] = [];
 
       const restoredToBaseline: string[] = [];
+      /** Reverted files in no head version, which stay on disk. */
+      const revertedUntracked: string[] = [];
 
       for (const rawPath of input.filePaths) {
         const normalizedPath = rawPath
@@ -1711,11 +1645,13 @@ export const pendingRouter = router({
               await fs.chmod(localFilePath, headFileInfo.mode);
             }
             restoredToBaseline.push(normalizedPath);
+          } else {
+            // A file in no head version (added locally) stays on disk:
+            // reverting an add takes it out of the next submit, as Perforce
+            // does, rather than deleting work that exists nowhere else. It is
+            // unstaged below and shows as untracked again.
+            revertedUntracked.push(normalizedPath);
           }
-          // A file in no head version (added locally) stays on disk: reverting
-          // an add takes it out of the next submit, as Perforce does, rather
-          // than deleting work that exists nowhere else. It is unmarked for
-          // add below and shows as untracked again.
 
           // Undo checkout if the file was checked out
           try {
@@ -1741,13 +1677,20 @@ export const pendingRouter = router({
       // The reverted files now hold exactly what they are tracked at.
       await manager.markFilesPristine(workspace, restoredToBaseline);
 
-      // Remove any reverted files from the marked-for-add list
+      if (revertedUntracked.length > 0) {
+        await manager.unstage(workspace, revertedUntracked);
+        await assignToPendingChangelist(
+          workspace.localPath,
+          revertedUntracked,
+          null,
+        );
+      }
+
+      // Drop any mode set for the reverted files from Windows.
       const revertedPaths = results
         .filter((r) => r.success)
         .map((r) => r.filePath);
       if (revertedPaths.length > 0) {
-        await manager.unmarkForAdd(workspace, revertedPaths);
-        // And any mode set for them from Windows.
         await manager.dropPendingModes(workspace, revertedPaths);
       }
 

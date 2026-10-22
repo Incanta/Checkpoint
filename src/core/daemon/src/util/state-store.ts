@@ -58,7 +58,6 @@ function countRows(state: WorkspaceState): number {
   return (
     Object.keys(state.files).length +
     Object.keys(state.artifactFiles ?? {}).length +
-    (state.markedForAdd?.length ?? 0) +
     (state.staged?.length ?? 0)
   );
 }
@@ -296,6 +295,9 @@ class SqliteStateStore implements StateStore {
         mtime         REAL,
         artifact_type TEXT
       );
+      -- Unused since marking for add was removed (staging alone says a new
+      -- file should be submitted). Kept, always empty, because a daemon from
+      -- before then reads it on every load and would fail without it.
       CREATE TABLE IF NOT EXISTS marked_for_add (
         path TEXT PRIMARY KEY
       );
@@ -350,6 +352,10 @@ class SqliteStateStore implements StateStore {
     // mode-only change shows as pending on Linux and macOS and a Windows
     // submit can keep the mode the file has at the head.
     5: ["ALTER TABLE files ADD COLUMN mode INTEGER"],
+    // Marking for add is gone: staging is the one way to say a new file
+    // should be submitted. Existing marks are dropped, so those files show
+    // as untracked until staged. The table stays (see createSchema).
+    6: ["DELETE FROM marked_for_add"],
   };
 
   private runMigrations(): void {
@@ -483,11 +489,6 @@ class SqliteStateStore implements StateStore {
       };
     }
 
-    const markedRows = db
-      .prepare("SELECT path FROM marked_for_add")
-      .all() as Array<{ path: string }>;
-    const markedForAdd = markedRows.map((r) => r.path);
-
     const stagedRows = db.prepare("SELECT path FROM staged").all() as Array<{
       path: string;
     }>;
@@ -567,15 +568,13 @@ class SqliteStateStore implements StateStore {
     const teamSync = this.loadTeamSync(db);
 
     this.stats.loads++;
-    this.stats.rowsRead +=
-      fileRows.length + artRows.length + markedRows.length + stagedRows.length;
+    this.stats.rowsRead += fileRows.length + artRows.length + stagedRows.length;
 
     return {
       version: WORKSPACE_STATE_VERSION,
       changelistNumber,
       files,
       artifactFiles,
-      markedForAdd,
       staged,
       ...(branchHeads !== undefined && { branchHeads }),
       ...(pendingRemovals !== undefined && { pendingRemovals }),
@@ -702,11 +701,6 @@ class SqliteStateStore implements StateStore {
         "INSERT OR REPLACE INTO artifact_files (path, file_id, changelist, hash, size, mtime, artifact_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
       ),
       deleteArtifact: db.prepare("DELETE FROM artifact_files WHERE path = ?"),
-      clearMarked: db.prepare("DELETE FROM marked_for_add"),
-      addMarked: db.prepare(
-        "INSERT OR IGNORE INTO marked_for_add (path) VALUES (?)",
-      ),
-      removeMarked: db.prepare("DELETE FROM marked_for_add WHERE path = ?"),
       clearStaged: db.prepare("DELETE FROM staged"),
       addStaged: db.prepare("INSERT OR IGNORE INTO staged (path) VALUES (?)"),
       removeStaged: db.prepare("DELETE FROM staged WHERE path = ?"),
@@ -782,12 +776,6 @@ class SqliteStateStore implements StateStore {
         }
       }
 
-      if (delta.markedForAdd) {
-        if (delta.markedForAdd.clear) s.clearMarked.run();
-        for (const p of delta.markedForAdd.remove ?? []) s.removeMarked.run(p);
-        for (const p of delta.markedForAdd.add ?? []) s.addMarked.run(p);
-      }
-
       if (delta.staged) {
         if (delta.staged.clear) s.clearStaged.run();
         for (const p of delta.staged.remove ?? []) s.removeStaged.run(p);
@@ -849,8 +837,6 @@ class SqliteStateStore implements StateStore {
       upsertFile: insertFile,
       clearArtifacts,
       upsertArtifact: insertArtifact,
-      clearMarked,
-      addMarked: insertMarked,
       clearStaged,
       addStaged: insertStaged,
       deleteMeta,
@@ -888,13 +874,6 @@ class SqliteStateStore implements StateStore {
             f.mtime ?? null,
             f.artifactType ?? null,
           );
-        }
-      }
-
-      clearMarked.run();
-      if (state.markedForAdd) {
-        for (const p of state.markedForAdd) {
-          insertMarked.run(p);
         }
       }
 

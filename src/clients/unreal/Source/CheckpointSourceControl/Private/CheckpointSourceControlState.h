@@ -15,6 +15,11 @@ namespace ECheckpointFileStatus {
     Unknown = 0,
     NotInWorkspaceRoot = 1,
     Local = 2,
+    /**
+     * Reserved: the daemon no longer reports it. A new file is added by
+     * staging it, so "added" is now Local with the staged flag set (see
+     * FCheckpointSourceControlState::IsStagedUntracked).
+     */
     Added = 3,
     Renamed = 4,
     Deleted = 5,
@@ -137,6 +142,14 @@ public:
     return FileStatus;
   }
 
+  /**
+   * An untracked file staged for its first submit: what Unreal calls
+   * "added", and what used to be "marked for add".
+   */
+  bool IsStagedUntracked() const {
+    return FileStatus == ECheckpointFileStatus::Local && bStaged;
+  }
+
   /** The absolute local path of this file */
   FString LocalFilename;
 
@@ -160,6 +173,9 @@ public:
    * checkout model had no branch to report; claims do.
    */
   FString ClaimBranch;
+
+  /** Whether the daemon has the file staged for the next submit */
+  bool bStaged = false;
 
   /** Whether the file is exclusively locked */
   bool bIsLocked = false;

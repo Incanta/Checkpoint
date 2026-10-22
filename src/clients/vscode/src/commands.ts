@@ -206,7 +206,6 @@ export function registerCommands(model: CheckpointModel): vscode.Disposable {
         );
         return;
 
-      case FileStatus.Added:
       case FileStatus.Local:
       case FileStatus.NotChangedCheckedOut:
         await vscode.commands.executeCommand(
@@ -615,22 +614,6 @@ export function registerCommands(model: CheckpointModel): vscode.Disposable {
       return;
     }
     await repository.moveToChangelist(resolveRelPaths(repository, args));
-  });
-
-  register("checkpoint.markForAdd", async (...args) => {
-    const repository = await resolveRepository(args[0]);
-    if (!repository) {
-      return;
-    }
-    await repository.markForAdd(resolveRelPaths(repository, args));
-  });
-
-  register("checkpoint.unmarkForAdd", async (...args) => {
-    const repository = await resolveRepository(args[0]);
-    if (!repository) {
-      return;
-    }
-    await repository.unmarkForAdd(resolveRelPaths(repository, args));
   });
 
   register("checkpoint.checkoutFile", async (...args) => {

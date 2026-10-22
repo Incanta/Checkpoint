@@ -26,7 +26,10 @@ export class StageTimer {
   }
 
   /** Ends the current stage and returns the line's payload. */
-  public finish(): { stagesMs: Record<string, number> } & Record<string, unknown> {
+  public finish(): { stagesMs: Record<string, number> } & Record<
+    string,
+    unknown
+  > {
     this.stage("");
     return { ...this.counts, stagesMs: this.stagesMs };
   }

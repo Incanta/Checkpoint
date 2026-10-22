@@ -108,7 +108,7 @@ int main(int argc, char** argv) {
 
   // add
   argparse::ArgumentParser addCmd("add");
-  addCmd.add_description("Stage files for submission (mark for add)");
+  addCmd.add_description("Stage files for submission");
   addCmd.add_argument("--patch", "-p")
       .help("Stage individual hunks of one text file, interactively")
       .default_value(false)

@@ -471,6 +471,7 @@ bool FCheckpointCheckInWorker::UpdateStates() {
   for (const FString &File : Files) {
     auto State = SccProvider.GetStateInternal(File);
     State->SetFileStatus(ECheckpointFileStatus::ReadOnlyControlled);
+    State->bStaged = false;
   }
 
   // A submitted numbered changelist is deleted by the daemon; a default one
@@ -495,56 +496,66 @@ bool FCheckpointMarkForAddWorker::Execute(
   auto &Client = SccProvider.GetDaemonClient();
   auto &Settings = SccProvider.AccessSettings();
 
-  TArray<FString> RelPaths;
-  for (const FString &File : InCommand.Files) {
-    FString RelPath = SccProvider.ToRelativePath(File);
+  // Checkpoint has no "mark for add": staging a new file is what makes the
+  // next submit take it. No changelist means Unreal's default one, which is
+  // the domain root's, the same place CheckIn submits from.
+  DestinationChangelist = CommandChangelist(InCommand);
 
-    if (RelPath.IsEmpty() || RelPath.StartsWith(TEXT("../")) ||
-        RelPath.StartsWith(TEXT("/"))) {
-      UE_LOG(
-        LogCheckpointSourceControl,
-        Warning,
-        TEXT("File '%s' is outside of the workspace root, cannot mark for add"),
-        *File
-      );
-      InCommand.ResultInfo.ErrorMessages.Add(
-        FText::FromString(
-          FString::Printf(
-            TEXT(
-              "File '%s' is outside of the workspace root, cannot mark for add"
-            ),
-            *File
-          )
-        )
-      );
+  TArray<FString> RelPaths;
+  TArray<FString> Files;
+  for (const FString &File : InCommand.Files) {
+    FString RelPath;
+    if (!ToWorkspacePath(SccProvider, InCommand, File, TEXT("add"), RelPath)) {
+      continue;
+    }
+
+    // Already staged: restaging into a default changelist would pull it out
+    // of a numbered one it was moved to.
+    if (!InCommand.Changelist.IsValid() &&
+        SccProvider.GetStateInternal(File)->bStaged) {
       continue;
     }
 
     RelPaths.Add(RelPath);
-    AddedFiles.Add(File);
+    Files.Add(File);
+  }
+
+  if (RelPaths.Num() == 0) {
+    return InCommand.ResultInfo.ErrorMessages.Num() == 0;
   }
 
   FString Error;
-  if (!Client.MarkForAdd(
-        Settings.GetDaemonId(), Settings.GetWorkspaceId(), RelPaths, Error
+  if (!Client.Stage(
+        Settings.GetDaemonId(),
+        Settings.GetWorkspaceId(),
+        RelPaths,
+        DestinationChangelist.IsNumbered()
+          ? FString()
+          : DestinationChangelist.GetBranchName(),
+        DestinationChangelist.GetId(),
+        Error
       )) {
-    UE_LOG(
-      LogCheckpointSourceControl, Warning, TEXT("MarkForAdd failed: %s"), *Error
-    );
-    // Still mark locally even if daemon call fails, so UE
-    // state stays consistent for the session.
+    ReportFailure(InCommand, TEXT("Stage"), Error);
+    return false;
   }
 
-  return true;
+  AddedFiles = Files;
+  return InCommand.ResultInfo.ErrorMessages.Num() == 0;
 }
 
 bool FCheckpointMarkForAddWorker::UpdateStates() {
   auto &SccProvider = GetProvider();
   for (const FString &File : AddedFiles) {
     auto State = SccProvider.GetStateInternal(File);
-    State->SetFileStatus(ECheckpointFileStatus::Added);
+    // The daemon reports a new file as Local whether or not it is staged; the
+    // staged flag is what makes it "added".
+    if (State->GetFileStatus() == ECheckpointFileStatus::Unknown) {
+      State->SetFileStatus(ECheckpointFileStatus::Local);
+    }
+    State->bStaged = true;
   }
   if (AddedFiles.Num() > 0) {
+    SccProvider.MoveFilesToChangelist(AddedFiles, DestinationChangelist);
     SccProvider.BroadcastStateChanged();
   }
   return AddedFiles.Num() > 0;
@@ -586,6 +597,7 @@ bool FCheckpointRevertWorker::Execute(
 
   // Collect relative paths for batch revert
   TArray<FString> RelPaths;
+  TArray<FString> UnstagedRelPaths;
   for (const FString &File : InCommand.Files) {
     FString RelPath = SccProvider.ToRelativePath(File);
 
@@ -609,9 +621,26 @@ bool FCheckpointRevertWorker::Execute(
     }
 
     RelPaths.Add(RelPath);
+    if (SccProvider.GetStateInternal(File)->IsStagedUntracked()) {
+      UnstagedRelPaths.Add(RelPath);
+    }
   }
 
   FString Error;
+
+  // Reverting an add leaves the new file on disk, as Perforce does, and only
+  // takes it out of the next submit: unstage it.
+  if (UnstagedRelPaths.Num() > 0 &&
+      !Client.Unstage(
+        Settings.GetDaemonId(),
+        Settings.GetWorkspaceId(),
+        UnstagedRelPaths,
+        Error
+      )) {
+    ReportFailure(InCommand, TEXT("Unstage"), Error);
+    return false;
+  }
+
   if (!Client.RevertFiles(
         Settings.GetDaemonId(), Settings.GetWorkspaceId(), RelPaths, Error
       )) {
@@ -638,19 +667,16 @@ bool FCheckpointRevertWorker::UpdateStates() {
   for (const FString &File : RevertedFiles) {
     auto State = SccProvider.GetStateInternal(File);
 
-    // Reset to appropriate state
-    if (State->GetFileStatus() == ECheckpointFileStatus::Added) {
-      State->SetFileStatus(ECheckpointFileStatus::Local);
-    } else if (State->GetFileStatus() == ECheckpointFileStatus::Deleted) {
-      State->SetFileStatus(ECheckpointFileStatus::WritableControlled);
-    } else {
+    // Reset to appropriate state. A reverted add stays an untracked file.
+    if (State->GetFileStatus() != ECheckpointFileStatus::Local) {
       State->SetFileStatus(ECheckpointFileStatus::WritableControlled);
     }
+    State->bStaged = false;
   }
   if (RevertedFiles.Num() > 0) {
     // Reverted work has nothing left to submit. The next changelist update
-    // puts back anything that still belongs in one (a file reverted from
-    // Added to Local, say).
+    // puts back anything that still belongs in one (an unstaged untracked
+    // file, say).
     SccProvider.RemoveFilesFromChangelists(RevertedFiles);
     SccProvider.BroadcastStateChanged();
   }
@@ -797,6 +823,11 @@ bool FCheckpointSyncWorker::Execute(
           FileStates.Add(
             AbsFile, static_cast<ECheckpointFileStatus::Type>(Status)
           );
+          bool bStaged = false;
+          (*Found)->TryGetBoolField(TEXT("staged"), bStaged);
+          if (bStaged) {
+            StagedFiles.Add(AbsFile);
+          }
         } else if (FPaths::FileExists(AbsFile)) {
           FileStates.Add(AbsFile, ECheckpointFileStatus::Local);
         }
@@ -813,6 +844,7 @@ bool FCheckpointSyncWorker::UpdateStates() {
   for (auto &Pair : FileStates) {
     auto State = SccProvider.GetStateInternal(Pair.Key);
     State->SetFileStatus(Pair.Value);
+    State->bStaged = StagedFiles.Contains(Pair.Key);
     State->TimeStamp = FDateTime::Now();
   }
 
@@ -927,6 +959,12 @@ bool FCheckpointUpdateStatusWorker::Execute(
         FileStates.Add(
           AbsFile, static_cast<ECheckpointFileStatus::Type>(Status)
         );
+
+        bool bStaged = false;
+        (*Found)->TryGetBoolField(TEXT("staged"), bStaged);
+        if (bStaged) {
+          StagedFiles.Add(AbsFile);
+        }
 
         // Claims held on this file. The daemon used to send `checkouts` with
         // a `locked` boolean; it now sends `claims`, and reading the old
@@ -1079,6 +1117,7 @@ bool FCheckpointUpdateStatusWorker::UpdateStates() {
   for (auto &Pair : FileStates) {
     auto State = SccProvider.GetStateInternal(Pair.Key);
     State->SetFileStatus(Pair.Value);
+    State->bStaged = StagedFiles.Contains(Pair.Key);
     State->TimeStamp = FDateTime::Now();
 
     // Set other checkout info
@@ -1230,10 +1269,16 @@ bool FCheckpointUpdateChangelistsStatusWorker::Execute(
 
         int32 Status = 0;
         Pair.Value->TryGetNumberField(TEXT("status"), Status);
+        const FString StateFilename = ToStateFilename(SccProvider, Pair.Key);
         ChangelistFiles.FindOrAdd(Changelist).Add(
-          ToStateFilename(SccProvider, Pair.Key),
-          static_cast<ECheckpointFileStatus::Type>(Status)
+          StateFilename, static_cast<ECheckpointFileStatus::Type>(Status)
         );
+
+        bool bStaged = false;
+        Pair.Value->TryGetBoolField(TEXT("staged"), bStaged);
+        if (bStaged) {
+          StagedFiles.Add(StateFilename);
+        }
       }
     }
   }
@@ -1270,6 +1315,7 @@ bool FCheckpointUpdateChangelistsStatusWorker::UpdateStates() {
         for (const auto &FilePair : *Files) {
           auto FileState = SccProvider.GetStateInternal(FilePair.Key);
           FileState->SetFileStatus(FilePair.Value);
+          FileState->bStaged = StagedFiles.Contains(FilePair.Key);
           FileState->TimeStamp = Now;
           ChangelistState->Files.Add(FileState);
         }

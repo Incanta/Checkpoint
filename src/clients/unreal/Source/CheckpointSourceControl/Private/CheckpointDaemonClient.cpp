@@ -482,6 +482,27 @@ bool FCheckpointDaemonClient::Stage(
   );
 }
 
+bool FCheckpointDaemonClient::Unstage(
+  const FString &DaemonId,
+  const FString &WorkspaceId,
+  const TArray<FString> &Paths,
+  FString &OutError
+) {
+  TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
+  Input->SetStringField(TEXT("daemonId"), DaemonId);
+  Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
+  TArray<TSharedPtr<FJsonValue>> PathValues;
+  for (const FString &Path : Paths) {
+    PathValues.Add(MakeShareable(new FJsonValueString(Path)));
+  }
+  Input->SetArrayField(TEXT("paths"), PathValues);
+
+  TSharedPtr<FJsonObject> Result;
+  return MutateProcedure(
+    TEXT("workspaces.pending.unstage"), Input, Result, OutError
+  );
+}
+
 bool FCheckpointDaemonClient::Submit(
   const FString &DaemonId,
   const FString &WorkspaceId,
@@ -912,50 +933,6 @@ bool FCheckpointDaemonClient::RevertFiles(
   TSharedPtr<FJsonObject> Result;
   return MutateProcedure(
     TEXT("workspaces.pending.revertFiles"), Input, Result, OutError
-  );
-}
-
-bool FCheckpointDaemonClient::MarkForAdd(
-  const FString &DaemonId,
-  const FString &WorkspaceId,
-  const TArray<FString> &RelPaths,
-  FString &OutError
-) {
-  TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
-  Input->SetStringField(TEXT("daemonId"), DaemonId);
-  Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
-
-  TArray<TSharedPtr<FJsonValue>> PathsArray;
-  for (const FString &RelPath : RelPaths) {
-    PathsArray.Add(MakeShareable(new FJsonValueString(RelPath)));
-  }
-  Input->SetArrayField(TEXT("paths"), PathsArray);
-
-  TSharedPtr<FJsonObject> Result;
-  return MutateProcedure(
-    TEXT("workspaces.pending.markForAdd"), Input, Result, OutError
-  );
-}
-
-bool FCheckpointDaemonClient::UnmarkForAdd(
-  const FString &DaemonId,
-  const FString &WorkspaceId,
-  const TArray<FString> &RelPaths,
-  FString &OutError
-) {
-  TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
-  Input->SetStringField(TEXT("daemonId"), DaemonId);
-  Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
-
-  TArray<TSharedPtr<FJsonValue>> PathsArray;
-  for (const FString &RelPath : RelPaths) {
-    PathsArray.Add(MakeShareable(new FJsonValueString(RelPath)));
-  }
-  Input->SetArrayField(TEXT("paths"), PathsArray);
-
-  TSharedPtr<FJsonObject> Result;
-  return MutateProcedure(
-    TEXT("workspaces.pending.unmarkForAdd"), Input, Result, OutError
   );
 }
 

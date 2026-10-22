@@ -51,7 +51,7 @@ export async function getProjectInfo(
     Object.prototype.hasOwnProperty.call(
       state.files,
       "Engine/Build/Build.version",
-    ) || (state.markedForAdd ?? []).includes("Engine/Build/Build.version");
+    ) || (state.staged ?? []).includes("Engine/Build/Build.version");
 
   // Nothing Unreal here.
   if (!selected && !hasEngineInWorkspace) {

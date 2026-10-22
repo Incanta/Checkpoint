@@ -165,7 +165,9 @@ export const branchesRouter = router({
           .filter(([_, file]) => {
             const status = file.status;
             return (
-              status === FileStatus.Added ||
+              // A new file the user means to submit, which the switch could
+              // overwrite if the target branch has one at the same path.
+              (status === FileStatus.Local && file.staged) ||
               status === FileStatus.Renamed ||
               status === FileStatus.Deleted ||
               status === FileStatus.ChangedCheckedOut ||

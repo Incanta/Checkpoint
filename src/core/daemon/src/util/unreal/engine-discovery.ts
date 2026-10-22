@@ -198,7 +198,7 @@ export async function resolveEngine(
     Object.prototype.hasOwnProperty.call(
       state.files,
       "Engine/Build/Build.version",
-    ) || (state.markedForAdd ?? []).includes("Engine/Build/Build.version");
+    ) || (state.staged ?? []).includes("Engine/Build/Build.version");
   const engineOnDisk = await pathExists(
     path.join(workspace.localPath, "Engine", "Build", "Build.version"),
   );

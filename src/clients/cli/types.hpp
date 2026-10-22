@@ -24,6 +24,8 @@ enum class FileStatus : int {
   Unknown = 0,
   NotInWorkspaceRoot = 1,
   Local = 2,
+  // Reserved: the daemon no longer reports it. A new file is added by staging
+  // it, so it stays Local with `staged` set.
   Added = 3,
   Renamed = 4,
   Deleted = 5,
@@ -47,8 +49,6 @@ inline std::string fileStatusToString(FileStatus status) {
       return "not in workspace";
     case FileStatus::Local:
       return "local (untracked)";
-    case FileStatus::Added:
-      return "added (staged)";
     case FileStatus::Renamed:
       return "renamed";
     case FileStatus::Deleted:
@@ -82,8 +82,6 @@ inline std::string fileStatusSymbol(FileStatus status) {
   switch (status) {
     case FileStatus::Local:
       return "?";
-    case FileStatus::Added:
-      return "+";
     case FileStatus::Renamed:
       return "R";
     case FileStatus::Deleted:

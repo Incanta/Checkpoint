@@ -28,7 +28,6 @@ export interface StateDelta {
     delete?: string[];
     upsert?: Record<string, ArtifactStateFile>;
   };
-  markedForAdd?: { clear?: boolean; remove?: string[]; add?: string[] };
   staged?: { clear?: boolean; remove?: string[]; add?: string[] };
   bisect?: {
     clear?: boolean;
@@ -60,8 +59,6 @@ export function deltaRowCount(delta: StateDelta): number {
     len(delta.artifactFiles?.replaceAll) +
     (delta.artifactFiles?.delete?.length ?? 0) +
     len(delta.artifactFiles?.upsert) +
-    (delta.markedForAdd?.remove?.length ?? 0) +
-    (delta.markedForAdd?.add?.length ?? 0) +
     (delta.staged?.remove?.length ?? 0) +
     (delta.staged?.add?.length ?? 0) +
     (delta.bisect?.remove?.length ?? 0) +
@@ -113,9 +110,6 @@ export function applyDeltaToState(
       state.artifactFiles,
       delta.artifactFiles,
     );
-  }
-  if (delta.markedForAdd) {
-    state.markedForAdd = applyToList(state.markedForAdd, delta.markedForAdd);
   }
   if (delta.staged) {
     state.staged = applyToList(state.staged, delta.staged);

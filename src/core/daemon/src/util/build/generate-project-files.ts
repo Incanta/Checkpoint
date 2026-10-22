@@ -99,7 +99,13 @@ export async function runGenerateProjectFiles(
     }
 
     sysLog(`Generating project files: ${[cmd, ...args].join(" ")}`);
-    const exitCode = await spawnStreaming(jobId, cmd, args, engineDir, writeLogLine);
+    const exitCode = await spawnStreaming(
+      jobId,
+      cmd,
+      args,
+      engineDir,
+      writeLogLine,
+    );
     if (exitCode !== 0) {
       const message = `Generate project files failed with exit code ${exitCode}.`;
       sysLog(message);

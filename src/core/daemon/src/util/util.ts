@@ -100,7 +100,7 @@ export type ArtifactStateFile = WorkspaceStateFile & {
   artifactType?: string;
 };
 
-export const WORKSPACE_STATE_VERSION = 5;
+export const WORKSPACE_STATE_VERSION = 6;
 
 export interface WorkspaceState {
   /** State schema version; absent = 1. Current: WORKSPACE_STATE_VERSION. */
@@ -123,15 +123,12 @@ export interface WorkspaceState {
   branchHeads?: Record<string, number>;
   files: Record<string, WorkspaceStateFile>; // path -> file info
   artifactFiles?: Record<string, ArtifactStateFile>; // path -> artifact file info
-  /** Relative paths of files explicitly marked for add */
-  markedForAdd?: string[];
   /**
    * Relative paths staged for the next submit.
    *
-   * Distinct from `markedForAdd`, which promotes an untracked file to
-   * `Added` status. This is git's index: whether a change is ready to go into
-   * its branch's next changelist. A file can be marked for add and unstaged,
-   * or staged without ever being marked (the ordinary modified-file case).
+   * This is git's index: whether a change is ready to go into its branch's
+   * next changelist. It is also the only way a new (untracked) file becomes
+   * part of a submit; there is no separate "mark for add" step.
    *
    * Which branch a staged file goes to is not stored here. That comes from
    * the file's `FileClaim.branchName` on the server, so the two cannot drift.

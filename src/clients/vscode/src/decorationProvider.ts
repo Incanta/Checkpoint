@@ -206,7 +206,7 @@ export class CheckpointDecorationProvider
         : undefined;
     }
 
-    const info = getStatusInfo(file.status);
+    const info = getStatusInfo(file);
     if (!info) {
       return undefined;
     }
@@ -215,15 +215,15 @@ export class CheckpointDecorationProvider
       badge: info.badge,
       color: new vscode.ThemeColor(info.colorId),
       tooltip: `Checkpoint: ${info.label}`,
-      // Tint parent folders for real pending changes, but not for the
-      // (potentially huge) untracked set.
-      propagate: file.status !== FileStatus.Local,
+      // Tint parent folders for real pending changes, including new files
+      // once staged, but not for the (potentially huge) untracked set.
+      propagate: !(file.status === FileStatus.Local && !file.staged),
     };
   }
 
   /** Looks the same as the collapsed folder row it replaces. */
   private untrackedFolderDecoration(): vscode.FileDecoration | undefined {
-    const info = getStatusInfo(FileStatus.Local);
+    const info = getStatusInfo({ status: FileStatus.Local });
     return info
       ? {
           badge: info.badge,

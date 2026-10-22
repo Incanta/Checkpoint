@@ -187,7 +187,7 @@ export const syncRouter = router({
   /**
    * Restores the workspace to a pristine copy of its current changelist:
    * locally modified/deleted tracked files are re-downloaded, untracked files
-   * and directories are removed, marks-for-add are cleared, and checkouts held
+   * and directories are removed (staged ones too), and checkouts held
    * by this workspace are released. Used by CI (e.g. the Horde agent conform
    * step) via `checkpoint clean`.
    */
@@ -293,8 +293,8 @@ export const syncRouter = router({
                     restoredFiles++;
                   }
                 } else {
-                  // Untracked file, marked-for-add file, or untracked
-                  // directory entry: remove it from disk entirely
+                  // Untracked file (staged or not) or untracked directory
+                  // entry: remove it from disk entirely
                   await fs.rm(localFilePath, {
                     recursive: file.type === FileType.Directory,
                     force: true,
@@ -334,12 +334,6 @@ export const syncRouter = router({
 
           // The restored files now hold exactly what they are tracked at.
           await manager.markFilesPristine(workspace, restoredToBaseline);
-
-          // Clear all marks-for-add
-          const markedForAdd = manager.getMarkedForAdd(workspace.id);
-          if (markedForAdd.size > 0) {
-            await manager.unmarkForAdd(workspace, [...markedForAdd]);
-          }
 
           // Invalidate cached pending/sync state so the next query rescans
           manager.workspacePendingChanges.delete(workspace.id);

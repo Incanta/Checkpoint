@@ -169,6 +169,17 @@ public:
     FString &OutError
   );
 
+  /**
+   * Unstage `Paths`, taking them out of whatever changelist they were in. An
+   * untracked file goes back to being ignored by submit.
+   */
+  bool Unstage(
+    const FString &DaemonId,
+    const FString &WorkspaceId,
+    const TArray<FString> &Paths,
+    FString &OutError
+  );
+
   /** List the workspace's numbered pending changelists and assignments. */
   bool ListChangelists(
     const FString &DaemonId,
@@ -293,26 +304,6 @@ public:
    * Revert files to their head version (restores content + undoes checkout).
    */
   bool RevertFiles(
-    const FString &DaemonId,
-    const FString &WorkspaceId,
-    const TArray<FString> &RelPaths,
-    FString &OutError
-  );
-
-  /**
-   * Mark files for add (persisted in daemon state.json).
-   */
-  bool MarkForAdd(
-    const FString &DaemonId,
-    const FString &WorkspaceId,
-    const TArray<FString> &RelPaths,
-    FString &OutError
-  );
-
-  /**
-   * Remove files from the marked-for-add list.
-   */
-  bool UnmarkForAdd(
     const FString &DaemonId,
     const FString &WorkspaceId,
     const TArray<FString> &RelPaths,

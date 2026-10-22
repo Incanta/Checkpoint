@@ -182,8 +182,8 @@ export type Channels = {
   "file:history:select-changelist": { changelistNumber: number };
   "file:history:close": null;
   "file:history:open-window": null;
-  "file:mark-as-added": { path: string };
-  "file:mark-directory-as-added": { path: string };
+  /** Stage the untracked files at or under a path (file or folder). */
+  "file:stage-new": { path: string };
   /** Executable (or not) in the next submit; the only way from Windows. */
   "file:set-executable": { path: string; executable: boolean };
   "file:set-executable:error": { message: string };

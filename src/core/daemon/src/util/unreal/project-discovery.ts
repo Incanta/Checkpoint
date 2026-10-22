@@ -12,17 +12,14 @@ function pathDepth(relPath: string): number {
 
 /**
  * Discover all .uproject files known to the workspace state (both tracked
- * files and files marked for add). Returns repo-relative forward-slash paths,
+ * files and new files staged for submit). Returns repo-relative forward-slash paths,
  * deduped and sorted by depth (shallowest first) then alphabetically.
  */
 export async function discoverProjects(
   workspace: Workspace,
   state: WorkspaceState,
 ): Promise<string[]> {
-  const candidates = [
-    ...Object.keys(state.files),
-    ...(state.markedForAdd ?? []),
-  ];
+  const candidates = [...Object.keys(state.files), ...(state.staged ?? [])];
 
   const uprojects = new Set<string>();
   for (const rel of candidates) {
@@ -102,10 +99,7 @@ export async function findEditorTargetName(
   const projectDir = path.posix.dirname(uprojectRelPath);
   const sourcePrefix = projectDir === "." ? "Source/" : `${projectDir}/Source/`;
 
-  const stateKeys = [
-    ...Object.keys(state.files),
-    ...(state.markedForAdd ?? []),
-  ];
+  const stateKeys = [...Object.keys(state.files), ...(state.staged ?? [])];
 
   const targetFiles: string[] = [];
   let hasSourceDir = false;

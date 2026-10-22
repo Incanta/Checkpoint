@@ -50,7 +50,7 @@ const FileStatusValues = {
   Unknown: 0,
   NotInWorkspaceRoot: 1,
   Local: 2,
-  Added: 3,
+  // 3 was Added; reserved, no longer reported.
   Renamed: 4,
   Deleted: 5,
   Ignored: 6,
@@ -73,7 +73,6 @@ function getFileStatusFromString(status: string): FileStatusType {
     Unknown: FileStatusValues.Unknown,
     NotInWorkspaceRoot: FileStatusValues.NotInWorkspaceRoot,
     Local: FileStatusValues.Local,
-    Added: FileStatusValues.Added,
     Renamed: FileStatusValues.Renamed,
     Deleted: FileStatusValues.Deleted,
     Ignored: FileStatusValues.Ignored,
@@ -210,25 +209,18 @@ export function useFileContextMenu() {
     // Separator
     items.push({ separator: true });
 
-    // Mark as added (only for Local status)
-    items.push({
-      label: "Mark as added",
-      disabled: status !== FileStatusValues.Local,
-      command: () => {
-        ipc.sendMessage("file:mark-as-added", { path: file.relativePath });
-      },
-    });
-
-    // Mark directory contents as added (only for directories)
-    items.push({
-      label: "Mark directory contents as added",
-      disabled: !file.isDirectory,
-      command: () => {
-        ipc.sendMessage("file:mark-directory-as-added", {
-          path: file.relativePath,
-        });
-      },
-    });
+    // Staging is the only way a new file joins a submit. The Pending page
+    // passes its own stage/unstage items, so this is for the explorer. A
+    // folder stages just the untracked files under it.
+    if (leadingItems.length === 0) {
+      items.push({
+        label: file.isDirectory ? "Stage new files" : "Stage",
+        disabled: !file.isDirectory && status !== FileStatusValues.Local,
+        command: () => {
+          ipc.sendMessage("file:stage-new", { path: file.relativePath });
+        },
+      });
+    }
 
     // The executable bit, for the next submit. On Linux and macOS this is
     // `chmod`; Windows has no such bit, so the daemon sends it with the file.
@@ -301,7 +293,6 @@ export function useFileContextMenu() {
       status === FileStatusValues.ChangedCheckedOut ||
       status === FileStatusValues.ChangedNotCheckedOut ||
       status === FileStatusValues.NotChangedCheckedOut ||
-      status === FileStatusValues.Added ||
       status === FileStatusValues.Renamed ||
       status === FileStatusValues.Deleted ||
       status === FileStatusValues.Conflicted ||

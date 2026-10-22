@@ -11,14 +11,9 @@ export class PathIndex {
   private readonly files = new Map<string, Set<string>>();
   /** dir -> names of child directories holding tracked files. */
   private readonly children = new Map<string, Set<string>>();
-  /** Directories that are ancestors of a marked-for-add path. */
-  private readonly markedDirs = new Set<string>();
   private readonly ids = new Map<string, string>();
 
-  public constructor(
-    tracked: Record<string, { fileId: string }>,
-    markedForAdd: Iterable<string> = [],
-  ) {
+  public constructor(tracked: Record<string, { fileId: string }>) {
     this.children.set("", new Set());
     for (const [rawPath, entry] of Object.entries(tracked)) {
       const filePath = rawPath.replace(/^\//, "");
@@ -33,15 +28,6 @@ export class PathIndex {
       }
       names.add(name);
       if (!this.ids.has(entry.fileId)) this.ids.set(entry.fileId, filePath);
-    }
-    for (const rawPath of markedForAdd) {
-      const parts = rawPath.replace(/^\//, "").split("/");
-      parts.pop();
-      let current = "";
-      for (const part of parts) {
-        current = current ? `${current}/${part}` : part;
-        this.markedDirs.add(current);
-      }
     }
   }
 
@@ -65,12 +51,12 @@ export class PathIndex {
   }
 
   /**
-   * Whether `dir` holds tracked files (directly or below) or the ancestor of
-   * a path marked for add. The root always counts.
+   * Whether `dir` holds tracked files (directly or below). The root always
+   * counts.
    */
   public hasTrackedDir(dir: string): boolean {
     const normalized = dir.replace(/^\//, "").replace(/\/$/, "");
-    return this.children.has(normalized) || this.markedDirs.has(normalized);
+    return this.children.has(normalized);
   }
 
   /** Tracked files at any depth under `dir`, as workspace-relative paths. */

@@ -15,8 +15,8 @@ import { resolveInWorkspace, UnsafePathError } from "../workspace-path.js";
 // does not account for. Two rules keep it from losing work:
 //
 //   - Anything the state still has a claim on is never touched: synced and
-//     artifact files, files marked for add or staged (a staged new file is not
-//     marked for add), pending modes, pull leftovers (pendingRemovals, which
+//     artifact files, staged files (including new ones), pending modes, pull
+//     leftovers (pendingRemovals, which
 //     may be a directory sitting where a tracked file was), directories a pull
 //     could not rename, and anything under a .checkpoint directory. On a
 //     volume that takes two spellings for one file, each is matched under
@@ -124,7 +124,6 @@ async function protectionFor(
     ...Object.keys(state.artifactFiles ?? {}),
   ]);
   const trees = new Set<string>([
-    ...(state.markedForAdd ?? []),
     ...(state.staged ?? []),
     ...(state.pendingRemovals ?? []),
     ...Object.keys(state.pendingModes ?? {}),
@@ -157,7 +156,7 @@ function protectedReason(relPath: string, p: Protection): string | null {
   if (p.files.has(relPath)) return "it is tracked";
   for (const prefix of chain) {
     if (p.trees.has(prefix)) {
-      return "it is staged, marked for add, or pending in the workspace state";
+      return "it is staged or pending in the workspace state";
     }
   }
   if (p.folded) {
@@ -168,7 +167,7 @@ function protectedReason(relPath: string, p: Protection): string | null {
     }
     for (const prefix of chain) {
       if (p.folded.trees.has(p.folded.key(prefix))) {
-        return "it is staged, marked for add, or pending under another spelling";
+        return "it is staged or pending under another spelling";
       }
     }
   }

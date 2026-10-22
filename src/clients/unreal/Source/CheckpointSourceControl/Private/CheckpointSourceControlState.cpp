@@ -49,12 +49,14 @@ FCheckpointSourceControlState::GetCurrentRevision() const {
 
 #if SOURCE_CONTROL_WITH_SLATE
 FSlateIcon FCheckpointSourceControlState::GetIcon() const {
+  if (IsStagedUntracked()) {
+    return FSlateIcon(
+      FRevisionControlStyleManager::GetStyleSetName(),
+      "RevisionControl.OpenForAdd"
+    );
+  }
+
   switch (FileStatus) {
-    case ECheckpointFileStatus::Added:
-      return FSlateIcon(
-        FRevisionControlStyleManager::GetStyleSetName(),
-        "RevisionControl.OpenForAdd"
-      );
     case ECheckpointFileStatus::Deleted:
       return FSlateIcon(
         FRevisionControlStyleManager::GetStyleSetName(),
@@ -101,9 +103,11 @@ FSlateIcon FCheckpointSourceControlState::GetIcon() const {
 #endif
 
 FText FCheckpointSourceControlState::GetDisplayName() const {
+  if (IsStagedUntracked()) {
+    return NSLOCTEXT("CheckpointSC", "Added", "Added");
+  }
+
   switch (FileStatus) {
-    case ECheckpointFileStatus::Added:
-      return NSLOCTEXT("CheckpointSC", "Added", "Added");
     case ECheckpointFileStatus::Deleted:
       return NSLOCTEXT("CheckpointSC", "Deleted", "Deleted");
     case ECheckpointFileStatus::ChangedCheckedOut:
@@ -136,13 +140,15 @@ FText FCheckpointSourceControlState::GetDisplayName() const {
 }
 
 FText FCheckpointSourceControlState::GetDisplayTooltip() const {
+  if (IsStagedUntracked()) {
+    return NSLOCTEXT(
+      "CheckpointSC",
+      "AddedTooltip",
+      "File is staged to be added to source control"
+    );
+  }
+
   switch (FileStatus) {
-    case ECheckpointFileStatus::Added:
-      return NSLOCTEXT(
-        "CheckpointSC",
-        "AddedTooltip",
-        "File is marked for addition to source control"
-      );
     case ECheckpointFileStatus::Deleted:
       return NSLOCTEXT(
         "CheckpointSC",
@@ -192,8 +198,8 @@ FText FCheckpointSourceControlState::GetDisplayTooltip() const {
 }
 
 bool FCheckpointSourceControlState::CanCheckIn() const {
+  // Local covers staged untracked files too.
   return FileStatus == ECheckpointFileStatus::Local ||
-    FileStatus == ECheckpointFileStatus::Added ||
     FileStatus == ECheckpointFileStatus::Renamed ||
     FileStatus == ECheckpointFileStatus::Deleted ||
     FileStatus == ECheckpointFileStatus::ChangedNotCheckedOut ||
@@ -268,7 +274,7 @@ bool FCheckpointSourceControlState::GetOtherBranchHeadModification(
 }
 
 bool FCheckpointSourceControlState::IsCurrent() const {
-  return FileStatus == ECheckpointFileStatus::Added ||
+  return IsStagedUntracked() ||
     FileStatus == ECheckpointFileStatus::ReadOnlyControlled ||
     FileStatus == ECheckpointFileStatus::WritableControlled ||
     FileStatus == ECheckpointFileStatus::NotChangedCheckedOut ||
@@ -279,8 +285,10 @@ bool FCheckpointSourceControlState::IsCurrent() const {
 
 bool FCheckpointSourceControlState::IsSourceControlled() const {
   switch (FileStatus) {
-    case ECheckpointFileStatus::Unknown:
     case ECheckpointFileStatus::Local:
+      // A staged new file is open for add, which Unreal counts as controlled.
+      return bStaged;
+    case ECheckpointFileStatus::Unknown:
     case ECheckpointFileStatus::Ignored:
     case ECheckpointFileStatus::Artifact:
       return false;
@@ -290,7 +298,7 @@ bool FCheckpointSourceControlState::IsSourceControlled() const {
 }
 
 bool FCheckpointSourceControlState::IsAdded() const {
-  return FileStatus == ECheckpointFileStatus::Added;
+  return IsStagedUntracked();
 }
 
 bool FCheckpointSourceControlState::IsDeleted() const {
@@ -305,7 +313,6 @@ bool FCheckpointSourceControlState::CanEdit() const {
   return IsCheckedOut() ||
     FileStatus == ECheckpointFileStatus::WritableControlled ||
     FileStatus == ECheckpointFileStatus::ChangedNotCheckedOut ||
-    FileStatus == ECheckpointFileStatus::Added ||
     FileStatus == ECheckpointFileStatus::Local;
 }
 
@@ -321,13 +328,13 @@ bool FCheckpointSourceControlState::IsUnknown() const {
 bool FCheckpointSourceControlState::IsModified() const {
   return FileStatus == ECheckpointFileStatus::ChangedCheckedOut ||
     FileStatus == ECheckpointFileStatus::ChangedNotCheckedOut ||
-    FileStatus == ECheckpointFileStatus::Added ||
+    IsStagedUntracked() ||
     FileStatus == ECheckpointFileStatus::Deleted ||
     FileStatus == ECheckpointFileStatus::Renamed;
 }
 
 bool FCheckpointSourceControlState::CanAdd() const {
-  return FileStatus == ECheckpointFileStatus::Local;
+  return FileStatus == ECheckpointFileStatus::Local && !bStaged;
 }
 
 bool FCheckpointSourceControlState::CanRevert() const {

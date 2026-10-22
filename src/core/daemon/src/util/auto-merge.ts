@@ -85,6 +85,9 @@ export function hasConflictMarkers(content: string): boolean {
 /**
  * Whether a file path is eligible for auto-merge (i.e. it is a text file).
  */
-export function canAutoMerge(filePath: string, extensions: Set<string>): boolean {
+export function canAutoMerge(
+  filePath: string,
+  extensions: Set<string>,
+): boolean {
   return !isBinaryFile(filePath, extensions);
 }

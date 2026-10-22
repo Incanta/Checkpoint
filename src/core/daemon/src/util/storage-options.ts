@@ -120,7 +120,8 @@ export function toStorageOptions(t: StorageTokenResponse): StorageOptions {
       s3ForcePathStyle: false,
     };
   }
-  if (!t.gatewayUrl) throw new Error("gateway token response missing gatewayUrl");
+  if (!t.gatewayUrl)
+    throw new Error("gateway token response missing gatewayUrl");
   return {
     storageType: "gateway",
     jwt: t.token,

@@ -184,18 +184,6 @@
         "category": "Checkpoint"
       },
       {
-        "command": "checkpoint.markForAdd",
-        "title": "Mark for Add",
-        "category": "Checkpoint",
-        "icon": "$(add)"
-      },
-      {
-        "command": "checkpoint.unmarkForAdd",
-        "title": "Unmark for Add",
-        "category": "Checkpoint",
-        "icon": "$(remove)"
-      },
-      {
         "command": "checkpoint.checkoutFile",
         "title": "Check Out File",
         "category": "Checkpoint",
@@ -341,14 +329,6 @@
           "when": "false"
         },
         {
-          "command": "checkpoint.markForAdd",
-          "when": "false"
-        },
-        {
-          "command": "checkpoint.unmarkForAdd",
-          "when": "false"
-        },
-        {
           "command": "checkpoint.checkoutFile",
           "when": "checkpoint.enabled && resourceScheme == file"
         },
@@ -452,12 +432,7 @@
         {
           "command": "checkpoint.revert",
           "group": "1_modification",
-          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
-        },
-        {
-          "command": "checkpoint.markForAdd",
-          "group": "1_modification",
-          "when": "scmProvider == checkpoint && scmResourceGroup == local"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts"
         }
       ],
       "scm/change/title": [
@@ -532,7 +507,7 @@
         {
           "command": "checkpoint.openDiff",
           "group": "inline@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceState != untracked && scmResourceState != added"
         },
         {
           "command": "checkpoint.openFile",
@@ -542,17 +517,12 @@
         {
           "command": "checkpoint.revert",
           "group": "inline@3",
-          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
-        },
-        {
-          "command": "checkpoint.markForAdd",
-          "group": "inline@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup == local"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceState != untracked"
         },
         {
           "command": "checkpoint.openDiff",
           "group": "navigation@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceState != untracked && scmResourceState != added"
         },
         {
           "command": "checkpoint.openFile",
@@ -562,22 +532,12 @@
         {
           "command": "checkpoint.revert",
           "group": "1_modification@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceState != untracked"
         },
         {
           "command": "checkpoint.undoCheckout",
           "group": "1_modification@2",
           "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(unstaged$|branch:|changelist:)/ && scmResourceState =~ /checkedout/"
-        },
-        {
-          "command": "checkpoint.unmarkForAdd",
-          "group": "1_modification@3",
-          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(unstaged$|branch:|changelist:)/ && scmResourceState == added"
-        },
-        {
-          "command": "checkpoint.markForAdd",
-          "group": "1_modification@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup == local"
         },
         {
           "command": "checkpoint.resolveConflicts",
@@ -587,20 +547,10 @@
         {
           "command": "checkpoint.fileHistory",
           "group": "2_history@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceState != untracked && scmResourceState != added"
         }
       ],
       "scm/resourceFolder/context": [
-        {
-          "command": "checkpoint.markForAdd",
-          "group": "inline@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup == local"
-        },
-        {
-          "command": "checkpoint.markForAdd",
-          "group": "1_modification@1",
-          "when": "scmProvider == checkpoint && scmResourceGroup == local"
-        },
         {
           "command": "checkpoint.stage",
           "group": "inline@0",
@@ -614,7 +564,7 @@
         {
           "command": "checkpoint.revert",
           "group": "1_modification@2",
-          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts"
         },
         {
           "command": "checkpoint.moveToBranch",
@@ -663,7 +613,7 @@
           "type": "number",
           "default": 5000,
           "minimum": 0,
-          "description": "The daemon reports a folder holding no tracked files as a single row. Folders with up to this many files and subfolders are listed file by file instead, so single files can be marked for add or staged. Larger folders stay a single row. Set to 0 to never list them."
+          "description": "The daemon reports a folder holding no tracked files as a single row. Folders with up to this many files and subfolders are listed file by file instead, so single files can be staged. Larger folders stay a single row. Set to 0 to never list them."
         },
         "checkpoint.syncStatusInterval": {
           "type": "number",
@@ -681,7 +631,7 @@
     "colors": [
       {
         "id": "checkpointDecoration.addedResourceForeground",
-        "description": "Color for files marked for add.",
+        "description": "Color for new files staged to be added.",
         "defaults": {
           "light": "#587c0c",
           "dark": "#81b88b",

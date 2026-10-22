@@ -821,7 +821,6 @@ export class DaemonManager {
 
     const children = Array.from(childrenMap.values());
     const pendingStatuses = [
-      FileStatus.Added,
       FileStatus.Renamed,
       FileStatus.Deleted,
       FileStatus.ChangedCheckedOut,
@@ -1027,22 +1026,21 @@ export class DaemonManager {
 
   /**
    * The workspace's path index (tracked files by directory, and by id),
-   * built lazily from its state and dropped whenever tracked paths or the
-   * marked-for-add set change.
+   * built lazily from its state and dropped whenever tracked paths change.
    */
   private getPathIndex(workspaceId: string): PathIndex {
     let index = this.pathIndexes.get(workspaceId);
     if (!index) {
       const state = this.workspaceStates.get(workspaceId);
-      index = new PathIndex(state?.files ?? {}, state?.markedForAdd ?? []);
+      index = new PathIndex(state?.files ?? {});
       this.pathIndexes.set(workspaceId, index);
     }
     return index;
   }
 
   /**
-   * Directories that hold tracked files or the ancestors of marked-for-add
-   * paths (the root always counts). Used to prune untracked subtrees.
+   * Directories that hold tracked files (the root always counts). Used to
+   * prune untracked subtrees.
    */
   private getTrackedDirSet(workspaceId: string): { has(dir: string): boolean } {
     const index = this.getPathIndex(workspaceId);
@@ -1062,7 +1060,6 @@ export class DaemonManager {
     stat: Stats,
     baselineFile: WorkspaceStateFile | undefined,
     checkedOutIds: Set<string>,
-    markedForAdd: Set<string>,
   ): Promise<File | null> {
     let hasChanged = false;
     let needsHashCheck = false;
@@ -1122,9 +1119,7 @@ export class DaemonManager {
 
     let status: FileStatus;
     if (!baselineFile) {
-      status = markedForAdd.has(relativePath)
-        ? FileStatus.Added
-        : FileStatus.Local;
+      status = FileStatus.Local;
     } else if (
       !isBinaryFile(
         relativePath,
@@ -1312,8 +1307,7 @@ export class DaemonManager {
 
   /**
    * Performs a complete filesystem walk of the workspace. Directories that
-   * contain no tracked files (and no marked-for-add files) are represented
-   * as directory-level entries with {@link FileStatus.Local} rather than
+   * contain no tracked files are represented as directory-level entries with {@link FileStatus.Local} rather than
    * walking their contents – the subtree is only enumerated at submit time
    * or when the user expands the directory in the pending-changes UI.
    */
@@ -1328,7 +1322,6 @@ export class DaemonManager {
 
     const trackedDirs = this.getTrackedDirSet(workspace.id);
     const ignoreCache = this.getIgnoreCache(workspace.id);
-    const markedForAdd = this.getMarkedForAdd(workspace.id);
 
     // On a volume that takes two spellings for one file (volume.ts), the
     // state's spelling and the one on disk can differ: the tree may spell a
@@ -1428,9 +1421,7 @@ export class DaemonManager {
                 type: FileType.Directory,
                 size: 0,
                 modifiedAt: 0,
-                status: markedForAdd.has(relativePath)
-                  ? FileStatus.Added
-                  : FileStatus.Local,
+                status: FileStatus.Local,
                 id: null,
                 changelist: null,
                 claims: [],
@@ -1525,7 +1516,6 @@ export class DaemonManager {
         stat,
         baselineFile,
         checkedOutIds,
-        markedForAdd,
       );
 
       if (pendingFile) {
@@ -1609,7 +1599,6 @@ export class DaemonManager {
     };
 
     const ignoreCache = this.getIgnoreCache(workspace.id);
-    const markedForAdd = this.getMarkedForAdd(workspace.id);
     const trackedDirs = this.getTrackedDirSet(workspace.id);
 
     // Fetch checkouts from API
@@ -1689,9 +1678,7 @@ export class DaemonManager {
                   type: FileType.Directory,
                   size: 0,
                   modifiedAt: 0,
-                  status: markedForAdd.has(dirEntry)
-                    ? FileStatus.Added
-                    : FileStatus.Local,
+                  status: FileStatus.Local,
                   id: null,
                   changelist: null,
                   claims: [],
@@ -1730,7 +1717,7 @@ export class DaemonManager {
       // For untracked files in untracked directories, ensure the topmost
       // untracked ancestor directory appears as a Local directory entry
       // instead of adding the individual file.
-      if (!baselineFile && !markedForAdd.has(relativePath)) {
+      if (!baselineFile) {
         const topmostDir = this.findTopmostUntrackedDir(
           relativePath,
           trackedDirs,
@@ -1765,7 +1752,6 @@ export class DaemonManager {
         stat,
         baselineFile,
         checkedOutIds,
-        markedForAdd,
       );
 
       if (pendingFile) {
@@ -2065,7 +2051,6 @@ export class DaemonManager {
     // from inside it (by expanding the folder) has no row of its own and
     // would be neither listed nor submitted. Give it one; the folder row
     // stays for the rest of its contents.
-    const markedForAdd = this.getMarkedForAdd(workspace.id);
     for (const relativePath of staged) {
       if (result.files[relativePath]) continue;
       if (!this.isUnderCollapsedDir(relativePath, result)) continue;
@@ -2080,9 +2065,7 @@ export class DaemonManager {
         type: stat.isDirectory() ? FileType.Directory : FileType.Text,
         size: stat.isDirectory() ? 0 : stat.size,
         modifiedAt: stat.mtimeMs,
-        status: markedForAdd.has(relativePath)
-          ? FileStatus.Added
-          : FileStatus.Local,
+        status: FileStatus.Local,
         id: null,
         changelist: null,
         claims: [],
@@ -2153,56 +2136,6 @@ export class DaemonManager {
       ...(change.add ?? []),
       ...(change.remove ?? []),
     ]);
-  }
-
-  /**
-   * Returns the set of relative paths currently marked for add in a workspace.
-   */
-  public getMarkedForAdd(workspaceId: string): Set<string> {
-    const state = this.workspaceStates.get(workspaceId);
-    return new Set(state?.markedForAdd ?? []);
-  }
-
-  /**
-   * Mark one or more files for add. Persists to state.json.
-   */
-  public async markForAdd(
-    workspace: Workspace,
-    relativePaths: string[],
-  ): Promise<void> {
-    const state = this.workspaceStates.get(workspace.id);
-    if (!state) return;
-
-    await this.persistDelta(workspace, {
-      markedForAdd: { add: relativePaths },
-    });
-
-    // Invalidate caches so next refresh picks up the new status. Marking
-    // changes which directories count as tracked, which changes how untracked
-    // folders collapse, so this needs a full refresh rather than a re-check.
-    this.workspacePendingChanges.delete(workspace.id);
-    this.pathIndexes.delete(workspace.id);
-  }
-
-  /**
-   * Remove one or more files from the marked-for-add list. Persists to state.json.
-   */
-  public async unmarkForAdd(
-    workspace: Workspace,
-    relativePaths: string[],
-  ): Promise<void> {
-    const state = this.workspaceStates.get(workspace.id);
-    if (!state) return;
-
-    await this.persistDelta(workspace, {
-      markedForAdd: { remove: relativePaths },
-    });
-
-    // Invalidate caches so next refresh picks up the new status. Marking
-    // changes which directories count as tracked, which changes how untracked
-    // folders collapse, so this needs a full refresh rather than a re-check.
-    this.workspacePendingChanges.delete(workspace.id);
-    this.pathIndexes.delete(workspace.id);
   }
 
   /**

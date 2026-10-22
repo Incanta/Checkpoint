@@ -548,6 +548,8 @@ void FCheckpointSourceControlProvider::MoveFilesToChangelist(
     TSharedRef<FCheckpointSourceControlState, ESPMode::ThreadSafe> FileState =
       GetStateInternal(File);
     FileState->TimeStamp = Now;
+    // Every move into a changelist is a daemon stage.
+    FileState->bStaged = true;
     Destination->Files.Add(FileState);
   }
   Destination->TimeStamp = Now;
