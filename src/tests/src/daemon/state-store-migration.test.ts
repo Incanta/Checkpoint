@@ -109,6 +109,49 @@ describe("sqlite state store", () => {
     expect(tables.map((t) => t.name)).toContain("staged");
   });
 
+  it("drops marks for add on upgrade but keeps the table for older daemons", async () => {
+    // Marking for add was removed: staging alone says a new file should be
+    // submitted. Old marks are dropped (the files show as untracked until
+    // staged), and the rest of the state is untouched.
+    const dbPath = writeV2Database();
+    const seed = new BetterSqlite3(dbPath);
+    seed
+      .prepare("INSERT INTO marked_for_add (path) VALUES (?)")
+      .run("Content/new.uasset");
+    seed.close();
+
+    const state = await getStateStore(workspacePath, "sqlite").load();
+    expect(state.changelistNumber).toBe(7);
+    expect(state.files["Content/foo.uasset"]?.fileId).toBe("file-1");
+    expect(state).not.toHaveProperty("markedForAdd");
+    closeAllStateStores();
+
+    const db = new BetterSqlite3(dbPath, { readonly: true });
+    // A daemon from before the removal selects from this table on every
+    // load, so it has to keep existing for a downgrade to work.
+    const marked = db.prepare("SELECT path FROM marked_for_add").all();
+    db.close();
+    expect(marked).toEqual([]);
+  });
+
+  it("creates the marked_for_add table in a new database", async () => {
+    await getStateStore(workspacePath, "sqlite").save({
+      changelistNumber: 1,
+      files: {},
+    });
+    closeAllStateStores();
+
+    const db = new BetterSqlite3(
+      path.join(workspacePath, ".checkpoint", "state.db"),
+      { readonly: true },
+    );
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all() as Array<{ name: string }>;
+    db.close();
+    expect(tables.map((t) => t.name)).toContain("marked_for_add");
+  });
+
   it("round-trips the staged set", async () => {
     const store = getStateStore(workspacePath, "sqlite");
 

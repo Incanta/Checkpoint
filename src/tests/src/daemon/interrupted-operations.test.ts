@@ -221,7 +221,10 @@ describe("interrupted pulls and submits", { timeout: 120_000 }, () => {
     const locked = vi
       .spyOn(fsp, "copyFile")
       .mockImplementation(async (src, dest, mode) => {
-        if (path.basename(String(dest)) === "notes.txt" && !String(dest).includes("pull-backups")) {
+        if (
+          path.basename(String(dest)) === "notes.txt" &&
+          !String(dest).includes("pull-backups")
+        ) {
           throw Object.assign(new Error("EBUSY: resource busy or locked"), {
             code: "EBUSY",
           });

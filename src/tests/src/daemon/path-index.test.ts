@@ -64,15 +64,14 @@ describe("PathIndex", () => {
     },
   );
 
-  it("counts ancestors of marked-for-add paths as tracked directories", () => {
-    const index = new PathIndex({ "src/a.cpp": { fileId: "1" } }, [
-      "new/deep/file.txt",
-    ]);
+  it("counts only directories holding tracked files as tracked", () => {
+    // New files are not tracked until submitted, staged or not, so a folder
+    // holding only new files stays untracked (and collapses to one row).
+    const index = new PathIndex({ "src/a.cpp": { fileId: "1" } });
     expect(index.hasTrackedDir("")).toBe(true);
     expect(index.hasTrackedDir("src")).toBe(true);
-    expect(index.hasTrackedDir("new")).toBe(true);
-    expect(index.hasTrackedDir("new/deep")).toBe(true);
-    expect(index.hasTrackedDir("new/deep/file.txt")).toBe(false);
+    expect(index.hasTrackedDir("new")).toBe(false);
+    expect(index.hasTrackedDir("new/deep")).toBe(false);
     expect(index.filesUnder("new")).toEqual([]);
   });
 

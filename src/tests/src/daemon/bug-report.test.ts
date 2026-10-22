@@ -4,7 +4,15 @@
  * (logging.ts). The bundle is read back with a small zip reader here, so a
  * malformed archive fails the tests rather than the user's upload.
  */
-import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { inflateRawSync } from "node:zlib";
@@ -121,11 +129,16 @@ describe("the daemon's rotating log file", () => {
   it("keeps at most maxArchivedFiles archives", async () => {
     const file = path.join(dir, "daemon.log");
     for (let i = 0; i < 4; i++) {
-      await writeFile(path.join(dir, `daemon-2020.01.0${i + 1}-00.00.00.log`), "old");
+      await writeFile(
+        path.join(dir, `daemon-2020.01.0${i + 1}-00.00.00.log`),
+        "old",
+      );
     }
     const log = new RotatingLogFile(file, 10, 2);
     log.write("0123456789\n");
-    const archives = (await readdir(dir)).filter((n) => n.startsWith("daemon-"));
+    const archives = (await readdir(dir)).filter((n) =>
+      n.startsWith("daemon-"),
+    );
     expect(archives.length).toBe(2);
     // The newest (just rotated) archive survives; the oldest go first.
     expect(archives).not.toContain("daemon-2020.01.01-00.00.00.log");
@@ -141,7 +154,10 @@ describe("the daemon's rotating log file", () => {
     ];
     for (const name of siblings) await writeFile(path.join(dir, name), "x");
     await writeFile(path.join(dir, "daemon-2020.01.01-00.00.00.log"), "old");
-    await writeFile(path.join(dir, "daemon-2020.01.02-00.00.00.000.log"), "old");
+    await writeFile(
+      path.join(dir, "daemon-2020.01.02-00.00.00.000.log"),
+      "old",
+    );
 
     const log = new RotatingLogFile(file, 10, 2);
     log.write("0123456789\n");
@@ -276,7 +292,10 @@ describe("collectBugReport", () => {
 
   async function collect(
     extra: Partial<Parameters<typeof collectBugReport>[0]> = {},
-  ): Promise<{ entries: Map<string, string>; result: Awaited<ReturnType<typeof collectBugReport>> }> {
+  ): Promise<{
+    entries: Map<string, string>;
+    result: Awaited<ReturnType<typeof collectBugReport>>;
+  }> {
     const result = await collectBugReport({
       config: makeConfig([]),
       logFilePath: path.join(logDir, "daemon.log"),
@@ -295,7 +314,13 @@ describe("collectBugReport", () => {
   it("contains the README, versions, config, workspaces, and jobs even with no logs", async () => {
     const { entries, result } = await collect();
     expect([...entries.keys()].sort()).toEqual(
-      ["README.txt", "daemon-config.json", "jobs.json", "versions.json", "workspaces.json"].sort(),
+      [
+        "README.txt",
+        "daemon-config.json",
+        "jobs.json",
+        "versions.json",
+        "workspaces.json",
+      ].sort(),
     );
     expect(result.files.sort()).toEqual([...entries.keys()].sort());
     expect(path.dirname(result.path)).toBe(outDir);
@@ -322,7 +347,11 @@ describe("collectBugReport", () => {
     await write("daemon.log", "current\n", 0);
     await write("daemon-2026.01.01-00.00.00.log", "archived\n", 100);
     await write("ephemeral-daemon.log", "ephemeral\n", 50);
-    await write("ephemeral-daemon-2026.01.01-00.00.00.log", "old ephemeral\n", 200);
+    await write(
+      "ephemeral-daemon-2026.01.01-00.00.00.log",
+      "old ephemeral\n",
+      200,
+    );
     await write("checkpoint.log", "someone else's\n", 0);
     await write("daemon.txt", "not a log\n", 0);
 
@@ -341,13 +370,23 @@ describe("collectBugReport", () => {
       path.join(logDir, "daemon.log"),
       [
         JSON.stringify({ level: 30, msg: `using token ${TOKEN}` }),
-        JSON.stringify({ level: 30, msg: "login", email: "bob@studio.dev", apiToken: "zzz" }),
-        JSON.stringify({ level: 30, msg: `pull in ${path.join(fakeHome, "Game")} Content/Maps/A.umap` }),
+        JSON.stringify({
+          level: 30,
+          msg: "login",
+          email: "bob@studio.dev",
+          apiToken: "zzz",
+        }),
+        JSON.stringify({
+          level: 30,
+          msg: `pull in ${path.join(fakeHome, "Game")} Content/Maps/A.umap`,
+        }),
         "plain line Authorization: Bearer abcdefghijklmnop",
       ].join("\n") + "\n",
     );
     const { entries } = await collect({
-      clientLogs: [{ name: "desktop-main.log", content: "renderer saw bob@studio.dev" }],
+      clientLogs: [
+        { name: "desktop-main.log", content: "renderer saw bob@studio.dev" },
+      ],
     });
     const log = entries.get("logs/daemon.log")!;
     expect(log).not.toContain(TOKEN);
@@ -359,7 +398,9 @@ describe("collectBugReport", () => {
     // Repo paths survive.
     expect(log).toContain("Content/Maps/A.umap");
     // Same placeholder in a different file of the same bundle.
-    expect(entries.get("client-logs/desktop-main.log")).toBe("renderer saw [email-1]");
+    expect(entries.get("client-logs/desktop-main.log")).toBe(
+      "renderer saw [email-1]",
+    );
   });
 
   it("keeps the newest logs within the byte budget and tails the one that crosses it", async () => {
@@ -368,10 +409,21 @@ describe("collectBugReport", () => {
     const older = path.join(logDir, "daemon-2026.01.01-00.00.00.log");
     const oldest = path.join(logDir, "daemon-2025.01.01-00.00.00.log");
     await writeFile(newest, "n".repeat(59) + "\n");
-    await writeFile(older, Array.from({ length: 10 }, (_, i) => `line-${i}-xxxx`).join("\n") + "\n");
+    await writeFile(
+      older,
+      Array.from({ length: 10 }, (_, i) => `line-${i}-xxxx`).join("\n") + "\n",
+    );
     await writeFile(oldest, "o\n");
-    await utimes(older, new Date(Date.now() - 100_000), new Date(Date.now() - 100_000));
-    await utimes(oldest, new Date(Date.now() - 200_000), new Date(Date.now() - 200_000));
+    await utimes(
+      older,
+      new Date(Date.now() - 100_000),
+      new Date(Date.now() - 100_000),
+    );
+    await utimes(
+      oldest,
+      new Date(Date.now() - 200_000),
+      new Date(Date.now() - 200_000),
+    );
 
     const { entries, result } = await collect({ maxLogBytes: 100 });
     expect(entries.get("logs/daemon.log")).toBe("n".repeat(59) + "\n");
@@ -382,14 +434,21 @@ describe("collectBugReport", () => {
     expect(tail.length).toBeLessThanOrEqual(40);
     expect(entries.has("logs/daemon-2025.01.01-00.00.00.log")).toBe(false);
     expect(result.truncatedLogs.sort()).toEqual(
-      ["daemon-2025.01.01-00.00.00.log", "daemon-2026.01.01-00.00.00.log"].sort(),
+      [
+        "daemon-2025.01.01-00.00.00.log",
+        "daemon-2026.01.01-00.00.00.log",
+      ].sort(),
     );
   });
 
   it("redacts daemon.json and never includes auth.json", async () => {
-    await writeFile(path.join(fakeHome, "auth.json"), JSON.stringify({ users: { d: { apiToken: TOKEN } } }));
+    await writeFile(
+      path.join(fakeHome, "auth.json"),
+      JSON.stringify({ users: { d: { apiToken: TOKEN } } }),
+    );
     const ws = makeWorkspace("w1", path.join(fakeHome, "Projects", "Game"));
-    const config = makeConfig([ws]) as DaemonConfigType & Record<string, unknown>;
+    const config = makeConfig([ws]) as DaemonConfigType &
+      Record<string, unknown>;
     (config as Record<string, unknown>)["someToken"] = "should-not-leak";
     const { entries } = await collect({ config });
     const daemonJson = entries.get("daemon-config.json")!;
@@ -411,8 +470,11 @@ describe("collectBugReport", () => {
       version: 3,
       changelistNumber: 42,
       branchHeads: { "feature/x": 44 },
-      files: { "a.txt": {} as never, "b.txt": {} as never, "c/d.txt": {} as never },
-      markedForAdd: ["new.txt"],
+      files: {
+        "a.txt": {} as never,
+        "b.txt": {} as never,
+        "c/d.txt": {} as never,
+      },
       staged: ["a.txt", "new.txt"],
       pendingRemovals: ["gone.txt"],
       interruptedPull: {
@@ -426,7 +488,14 @@ describe("collectBugReport", () => {
     const manager: BugReportManagerView = {
       workspaces: new Map([["daemon-1", [wsA]]]),
       workspacePendingChanges: new Map([
-        ["a", { numChanges: 5, files: {}, unsupported: [{ path: "x\\y", reason: "r" }] }],
+        [
+          "a",
+          {
+            numChanges: 5,
+            files: {},
+            unsupported: [{ path: "x\\y", reason: "r" }],
+          },
+        ],
       ]),
       getWorkspaceState: (id) => (id === "a" ? state : null),
       getSyncStatus: (id) =>
@@ -446,14 +515,37 @@ describe("collectBugReport", () => {
       isWatching: (id) => id === "a",
     };
     const jobs = [
-      makeJob({ id: "j1", type: "pull", status: "failed", workspaceId: "a", error: "ECONNRESET talking to https://h/?token=abc",
-        logs: [{ seq: 1, ts: 1, stream: "err", line: "boom for carol@studio.dev" }] }),
-      makeJob({ id: "j2", type: "submit", status: "completed", workspaceId: "a",
-        logs: [{ seq: 1, ts: 1, stream: "out", line: "fine" }] }),
-      makeJob({ id: "j3", type: "submit", status: "failed", workspaceId: "b", error: "refused" }),
+      makeJob({
+        id: "j1",
+        type: "pull",
+        status: "failed",
+        workspaceId: "a",
+        error: "ECONNRESET talking to https://h/?token=abc",
+        logs: [
+          { seq: 1, ts: 1, stream: "err", line: "boom for carol@studio.dev" },
+        ],
+      }),
+      makeJob({
+        id: "j2",
+        type: "submit",
+        status: "completed",
+        workspaceId: "a",
+        logs: [{ seq: 1, ts: 1, stream: "out", line: "fine" }],
+      }),
+      makeJob({
+        id: "j3",
+        type: "submit",
+        status: "failed",
+        workspaceId: "b",
+        error: "refused",
+      }),
     ];
 
-    const { entries } = await collect({ config: makeConfig([wsA, wsB]), manager, jobs });
+    const { entries } = await collect({
+      config: makeConfig([wsA, wsB]),
+      manager,
+      jobs,
+    });
     const summaries = JSON.parse(entries.get("workspaces.json")!);
     expect(summaries).toHaveLength(2);
     const a = summaries.find((s: { id: string }) => s.id === "a");
@@ -467,10 +559,14 @@ describe("collectBugReport", () => {
         changelistNumber: 42,
         branchHeads: { "feature/x": 44 },
         trackedFiles: 3,
-        markedForAdd: 1,
         staged: 2,
         pendingRemovals: 1,
-        interruptedPull: { changelist: 43, pid: 1234, partialFiles: 1, restoredAt: null },
+        interruptedPull: {
+          changelist: 43,
+          pid: 1234,
+          partialFiles: 1,
+          restoredAt: null,
+        },
       },
       pendingChanges: { numChanges: 5, unsupportedNames: 1 },
       syncStatus: { changelistsBehind: 3, outdatedFiles: 1, newOnRemote: 2 },
@@ -478,7 +574,11 @@ describe("collectBugReport", () => {
     expect(a.localPath).not.toContain("alice");
     expect(a.state.interruptedPull.backupRoot).not.toContain("alice");
     expect(a.recentErrors).toEqual([
-      { type: "pull", at: "2026-01-01T00:00:01.000Z", error: "ECONNRESET talking to https://h/?token=[REDACTED]" },
+      {
+        type: "pull",
+        at: "2026-01-01T00:00:01.000Z",
+        error: "ECONNRESET talking to https://h/?token=[REDACTED]",
+      },
     ]);
     // No file lists from the sync status.
     expect(entries.get("workspaces.json")).not.toContain("secret-plans.txt");
@@ -486,10 +586,16 @@ describe("collectBugReport", () => {
     const b = summaries.find((s: { id: string }) => s.id === "b");
     expect(b.exists).toBe(false);
     expect(b.state).toBe("not loaded by this daemon process");
-    expect(b.recentErrors).toEqual([{ type: "submit", at: "2026-01-01T00:00:01.000Z", error: "refused" }]);
+    expect(b.recentErrors).toEqual([
+      { type: "submit", at: "2026-01-01T00:00:01.000Z", error: "refused" },
+    ]);
 
     const jobsDoc = JSON.parse(entries.get("jobs.json")!);
-    expect(jobsDoc.map((j: { id: string }) => j.id)).toEqual(["j1", "j2", "j3"]);
+    expect(jobsDoc.map((j: { id: string }) => j.id)).toEqual([
+      "j1",
+      "j2",
+      "j3",
+    ]);
     expect(jobsDoc[0].logTail).toEqual(["[err] boom for [email-1]"]);
     // A successful job's log is left out.
     expect(jobsDoc[1].logTail).toBeUndefined();
@@ -510,12 +616,17 @@ describe("collectBugReport", () => {
     const summaries = JSON.parse(entries.get("workspaces.json")!);
     expect(summaries.map((s: { id: string }) => s.id)).toEqual(["eph"]);
     expect(summaries[0].syncStatus).toBeNull();
-    expect(JSON.parse(entries.get("versions.json")!).daemon.ephemeral).toBe(true);
+    expect(JSON.parse(entries.get("versions.json")!).daemon.ephemeral).toBe(
+      true,
+    );
   });
 
   it("adds status documents and sanitizes client log names", async () => {
     const { entries } = await collect({
-      status: { servers: [{ endpoint: "https://u:pw@h", result: "ok" }], "../evil": 1 },
+      status: {
+        servers: [{ endpoint: "https://u:pw@h", result: "ok" }],
+        "../evil": 1,
+      },
       clientLogs: [
         { name: "../../etc/passwd", content: "a" },
         { name: "main.log", content: "b" },
@@ -523,11 +634,20 @@ describe("collectBugReport", () => {
         { name: "...", content: "d" },
       ],
     });
-    expect(entries.get("status/servers.json")).toContain("https://u:[REDACTED]@h");
+    expect(entries.get("status/servers.json")).toContain(
+      "https://u:[REDACTED]@h",
+    );
     expect(entries.has("status/evil.json")).toBe(true);
-    const clientLogs = [...entries.keys()].filter((n) => n.startsWith("client-logs/")).sort();
+    const clientLogs = [...entries.keys()]
+      .filter((n) => n.startsWith("client-logs/"))
+      .sort();
     expect(clientLogs).toEqual(
-      ["client-logs/2-main.log", "client-logs/log.txt", "client-logs/main.log", "client-logs/passwd"].sort(),
+      [
+        "client-logs/2-main.log",
+        "client-logs/log.txt",
+        "client-logs/main.log",
+        "client-logs/passwd",
+      ].sort(),
     );
   });
 
@@ -535,14 +655,19 @@ describe("collectBugReport", () => {
     await mkdir(outDir, { recursive: true });
     for (let i = 0; i < MAX_BUNDLES_KEPT + 3; i++) {
       await writeFile(
-        path.join(outDir, `checkpoint-bug-report-2020-01-${String(i + 1).padStart(2, "0")}-000000.zip`),
+        path.join(
+          outDir,
+          `checkpoint-bug-report-2020-01-${String(i + 1).padStart(2, "0")}-000000.zip`,
+        ),
         "",
       );
     }
     await writeFile(path.join(outDir, "unrelated.zip"), "");
     const { result } = await collect();
     const names = await readdir(outDir);
-    expect(names.filter((n) => n.startsWith("checkpoint-bug-report-")).length).toBe(MAX_BUNDLES_KEPT);
+    expect(
+      names.filter((n) => n.startsWith("checkpoint-bug-report-")).length,
+    ).toBe(MAX_BUNDLES_KEPT);
     expect(names).toContain(path.basename(result.path));
     expect(names).toContain("unrelated.zip");
     expect(names).not.toContain("checkpoint-bug-report-2020-01-01-000000.zip");

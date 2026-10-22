@@ -188,7 +188,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       await put(alice, "a.txt", "edited, unreported\n");
       // The cache is trusted and nothing is dirty: the edit stays hidden.
       expect(await pendingChanges(alice)).toEqual({});
-      expect(await fullRescan(alice)).toEqual({ "a.txt": "ChangedNotCheckedOut" });
+      expect(await fullRescan(alice)).toEqual({
+        "a.txt": "ChangedNotCheckedOut",
+      });
     });
 
     it("shows a reported edit on an incremental refresh, and only that path", async () => {
@@ -198,7 +200,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       await event(alice, "change", "a.txt");
       expect(dirty(alice)).toEqual(["a.txt"]);
       // Incremental: only the dirty path was looked at again.
-      expect(await pendingChanges(alice)).toEqual({ "a.txt": "ChangedNotCheckedOut" });
+      expect(await pendingChanges(alice)).toEqual({
+        "a.txt": "ChangedNotCheckedOut",
+      });
       expect(dirty(alice)).toEqual([]);
     });
 
@@ -216,15 +220,21 @@ describe("the file watcher", { timeout: 120_000 }, () => {
         process.platform === "win32" ? "dir\\a.txt" : "dir/a.txt",
       );
       expect(dirty(alice)).toEqual(["dir/a.txt"]);
-      expect(await pendingChanges(alice)).toEqual({ "dir/a.txt": "ChangedNotCheckedOut" });
+      expect(await pendingChanges(alice)).toEqual({
+        "dir/a.txt": "ChangedNotCheckedOut",
+      });
     });
 
     it("drops the cache on an event with no name (an overflowed buffer on Windows)", async () => {
       const alice = await tracked();
       await put(alice, "a.txt", "edited, lost in the overflow\n");
       await event(alice, "rename", null);
-      expect(manager().workspacePendingChanges.has(alice.workspace.id)).toBe(false);
-      expect(await pendingChanges(alice)).toEqual({ "a.txt": "ChangedNotCheckedOut" });
+      expect(manager().workspacePendingChanges.has(alice.workspace.id)).toBe(
+        false,
+      );
+      expect(await pendingChanges(alice)).toEqual({
+        "a.txt": "ChangedNotCheckedOut",
+      });
     });
 
     it("drops the cache on a nameless event that arrives during a VCS operation", async () => {
@@ -236,7 +246,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       } finally {
         await manager().endVcsOperation(alice.workspace.id);
       }
-      expect(await pendingChanges(alice)).toEqual({ "a.txt": "ChangedNotCheckedOut" });
+      expect(await pendingChanges(alice)).toEqual({
+        "a.txt": "ChangedNotCheckedOut",
+      });
     });
 
     it("buffers events during a VCS operation and replays them after it", async () => {
@@ -250,7 +262,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
         await manager().endVcsOperation(alice.workspace.id);
       }
       expect(dirty(alice)).toEqual(["a.txt"]);
-      expect(await pendingChanges(alice)).toEqual({ "a.txt": "ChangedNotCheckedOut" });
+      expect(await pendingChanges(alice)).toEqual({
+        "a.txt": "ChangedNotCheckedOut",
+      });
     });
   });
 
@@ -261,7 +275,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       await event(alice, "change", ".checkpoint/pull-backups/x/a.txt");
       await event(alice, "rename", ".checkpoint");
       expect(dirty(alice)).toEqual([]);
-      expect(manager().workspacePendingChanges.has(alice.workspace.id)).toBe(true);
+      expect(manager().workspacePendingChanges.has(alice.workspace.id)).toBe(
+        true,
+      );
     });
 
     it("does not take a user file named like .checkpoint for the directory", async () => {
@@ -311,7 +327,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
 
       await put(alice, ".chkignore", "*.log\n");
       await event(alice, "rename", ".chkignore");
-      expect(manager().workspacePendingChanges.has(alice.workspace.id)).toBe(false);
+      expect(manager().workspacePendingChanges.has(alice.workspace.id)).toBe(
+        false,
+      );
       expect(await pendingChanges(alice)).toEqual({ ".chkignore": "Local" });
     });
   });
@@ -409,7 +427,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
         await event(alice, "rename", `gen/out${i}.tmp`);
       }
       // The full rescan finds the unreported edit too.
-      expect(await pendingChanges(alice)).toEqual({ "a.txt": "ChangedNotCheckedOut" });
+      expect(await pendingChanges(alice)).toEqual({
+        "a.txt": "ChangedNotCheckedOut",
+      });
     });
 
     it("keeps a build into an ignored directory from overflowing the dirty set", async () => {
@@ -427,7 +447,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       await put(alice, "a.txt", "edited\n");
       await event(alice, "change", "a.txt");
       expect(dirty(alice)).toEqual(["a.txt"]);
-      expect(await pendingChanges(alice)).toEqual({ "a.txt": "ChangedNotCheckedOut" });
+      expect(await pendingChanges(alice)).toEqual({
+        "a.txt": "ChangedNotCheckedOut",
+      });
     });
   });
 
@@ -436,18 +458,24 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       const alice = await tracked();
       DaemonManager.watcherRetryMs = 20;
       await put(alice, "a.txt", "edited while the watcher failed\n");
-      manager().handleWatchError(ws(alice), new Error("ENOSPC: System limit for number of file watchers reached"));
+      manager().handleWatchError(
+        ws(alice),
+        new Error("ENOSPC: System limit for number of file watchers reached"),
+      );
       expect(manager().isWatching(alice.workspace.id)).toBe(false);
       expect(daemonLog.some((l) => l.includes("Watcher error"))).toBe(true);
-      expect(await pendingChanges(alice)).toEqual({ "a.txt": "ChangedNotCheckedOut" });
+      expect(await pendingChanges(alice)).toEqual({
+        "a.txt": "ChangedNotCheckedOut",
+      });
 
       await waitFor("the watcher to restart", () =>
         manager().isWatching(alice.workspace.id),
       );
       // The restarted watcher is a real one: it reports the next edit.
       await put(alice, "b.txt", "edited after the restart, much longer\n");
-      await waitFor("b.txt to show as pending", async () =>
-        "b.txt" in (await pendingChanges(alice)),
+      await waitFor(
+        "b.txt to show as pending",
+        async () => "b.txt" in (await pendingChanges(alice)),
       );
       expect(await pendingChanges(alice)).toEqual({
         "a.txt": "ChangedNotCheckedOut",
@@ -464,7 +492,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       manager().handleWatchError(ws(alice), new Error("EMFILE"));
       expect(await pendingChanges(alice)).toEqual({});
       await put(alice, "a.txt", "edited while no watcher ran\n");
-      expect(await pendingChanges(alice)).toEqual({ "a.txt": "ChangedNotCheckedOut" });
+      expect(await pendingChanges(alice)).toEqual({
+        "a.txt": "ChangedNotCheckedOut",
+      });
     });
 
     it("drops the cache when a watcher starts, for changes made before it did", async () => {
@@ -473,7 +503,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       expect(await pendingChanges(alice)).toEqual({});
       await put(alice, "a.txt", "edited before the watcher started\n");
       expect(manager().watchWorkspace(ws(alice))).toBe(true);
-      expect(await pendingChanges(alice)).toEqual({ "a.txt": "ChangedNotCheckedOut" });
+      expect(await pendingChanges(alice)).toEqual({
+        "a.txt": "ChangedNotCheckedOut",
+      });
     });
 
     it("does not restart the watcher of a workspace unlinked in the meantime", async () => {
@@ -515,7 +547,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       const alice = await tracked();
       internals().watchers.delete(alice.workspace.id);
       expect(manager().watchWorkspace(ws(alice))).toBe(true);
-      const first = internals().watchers.get(alice.workspace.id) as EventEmitter;
+      const first = internals().watchers.get(
+        alice.workspace.id,
+      ) as EventEmitter;
       expect(manager().watchWorkspace(ws(alice))).toBe(true);
       const second = internals().watchers.get(alice.workspace.id);
       expect(second).not.toBe(first);
@@ -523,7 +557,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       expect(await pendingChanges(alice)).toEqual({});
       first.emit("error", new Error("late error from the closed watcher"));
       expect(internals().watchers.get(alice.workspace.id)).toBe(second);
-      expect(manager().workspacePendingChanges.has(alice.workspace.id)).toBe(true);
+      expect(manager().workspacePendingChanges.has(alice.workspace.id)).toBe(
+        true,
+      );
     });
 
     it("turns an error event on the running watcher into a restart", async () => {
@@ -531,7 +567,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       DaemonManager.watcherRetryMs = 20;
       internals().watchers.delete(alice.workspace.id);
       manager().watchWorkspace(ws(alice));
-      const first = internals().watchers.get(alice.workspace.id) as EventEmitter;
+      const first = internals().watchers.get(
+        alice.workspace.id,
+      ) as EventEmitter;
       first.emit("error", new Error("EPERM"));
       expect(manager().isWatching(alice.workspace.id)).toBe(false);
       await waitFor("the watcher to restart", () =>
@@ -547,7 +585,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       internals().watchers.delete(alice.workspace.id);
       expect(await pendingChanges(alice)).toEqual({});
       await put(alice, "a.txt", "edited with no watcher\n");
-      expect(await pendingChanges(alice)).toEqual({ "a.txt": "ChangedNotCheckedOut" });
+      expect(await pendingChanges(alice)).toEqual({
+        "a.txt": "ChangedNotCheckedOut",
+      });
     });
   });
 
@@ -584,7 +624,9 @@ describe("the file watcher", { timeout: 120_000 }, () => {
       await put(alice, "a.txt", "edited for real, as a marker\n");
       // Wait until the marker arrives; the .checkpoint write came first.
       await waitFor("the marker event", () => dirty(alice).includes("a.txt"));
-      expect(dirty(alice).filter((p) => p.startsWith(".checkpoint"))).toEqual([]);
+      expect(dirty(alice).filter((p) => p.startsWith(".checkpoint"))).toEqual(
+        [],
+      );
     });
   });
 });

@@ -322,7 +322,11 @@ describe(
           await stageAndSubmit(bob, ["Content/top.txt"]);
           expect(
             await pathsAtHead(testDb.client, scene!.repoId, "main"),
-          ).toEqual(["Content/maps/a.txt", "Content/maps/b.txt", "Content/top.txt"]);
+          ).toEqual([
+            "Content/maps/a.txt",
+            "Content/maps/b.txt",
+            "Content/top.txt",
+          ]);
           expect(await pendingChanges(bob)).toEqual({});
 
           // Alice's copy follows, directory and all, with nothing pending.
@@ -348,7 +352,9 @@ describe(
           expect(
             await pathsAtHead(testDb.client, scene!.repoId, "main"),
           ).toEqual(["Docs/a.txt"]);
-          expect(await pendingChanges(bob)).toEqual({ "Docs/notes.txt": "Local" });
+          expect(await pendingChanges(bob)).toEqual({
+            "Docs/notes.txt": "Local",
+          });
         },
       );
 

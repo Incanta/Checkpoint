@@ -115,9 +115,9 @@ describe("marking a file executable", { timeout: 120_000 }, () => {
         (await getWorkspaceState(alice.root, "sqlite")).pendingModes,
       ).toEqual({ "tools/build.sh": 0o755 });
     } else {
-      expect((await fsp.stat(fileIn(alice, "tools/build.sh"))).mode & 0o777).toBe(
-        0o755,
-      );
+      expect(
+        (await fsp.stat(fileIn(alice, "tools/build.sh"))).mode & 0o777,
+      ).toBe(0o755);
     }
 
     await stageAndSubmit(alice, ["tools/build.sh"]);
@@ -208,6 +208,8 @@ describe("marking a file executable", { timeout: 120_000 }, () => {
     await expect(setExecutable(alice, ["dir"], true)).rejects.toThrow(
       /not a file/,
     );
-    await expect(setExecutable(alice, ["../outside.sh"], true)).rejects.toThrow();
+    await expect(
+      setExecutable(alice, ["../outside.sh"], true),
+    ).rejects.toThrow();
   });
 });

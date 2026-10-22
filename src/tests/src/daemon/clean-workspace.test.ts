@@ -53,10 +53,7 @@ vi.mock(
 
 import { createTestDb, type TestDb } from "../harness/db";
 import { closeAllStateStores } from "../../../core/daemon/src/util/state-store.js";
-import {
-  getWorkspaceState,
-  updateWorkspaceState,
-} from "../../../core/daemon/src/util/util.js";
+import { updateWorkspaceState } from "../../../core/daemon/src/util/util.js";
 import {
   cleanExecute,
   cleanPreview,
@@ -75,20 +72,6 @@ import {
 } from "../harness/stack";
 
 const caseInsensitive = await filesystemIsCaseInsensitive();
-
-const ids = (seat: Seat) => ({
-  daemonId: seat.workspace.daemonId,
-  workspaceId: seat.workspace.id,
-});
-
-async function markForAdd(seat: Seat, paths: string[]): Promise<void> {
-  const [{ createCaller }, { DaemonManager }] = await Promise.all([
-    import("../../../core/daemon/src/api/index.js"),
-    import("../../../core/daemon/src/daemon-manager.js"),
-  ]);
-  const daemon = createCaller({ manager: DaemonManager.Get() });
-  await daemon.workspaces.pending.markForAdd({ ...ids(seat), paths });
-}
 
 const offered = async (seat: Seat) =>
   (await cleanPreview(seat)).map((c) => c.path);
@@ -126,9 +109,6 @@ describe("Clean Workspace", { timeout: 120_000 }, () => {
       await put(alice, "Saved/Config/draft.ini", "work in progress\n");
       await put(alice, "notes.txt", "also staged\n");
       await stage(alice, ["Saved/Config/draft.ini", "notes.txt"]);
-      expect(
-        (await getWorkspaceState(alice.root, "sqlite")).markedForAdd ?? [],
-      ).not.toContain("Saved/Config/draft.ini");
 
       expect(await offered(alice)).toEqual([]);
       const result = await cleanExecute(alice, [
@@ -157,17 +137,6 @@ describe("Clean Workspace", { timeout: 120_000 }, () => {
       const result = await cleanExecute(alice, ["Binaries/Tools/helper.txt"]);
       expect(result.deleted).toBe(0);
       expect(exists(alice, "Binaries/Tools/helper.txt")).toBe(true);
-    });
-
-    it("keeps a file marked for add", async () => {
-      const { alice } = scene!;
-      await put(alice, "Intermediate/keep.txt", "marked\n");
-      await markForAdd(alice, ["Intermediate/keep.txt"]);
-
-      expect(await offered(alice)).toEqual([]);
-      const result = await cleanExecute(alice, ["Intermediate/keep.txt"]);
-      expect(result.skipped).toHaveLength(1);
-      expect(await read(alice, "Intermediate/keep.txt")).toBe("marked\n");
     });
 
     it("keeps a tracked file", async () => {

@@ -248,7 +248,9 @@ describe("S3, R2, and other provider keys", () => {
 
   it("redacts AWS env vars", () => {
     expect(
-      redactText("AWS_SECRET_ACCESS_KEY=abc AWS_SESSION_TOKEN=def AWS_REGION=x"),
+      redactText(
+        "AWS_SECRET_ACCESS_KEY=abc AWS_SESSION_TOKEN=def AWS_REGION=x",
+      ),
     ).toBe(
       `AWS_SECRET_ACCESS_KEY=${REDACTED} AWS_SESSION_TOKEN=${REDACTED} AWS_REGION=x`,
     );
@@ -319,9 +321,7 @@ describe("URLs", () => {
   });
 
   it("keeps an empty sensitive parameter", () => {
-    expect(redactText("https://h/p?token=&x=1")).toBe(
-      "https://h/p?token=&x=1",
-    );
+    expect(redactText("https://h/p?token=&x=1")).toBe("https://h/p?token=&x=1");
   });
 
   it("redacts a presigned R2 URL fully", () => {
@@ -479,7 +479,10 @@ describe("home directory usernames", () => {
     ["/Users/alice/Library", "/Users/[user]/Library"],
     ["path=/home/alice", "path=/home/[user]"],
     ['"/home/alice"', '"/home/[user]"'],
-    ["C:\\Documents and Settings\\bob\\x", "C:\\Documents and Settings\\[user]\\x"],
+    [
+      "C:\\Documents and Settings\\bob\\x",
+      "C:\\Documents and Settings\\[user]\\x",
+    ],
   ])("anonymizes %s", (input, expected) => {
     expect(redactText(input)).toBe(expected);
   });
@@ -548,7 +551,10 @@ describe("redactValue", () => {
     const r = new Redactor();
     expect(
       r.redactValue({ msg: "GET https://h/?token=abc", path: "/home/al/x" }),
-    ).toEqual({ msg: `GET https://h/?token=${REDACTED}`, path: "/home/[user]/x" });
+    ).toEqual({
+      msg: `GET https://h/?token=${REDACTED}`,
+      path: "/home/[user]/x",
+    });
   });
 
   it("redacts keys that are emails", () => {

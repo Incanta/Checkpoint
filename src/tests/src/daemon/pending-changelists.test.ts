@@ -93,8 +93,9 @@ describe("pending changelist store", () => {
     await deletePendingChangelist(root, b.id);
     const c = await createPendingChangelist(root, "main", "c");
     expect([a.id, b.id, c.id]).toEqual([1, 2, 3]);
-    expect((await getPendingChangelists(root)).changelists.map((x) => x.id))
-      .toEqual([1, 3]);
+    expect(
+      (await getPendingChangelists(root)).changelists.map((x) => x.id),
+    ).toEqual([1, 3]);
   });
 
   it("loses no update when edits arrive at once", async () => {
@@ -155,9 +156,7 @@ describe("pending changelist store", () => {
       main: "draft",
     });
     await setDefaultChangelistDescription(root, "main", "");
-    expect((await getPendingChangelists(root)).defaultDescriptions).toEqual(
-      {},
-    );
+    expect((await getPendingChangelists(root)).defaultDescriptions).toEqual({});
   });
 
   it("submitting a numbered changelist deletes it and only its files", async () => {

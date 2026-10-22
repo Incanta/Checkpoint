@@ -89,8 +89,6 @@ function randomDelta(rand: () => number): StateDelta {
   }
   if (rand() < 0.4)
     delta.staged = { clear: rand() < 0.1, remove: some(3), add: some(3) };
-  if (rand() < 0.3)
-    delta.markedForAdd = { clear: rand() < 0.1, remove: some(2), add: some(2) };
   if (rand() < 0.2) {
     delta.bisect = {
       clear: rand() < 0.2,
@@ -129,7 +127,6 @@ function normalize(state: WorkspaceState) {
     changelistNumber: state.changelistNumber,
     files: state.files,
     artifactFiles: state.artifactFiles ?? {},
-    markedForAdd: [...(state.markedForAdd ?? [])].sort(),
     staged: [...(state.staged ?? [])].sort(),
     branchHeads: state.branchHeads,
     teamSync: state.teamSync,
@@ -140,7 +137,6 @@ const empty = (): WorkspaceState => ({
   changelistNumber: 0,
   files: {},
   artifactFiles: {},
-  markedForAdd: [],
   staged: [],
 });
 
@@ -192,14 +188,10 @@ describe.each(["sqlite"] as const)("%s store: apply(delta)", (backend) => {
 
   it("treats adding a path twice and removing an absent one as no-ops", async () => {
     const store = getStateStore(root, backend);
-    await store.apply({
-      staged: { add: ["a", "a"] },
-      markedForAdd: { add: ["b"] },
-    });
+    await store.apply({ staged: { add: ["a", "a"] } });
     await store.apply({ staged: { add: ["a"], remove: ["missing"] } });
     const state = await store.load();
     expect(state.staged).toEqual(["a"]);
-    expect(state.markedForAdd).toEqual(["b"]);
   });
 
   it("removes a meta field on null and leaves it alone when absent", async () => {

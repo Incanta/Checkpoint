@@ -112,268 +112,277 @@ async function claimsOf(seat: Seat): Promise<Record<string, string>> {
   );
 }
 
-describe("moving a pending changelist to another branch", { timeout: 120_000 }, () => {
-  let testDb: TestDb;
-  let scene: Scene | undefined;
+describe(
+  "moving a pending changelist to another branch",
+  { timeout: 120_000 },
+  () => {
+    let testDb: TestDb;
+    let scene: Scene | undefined;
 
-  beforeAll(async () => {
-    testDb = await createTestDb();
-    globalThis.__checkpointTestDb = testDb.client;
-  }, 120_000);
+    beforeAll(async () => {
+      testDb = await createTestDb();
+      globalThis.__checkpointTestDb = testDb.client;
+    }, 120_000);
 
-  afterAll(async () => {
-    await testDb.teardown();
-    delete globalThis.__checkpointTestDb;
-  });
-
-  beforeEach(async () => {
-    await testDb.reset();
-    resetStack();
-    scene = await makeScene(testDb.client);
-
-    // main has notes.txt and stay.txt. Alice edits both and adds extra.txt,
-    // and starts a changelist on main for notes.txt and extra.txt; stay.txt
-    // goes in main's default changelist.
-    const { alice } = scene;
-    await put(alice, "notes.txt", ORIGINAL);
-    await put(alice, "stay.txt", ORIGINAL);
-    await stageAndSubmit(alice, ["notes.txt", "stay.txt"]);
-    await put(alice, "notes.txt", EDITED);
-    await put(alice, "stay.txt", EDITED);
-    await put(alice, "extra.txt", "extra\n");
-  });
-
-  afterEach(async () => {
-    delete overrides.procedures;
-    closeAllStateStores();
-    await tearDownScene(scene);
-    scene = undefined;
-  });
-
-  /** A changelist on main holding notes.txt and extra.txt; stay.txt staged to main's default. */
-  async function startOnMain(alice: Seat): Promise<number> {
-    const d = await daemon();
-    const cl = await d.workspaces.pending.createChangelist({
-      ...ids(alice),
-      description: "needs its own branch",
-    });
-    await d.workspaces.pending.stage({
-      ...ids(alice),
-      paths: ["notes.txt", "extra.txt"],
-      changelistId: cl.id,
-    });
-    await d.workspaces.pending.stage({ ...ids(alice), paths: ["stay.txt"] });
-    return cl.id;
-  }
-
-  async function createAndActivateFeature(alice: Seat) {
-    await apiAs(alice).branch.createBranch({
-      repoId: scene!.repoId,
-      name: "feature",
-      type: "FEATURE",
-      parentBranchName: "main",
-    });
-    await switchBranch(alice, "feature");
-  }
-
-  it("moves the changelist and its files' claims, and submits to the new branch", async () => {
-    const { alice } = scene!;
-    const d = await daemon();
-    const clId = await startOnMain(alice);
-    await createAndActivateFeature(alice);
-
-    const result = await d.workspaces.pending.setChangelistBranch({
-      ...ids(alice),
-      changelistId: clId,
-      branchName: "feature",
-    });
-    expect(result.paths.sort()).toEqual(["extra.txt", "notes.txt"]);
-
-    const state = await d.workspaces.pending.listChangelists(ids(alice));
-    expect(state.changelists).toMatchObject([
-      { id: clId, branchName: "feature" },
-    ]);
-    expect(await claimsOf(alice)).toEqual({
-      "notes.txt": "feature+staged",
-      "extra.txt": "feature+staged",
-      // Outside the changelist: not moved.
-      "stay.txt": "main+staged",
+    afterAll(async () => {
+      await testDb.teardown();
+      delete globalThis.__checkpointTestDb;
     });
 
-    const { jobId } = await d.workspaces.pending.submit({
-      ...ids(alice),
-      message: "feature work",
-      changelistId: clId,
-      noProgress: true,
-    });
-    await waitForJob(jobId);
+    beforeEach(async () => {
+      await testDb.reset();
+      resetStack();
+      scene = await makeScene(testDb.client);
 
-    const db = testDb.client;
-    expect(
-      await contentAtHead(db, scene!.repoId, "feature", "notes.txt"),
-    ).toBe(EDITED);
-    expect(await contentAtHead(db, scene!.repoId, "main", "notes.txt")).toBe(
-      ORIGINAL,
-    );
-    expect(await pathsAtHead(db, scene!.repoId, "feature")).toContain(
-      "extra.txt",
-    );
-    expect(await pathsAtHead(db, scene!.repoId, "main")).not.toContain(
-      "extra.txt",
-    );
-
-    // Submitted, so gone; main's default keeps what it had.
-    expect(
-      (await d.workspaces.pending.listChangelists(ids(alice))).changelists,
-    ).toEqual([]);
-    expect((await claimsOf(alice))["stay.txt"]).toBe("main+staged");
-  });
-
-  it("cuts a new branch where the workspace is synced, without pulling it forward", async () => {
-    // A busy team: Bob lands work on main after Alice's last sync, including
-    // a new version of an asset Alice is editing. Alice moving her changelist
-    // to a new branch must neither drag her up to head nor be refused over
-    // changes she is not receiving.
-    const { alice, bob } = scene!;
-    const d = await daemon();
-    await put(alice, "art.uasset", "art v1");
-    await stageAndSubmit(alice, ["art.uasset"]);
-    const aliceAt = await headOf(testDb.client, scene!.repoId, "main");
-
-    await syncLatest(bob);
-    await put(bob, "art.uasset", "art v2 (bob)");
-    await put(bob, "bobs.txt", "bob\n");
-    await stageAndSubmit(bob, ["art.uasset", "bobs.txt"]);
-    const mainHead = await headOf(testDb.client, scene!.repoId, "main");
-    expect(mainHead).toBeGreaterThan(aliceAt);
-
-    await put(alice, "art.uasset", "art v1 (alice local edit)");
-    const clId = await startOnMain(alice);
-    // The precondition for the switch's overwrite check: a local binary edit
-    // to a file main has moved on from.
-    expect((await pendingChanges(alice))["art.uasset"]).toMatch(/^Changed/);
-
-    // What the desktop's "New branch..." does: create with no head, activate.
-    await d.workspaces.branches.create({
-      ...ids(alice),
-      name: "feature",
-      type: "FEATURE",
-      parentBranchName: "main",
-    });
-    expect(await headOf(testDb.client, scene!.repoId, "feature")).toBe(
-      aliceAt,
-    );
-    await switchBranch(alice, "feature");
-    await d.workspaces.pending.setChangelistBranch({
-      ...ids(alice),
-      changelistId: clId,
-      branchName: "feature",
+      // main has notes.txt and stay.txt. Alice edits both and adds extra.txt,
+      // and starts a changelist on main for notes.txt and extra.txt; stay.txt
+      // goes in main's default changelist.
+      const { alice } = scene;
+      await put(alice, "notes.txt", ORIGINAL);
+      await put(alice, "stay.txt", ORIGINAL);
+      await stageAndSubmit(alice, ["notes.txt", "stay.txt"]);
+      await put(alice, "notes.txt", EDITED);
+      await put(alice, "stay.txt", EDITED);
+      await put(alice, "extra.txt", "extra\n");
     });
 
-    // Nothing of Bob's arrived, and her local edit is untouched.
-    expect(await exists(alice, "bobs.txt")).toBe(false);
-    expect(await read(alice, "art.uasset")).toBe("art v1 (alice local edit)");
-
-    const { jobId } = await d.workspaces.pending.submit({
-      ...ids(alice),
-      message: "feature work",
-      changelistId: clId,
-      noProgress: true,
+    afterEach(async () => {
+      delete overrides.procedures;
+      closeAllStateStores();
+      await tearDownScene(scene);
+      scene = undefined;
     });
-    await waitForJob(jobId);
-    expect(
-      await contentAtHead(testDb.client, scene!.repoId, "feature", "notes.txt"),
-    ).toBe(EDITED);
-    expect(await headOf(testDb.client, scene!.repoId, "main")).toBe(mainHead);
-  });
 
-  it("refuses a branch that is not active here, and changes nothing", async () => {
-    const { alice } = scene!;
-    const d = await daemon();
-    const clId = await startOnMain(alice);
-    await apiAs(alice).branch.createBranch({
-      repoId: scene!.repoId,
-      name: "feature",
-      type: "FEATURE",
-      parentBranchName: "main",
-    });
-    const before = await claimsOf(alice);
+    /** A changelist on main holding notes.txt and extra.txt; stay.txt staged to main's default. */
+    async function startOnMain(alice: Seat): Promise<number> {
+      const d = await daemon();
+      const cl = await d.workspaces.pending.createChangelist({
+        ...ids(alice),
+        description: "needs its own branch",
+      });
+      await d.workspaces.pending.stage({
+        ...ids(alice),
+        paths: ["notes.txt", "extra.txt"],
+        changelistId: cl.id,
+      });
+      await d.workspaces.pending.stage({ ...ids(alice), paths: ["stay.txt"] });
+      return cl.id;
+    }
 
-    await expect(
-      d.workspaces.pending.setChangelistBranch({
+    async function createAndActivateFeature(alice: Seat) {
+      await apiAs(alice).branch.createBranch({
+        repoId: scene!.repoId,
+        name: "feature",
+        type: "FEATURE",
+        parentBranchName: "main",
+      });
+      await switchBranch(alice, "feature");
+    }
+
+    it("moves the changelist and its files' claims, and submits to the new branch", async () => {
+      const { alice } = scene!;
+      const d = await daemon();
+      const clId = await startOnMain(alice);
+      await createAndActivateFeature(alice);
+
+      const result = await d.workspaces.pending.setChangelistBranch({
         ...ids(alice),
         changelistId: clId,
         branchName: "feature",
-      }),
-    ).rejects.toThrow(/not active/);
+      });
+      expect(result.paths.sort()).toEqual(["extra.txt", "notes.txt"]);
 
-    expect(
-      (await d.workspaces.pending.listChangelists(ids(alice))).changelists[0]
-        ?.branchName,
-    ).toBe("main");
-    expect(await claimsOf(alice)).toEqual(before);
-  });
+      const state = await d.workspaces.pending.listChangelists(ids(alice));
+      expect(state.changelists).toMatchObject([
+        { id: clId, branchName: "feature" },
+      ]);
+      expect(await claimsOf(alice)).toEqual({
+        "notes.txt": "feature+staged",
+        "extra.txt": "feature+staged",
+        // Outside the changelist: not moved.
+        "stay.txt": "main+staged",
+      });
 
-  it("puts every claim back when the server refuses one", async () => {
-    const { alice } = scene!;
-    const d = await daemon();
-    const clId = await startOnMain(alice);
-    await createAndActivateFeature(alice);
-    const before = await claimsOf(alice);
+      const { jobId } = await d.workspaces.pending.submit({
+        ...ids(alice),
+        message: "feature work",
+        changelistId: clId,
+        noProgress: true,
+      });
+      await waitForJob(jobId);
 
-    // The server refuses to move extra.txt to feature, whichever order the
-    // files are moved in; every other checkout goes through for real.
-    overrides.procedures = {
-      file: {
-        checkout: async (input: unknown) => {
-          const { filePath, branchName } = input as {
-            filePath: string;
-            branchName: string;
-          };
-          if (filePath === "extra.txt" && branchName === "feature") {
-            throw new Error("held elsewhere");
-          }
-          return apiAs(alice).file.checkout(input as never);
+      const db = testDb.client;
+      expect(
+        await contentAtHead(db, scene!.repoId, "feature", "notes.txt"),
+      ).toBe(EDITED);
+      expect(await contentAtHead(db, scene!.repoId, "main", "notes.txt")).toBe(
+        ORIGINAL,
+      );
+      expect(await pathsAtHead(db, scene!.repoId, "feature")).toContain(
+        "extra.txt",
+      );
+      expect(await pathsAtHead(db, scene!.repoId, "main")).not.toContain(
+        "extra.txt",
+      );
+
+      // Submitted, so gone; main's default keeps what it had.
+      expect(
+        (await d.workspaces.pending.listChangelists(ids(alice))).changelists,
+      ).toEqual([]);
+      expect((await claimsOf(alice))["stay.txt"]).toBe("main+staged");
+    });
+
+    it("cuts a new branch where the workspace is synced, without pulling it forward", async () => {
+      // A busy team: Bob lands work on main after Alice's last sync, including
+      // a new version of an asset Alice is editing. Alice moving her changelist
+      // to a new branch must neither drag her up to head nor be refused over
+      // changes she is not receiving.
+      const { alice, bob } = scene!;
+      const d = await daemon();
+      await put(alice, "art.uasset", "art v1");
+      await stageAndSubmit(alice, ["art.uasset"]);
+      const aliceAt = await headOf(testDb.client, scene!.repoId, "main");
+
+      await syncLatest(bob);
+      await put(bob, "art.uasset", "art v2 (bob)");
+      await put(bob, "bobs.txt", "bob\n");
+      await stageAndSubmit(bob, ["art.uasset", "bobs.txt"]);
+      const mainHead = await headOf(testDb.client, scene!.repoId, "main");
+      expect(mainHead).toBeGreaterThan(aliceAt);
+
+      await put(alice, "art.uasset", "art v1 (alice local edit)");
+      const clId = await startOnMain(alice);
+      // The precondition for the switch's overwrite check: a local binary edit
+      // to a file main has moved on from.
+      expect((await pendingChanges(alice))["art.uasset"]).toMatch(/^Changed/);
+
+      // What the desktop's "New branch..." does: create with no head, activate.
+      await d.workspaces.branches.create({
+        ...ids(alice),
+        name: "feature",
+        type: "FEATURE",
+        parentBranchName: "main",
+      });
+      expect(await headOf(testDb.client, scene!.repoId, "feature")).toBe(
+        aliceAt,
+      );
+      await switchBranch(alice, "feature");
+      await d.workspaces.pending.setChangelistBranch({
+        ...ids(alice),
+        changelistId: clId,
+        branchName: "feature",
+      });
+
+      // Nothing of Bob's arrived, and her local edit is untouched.
+      expect(await exists(alice, "bobs.txt")).toBe(false);
+      expect(await read(alice, "art.uasset")).toBe("art v1 (alice local edit)");
+
+      const { jobId } = await d.workspaces.pending.submit({
+        ...ids(alice),
+        message: "feature work",
+        changelistId: clId,
+        noProgress: true,
+      });
+      await waitForJob(jobId);
+      expect(
+        await contentAtHead(
+          testDb.client,
+          scene!.repoId,
+          "feature",
+          "notes.txt",
+        ),
+      ).toBe(EDITED);
+      expect(await headOf(testDb.client, scene!.repoId, "main")).toBe(mainHead);
+    });
+
+    it("refuses a branch that is not active here, and changes nothing", async () => {
+      const { alice } = scene!;
+      const d = await daemon();
+      const clId = await startOnMain(alice);
+      await apiAs(alice).branch.createBranch({
+        repoId: scene!.repoId,
+        name: "feature",
+        type: "FEATURE",
+        parentBranchName: "main",
+      });
+      const before = await claimsOf(alice);
+
+      await expect(
+        d.workspaces.pending.setChangelistBranch({
+          ...ids(alice),
+          changelistId: clId,
+          branchName: "feature",
+        }),
+      ).rejects.toThrow(/not active/);
+
+      expect(
+        (await d.workspaces.pending.listChangelists(ids(alice))).changelists[0]
+          ?.branchName,
+      ).toBe("main");
+      expect(await claimsOf(alice)).toEqual(before);
+    });
+
+    it("puts every claim back when the server refuses one", async () => {
+      const { alice } = scene!;
+      const d = await daemon();
+      const clId = await startOnMain(alice);
+      await createAndActivateFeature(alice);
+      const before = await claimsOf(alice);
+
+      // The server refuses to move extra.txt to feature, whichever order the
+      // files are moved in; every other checkout goes through for real.
+      overrides.procedures = {
+        file: {
+          checkout: async (input: unknown) => {
+            const { filePath, branchName } = input as {
+              filePath: string;
+              branchName: string;
+            };
+            if (filePath === "extra.txt" && branchName === "feature") {
+              throw new Error("held elsewhere");
+            }
+            return apiAs(alice).file.checkout(input as never);
+          },
         },
-      },
-    } as never;
+      } as never;
 
-    await expect(
-      d.workspaces.pending.setChangelistBranch({
+      await expect(
+        d.workspaces.pending.setChangelistBranch({
+          ...ids(alice),
+          changelistId: clId,
+          branchName: "feature",
+        }),
+      ).rejects.toThrow(/held elsewhere/);
+      delete overrides.procedures;
+
+      expect(
+        (await d.workspaces.pending.listChangelists(ids(alice))).changelists[0]
+          ?.branchName,
+      ).toBe("main");
+      expect(await claimsOf(alice)).toEqual(before);
+    });
+
+    it("is a no-op for the branch it already targets, and refuses a missing changelist", async () => {
+      const { alice } = scene!;
+      const d = await daemon();
+      const clId = await startOnMain(alice);
+      const before = await claimsOf(alice);
+
+      const same = await d.workspaces.pending.setChangelistBranch({
         ...ids(alice),
         changelistId: clId,
-        branchName: "feature",
-      }),
-    ).rejects.toThrow(/held elsewhere/);
-    delete overrides.procedures;
-
-    expect(
-      (await d.workspaces.pending.listChangelists(ids(alice))).changelists[0]
-        ?.branchName,
-    ).toBe("main");
-    expect(await claimsOf(alice)).toEqual(before);
-  });
-
-  it("is a no-op for the branch it already targets, and refuses a missing changelist", async () => {
-    const { alice } = scene!;
-    const d = await daemon();
-    const clId = await startOnMain(alice);
-    const before = await claimsOf(alice);
-
-    const same = await d.workspaces.pending.setChangelistBranch({
-      ...ids(alice),
-      changelistId: clId,
-      branchName: "main",
-    });
-    expect(same.paths).toEqual([]);
-    expect(await claimsOf(alice)).toEqual(before);
-
-    await expect(
-      d.workspaces.pending.setChangelistBranch({
-        ...ids(alice),
-        changelistId: 999,
         branchName: "main",
-      }),
-    ).rejects.toThrow(/999/);
-  });
-});
+      });
+      expect(same.paths).toEqual([]);
+      expect(await claimsOf(alice)).toEqual(before);
+
+      await expect(
+        d.workspaces.pending.setChangelistBranch({
+          ...ids(alice),
+          changelistId: 999,
+          branchName: "main",
+        }),
+      ).rejects.toThrow(/999/);
+    });
+  },
+);

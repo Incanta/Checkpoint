@@ -46,7 +46,6 @@ const sample: WorkspaceState = {
   files: {
     "Content/a.uasset": { fileId: "a", changelist: 40, md5: "", size: 3 },
   },
-  markedForAdd: [],
   staged: ["Content/a.uasset"],
 };
 
