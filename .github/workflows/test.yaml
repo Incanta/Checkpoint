@@ -57,7 +57,15 @@ jobs:
       - name: Build services
         run: yarn build
 
+      # Each test file gets its own SQLite database and the daemon tests make
+      # workspace directories, all under the temp directory. On Windows that
+      # defaults to the runner's slow C: drive; the work drive's temp
+      # directory is much faster.
       - name: Run fast tests
+        env:
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
+          TMPDIR: ${{ runner.temp }}
         run: yarn test
 
   test:

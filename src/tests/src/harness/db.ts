@@ -127,6 +127,15 @@ export async function createTestDb(): Promise<TestDb> {
     log: ["error"],
   });
 
+  // WAL instead of the default rollback journal. A rollback-journal commit
+  // creates and deletes a -journal file and flushes several times, which on
+  // hosted Windows runners (slow temp disk, antivirus scanning every new file)
+  // cost seconds per test across the reset and fixture writes. WAL appends to
+  // one long-lived file, and lets readers proceed while a writer holds the
+  // lock, so the concurrent-submit tests contend less. The mode is stored in
+  // the file, so it covers every connection in Prisma's pool.
+  await client.$queryRawUnsafe(`PRAGMA journal_mode = WAL`);
+
   return {
     client,
     reset: async () => {
