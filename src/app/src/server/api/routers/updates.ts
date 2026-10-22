@@ -11,6 +11,7 @@ import {
 } from "~/server/updates/check";
 import {
   applyUpdate,
+  checkRollbackMigrations,
   getStageStatus,
   isBundleDeployment,
   isStaged,
@@ -50,7 +51,7 @@ const bundleTarget = z.object({
  * the opposite of the license-manager-only admin surface.
  */
 export const updatesRouter = createTRPCRouter({
-  getStatus: adminProcedure.query(async () => {
+  getStatus: adminProcedure.query(async ({ ctx }) => {
     const bundleDeployment = isBundleDeployment();
 
     const [app, server, desired] = bundleDeployment
@@ -103,6 +104,11 @@ export const updatesRouter = createTRPCRouter({
           : null,
       },
       previousVersion: app?.previous ?? null,
+      // What a rollback would leave behind, so the panel can say whether one
+      // is safe instead of asking the admin to know.
+      rollbackMigrations: app?.previous
+        ? await checkRollbackMigrations(ctx.db)
+        : null,
       desired: desired?.version ?? null,
 
       // What is available.
@@ -181,24 +187,51 @@ export const updatesRouter = createTRPCRouter({
       return { restarting: true, version: input.version };
     }),
 
-  rollback: adminProcedure.mutation(async ({ ctx }) => {
-    if (!isBundleDeployment()) {
-      throw new TRPCError({
-        code: "PRECONDITION_FAILED",
-        message: "This instance does not run from a deployment bundle.",
-      });
-    }
+  rollback: adminProcedure
+    .input(
+      z
+        .object({
+          /**
+           * Set once the admin has seen that the database is ahead of the
+           * previous version (or that this could not be determined).
+           */
+          acknowledgeMigrations: z.boolean().optional(),
+        })
+        .optional(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!isBundleDeployment()) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "This instance does not run from a deployment bundle.",
+        });
+      }
 
-    try {
-      const version = await rollback(
-        ctx.session.user.email ?? ctx.session.user.id,
-      );
-      return { restarting: true, version };
-    } catch (err: unknown) {
-      throw new TRPCError({
-        code: "PRECONDITION_FAILED",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }),
+      // Checked here as well as in the panel, so a stale page cannot roll back
+      // past a migration that was applied after it loaded.
+      const migrations = await checkRollbackMigrations(ctx.db);
+      if (
+        (!migrations.known || migrations.migrations.length > 0) &&
+        !input?.acknowledgeMigrations
+      ) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: migrations.known
+            ? `The database has ${migrations.migrations.length} migration(s) the previous version does not know about. Confirm to roll back anyway.`
+            : "Could not determine whether the database has migrations the previous version does not know about. Confirm to roll back anyway.",
+        });
+      }
+
+      try {
+        const version = await rollback(
+          ctx.session.user.email ?? ctx.session.user.id,
+        );
+        return { restarting: true, version };
+      } catch (err: unknown) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }),
 });

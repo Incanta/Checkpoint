@@ -139,6 +139,93 @@ export async function isStaged(version: string): Promise<boolean> {
   return dirs.every((dir) => existsSync(path.join(dir, "bundle.json")));
 }
 
+// ── Rollback safety ──────────────────────────────────────────────
+
+/**
+ * Migrations the database has applied that the previous version does not know
+ * about.
+ *
+ * Rolling back does not reverse migrations, so this list is exactly what a
+ * rollback would leave the older code running against. It is computed rather
+ * than remembered: the database's own `_prisma_migrations` table is the record
+ * of what ran, and the previous bundle is still extracted on disk (bootstrap
+ * never prunes it), so its migrations folder says what it expects. That stays
+ * right across every path the database could have taken, including a manual
+ * `migrate deploy` or a version installed and rolled back before.
+ *
+ * `known: false` means the answer could not be worked out (the previous bundle
+ * is gone, or the table could not be read) and the caller must not assume the
+ * rollback is safe.
+ */
+export interface RollbackMigrationCheck {
+  known: boolean;
+  /** Migration folder names, oldest first. Empty when `known` is false. */
+  migrations: string[];
+}
+
+async function bundleMigrationNames(
+  version: string,
+  provider: string,
+): Promise<Set<string> | null> {
+  const dir = path.join(
+    getStateDir(),
+    "bundles",
+    "app",
+    `${version}-${provider}`,
+  );
+  const manifest = await readJson<{ exec?: { migrateCwd?: string } }>(
+    path.join(dir, "bundle.json"),
+  );
+  if (!manifest) return null;
+
+  // Prisma resolves migrations next to the schema, which build-bundle.js puts
+  // under the migrate working directory.
+  const migrationsDir = path.join(
+    dir,
+    manifest.exec?.migrateCwd ?? "src/app",
+    "prisma",
+    "migrations",
+  );
+  try {
+    const entries = await fs.readdir(migrationsDir, { withFileTypes: true });
+    return new Set(entries.filter((e) => e.isDirectory()).map((e) => e.name));
+  } catch {
+    return null;
+  }
+}
+
+export async function checkRollbackMigrations(db: {
+  $queryRawUnsafe<T = unknown>(query: string): Promise<T>;
+}): Promise<RollbackMigrationCheck> {
+  const unknown: RollbackMigrationCheck = { known: false, migrations: [] };
+
+  const app = await readComponentState("app");
+  if (!app?.previous || !app.provider) return unknown;
+
+  const expected = await bundleMigrationNames(app.previous, app.provider);
+  if (!expected) return unknown;
+
+  let applied: { migration_name: string }[];
+  try {
+    // Same table and columns on SQLite and PostgreSQL.
+    applied = await db.$queryRawUnsafe<{ migration_name: string }[]>(
+      `SELECT migration_name FROM _prisma_migrations
+       WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL
+       ORDER BY started_at`,
+    );
+  } catch (err: unknown) {
+    Logger.warn(`[Updates] Could not read applied migrations: ${String(err)}`);
+    return unknown;
+  }
+
+  return {
+    known: true,
+    migrations: applied
+      .map((m) => m.migration_name)
+      .filter((name) => !expected.has(name)),
+  };
+}
+
 // ── Staging ──────────────────────────────────────────────────────
 
 function runBootstrapStage(

@@ -50,6 +50,7 @@ export default function AdminUpdatesPage(): React.ReactElement {
     null | "check" | "download" | "install" | "rollback"
   >(null);
   const [error, setError] = useState<string | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
 
   const { data: user, isLoading: userLoading } = api.user.me.useQuery();
 
@@ -108,6 +109,9 @@ export default function AdminUpdatesPage(): React.ReactElement {
   const restarting = install.isSuccess || rollback.isSuccess;
   const staging = data.stage.state === "staging";
   const stageError = data.stage.state === "error" ? data.stage.message : null;
+  const rollbackSafe =
+    !!data.rollbackMigrations?.known &&
+    data.rollbackMigrations.migrations.length === 0;
 
   return (
     <div>
@@ -282,16 +286,64 @@ export default function AdminUpdatesPage(): React.ReactElement {
           </h2>
           <p className="mb-3 text-sm text-[var(--color-text-secondary)]">
             Return to <Mono>{data.previousVersion}</Mono>, which is still on
-            disk. Database migrations are not reversed, so roll back only if the
-            new version has not applied any.
+            disk. Database migrations are not reversed by a rollback.
           </p>
+
+          {rollbackSafe ? (
+            <p className="mb-3 text-sm text-[var(--color-success)]">
+              The database has no migrations that{" "}
+              <Mono>{data.previousVersion}</Mono> does not know about, so it is
+              safe to roll back.
+            </p>
+          ) : (
+            <div className="mb-3 text-sm text-[var(--color-danger)]">
+              {data.rollbackMigrations?.known ? (
+                <>
+                  <p className="mb-2">
+                    The database has applied{" "}
+                    {data.rollbackMigrations.migrations.length === 1
+                      ? "a migration"
+                      : `${data.rollbackMigrations.migrations.length} migrations`}{" "}
+                    that <Mono>{data.previousVersion}</Mono> does not know
+                    about. Rolling back leaves them in place, and the older
+                    version may fail against the changed schema. Restoring a
+                    database backup taken before the update is the safe way
+                    back.
+                  </p>
+                  <ul className="mb-2 list-disc pl-5">
+                    {data.rollbackMigrations.migrations.map((name) => (
+                      <li key={name}>
+                        <Mono>{name}</Mono>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="mb-2">
+                  Could not determine whether this version applied database
+                  migrations. Roll back only if you know it did not.
+                </p>
+              )}
+              <label className="flex items-center gap-2 text-[var(--color-text-primary)]">
+                <input
+                  type="checkbox"
+                  checked={acknowledged}
+                  onChange={(e) => setAcknowledged(e.target.checked)}
+                />
+                I understand, roll back anyway
+              </label>
+            </div>
+          )}
+
           <Button
             variant="danger"
-            disabled={busy !== null || restarting}
+            disabled={
+              busy !== null || restarting || (!rollbackSafe && !acknowledged)
+            }
             onClick={() => {
               setError(null);
               setBusy("rollback");
-              rollback.mutate();
+              rollback.mutate({ acknowledgeMigrations: !rollbackSafe });
             }}
           >
             Roll back and restart
