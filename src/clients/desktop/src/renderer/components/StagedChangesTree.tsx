@@ -3,6 +3,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCheck } from "@fortawesome/free-solid-svg-icons/faCheck";
 import { faPen } from "@fortawesome/free-solid-svg-icons/faPen";
 import { faTrashCan } from "@fortawesome/free-solid-svg-icons/faTrashCan";
+import { faCodeBranch } from "@fortawesome/free-solid-svg-icons/faCodeBranch";
 import { FileIcon } from "./FileIcon";
 import { FileStatus, FileType } from "@checkpointvcs/daemon/types";
 import type { File as PendingFile } from "@checkpointvcs/daemon/types";
@@ -565,6 +566,8 @@ interface StagedChangesTreeProps {
   onMove: (paths: string[], from: Bucket, to: Bucket) => void;
   onSubmit: (bucket: Bucket) => void;
   onEditDescription: (bucket: Bucket) => void;
+  /** Retarget a numbered changelist at another branch. */
+  onChangeBranch: (bucket: Bucket) => void;
   onDelete: (bucket: Bucket) => void;
   disabled: boolean;
 }
@@ -577,6 +580,7 @@ export default function StagedChangesTree({
   onMove,
   onSubmit,
   onEditDescription,
+  onChangeBranch,
   onDelete,
   disabled,
 }: StagedChangesTreeProps) {
@@ -797,6 +801,14 @@ export default function StagedChangesTree({
                   disabled={disabled}
                   onClick={() => onEditDescription(bucket)}
                 />
+                {bucket.kind === "numbered" && (
+                  <HeaderIcon
+                    icon={faCodeBranch}
+                    title={`Change branch (submits to ${bucket.branchName})`}
+                    disabled={disabled}
+                    onClick={() => onChangeBranch(bucket)}
+                  />
+                )}
                 {bucket.kind === "numbered" && (
                   <HeaderIcon
                     icon={faTrashCan}

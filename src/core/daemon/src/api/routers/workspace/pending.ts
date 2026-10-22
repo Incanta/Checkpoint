@@ -47,6 +47,7 @@ import {
   getPendingChangelist,
   getPendingChangelists,
   setDefaultChangelistDescription,
+  setPendingChangelistBranch,
   updatePendingChangelistDescription,
 } from "../../../util/pending-changelists.js";
 
@@ -953,6 +954,7 @@ export const pendingRouter = router({
           workspaceId: workspace.id,
           filePath: relPath,
           branchName: targetBranch,
+          moveExisting: true,
         });
       }
 
@@ -1046,6 +1048,109 @@ export const pendingRouter = router({
         });
       }
       return { success: true };
+    }),
+
+  /**
+   * Retargets a numbered pending changelist at another branch, taking its
+   * files along.
+   *
+   * A file's branch is its claim's, so the files' claims move first, exactly
+   * as staging them there would. Only then does the changelist's record
+   * change: a claim the server refuses to move leaves the changelist (and
+   * every claim already moved) where it was, rather than splitting it across
+   * two branches.
+   */
+  setChangelistBranch: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        changelistId: z.number().int(),
+        branchName: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { manager, workspace } = resolveWorkspace(ctx, input);
+
+      if (
+        input.branchName !== workspace.domainBranchName &&
+        !workspace.activeBranches.includes(input.branchName)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `"${input.branchName}" is not active in this workspace. Activate it before moving a changelist to it.`,
+        });
+      }
+
+      let changelist;
+      try {
+        changelist = await getPendingChangelist(
+          workspace.localPath,
+          input.changelistId,
+        );
+      } catch (err) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      const fromBranch = changelist.branchName;
+      if (fromBranch === input.branchName) {
+        return { success: true, paths: [] as string[] };
+      }
+
+      const pending = await manager.refreshWorkspaceContents(workspace);
+      const staged = manager.getStaged(workspace.id);
+      const state = await getPendingChangelists(workspace.localPath);
+      const members = Object.values(pending.files)
+        .filter(
+          (f) =>
+            staged.has(f.path) &&
+            changelistOf(f, state, workspace.domainBranchName) ===
+              input.changelistId,
+        )
+        .map((f) => f.path);
+
+      const client = await CreateApiClientAuth(input.daemonId);
+      const moved: string[] = [];
+      try {
+        for (const relPath of members) {
+          await client.file.checkout.mutate({
+            repoId: workspace.repoId,
+            workspaceId: workspace.id,
+            filePath: relPath,
+            branchName: input.branchName,
+            moveExisting: true,
+          });
+          moved.push(relPath);
+        }
+      } catch (err) {
+        for (const relPath of moved) {
+          try {
+            await client.file.checkout.mutate({
+              repoId: workspace.repoId,
+              workspaceId: workspace.id,
+              filePath: relPath,
+              branchName: fromBranch,
+              moveExisting: true,
+            });
+          } catch {
+            // Best effort: the error below is the one worth reporting.
+          }
+        }
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Could not move changelist ${input.changelistId} to "${input.branchName}": ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+
+      await setPendingChangelistBranch(
+        workspace.localPath,
+        input.changelistId,
+        input.branchName,
+      );
+
+      return { success: true, paths: members };
     }),
 
   /**
@@ -1235,6 +1340,7 @@ export const pendingRouter = router({
         workspaceId: workspace.id,
         filePath: relPath,
         branchName: input.branchName ?? workspace.domainBranchName,
+        moveExisting: true,
       });
       await manager.stage(workspace, [relPath]);
 
@@ -1318,6 +1424,7 @@ export const pendingRouter = router({
         workspaceId: workspace.id,
         filePath: relPath,
         branchName: input.branchName ?? workspace.domainBranchName,
+        moveExisting: true,
       });
       await manager.stage(workspace, [relPath]);
 
@@ -1390,6 +1497,7 @@ export const pendingRouter = router({
           workspaceId: workspace.id,
           filePath: relPath,
           branchName: input.branchName,
+          moveExisting: true,
         });
       }
 

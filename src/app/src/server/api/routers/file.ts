@@ -28,6 +28,7 @@ import {
 import { buildAddonStorageOptions } from "~/server/storage-options";
 import {
   acquireClaim,
+  moveClaim,
   releaseClaim as releaseClaimRecord,
 } from "~/server/claims/claims";
 import { reconcileClaims } from "~/server/claims/landing";
@@ -242,6 +243,13 @@ export const fileRouter = createTRPCRouter({
          * off it". Any writer may pass it.
          */
         forceExclusive: z.boolean().default(false),
+        /**
+         * Move this workspace's own open claim on the path to `branchName`
+         * (within its domain) instead of adding another. What staging into a
+         * branch means; a plain checkout leaves an existing claim where it
+         * is.
+         */
+        moveExisting: z.boolean().default(false),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -288,19 +296,22 @@ export const fileRouter = createTRPCRouter({
         });
       }
 
-      const { claim } = await acquireClaim(ctx.db, {
-        repoId: input.repoId,
-        fileId: file.id,
-        filePath: normalizedPath,
-        branchName,
-        orgBinaryExtensions: repo.org.binaryExtensions,
-        forceExclusive: input.forceExclusive,
-        actor: {
-          userId: ctx.session.user.id,
-          workspaceId: input.workspaceId,
+      const { claim } = await (input.moveExisting ? moveClaim : acquireClaim)(
+        ctx.db,
+        {
+          repoId: input.repoId,
+          fileId: file.id,
+          filePath: normalizedPath,
+          branchName,
+          orgBinaryExtensions: repo.org.binaryExtensions,
+          forceExclusive: input.forceExclusive,
+          actor: {
+            userId: ctx.session.user.id,
+            workspaceId: input.workspaceId,
+          },
+          syncedChangelistNumber: workspace.syncedChangelistNumber,
         },
-        syncedChangelistNumber: workspace.syncedChangelistNumber,
-      });
+      );
 
       // Record write activity for billing (fire-and-forget)
       void recordActivity(ctx.db, {

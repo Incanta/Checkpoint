@@ -287,6 +287,14 @@ export default class DaemonHandler {
       },
     );
 
+    ipcOn(
+      this.ipcMain,
+      "workspace:pending-cl:set-branch",
+      async (_event, data) => {
+        await this.pendingChangelistSetBranch(data);
+      },
+    );
+
     ipcOn(this.ipcMain, "workspace:pending-cl:delete", async (_event, data) => {
       await this.pendingChangelistCall("delete", (client, ids) =>
         client.workspaces.pending.deleteChangelist.mutate({ ...ids, ...data }),
@@ -1694,6 +1702,87 @@ export default class DaemonHandler {
     }
   }
 
+  /**
+   * Records the branch state a switch or activation left the workspace in.
+   * The daemon decides whether it was a domain switch or an overlay
+   * activation and returns the resulting state either way.
+   */
+  private applyBranchState(result: {
+    domainBranchName: string;
+    activeBranches: string[];
+  }): void {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace) return;
+
+    const updatedWorkspace = {
+      ...currentWorkspace,
+      domainBranchName: result.domainBranchName,
+      activeBranches: result.activeBranches,
+    };
+    store.set(currentWorkspaceAtom, updatedWorkspace);
+
+    // Also update in the workspaces list
+    const workspaces = store.get(workspacesAtom);
+    if (workspaces) {
+      store.set(
+        workspacesAtom,
+        workspaces.map((w) =>
+          w.id === currentWorkspace.id ? updatedWorkspace : w,
+        ),
+      );
+    }
+
+    // Clear stale state for the new branch
+    store.set(workspaceHistoryAtom, null);
+    store.set(workspaceSyncStatusAtom, null);
+    store.set(workspaceSyncPreviewAtom, null);
+  }
+
+  /**
+   * Retargets a numbered changelist at another branch. The branch may be
+   * created (off the domain root, at the changelist this workspace is synced
+   * to) and activated on the way, so "this work needs its own branch" is one
+   * step rather than three.
+   */
+  private async pendingChangelistSetBranch(
+    data: Channels["workspace:pending-cl:set-branch"],
+  ): Promise<void> {
+    await this.pendingChangelistCall("move", async (client, ids) => {
+      const workspace = store.get(currentWorkspaceAtom);
+      if (!workspace) return;
+
+      if (data.createBranch) {
+        // No head given: the daemon starts it at the changelist this
+        // workspace is synced to, so activating it pulls nothing.
+        await client.workspaces.branches.create.mutate({
+          ...ids,
+          name: data.branchName,
+          type: "FEATURE",
+          parentBranchName: workspace.domainBranchName,
+        });
+      }
+
+      if (
+        data.branchName !== workspace.domainBranchName &&
+        !workspace.activeBranches.includes(data.branchName)
+      ) {
+        this.applyBranchState(
+          await client.workspaces.branches.switch.mutate({
+            ...ids,
+            branchName: data.branchName,
+          }),
+        );
+      }
+
+      await client.workspaces.pending.setChangelistBranch.mutate({
+        ...ids,
+        changelistId: data.changelistId,
+        branchName: data.branchName,
+      });
+      await this.workspaceRefresh();
+    });
+  }
+
   private async workspaceSwitchBranch(
     data: Channels["workspace:select-branch"],
   ): Promise<void> {
@@ -1718,31 +1807,7 @@ export default class DaemonHandler {
         workspaceId: currentWorkspace.id,
         branchName: data.name,
       });
-
-      // The daemon decides whether this was a domain switch or an overlay
-      // activation and returns the resulting state either way.
-      const updatedWorkspace = {
-        ...currentWorkspace,
-        domainBranchName: result.domainBranchName,
-        activeBranches: result.activeBranches,
-      };
-      store.set(currentWorkspaceAtom, updatedWorkspace);
-
-      // Also update in the workspaces list
-      const workspaces = store.get(workspacesAtom);
-      if (workspaces) {
-        store.set(
-          workspacesAtom,
-          workspaces.map((w) =>
-            w.id === currentWorkspace.id ? updatedWorkspace : w,
-          ),
-        );
-      }
-
-      // Clear stale state for the new branch
-      store.set(workspaceHistoryAtom, null);
-      store.set(workspaceSyncStatusAtom, null);
-      store.set(workspaceSyncPreviewAtom, null);
+      this.applyBranchState(result);
 
       if (this.webContents) {
         ipcSend(this.webContents, "workspace:select-branch:success", {

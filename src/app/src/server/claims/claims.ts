@@ -260,6 +260,83 @@ export async function acquireClaim(
 }
 
 /**
+ * Points the actor workspace's own open claim on a path at another branch of
+ * the same domain, or takes one as acquireClaim does when it holds none.
+ *
+ * acquireClaim never moves anything: an advisory acquisition adds a second
+ * row beside the first, and an exclusive claim the workspace already holds
+ * comes back unchanged. Staging a file into a branch means "this work goes
+ * there", so the claim itself has to move, or the file keeps naming the old
+ * branch and is submitted there. Extra open rows the workspace piled up on
+ * the path (one per earlier advisory stage) are released, so one claim says
+ * where the work goes.
+ */
+export async function moveClaim(
+  db: Db,
+  params: Parameters<typeof acquireClaim>[1],
+): Promise<AcquireResult> {
+  const { branch, domainBranchName } = await getBranchWithDomain(
+    db,
+    params.repoId,
+    params.branchName,
+  );
+
+  const mine = await db.fileClaim.findMany({
+    where: {
+      repoId: params.repoId,
+      fileId: params.fileId,
+      domainBranchName,
+      workspaceId: params.actor.workspaceId,
+      state: ClaimState.OPEN,
+      releasedAt: null,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (mine.length === 0) {
+    return acquireClaim(db, params);
+  }
+
+  // The exclusive row is the one that excludes others, so it is the one to
+  // keep; otherwise the newest.
+  const keep =
+    mine.find((c) => c.strength === ClaimStrength.EXCLUSIVE) ?? mine[0]!;
+  for (const extra of mine) {
+    if (extra.id !== keep.id) {
+      await releaseClaim(db, extra, params.actor);
+    }
+  }
+
+  if (keep.branchName === params.branchName) {
+    return { claim: keep, reclaimed: false };
+  }
+
+  // Moving an exclusive claim is taking it on the new branch, so the same
+  // gate applies: no starting binary work against a stale base.
+  if (keep.strength === ClaimStrength.EXCLUSIVE) {
+    assertFresh(params, branch.headNumber);
+  }
+
+  const claim = await db.fileClaim.update({
+    where: { id: keep.id },
+    data: {
+      branchName: params.branchName,
+      baseChangelistNumber: branch.headNumber,
+    },
+  });
+
+  await logEvent(
+    db,
+    claim.id,
+    ClaimEventType.CLAIM,
+    params.branchName,
+    params.actor,
+  );
+
+  return { claim, reclaimed: false };
+}
+
+/**
  * The freshness gate.
  *
  * Refusing here costs the user a sync. Refusing at submit instead, which is

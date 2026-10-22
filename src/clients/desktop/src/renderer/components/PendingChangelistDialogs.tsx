@@ -135,6 +135,136 @@ export function ChangelistDescriptionDialog({
   );
 }
 
+const NEW_BRANCH = "__new_branch__";
+
+/**
+ * Retargets a numbered changelist: at a branch already active here, at one
+ * that will be activated first, or at a new branch created off the domain
+ * root.
+ */
+export function ChangelistBranchDialog({
+  bucket,
+  activeBranches,
+  inactiveBranches,
+  onConfirm,
+  onHide,
+}: {
+  /** The changelist to retarget; null hides the dialog. */
+  bucket: Bucket | null;
+  /** The domain root and the active overlays. */
+  activeBranches: string[];
+  /** Feature branches that can be activated in this workspace. */
+  inactiveBranches: string[];
+  onConfirm: (branchName: string, createBranch: boolean) => void;
+  onHide: () => void;
+}) {
+  const [choice, setChoice] = useState("");
+  const [newName, setNewName] = useState("");
+  const bucketId = bucket?.id ?? null;
+
+  useEffect(() => {
+    if (!bucket) return;
+    setChoice(NEW_BRANCH);
+    setNewName("");
+  }, [bucketId]);
+
+  const targets = activeBranches.filter((b) => b !== bucket?.branchName);
+  const creating = choice === NEW_BRANCH;
+  const branchName = creating ? newName.trim() : choice;
+  const taken =
+    creating &&
+    [...activeBranches, ...inactiveBranches].includes(branchName);
+  const canConfirm = branchName !== "" && !taken;
+  const confirm = () => {
+    if (canConfirm) onConfirm(branchName, creating);
+  };
+
+  return (
+    <Dialog
+      header={bucket ? `Change branch of ${bucket.label}` : "Change branch"}
+      visible={bucket !== null}
+      style={{ width: "30rem" }}
+      onHide={onHide}
+      pt={dialogPt}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onHide}>
+            Cancel
+          </Button>
+          <Button onClick={confirm} disabled={!canConfirm}>
+            {creating ? "Create and move" : "Move"}
+          </Button>
+        </div>
+      }
+    >
+      {bucket && (
+        <div className="flex flex-col gap-3 text-[0.85em]">
+          <div>
+            Submits to{" "}
+            <span className="font-medium text-[var(--color-text-primary)]">
+              {bucket.branchName}
+            </span>{" "}
+            now. Its files' claims move with it.
+          </div>
+          <label className="flex flex-col gap-1.5">
+            <span>New branch</span>
+            <select
+              value={choice}
+              onChange={(e) => setChoice(e.target.value)}
+              className="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
+            >
+              <option value={NEW_BRANCH}>New branch...</option>
+              {targets.length > 0 && (
+                <optgroup label="Active in this workspace">
+                  {targets.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {inactiveBranches.length > 0 && (
+                <optgroup label="Activate and move">
+                  {inactiveBranches.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </label>
+          {creating && (
+            <label className="flex flex-col gap-1.5">
+              <span>
+                Name{" "}
+                <span className="text-[var(--color-text-muted)]">
+                  (a feature branch off {activeBranches[0]} at the changelist
+                  you are synced to, activated here)
+                </span>
+              </span>
+              <input
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") confirm();
+                }}
+                className="box-border w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+              />
+              {taken && (
+                <span className="text-[var(--color-danger)]">
+                  A branch with that name already exists.
+                </span>
+              )}
+            </label>
+          )}
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
 /**
  * Confirms a submit: the description to submit with, and the files that go.
  * Folders list their contents only when expanded, as on the page itself.

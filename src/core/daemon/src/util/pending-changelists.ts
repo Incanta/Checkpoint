@@ -145,6 +145,21 @@ export async function updatePendingChangelistDescription(
   });
 }
 
+/**
+ * Points a numbered changelist at another branch. Only the record: moving its
+ * files' claims to match is the caller's job (see pending.setChangelistBranch),
+ * and until that happens they fall back to their old branch's default.
+ */
+export async function setPendingChangelistBranch(
+  workspaceLocalPath: string,
+  id: number,
+  branchName: string,
+): Promise<void> {
+  await mutate(workspaceLocalPath, (state) => {
+    find(state, id).branchName = branchName;
+  });
+}
+
 /** Deletes a numbered changelist; its files return to the branch default. */
 export async function deletePendingChangelist(
   workspaceLocalPath: string,

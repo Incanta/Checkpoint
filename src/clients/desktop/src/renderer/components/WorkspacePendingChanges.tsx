@@ -15,6 +15,7 @@ import {
   workspaceDiffAtom,
   workspacePendingChangelistsAtom,
   workspacePendingChangesAtom,
+  workspaceBranchesAtom,
 } from "../../common/state/workspace";
 import { ipc } from "../pages/ipc";
 import DropdownButton from "./DropdownButton";
@@ -35,6 +36,7 @@ import StagedChangesTree, {
   type PendingTreeNode,
 } from "./StagedChangesTree";
 import {
+  ChangelistBranchDialog,
   ChangelistDescriptionDialog,
   SubmitChangelistDialog,
 } from "./PendingChangelistDialogs";
@@ -187,6 +189,26 @@ export default function WorkspacePendingChanges() {
   const [submitBucketId, setSubmitBucketId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [editBucket, setEditBucket] = useState<Bucket | null>(null);
+  const [branchBucketId, setBranchBucketId] = useState<string | null>(null);
+  const branchBucket = buckets.find((b) => b.id === branchBucketId) ?? null;
+
+  // Feature branches a changelist can move to by activating them here: not
+  // archived, not already active, and stacked on something that is.
+  const workspaceBranches = useAtomValue(workspaceBranchesAtom);
+  const inactiveBranches = useMemo(
+    () =>
+      (workspaceBranches?.branches ?? [])
+        .filter(
+          (b) =>
+            b.type === "FEATURE" &&
+            !b.archivedAt &&
+            !branches.includes(b.name) &&
+            b.parentBranchName !== null &&
+            branches.includes(b.parentBranchName),
+        )
+        .map((b) => b.name),
+    [workspaceBranches, branches],
+  );
   const [createFor, setCreateFor] = useState<{ paths: string[] } | null>(
     null,
   );
@@ -432,6 +454,11 @@ export default function WorkspacePendingChanges() {
             setSubmitBucketId(bucket.id);
           }}
           onEditDescription={setEditBucket}
+          onChangeBranch={(bucket) => {
+            // The branch list is only loaded by the Branches page otherwise.
+            ipc.sendMessage("workspace:branches", null);
+            setBranchBucketId(bucket.id);
+          }}
           onDelete={(bucket) => {
             if (
               window.confirm(
@@ -562,6 +589,23 @@ export default function WorkspacePendingChanges() {
             });
           }
           setEditBucket(null);
+        }}
+      />
+
+      <ChangelistBranchDialog
+        bucket={branchBucket}
+        activeBranches={branches}
+        inactiveBranches={inactiveBranches}
+        onHide={() => setBranchBucketId(null)}
+        onConfirm={(branchName, createBranch) => {
+          if (branchBucket?.changelistId != null) {
+            ipc.sendMessage("workspace:pending-cl:set-branch", {
+              changelistId: branchBucket.changelistId,
+              branchName,
+              createBranch,
+            });
+          }
+          setBranchBucketId(null);
         }}
       />
 

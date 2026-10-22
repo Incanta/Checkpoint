@@ -57,7 +57,13 @@ export const branchesRouter = router({
         daemonId: z.string(),
         workspaceId: z.string(),
         name: z.string().min(1),
-        headNumber: z.number(),
+        /**
+         * The changelist the branch starts at. Defaults to the one this
+         * workspace is synced to, not the parent's head: being behind head is
+         * normal on a busy team, and a branch cut where the workspace already
+         * is activates without pulling anything.
+         */
+        headNumber: z.number().optional(),
         type: z.enum(["MAINLINE", "RELEASE", "FEATURE"]).default("FEATURE"),
         parentBranchName: z.string().nullable().default(null),
       }),
@@ -80,11 +86,22 @@ export const branchesRouter = router({
         });
       }
 
+      const headNumber =
+        input.headNumber ??
+        manager.getWorkspaceState(workspace.id)?.changelistNumber;
+      if (headNumber === undefined) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "This workspace has not synced a changelist yet, so there is nothing to start the branch from. Pull first.",
+        });
+      }
+
       const client = await CreateApiClientAuth(input.daemonId);
       const branch = await client.branch.createBranch.mutate({
         repoId: workspace.repoId,
         name: input.name,
-        headNumber: input.headNumber,
+        headNumber,
         type: input.type,
         parentBranchName: input.parentBranchName,
       });
@@ -158,25 +175,29 @@ export const branchesRouter = router({
           .map(([path]) => path);
 
         if (locallyModifiedPaths.length > 0) {
-          // Get all files changed between the current and target branch heads
+          // The switch pulls from what this workspace has to the target's
+          // head, so that range is what can overwrite local work. Not the
+          // current branch's head: a workspace behind it (normal on a busy
+          // team) would be refused over changes it is not about to receive,
+          // including when the target was cut right where it is synced.
           const currentBranch = await client.branch.getBranch.query({
             repoId: workspace.repoId,
             name: workspace.domainBranchName,
           });
+          const fromNumber =
+            manager.getWorkspaceState(workspace.id)?.changelistNumber ??
+            currentBranch?.headNumber;
 
-          if (currentBranch) {
+          if (
+            fromNumber !== undefined &&
+            fromNumber !== targetBranch.headNumber
+          ) {
             // Check for binary file conflicts
             const { paths: remoteChangedPaths } =
               (await client.changelist.getFilePathsChangedBetween.query({
                 repoId: workspace.repoId,
-                fromNumber: Math.min(
-                  currentBranch.headNumber,
-                  targetBranch.headNumber,
-                ),
-                toNumber: Math.max(
-                  currentBranch.headNumber,
-                  targetBranch.headNumber,
-                ),
+                fromNumber: Math.min(fromNumber, targetBranch.headNumber),
+                toNumber: Math.max(fromNumber, targetBranch.headNumber),
               })) as { paths: string[] };
 
             const conflictingPaths = locallyModifiedPaths.filter((p) =>

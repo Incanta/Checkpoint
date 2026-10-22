@@ -133,6 +133,15 @@ export type Channels = {
     branchName?: string;
   };
   "workspace:pending-cl:delete": { changelistId: number };
+  /**
+   * Retarget a numbered changelist. The branch is activated first if it is
+   * not, and with createBranch it is created off the domain root's head.
+   */
+  "workspace:pending-cl:set-branch": {
+    changelistId: number;
+    branchName: string;
+    createBranch?: boolean;
+  };
   "workspace:submit:success": null;
   "workspace:submit:error": { message: string };
   "workspace:diff:file": { path: string };

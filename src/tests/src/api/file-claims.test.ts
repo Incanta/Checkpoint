@@ -23,6 +23,7 @@ import { makeAppCaller } from "../harness/caller";
 import {
   acquireClaim,
   findActiveExclusiveClaim,
+  moveClaim,
   releaseClaimsForBranch,
   settleClaimAfterLanding,
 } from "~/server/claims/claims";
@@ -311,6 +312,203 @@ describe("file claims", () => {
       });
 
       expect(claim.strength).toBe("ADVISORY");
+    });
+  });
+
+  // moveClaim is what staging a file into a branch does: the work goes there,
+  // so the workspace's own claim must say so. acquireClaim cannot do it (an
+  // advisory claim gains a second row, an exclusive one comes back as is),
+  // and a file left with its old claim is submitted to its old branch.
+  describe("moving a claim", () => {
+    async function withFeature() {
+      const s = await scaffold();
+      await makeBranch(testDb.client, s.repo.id, s.owner.id, {
+        name: "feature/a",
+        type: "FEATURE",
+        parentName: "main",
+      });
+      const ws = await makeWorkspace(
+        testDb.client,
+        s.repo.id,
+        s.org.id,
+        s.owner.id,
+      );
+      return { ...s, ws };
+    }
+
+    const params = (
+      s: Awaited<ReturnType<typeof withFeature>>,
+      file: { id: string },
+      filePath: string,
+      branchName: string,
+      workspaceId = s.ws.id,
+      extra: { syncedChangelistNumber?: number } = {},
+    ) => ({
+      repoId: s.repo.id,
+      fileId: file.id,
+      filePath,
+      branchName,
+      orgBinaryExtensions: NO_OVERRIDES,
+      actor: { userId: s.owner.id, workspaceId },
+      ...extra,
+    });
+
+    const openClaims = (fileId: string) =>
+      testDb.client.fileClaim.findMany({
+        where: { fileId, releasedAt: null },
+      });
+
+    it("moves an advisory claim instead of adding a second one", async () => {
+      const s = await withFeature();
+      const file = await makeFile(testDb.client, s.repo.id, SOURCE);
+      const first = await acquireClaim(
+        testDb.client,
+        params(s, file, SOURCE, "main"),
+      );
+
+      const { claim } = await moveClaim(
+        testDb.client,
+        params(s, file, SOURCE, "feature/a"),
+      );
+
+      expect(claim.id).toBe(first.claim.id);
+      const open = await openClaims(file.id);
+      expect(open.map((c) => c.branchName)).toEqual(["feature/a"]);
+    });
+
+    it("moves an exclusive claim the workspace holds", async () => {
+      const s = await withFeature();
+      const file = await makeFile(testDb.client, s.repo.id, UASSET);
+      await acquireClaim(testDb.client, params(s, file, UASSET, "main"));
+
+      const { claim } = await moveClaim(
+        testDb.client,
+        params(s, file, UASSET, "feature/a"),
+      );
+
+      expect(claim.strength).toBe("EXCLUSIVE");
+      expect(claim.branchName).toBe("feature/a");
+      // Still the domain's one exclusion, now naming the feature branch.
+      expect(
+        (
+          await findActiveExclusiveClaim(
+            testDb.client,
+            s.repo.id,
+            file.id,
+            "main",
+          )
+        )?.branchName,
+      ).toBe("feature/a");
+    });
+
+    it("releases the extra rows earlier advisory stages piled up", async () => {
+      const s = await withFeature();
+      const file = await makeFile(testDb.client, s.repo.id, SOURCE);
+      for (let i = 0; i < 3; i++) {
+        await acquireClaim(testDb.client, params(s, file, SOURCE, "main"));
+      }
+
+      await moveClaim(testDb.client, params(s, file, SOURCE, "feature/a"));
+
+      expect((await openClaims(file.id)).map((c) => c.branchName)).toEqual([
+        "feature/a",
+      ]);
+    });
+
+    it("takes a claim when the workspace holds none", async () => {
+      const s = await withFeature();
+      const file = await makeFile(testDb.client, s.repo.id, SOURCE);
+
+      const { claim } = await moveClaim(
+        testDb.client,
+        params(s, file, SOURCE, "feature/a"),
+      );
+
+      expect(claim.branchName).toBe("feature/a");
+      expect(await openClaims(file.id)).toHaveLength(1);
+    });
+
+    it("leaves another workspace's claim alone", async () => {
+      const s = await withFeature();
+      const other = await makeWorkspace(
+        testDb.client,
+        s.repo.id,
+        s.org.id,
+        s.owner.id,
+      );
+      const file = await makeFile(testDb.client, s.repo.id, SOURCE);
+      const theirs = await acquireClaim(
+        testDb.client,
+        params(s, file, SOURCE, "main", other.id),
+      );
+
+      await moveClaim(testDb.client, params(s, file, SOURCE, "feature/a"));
+
+      const open = await openClaims(file.id);
+      expect(open.find((c) => c.id === theirs.claim.id)?.branchName).toBe(
+        "main",
+      );
+      expect(
+        open.find((c) => c.workspaceId === s.ws.id)?.branchName,
+      ).toBe("feature/a");
+    });
+
+    it("still refuses an exclusive move when another workspace holds it", async () => {
+      const s = await withFeature();
+      const other = await makeWorkspace(
+        testDb.client,
+        s.repo.id,
+        s.org.id,
+        s.owner.id,
+      );
+      const file = await makeFile(testDb.client, s.repo.id, UASSET);
+      await acquireClaim(
+        testDb.client,
+        params(s, file, UASSET, "main", other.id),
+      );
+
+      await expect(
+        moveClaim(testDb.client, params(s, file, UASSET, "feature/a")),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+    });
+
+    it("applies the freshness gate to an exclusive move onto a newer branch", async () => {
+      const s = await withFeature();
+      const file = await makeFile(testDb.client, s.repo.id, UASSET);
+      await acquireClaim(testDb.client, params(s, file, UASSET, "main"));
+      await testDb.client.branch.updateMany({
+        where: { repoId: s.repo.id, name: "feature/a" },
+        data: { headNumber: 12 },
+      });
+
+      await expect(
+        moveClaim(
+          testDb.client,
+          params(s, file, UASSET, "feature/a", s.ws.id, {
+            syncedChangelistNumber: 7,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+      expect((await openClaims(file.id)).map((c) => c.branchName)).toEqual([
+        "main",
+      ]);
+    });
+
+    it("is a no-op on the branch it already names", async () => {
+      const s = await withFeature();
+      const file = await makeFile(testDb.client, s.repo.id, SOURCE);
+      const first = await acquireClaim(
+        testDb.client,
+        params(s, file, SOURCE, "main"),
+      );
+
+      const { claim } = await moveClaim(
+        testDb.client,
+        params(s, file, SOURCE, "main"),
+      );
+
+      expect(claim.id).toBe(first.claim.id);
+      expect(await openClaims(file.id)).toHaveLength(1);
     });
   });
 
