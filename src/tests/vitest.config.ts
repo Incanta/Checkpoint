@@ -24,6 +24,8 @@ export default defineConfig({
     // design until they are fixed; it runs on its own (vitest.data-loss.config.ts).
     exclude: ["src/integration/**", "src/data-loss/**", "**/node_modules/**"],
     setupFiles: ["./src/harness/vitest-setup.ts"],
+    // Builds the template database every file's createTestDb() copies.
+    globalSetup: ["./src/harness/global-setup.ts"],
     testTimeout: 30_000,
     hookTimeout: 120_000,
     environment: "node",

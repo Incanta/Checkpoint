@@ -11,6 +11,55 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ==================================================================
+  # Fast in-process router/unit tests (no services running). See
+  # src/tests/src/api/* and src/tests/src/harness/.
+  #
+  # Their own job rather than a step in the integration jobs: they do not
+  # depend on the storage mode, so running them in each leg of `test` only
+  # repeated them, and here they run alongside the addon build and the
+  # integration suites instead of in front of them. Windows runs them too,
+  # since many of the daemon tests probe the filesystem they run on.
+  # ==================================================================
+  fast-tests:
+    name: fast tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: |
+          # See the note on the same step in the `test` job.
+          yarn_path=$(command -v yarn || true)
+          if [ -n "$yarn_path" ]; then
+            corepack enable --install-directory "$(dirname "$yarn_path")"
+          else
+            corepack enable
+          fi
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Build services
+        run: yarn build
+
+      - name: Run fast tests
+        run: yarn test
+
   test:
     name: test (${{ matrix.storage }} storage)
     runs-on: ubuntu-latest
@@ -75,20 +124,35 @@ jobs:
       - name: Build services
         run: yarn build
 
-      # ----------------------------------------------------------------
-      # Fast in-process router/unit tests (no services running).
-      # See src/tests/src/api/* and src/tests/src/harness/.
-      # ----------------------------------------------------------------
-      - name: Run fast tests
-        run: yarn test
+      # (The fast in-process tests run in the `fast-tests` job.)
 
       # ----------------------------------------------------------------
       # Install C++ build dependencies
+      #
+      # Only what the runner image lacks. It already ships cmake (a newer one,
+      # in /usr/local/bin, ahead of apt's /usr/bin on PATH) and g++, and
+      # reinstalling them through apt only downloaded ~13 MB nobody used: on
+      # a slow mirror day that alone held this step for over eight minutes.
+      # Retries cover a mirror that drops the connection.
       # ----------------------------------------------------------------
       - name: Install C++ dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake g++ libcurl4-openssl-dev nlohmann-json3-dev libssl-dev
+          missing=()
+          command -v cmake > /dev/null || missing+=(cmake)
+          command -v g++ > /dev/null || missing+=(g++)
+          for pkg in libcurl4-openssl-dev nlohmann-json3-dev libssl-dev; do
+            dpkg-query -W -f='${Status}' "$pkg" 2> /dev/null | grep -q "install ok installed" || missing+=("$pkg")
+          done
+
+          if [ ${#missing[@]} -eq 0 ]; then
+            echo "All C++ dependencies are already installed"
+            exit 0
+          fi
+
+          echo "Installing: ${missing[*]}"
+          apt_opts=(-o Acquire::Retries=5 -o Acquire::http::Timeout=30)
+          sudo apt-get "${apt_opts[@]}" update
+          sudo apt-get "${apt_opts[@]}" install -y --no-install-recommends "${missing[@]}"
 
       # ----------------------------------------------------------------
       # Longtail addon: test the C++ in this commit, not the last npm publish.
@@ -645,9 +709,9 @@ jobs:
   # one another, backslashes and drive letters in keys, hard links, file times.
   # The Linux job proves none of that.
   #
-  # This runs the fast suite, then builds the addon with MSVC and runs the
-  # integration suite against real services. It skips the CLI round trip, which
-  # the Linux job covers and which adds a second native build.
+  # This builds the addon with MSVC and runs the integration suite against real
+  # services (the fast suite runs on Windows in `fast-tests`). It skips the CLI
+  # round trip, which the Linux job covers and which adds a second native build.
   # ==================================================================
   test-windows:
     name: test (windows)
@@ -679,9 +743,6 @@ jobs:
 
       - name: Build services
         run: yarn build
-
-      - name: Run fast tests
-        run: yarn test
 
       - name: Fingerprint the addon sources
         id: addon-fp
@@ -753,8 +814,8 @@ jobs:
   # means something once the tests are green: "the addon sources in this commit
   # are good AND nobody outside this repo has them yet" is the state that kept
   # the submit sizing fix (708b223) away from users for two weeks while CI was
-  # passing the whole time. `needs: test` gives that gating for free, since a
-  # job with `needs` is skipped when its dependency fails.
+  # passing the whole time. `needs` gives that gating for free, since a job
+  # with `needs` is skipped when a dependency fails.
   #
   # Never fails the build. On a branch, "not published yet" is simply true and
   # there is nothing wrong with it. The release stream is where it becomes an
@@ -766,7 +827,7 @@ jobs:
   # per merge, addressed to whoever just merged, is the actionable version.
   # ==================================================================
   addon-publish-status:
-    needs: test
+    needs: [test, fast-tests]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -5,7 +5,11 @@
 // `os.tmpdir()/checkpoint-tests/` and is wiped on teardown.
 //
 // The Prisma schema is applied with `prisma db push` (no migrations, no
-// history) against a fresh file, which is fast enough for unit tests.
+// history) once per run, into a template file that global-setup.ts creates;
+// each file then copies the template. Spawning `yarn prisma` costs a few
+// seconds, which across ~90 files added minutes to a run (more on Windows,
+// where starting processes is slow). Without a template (a config that does
+// not load the global setup) each file pushes the schema itself.
 //
 // We deliberately do NOT import `db` from `~/server/db` here, as that
 // instantiates a singleton against the dev DATABASE_URL. The harness's
@@ -14,9 +18,10 @@
 
 import { PrismaClient } from "@prisma/client";
 import { execSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { inject } from "vitest";
 
 const repoRoot = path.resolve(__dirname, "../../../..");
 const appDir = path.resolve(repoRoot, "src/app");
@@ -79,13 +84,10 @@ const tableOrder = [
   "User",
 ];
 
-export async function createTestDb(): Promise<TestDb> {
-  const baseDir = path.join(os.tmpdir(), "checkpoint-tests");
-  mkdirSync(baseDir, { recursive: true });
-  const dir = mkdtempSync(path.join(baseDir, "db-"));
-  const dbFile = path.join(dir, "test.db");
-  const url = `file:${dbFile.replace(/\\/g, "/")}`;
+const sqliteUrl = (file: string) => `file:${file.replace(/\\/g, "/")}`;
 
+/** Applies the app's Prisma schema to a fresh SQLite file. */
+export function pushSchema(dbFile: string): void {
   // Use `execSync` (string form) instead of `execFileSync` + `shell: true`:
   // the latter is DEP0190'd because args get concatenated into the shell
   // command unescaped. The string form picks the shell up correctly on
@@ -96,10 +98,29 @@ export async function createTestDb(): Promise<TestDb> {
     `yarn prisma db push --schema "${schemaDir}" --skip-generate --accept-data-loss`,
     {
       cwd: appDir,
-      env: { ...process.env, DATABASE_URL: url, DB_PROVIDER: "sqlite" },
+      env: {
+        ...process.env,
+        DATABASE_URL: sqliteUrl(dbFile),
+        DB_PROVIDER: "sqlite",
+      },
       stdio: "pipe",
     },
   );
+}
+
+export async function createTestDb(): Promise<TestDb> {
+  const baseDir = path.join(os.tmpdir(), "checkpoint-tests");
+  mkdirSync(baseDir, { recursive: true });
+  const dir = mkdtempSync(path.join(baseDir, "db-"));
+  const dbFile = path.join(dir, "test.db");
+  const url = sqliteUrl(dbFile);
+
+  const template = inject("testDbTemplate");
+  if (template) {
+    copyFileSync(template, dbFile);
+  } else {
+    pushSchema(dbFile);
+  }
 
   const client = new PrismaClient({
     datasources: { db: { url } },
