@@ -567,12 +567,12 @@
         {
           "command": "checkpoint.undoCheckout",
           "group": "1_modification@2",
-          "when": "scmProvider == checkpoint && scmResourceGroup == changes && scmResourceState =~ /checkedout/"
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(unstaged$|branch:|changelist:)/ && scmResourceState =~ /checkedout/"
         },
         {
           "command": "checkpoint.unmarkForAdd",
           "group": "1_modification@3",
-          "when": "scmProvider == checkpoint && scmResourceGroup == changes && scmResourceState == added"
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(unstaged$|branch:|changelist:)/ && scmResourceState == added"
         },
         {
           "command": "checkpoint.markForAdd",
