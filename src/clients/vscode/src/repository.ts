@@ -235,22 +235,16 @@ interface SyncStatusSummary {
 export class CheckpointRepository implements vscode.Disposable {
   public readonly sourceControl: vscode.SourceControl;
   private readonly conflictsGroup: vscode.SourceControlResourceGroup;
-  private readonly unstagedGroup: vscode.SourceControlResourceGroup;
-  private readonly localGroup: vscode.SourceControlResourceGroup;
   /**
-   * One group per branch bucket, created on demand as branches are overlaid
-   * and disposed when they go away. Keyed by GroupId, not branch name.
+   * Every group below Conflicts, in the order VS Code shows them, which is
+   * the order they were created in (the API has no other way to order
+   * groups). syncGroups keeps it in the desktop app's order: for each
+   * branch, its default changelist (a branch bucket, `branch:<name>`, shown
+   * only while it holds files) followed by its numbered changelists (shown
+   * even when empty, so a new one can be moved into), then Unstaged Changes
+   * and Local Files.
    */
-  private branchGroups = new Map<GroupId, vscode.SourceControlResourceGroup>();
-  /**
-   * One group per numbered pending changelist. Unlike branch groups these
-   * live as long as the changelist does, empty or not, so a freshly created
-   * changelist is visible and can be moved into.
-   */
-  private changelistGroups = new Map<
-    GroupId,
-    vscode.SourceControlResourceGroup
-  >();
+  private orderedGroups = new Map<GroupId, vscode.SourceControlResourceGroup>();
   /** The daemon's pending changelists as of the last refresh. */
   private changelistState: PendingChangelistState = NO_CHANGELISTS;
 
@@ -329,22 +323,9 @@ export class CheckpointRepository implements vscode.Disposable {
       "Conflicts",
     );
     this.conflictsGroup.hideWhenEmpty = true;
-    this.unstagedGroup = this.sourceControl.createResourceGroup(
-      GROUP_UNSTAGED,
-      "Unstaged Changes",
-    );
-    this.localGroup = this.sourceControl.createResourceGroup(
-      "local",
-      "Local Files",
-    );
-    this.localGroup.hideWhenEmpty = true;
+    this.syncGroups(new Set());
 
-    this.disposables.push(
-      this.sourceControl,
-      this.conflictsGroup,
-      this.unstagedGroup,
-      this.localGroup,
-    );
+    this.disposables.push(this.sourceControl, this.conflictsGroup);
 
     this.debouncedRefresh = this.createDebouncedRefresh();
 
@@ -434,10 +415,7 @@ export class CheckpointRepository implements vscode.Disposable {
   public ownsGroup(group: vscode.SourceControlResourceGroup): boolean {
     return (
       group === this.conflictsGroup ||
-      group === this.unstagedGroup ||
-      group === this.localGroup ||
-      [...this.branchGroups.values()].includes(group) ||
-      [...this.changelistGroups.values()].includes(group)
+      [...this.orderedGroups.values()].includes(group)
     );
   }
 
@@ -817,8 +795,12 @@ export class CheckpointRepository implements vscode.Disposable {
     this.resources = resources;
     this.changelistState = nextChangelists;
     // Done even when no row moved: creating, renaming, or deleting an empty
-    // changelist changes the view without touching any file.
-    this.syncChangelistGroups();
+    // changelist changes the view without touching any file. A recreated
+    // group starts out empty, so it must be refilled like a dirty one.
+    const occupied = new Set([...resources.values()].map((r) => r.groupId));
+    for (const groupId of this.syncGroups(occupied)) {
+      dirtyGroups.add(groupId);
+    }
 
     const baselineChanged = this.baselineMoved;
     this.baselineMoved = false;
@@ -836,23 +818,14 @@ export class CheckpointRepository implements vscode.Disposable {
 
     // Every group that currently exists must be considered, so a bucket that
     // has just emptied gets cleared rather than keeping stale rows.
+    // syncGroups made a group for every occupied bucket, so each resource
+    // has somewhere to go.
     const groups = new Map<GroupId, CheckpointResource[]>();
-    for (const groupId of [
-      GROUP_CONFLICTS,
-      GROUP_UNSTAGED,
-      GROUP_LOCAL,
-      ...this.branchGroups.keys(),
-      ...this.changelistGroups.keys(),
-    ]) {
+    for (const groupId of [GROUP_CONFLICTS, ...this.orderedGroups.keys()]) {
       groups.set(groupId, []);
     }
     for (const resource of resources.values()) {
-      const bucket = groups.get(resource.groupId);
-      if (bucket) {
-        bucket.push(resource);
-      } else {
-        groups.set(resource.groupId, [resource]);
-      }
+      groups.get(resource.groupId)?.push(resource);
     }
 
     for (const [groupId, entries] of groups) {
@@ -861,15 +834,6 @@ export class CheckpointRepository implements vscode.Disposable {
       }
       entries.sort((a, b) => a.relPath.localeCompare(b.relPath));
       this.groupFor(groupId).resourceStates = entries;
-    }
-
-    // Drop branch groups that no longer hold anything, so the view does not
-    // keep an empty section for a branch that was deactivated.
-    for (const [groupId, group] of this.branchGroups) {
-      if ((groups.get(groupId)?.length ?? 0) === 0) {
-        group.dispose();
-        this.branchGroups.delete(groupId);
-      }
     }
 
     const count =
@@ -894,75 +858,127 @@ export class CheckpointRepository implements vscode.Disposable {
 
   private groupFor(groupId: GroupId): vscode.SourceControlResourceGroup {
     if (groupId === GROUP_CONFLICTS) return this.conflictsGroup;
-    if (groupId === GROUP_UNSTAGED) return this.unstagedGroup;
-    if (groupId === GROUP_LOCAL) return this.localGroup;
-
-    // Numbered changelists get their group from syncChangelistGroups, which
-    // runs before any rows are assigned, so it already exists here.
-    const changelistGroup = this.changelistGroups.get(groupId);
-    if (changelistGroup) return changelistGroup;
-
-    // Branch buckets are created the first time a file is staged into them
-    // and disposed in applyPendingFiles when they empty out, so the SCM view
-    // never shows a bucket for a branch that is no longer overlaid.
-    let group = this.branchGroups.get(groupId);
+    const group = this.orderedGroups.get(groupId);
     if (!group) {
-      const branchName = branchFromGroupId(groupId) ?? groupId;
-      group = this.sourceControl.createResourceGroup(
-        groupId,
-        this.branchGroupLabel(branchName),
-      );
-      group.hideWhenEmpty = true;
-      this.branchGroups.set(groupId, group);
-      this.disposables.push(group);
+      throw new Error(`No resource group ${groupId}`);
     }
     return group;
   }
 
+  private get unstagedGroup(): vscode.SourceControlResourceGroup {
+    return this.groupFor(GROUP_UNSTAGED);
+  }
+
+  /** The branch bucket groups that exist, by branch name. */
+  private get branchGroupIds(): GroupId[] {
+    return [...this.orderedGroups.keys()].filter(
+      (id) => branchFromGroupId(id) !== undefined,
+    );
+  }
+
   /**
-   * Gives every numbered changelist a group, drops the groups of ones that
-   * are gone, and keeps labels in step with descriptions.
+   * Brings the groups below Conflicts in line with the desktop app's order
+   * (see orderedGroups), creating, removing, and relabelling as needed.
+   * `occupied` names the groups that hold rows: a branch that is not active
+   * gets a bucket only while something is staged to it, so the view never
+   * keeps a section for a branch that was deactivated.
    *
-   * A numbered changelist's group shows even when empty, so one just created
-   * is there to move files into, as in Perforce. VS Code orders groups by
-   * creation, which puts changelists in the order they were made.
+   * VS Code places a group by when it was created, so when the order has to
+   * change (a changelist is created, a branch gains its first staged file),
+   * every group from the first out-of-place one down is disposed and created
+   * again. Returns the ids of the groups created, which start out empty and
+   * must be refilled.
    */
-  private syncChangelistGroups(): void {
-    const live = new Set<GroupId>();
-    for (const changelist of [...this.changelistState.changelists].sort(
-      (a, b) => a.id - b.id,
-    )) {
-      const groupId = changelistGroupId(changelist.id);
-      live.add(groupId);
-      const label = this.labelFor({
-        branchName: changelist.branchName,
-        changelistId: changelist.id,
-      });
-      const group = this.changelistGroups.get(groupId);
-      if (!group) {
-        const created = this.sourceControl.createResourceGroup(groupId, label);
-        created.hideWhenEmpty = false;
-        this.changelistGroups.set(groupId, created);
-      } else if (group.label !== label) {
-        group.label = label;
-      }
+  private syncGroups(occupied: Set<GroupId>): Set<GroupId> {
+    const wanted = this.wantedGroupOrder(occupied);
+
+    const current = [...this.orderedGroups.keys()];
+    let keep = 0;
+    while (
+      keep < current.length &&
+      keep < wanted.length &&
+      current[keep] === wanted[keep]
+    ) {
+      keep++;
     }
 
-    for (const [groupId, group] of this.changelistGroups) {
-      if (!live.has(groupId)) {
-        group.dispose();
-        this.changelistGroups.delete(groupId);
-      }
+    for (const groupId of current.slice(keep)) {
+      this.orderedGroups.get(groupId)!.dispose();
+      this.orderedGroups.delete(groupId);
     }
 
-    for (const [groupId, group] of this.branchGroups) {
-      const label = this.branchGroupLabel(
-        branchFromGroupId(groupId) ?? groupId,
+    const created = new Set<GroupId>();
+    for (const groupId of wanted.slice(keep)) {
+      const group = this.sourceControl.createResourceGroup(
+        groupId,
+        this.groupLabel(groupId),
       );
+      // Numbered changelists show even when empty; Unstaged Changes always
+      // shows, as in git's Changes group.
+      group.hideWhenEmpty =
+        groupId !== GROUP_UNSTAGED &&
+        changelistFromGroupId(groupId) === undefined;
+      this.orderedGroups.set(groupId, group);
+      created.add(groupId);
+    }
+
+    for (const [groupId, group] of this.orderedGroups) {
+      const label = this.groupLabel(groupId);
       if (group.label !== label) {
         group.label = label;
       }
     }
+
+    return created;
+  }
+
+  /** The ids of the groups below Conflicts, top to bottom. */
+  private wantedGroupOrder(occupied: Set<GroupId>): GroupId[] {
+    const changelists = [...this.changelistState.changelists].sort(
+      (a, b) => a.id - b.id,
+    );
+
+    // The domain root, then each overlay, then any other branch something
+    // is staged to (a claim on a branch no longer overlaid), so those files
+    // stay visible rather than silently dropped.
+    const branches = [...this.stageableBranches];
+    for (const groupId of occupied) {
+      const branch = branchFromGroupId(groupId);
+      if (branch !== undefined && !branches.includes(branch)) {
+        branches.push(branch);
+      }
+    }
+
+    // An active branch keeps its bucket even when empty (it hides itself
+    // then), so staging a branch's first file, or submitting its last, does
+    // not shift every group below it.
+    const order: GroupId[] = [];
+    for (const branch of branches) {
+      order.push(branchGroupId(branch));
+      for (const changelist of changelists) {
+        if (changelist.branchName === branch) {
+          order.push(changelistGroupId(changelist.id));
+        }
+      }
+    }
+    // Changelists on a branch that is not overlaid any more.
+    for (const changelist of changelists) {
+      if (!branches.includes(changelist.branchName)) {
+        order.push(changelistGroupId(changelist.id));
+      }
+    }
+
+    order.push(GROUP_UNSTAGED, GROUP_LOCAL);
+    return order;
+  }
+
+  private groupLabel(groupId: GroupId): string {
+    if (groupId === GROUP_UNSTAGED) return "Unstaged Changes";
+    if (groupId === GROUP_LOCAL) return "Local Files";
+    const branchName = branchFromGroupId(groupId);
+    if (branchName !== undefined) return this.branchGroupLabel(branchName);
+    const target = this.targetForGroup(groupId);
+    return target ? this.labelFor(target) : groupId;
   }
 
   /** A default changelist's group label: its branch, then any draft. */
@@ -1233,9 +1249,9 @@ export class CheckpointRepository implements vscode.Disposable {
       toStage = resources.filter((r) => !r.file.staged).map((r) => r.relPath);
     } else {
       const candidates: ChangelistTarget[] = [
-        ...[...this.branchGroups.entries()]
-          .filter(([, g]) => g.resourceStates.length > 0)
-          .map(([id]) => ({
+        ...this.branchGroupIds
+          .filter((id) => this.groupFor(id).resourceStates.length > 0)
+          .map((id) => ({
             branchName: branchFromGroupId(id)!,
             changelistId: null,
           }))
@@ -1243,8 +1259,8 @@ export class CheckpointRepository implements vscode.Disposable {
         ...this.changelistState.changelists
           .filter(
             (c) =>
-              (this.changelistGroups.get(changelistGroupId(c.id))
-                ?.resourceStates.length ?? 0) > 0,
+              (this.orderedGroups.get(changelistGroupId(c.id))?.resourceStates
+                .length ?? 0) > 0,
           )
           .sort((a, b) => a.id - b.id)
           .map((c) => ({ branchName: c.branchName, changelistId: c.id })),
@@ -2207,10 +2223,10 @@ export class CheckpointRepository implements vscode.Disposable {
     for (const d of this.disposables) {
       d.dispose();
     }
-    for (const group of this.changelistGroups.values()) {
+    for (const group of this.orderedGroups.values()) {
       group.dispose();
     }
-    this.changelistGroups.clear();
+    this.orderedGroups.clear();
   }
 }
 
