@@ -51,6 +51,15 @@ export class CheckpointModel implements vscode.Disposable {
   public readonly onDidChangeRepositoryStatus =
     this._onDidChangeRepositoryStatus.event;
 
+  /**
+   * A repository's .chkignore rules changed, or (with `undefined`) every
+   * repository's may have, e.g. after reconnecting to the daemon.
+   */
+  private readonly _onDidChangeIgnoreRules = new vscode.EventEmitter<
+    CheckpointRepository | undefined
+  >();
+  public readonly onDidChangeIgnoreRules = this._onDidChangeIgnoreRules.event;
+
   private readonly disposables: vscode.Disposable[] = [];
 
   public constructor(private readonly outputChannel: vscode.OutputChannel) {
@@ -118,6 +127,8 @@ export class CheckpointModel implements vscode.Disposable {
           "checkpoint.connected",
           true,
         );
+        // Ignore lookups made while offline resolved to "not ignored".
+        this._onDidChangeIgnoreRules.fire(undefined);
         for (const repo of this.repositories.values()) {
           void repo.refresh();
           void repo.updateSyncStatus(false);
@@ -187,6 +198,10 @@ export class CheckpointModel implements vscode.Disposable {
       uris,
       baselineChanged,
     });
+  }
+
+  public notifyIgnoreRulesChanged(repository: CheckpointRepository): void {
+    this._onDidChangeIgnoreRules.fire(repository);
   }
 
   // ─── Workspace discovery ───────────────────────────────────────────
@@ -300,6 +315,7 @@ export class CheckpointModel implements vscode.Disposable {
     }
     this._onDidChangeRepositories.dispose();
     this._onDidChangeRepositoryStatus.dispose();
+    this._onDidChangeIgnoreRules.dispose();
   }
 }
 

@@ -53,6 +53,7 @@ import {
   buildIgnoreCacheFromPatterns,
   getFileStatuses as computeFileStatuses,
   isIgnoredOrHidden,
+  matchesPattern,
   normalizeRelativePath,
   IGNORE_FILE,
   HIDDEN_FILE,
@@ -550,6 +551,44 @@ export class DaemonManager {
       ignoreCache,
       pendingChanges,
     );
+  }
+
+  /**
+   * Returns the subset of `relativePaths` that `.chkignore` (or the built-in
+   * patterns) excludes, echoed back exactly as given. This is the Checkpoint
+   * equivalent of `git check-ignore`, used by clients to grey out ignored
+   * files and folders.
+   *
+   * Only `.chkignore` counts: `.chkhidden` files are still tracked, so they
+   * are not reported. A path below an ignored directory is reported too.
+   */
+  public async checkIgnored(
+    workspace: Workspace,
+    relativePaths: string[],
+  ): Promise<string[]> {
+    const matcher = this.getIgnoreCache(workspace.id).ignore;
+
+    const results = await Promise.all(
+      relativePaths.map(async (relativePath) => {
+        try {
+          if (matchesPattern(matcher, relativePath)) return true;
+          // Directory-only rules (`Saved/`) need to know the path is a
+          // directory. Only stat when the directory form would match, so
+          // the common unignored case costs no filesystem access.
+          if (!matchesPattern(matcher, `${relativePath}/`)) return false;
+          const stats = await fs.stat(
+            path.join(workspace.localPath, relativePath),
+          );
+          return stats.isDirectory();
+        } catch {
+          // `ignore` throws on paths outside the workspace (`../x`), and the
+          // stat fails for paths that no longer exist: neither is ignored.
+          return false;
+        }
+      }),
+    );
+
+    return relativePaths.filter((_, i) => results[i]);
   }
 
   // ─── Directory Pending Helpers ─────────────────────────────────────

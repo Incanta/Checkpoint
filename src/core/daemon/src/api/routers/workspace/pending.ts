@@ -162,6 +162,24 @@ export const pendingRouter = router({
       }
     }),
 
+  /**
+   * Which of the given workspace-relative paths `.chkignore` excludes. A
+   * mutation rather than a query so a large batch (an expanded folder in an
+   * editor's file tree) travels in the request body, not the URL.
+   */
+  checkIgnore: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        paths: z.array(z.string()),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { manager, workspace } = resolveWorkspace(ctx, input);
+      return await manager.checkIgnored(workspace, input.paths);
+    }),
+
   diffFile: publicProcedure
     .input(
       z.object({

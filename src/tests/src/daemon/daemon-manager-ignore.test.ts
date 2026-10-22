@@ -219,6 +219,111 @@ describe("getDirectoryPending", () => {
   });
 });
 
+describe("checkIgnored", () => {
+  it("returns exactly the ignored paths, echoed as given", async () => {
+    await write(".chkignore", `Binaries${NL}*.log${NL}`);
+    await write("Binaries/Game.dll");
+    await write("Saved/run.log");
+    await write("Source/Game.cpp");
+
+    await manager.registerWorkspace(workspace, { watch: false });
+
+    const ignored = await manager.checkIgnored(workspace, [
+      "Binaries",
+      "Binaries/Game.dll",
+      "Saved",
+      "Saved/run.log",
+      "Source",
+      "Source/Game.cpp",
+      ".chkignore",
+    ]);
+
+    expect(ignored).toEqual(["Binaries", "Binaries/Game.dll", "Saved/run.log"]);
+  });
+
+  it("applies directory-only rules to directories but not same-named files", async () => {
+    await write(".chkignore", `Saved/${NL}`);
+    await write("Saved/Config/Editor.ini");
+    await write("Other/Saved");
+
+    await manager.registerWorkspace(workspace, { watch: false });
+
+    expect(
+      await manager.checkIgnored(workspace, [
+        "Saved",
+        "Saved/Config",
+        "Saved/Config/Editor.ini",
+        "Other/Saved",
+      ]),
+    ).toEqual(["Saved", "Saved/Config", "Saved/Config/Editor.ini"]);
+  });
+
+  it("does not report a directory-only rule for a path missing on disk", async () => {
+    // Without a stat there is no telling it was a directory, so the safe
+    // answer is "not ignored" rather than a guess.
+    await write(".chkignore", `Saved/${NL}`);
+
+    await manager.registerWorkspace(workspace, { watch: false });
+
+    expect(await manager.checkIgnored(workspace, ["Saved"])).toEqual([]);
+  });
+
+  it("reports the built-in patterns and the .checkpoint directory", async () => {
+    await write(".checkpoint/workspace.json", "{}");
+    await write("Content/.DS_Store");
+
+    await manager.registerWorkspace(workspace, { watch: false });
+
+    expect(
+      await manager.checkIgnored(workspace, [
+        ".checkpoint",
+        ".checkpoint/workspace.json",
+        "Content/.DS_Store",
+        "Content",
+      ]),
+    ).toEqual([
+      ".checkpoint",
+      ".checkpoint/workspace.json",
+      "Content/.DS_Store",
+    ]);
+  });
+
+  it("honours negations in nested .chkignore files", async () => {
+    await write(".chkignore", `*.log${NL}`);
+    await write("Logs/.chkignore", `!keep.log${NL}`);
+    await write("Logs/keep.log");
+    await write("Logs/drop.log");
+
+    await manager.registerWorkspace(workspace, { watch: false });
+
+    expect(
+      await manager.checkIgnored(workspace, ["Logs/keep.log", "Logs/drop.log"]),
+    ).toEqual(["Logs/drop.log"]);
+  });
+
+  it("accepts backslash paths and treats unmatchable input as not ignored", async () => {
+    const B = String.fromCharCode(92);
+    await write(".chkignore", `Binaries${NL}`);
+    await write("Binaries/Game.dll");
+
+    await manager.registerWorkspace(workspace, { watch: false });
+
+    expect(
+      await manager.checkIgnored(workspace, [
+        `Binaries${B}Game.dll`,
+        "../outside/Binaries",
+        "",
+        ".",
+      ]),
+    ).toEqual([`Binaries${B}Game.dll`]);
+  });
+
+  it("returns an empty list for an empty request", async () => {
+    await manager.registerWorkspace(workspace, { watch: false });
+    expect(await manager.checkIgnored(workspace, [])).toEqual([]);
+  });
+});
+
 describe("watchWorkspace", () => {
   it("rebuilds the ignore cache when .chkignore is created on disk", async () => {
     await write("Saved/a.ini");

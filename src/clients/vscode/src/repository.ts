@@ -270,6 +270,13 @@ export class CheckpointRepository implements vscode.Disposable {
   /** Signature of the last status bar render, to avoid redundant writes. */
   private lastStatusBar = "";
 
+  /**
+   * A .chkignore changed since the last refresh. The daemon rescans its
+   * ignore rules at the start of the next refresh, so ignore decorations are
+   * only invalidated once that refresh has returned.
+   */
+  private ignoreRulesChanged = false;
+
   private refreshing = false;
   private refreshQueued = false;
   private debouncedRefresh: (() => void) & { dispose: () => void };
@@ -331,6 +338,9 @@ export class CheckpointRepository implements vscode.Disposable {
     const onFsEvent = (uri: vscode.Uri): void => {
       if (this.isRefreshExcluded(uri)) {
         return;
+      }
+      if (path.basename(uri.fsPath) === ".chkignore") {
+        this.ignoreRulesChanged = true;
       }
       const autoRefresh = vscode.workspace
         .getConfiguration("checkpoint")
@@ -499,6 +509,8 @@ export class CheckpointRepository implements vscode.Disposable {
       return;
     }
     this.refreshing = true;
+    const ignoreRulesChanged = this.ignoreRulesChanged;
+    this.ignoreRulesChanged = false;
     try {
       await this.reloadWorkspaceConfig();
 
@@ -522,7 +534,13 @@ export class CheckpointRepository implements vscode.Disposable {
         new Map(Object.entries(pending?.files ?? {})),
         changelists,
       );
+
+      if (ignoreRulesChanged) {
+        this.model.notifyIgnoreRulesChanged(this);
+      }
     } catch (error) {
+      // Retry the invalidation with the next refresh.
+      this.ignoreRulesChanged ||= ignoreRulesChanged;
       this.model.handleDaemonError("refreshing pending changes", error);
     } finally {
       this.refreshing = false;

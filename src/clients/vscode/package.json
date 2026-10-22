@@ -695,6 +695,16 @@
           "highContrast": "#75BEFF",
           "highContrastLight": "#007acc"
         }
+      },
+      {
+        "id": "checkpointDecoration.ignoredResourceForeground",
+        "description": "Color for files and folders excluded by .chkignore.",
+        "defaults": {
+          "light": "#8E8E90",
+          "dark": "#8C8C8C",
+          "highContrast": "#A7A8A9",
+          "highContrastLight": "#8e8e90"
+        }
       }
     ]
   }

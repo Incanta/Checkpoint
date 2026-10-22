@@ -1,7 +1,10 @@
 import * as vscode from "vscode";
 import { registerCommands } from "./commands";
 import { CheckpointContentProvider } from "./contentProvider";
-import { CheckpointDecorationProvider } from "./decorationProvider";
+import {
+  CheckpointDecorationProvider,
+  CheckpointIgnoreDecorationProvider,
+} from "./decorationProvider";
 import { CheckpointModel } from "./model";
 
 export async function activate(
@@ -16,6 +19,7 @@ export async function activate(
     registerCommands(model),
     new CheckpointContentProvider(model),
     new CheckpointDecorationProvider(model),
+    new CheckpointIgnoreDecorationProvider(model),
   );
 
   await model.start();
