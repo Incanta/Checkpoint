@@ -156,7 +156,11 @@ export function useFileContextMenu() {
     contextMenuRef.current?.show(event);
   };
 
-  const buildMenuItems = (): MenuItem[] => {
+  /**
+   * The menu for the file in `currentFileRef`. `leadingItems` are actions the
+   * caller owns (the Pending page's stage/unstage), placed above Open.
+   */
+  const buildMenuItems = (leadingItems: MenuItem[] = []): MenuItem[] => {
     const file = currentFileRef.current;
     if (!file || !currentWorkspace) return [];
 
@@ -164,7 +168,8 @@ export function useFileContextMenu() {
     const fileBasename = getBasename(file.relativePath);
     const fileExtname = getExtname(file.relativePath);
 
-    const items: MenuItem[] = [];
+    const items: MenuItem[] =
+      leadingItems.length > 0 ? [...leadingItems, { separator: true }] : [];
 
     // Open submenu
     items.push({
@@ -631,7 +636,6 @@ export default function FileContextMenu({
         pt={{
           root: {
             style: {
-              marginTop: "2rem",
               backgroundColor: "var(--color-bg-overlay)",
               border: "1px solid var(--color-border-default)",
               borderRadius: "0.5rem",

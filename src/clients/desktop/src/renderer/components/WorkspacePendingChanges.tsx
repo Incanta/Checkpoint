@@ -5,141 +5,325 @@ import React, {
   useRef,
   useState,
 } from "react";
-import {
-  TreeTable,
-  TreeTableExpandedKeysType,
-  TreeTableSelectionKeysType,
-} from "primereact/treetable";
-import { Column, ColumnPassThroughOptions } from "primereact/column";
-import { TreeNode } from "primereact/treenode";
+import { flushSync } from "react-dom";
 import { Dialog } from "primereact/dialog";
+import type { MenuItem } from "primereact/menuitem";
+import { Splitter, SplitterPanel } from "primereact/splitter";
 import { useAtomValue } from "jotai";
 import {
   currentWorkspaceAtom,
   workspaceDiffAtom,
+  workspacePendingChangelistsAtom,
   workspacePendingChangesAtom,
 } from "../../common/state/workspace";
 import { ipc } from "../pages/ipc";
-import { Splitter, SplitterPanel } from "primereact/splitter";
-import Button from "./Button";
 import DropdownButton from "./DropdownButton";
 import styles from "./Editor.module.css";
 // @ts-ignore
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
-import { FileStatus, FileType } from "@checkpointvcs/daemon/types";
-import FileContextMenu, {
-  useFileContextMenu,
-  FileContextInfo,
-} from "./FileContextMenu";
-import prettyBytes from "pretty-bytes";
-import { FileIcon } from "./FileIcon";
-import { EmptyState } from "./ui";
+import { FileStatus } from "@checkpointvcs/daemon/types";
+import type {
+  File as PendingFile,
+  PendingChangelistState,
+} from "@checkpointvcs/daemon/types";
+import FileContextMenu, { useFileContextMenu } from "./FileContextMenu";
+import { Button, EmptyState } from "./ui";
 import StagedChangesTree, {
   UNSTAGED,
   type Bucket,
   type PendingSelection,
+  type PendingTreeNode,
 } from "./StagedChangesTree";
-import type { File as PendingFile } from "@checkpointvcs/daemon/types";
+import {
+  ChangelistDescriptionDialog,
+  SubmitChangelistDialog,
+} from "./PendingChangelistDialogs";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCircleCheck } from "@fortawesome/free-solid-svg-icons/faCircleCheck";
+import { faPlus } from "@fortawesome/free-solid-svg-icons/faPlus";
+import { faTableColumns } from "@fortawesome/free-solid-svg-icons/faTableColumns";
 
-// ─── Hoisted constants (never recreated) ────────────────────────────
-const itemBodyStyle: React.CSSProperties = {
-  display: "inline",
-  verticalAlign: "middle",
+type DiffLayout = "horizontal" | "vertical";
+
+const LAYOUT_STORAGE_KEY = "checkpoint.pending.diffLayout";
+
+function readLayout(): DiffLayout {
+  try {
+    return localStorage.getItem(LAYOUT_STORAGE_KEY) === "vertical"
+      ? "vertical"
+      : "horizontal";
+  } catch {
+    /* localStorage unavailable */
+    return "horizontal";
+  }
+}
+
+const NO_CHANGELISTS: PendingChangelistState = {
+  changelists: [],
+  assignments: {},
+  defaultDescriptions: {},
 };
 
-const itemBodyNameStyle: React.CSSProperties = {
-  marginLeft: ".5em",
-};
+// Mirrors destinedBranch/changelistOf in the daemon's pending-changelists
+// util, which decide what a submit sends: the renderer cannot import the
+// daemon's runtime code, and the page must group files the way submit will.
+function destinedBranch(file: PendingFile, domain: string): string {
+  const claim = file.claims.find((c) => c.state === "OPEN") ?? file.claims[0];
+  return claim?.branchName ?? domain;
+}
 
-// ─── Memoized TreeTable wrapper ─────────────────────────────────────
+function changelistOf(
+  file: PendingFile,
+  state: PendingChangelistState,
+  domain: string,
+): number | null {
+  const id = state.assignments[file.path];
+  if (id === undefined) return null;
+  const changelist = state.changelists.find((c) => c.id === id);
+  if (!changelist) return null;
+  return changelist.branchName === destinedBranch(file, domain) ? id : null;
+}
 
-// ─── Main component ─────────────────────────────────────────────────
+function firstLine(text: string): string {
+  return text.split("\n")[0] ?? "";
+}
+
 export default function WorkspacePendingChanges() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const workspacePendingChanges = useAtomValue(workspacePendingChangesAtom);
+  const pendingChangelists =
+    useAtomValue(workspacePendingChangelistsAtom) ?? NO_CHANGELISTS;
   const workspaceDiff = useAtomValue(workspaceDiffAtom);
 
-  // A selection is one row: a file, or a directory standing in for every
-  // pending change beneath it. Stage/unstage act on `selection.paths`.
-  const [selection, setSelection] = useState<PendingSelection | null>(null);
-  const selectedPath = selection?.path ?? null;
-  const selectedPaths = selection?.paths ?? [];
+  const domain = currentWorkspace?.domainBranchName ?? "main";
+  const branches = useMemo(
+    () => [domain, ...(currentWorkspace?.activeBranches ?? [])],
+    [domain, currentWorkspace],
+  );
 
-  // Sections: UNSTAGED first, then the domain root, then each overlaid
-  // feature branch. A file's bucket is its claim's branch; a staged file with
-  // no claim belongs to the domain root by default.
+  // Sections, top to bottom: each branch's default changelist followed by
+  // its numbered ones (the domain root first, then each overlay), and
+  // UNSTAGED last. A staged file's section is its numbered changelist when
+  // it has one on the branch its claim names, else that branch's default.
   const buckets = useMemo<Bucket[]>(() => {
     const files = Object.values(workspacePendingChanges?.files ?? {});
-    const domain = currentWorkspace?.domainBranchName ?? "main";
-    const overlays = currentWorkspace?.activeBranches ?? [];
+    const sections: Bucket[] = [];
+    const byId = new Map<string, Bucket>();
+    const add = (bucket: Bucket) => {
+      sections.push(bucket);
+      byId.set(bucket.id, bucket);
+    };
+    const addDefault = (branch: string) =>
+      add({
+        id: `default:${branch}`,
+        kind: "default",
+        label: branch,
+        branchName: branch,
+        changelistId: null,
+        description: pendingChangelists.defaultDescriptions[branch] ?? "",
+        files: [],
+      });
 
-    const unstaged = files.filter((f) => !f.staged);
-    const bucketFor = (branch: string) =>
-      files.filter(
-        (f) =>
-          f.staged &&
-          // The open claim is where the file is being worked on now; a
-          // submitted one is where earlier work went (a parent in a stack).
-          ((f.claims.find((c) => c.state === "OPEN") ?? f.claims[0])
-            ?.branchName ?? domain) === branch,
-      );
+    for (const branch of branches) {
+      addDefault(branch);
+      for (const cl of pendingChangelists.changelists
+        .filter((c) => c.branchName === branch)
+        .sort((a, b) => a.id - b.id)) {
+        add({
+          id: `cl:${cl.id}`,
+          kind: "numbered",
+          label: branch === domain ? `#${cl.id}` : `#${cl.id} (${branch})`,
+          branchName: branch,
+          changelistId: cl.id,
+          description: cl.description,
+          files: [],
+        });
+      }
+    }
 
-    return [
-      { id: UNSTAGED, label: "Unstaged", files: unstaged },
-      { id: domain, label: domain, files: bucketFor(domain) },
-      ...overlays.map((b) => ({ id: b, label: b, files: bucketFor(b) })),
-    ];
-  }, [workspacePendingChanges, currentWorkspace]);
+    const unstaged: Bucket = {
+      id: UNSTAGED,
+      kind: "unstaged",
+      label: "Unstaged",
+      branchName: null,
+      changelistId: null,
+      description: "",
+      files: [],
+    };
 
-  const handleSelect = useCallback((next: PendingSelection) => {
-    setSelection(next);
-    // Directories have nothing to diff; they only stand in for their files.
-    if (!next.isDirectory) {
-      ipc.sendMessage("workspace:diff:file", { path: next.path });
+    for (const file of files) {
+      if (!file.staged) {
+        unstaged.files.push(file);
+        continue;
+      }
+      const changelist = changelistOf(file, pendingChangelists, domain);
+      const branch = destinedBranch(file, domain);
+      // A claim on a branch this workspace does not have active still gets
+      // a section, so the file is visible rather than silently dropped.
+      if (changelist === null && !byId.has(`default:${branch}`)) {
+        addDefault(branch);
+      }
+      byId
+        .get(changelist !== null ? `cl:${changelist}` : `default:${branch}`)!
+        .files.push(file);
+    }
+
+    sections.push(unstaged);
+    return sections;
+  }, [workspacePendingChanges, pendingChangelists, branches, domain]);
+
+  const ownRows = useMemo(
+    () => new Set(Object.keys(workspacePendingChanges?.files ?? {})),
+    [workspacePendingChanges],
+  );
+
+  const [selection, setSelection] = useState<PendingSelection | null>(null);
+  const [layout, setLayout] = useState<DiffLayout>(readLayout);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Dialogs. The submit dialog follows its section by id, so it shows the
+  // section's current files after a refresh.
+  const [submitBucketId, setSubmitBucketId] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [editBucket, setEditBucket] = useState<Bucket | null>(null);
+  const [createFor, setCreateFor] = useState<{ paths: string[] } | null>(
+    null,
+  );
+  const submitBucket = buckets.find((b) => b.id === submitBucketId) ?? null;
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAYOUT_STORAGE_KEY, layout);
+    } catch {
+      /* localStorage unavailable */
+    }
+  }, [layout]);
+
+  // ─── Diff editor ──────────────────────────────────────────────────
+  // The host element changes when the layout flips (the splitter remounts),
+  // so the editor follows the element rather than being created once.
+  const [monacoHost, setMonacoHost] = useState<HTMLDivElement | null>(null);
+  const [editor, setEditor] =
+    useState<monaco.editor.IStandaloneDiffEditor | null>(null);
+
+  useEffect(() => {
+    if (!monacoHost) return;
+    const created = monaco.editor.createDiffEditor(monacoHost, {
+      theme: "vs-dark",
+      automaticLayout: true,
+      readOnly: true,
+      originalEditable: false,
+    });
+    setEditor(created);
+    return () => {
+      const model = created.getModel();
+      created.dispose();
+      model?.original.dispose();
+      model?.modified.dispose();
+      setEditor(null);
+    };
+  }, [monacoHost]);
+
+  useEffect(() => {
+    if (!editor || !workspaceDiff) return;
+    const previous = editor.getModel();
+    editor.setModel({
+      original: monaco.editor.createModel(workspaceDiff.left, "text/plain"),
+      modified: monaco.editor.createModel(workspaceDiff.right, "text/plain"),
+    });
+    previous?.original.dispose();
+    previous?.modified.dispose();
+  }, [editor, workspaceDiff]);
+
+  // ─── Submit ───────────────────────────────────────────────────────
+  /** The submit awaiting its result: what it was, and with which text. */
+  const submitInFlight = useRef<{
+    description: string;
+    target: { changelistId: number } | { branchName: string };
+  } | null>(null);
+
+  useEffect(() => {
+    const unsubscribeSuccess = ipc.on("workspace:submit:success", () => {
+      submitInFlight.current = null;
+      setIsSubmitting(false);
+      setSubmitBucketId(null);
+      setSelection(null);
+      ipc.sendMessage("workspace:refresh", null);
+    });
+
+    // Failures of stage, unstage, and changelist edits arrive here too; only
+    // a failed submit belongs in the submit dialog.
+    const unsubscribeError = ipc.on("workspace:submit:error", (data) => {
+      setIsSubmitting(false);
+      const failed = submitInFlight.current;
+      submitInFlight.current = null;
+      if (!failed) {
+        setErrorMessage(data.message);
+        return;
+      }
+      setSubmitError(data.message);
+      // Keep the text typed in the dialog, so trying again (or coming back
+      // to it later) does not mean retyping it. Saved only on failure: after
+      // a success the changelist and its description are gone.
+      ipc.sendMessage("workspace:pending-cl:set-description", {
+        description: failed.description,
+        ...failed.target,
+      });
+    });
+
+    return () => {
+      unsubscribeSuccess();
+      unsubscribeError();
+    };
+  }, []);
+
+  const targetOf = (
+    bucket: Bucket,
+  ): { changelistId: number } | { branchName: string } =>
+    bucket.changelistId !== null
+      ? { changelistId: bucket.changelistId }
+      : { branchName: bucket.branchName! };
+
+  const handleSubmit = (description: string) => {
+    if (!submitBucket) return;
+    const target = targetOf(submitBucket);
+    submitInFlight.current = { description, target };
+    setSubmitError(null);
+    setIsSubmitting(true);
+    ipc.sendMessage("workspace:submit", { message: description, ...target });
+  };
+
+  // ─── Staging ──────────────────────────────────────────────────────
+  const moveTo = useCallback((paths: string[], to: Bucket) => {
+    if (paths.length === 0) return;
+    if (to.kind === "unstaged") {
+      ipc.sendMessage("workspace:unstage", { paths });
+    } else if (to.changelistId !== null) {
+      ipc.sendMessage("workspace:stage", {
+        paths,
+        changelistId: to.changelistId,
+      });
+    } else {
+      ipc.sendMessage("workspace:stage", {
+        paths,
+        branchName: to.branchName!,
+      });
     }
   }, []);
 
-  const handleMoveBetweenBuckets = useCallback(
-    (paths: string[], _from: string, to: string) => {
-      if (to === UNSTAGED) {
-        ipc.sendMessage("workspace:unstage", { paths });
-      } else {
-        ipc.sendMessage("workspace:stage", { paths, branchName: to });
+  const handleSelectionChange = useCallback(
+    (next: PendingSelection | null, clicked: PendingTreeNode | null) => {
+      setSelection(next);
+      // Directories have nothing to diff; they only stand in for their files.
+      if (clicked && !clicked.isDirectory) {
+        ipc.sendMessage("workspace:diff:file", { path: clicked.path });
       }
     },
     [],
   );
 
-  const treeTableRef = useRef<TreeTable>(null);
-  const [nodes, setNodes] = useState<TreeNode[]>([]);
-  const [selectedNodeKeys, setSelectedNodeKeys] =
-    useState<TreeTableSelectionKeysType | null>(null);
-  const selectedNodeKeysRef = useRef(selectedNodeKeys);
-  selectedNodeKeysRef.current = selectedNodeKeys;
-  const [expandedKeys, setExpandedKeys] = useState<TreeTableExpandedKeysType>(
-    {},
-  );
-
-  const [commitMessage, setCommitMessage] = useState<string>("");
-  const [highlightedRowKey, setHighlightedRowKey] = useState<string | null>(
-    null,
-  );
-
-  const [editor, setEditor] =
-    useState<monaco.editor.IStandaloneDiffEditor | null>(null);
-  const monacoEl = useRef<HTMLDivElement | null>(null);
-
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [errorModalVisible, setErrorModalVisible] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string>("");
-
-  /** Tracks which directory node keys have been checked by the user so
-   * that lazily-loaded children can be auto-checked. */
-  const checkedDirsRef = useRef<Set<string>>(new Set());
-
-  // Context menu hook
+  // ─── Context menu ─────────────────────────────────────────────────
   const {
     contextMenuRef,
     showContextMenu,
@@ -159,474 +343,126 @@ export default function WorkspacePendingChanges() {
     setResolveDontAskDuration,
     confirmResolve,
   } = useFileContextMenu();
-  const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
 
-  // Handler for right-click on rows
-  const handleSubmitBucket = useCallback(
-    (bucketId: string) => {
-      setIsSubmitting(true);
-      ipc.sendMessage("workspace:submit", {
-        message: commitMessage,
-        branchName: bucketId,
-      });
-    },
-    [commitMessage],
-  );
+  /** Stage/unstage/move for the selection, above the per-file actions. */
+  const stagingItems = (sel: PendingSelection): MenuItem[] => {
+    const from = buckets.find((b) => b.id === sel.bucketId);
+    if (!from) return [];
+    const disabled = !sel.actionable || isSubmitting;
+    const count = sel.paths.length > 1 ? ` ${sel.paths.length} items` : "";
 
-  /** Context menu for a row in the bucket tree. */
-  const handleFileContextMenu = useCallback(
-    (event: React.MouseEvent, file: PendingFile, isDirectory: boolean) => {
-      if (!currentWorkspace) return;
-
-      const workspaceLocalPath = currentWorkspace.localPath
-        .split(/[/\\]/)
-        .join("/");
-
-      showContextMenu(event, {
-        absolutePath: workspaceLocalPath + "/" + file.path,
-        relativePath: file.path,
-        isDirectory,
-        status: FileStatus[file.status] ?? "",
-        hasChangelist: file.changelist != null,
-        changelistId: file.changelist,
-      });
-      setTimeout(() => {
-        setMenuItems(buildMenuItems());
-      }, 0);
-    },
-    [currentWorkspace, showContextMenu, buildMenuItems],
-  );
-
-  const handleRowContextMenu = useCallback(
-    (event: React.MouseEvent, node: TreeNode) => {
-      if (!currentWorkspace) return;
-
-      const key = node.key as string;
-      const relativePath = key.replace(/^\//, "");
-
-      const workspaceLocalPath = currentWorkspace.localPath
-        .split(/[/\\]/)
-        .join("/");
-      const absolutePath = workspaceLocalPath + "/" + relativePath;
-
-      const fileInfo: FileContextInfo = {
-        absolutePath,
-        relativePath,
-        isDirectory: node.data?.type === "Directory",
-        status: node.data?.status || "",
-        hasChangelist: !!node.data?.changelist,
-        changelistId: node.data?.changelist
-          ? parseInt(node.data.changelist, 10)
-          : null,
-      };
-
-      showContextMenu(event, fileInfo);
-      setTimeout(() => {
-        setMenuItems(buildMenuItems());
-      }, 0);
-    },
-    [currentWorkspace, showContextMenu, buildMenuItems],
-  );
-
-  // Check if any files/directories are selected
-  const hasSelectedFiles = useMemo(
-    () =>
-      selectedNodeKeys &&
-      Object.entries(selectedNodeKeys).some(([, value]) => {
-        const selection = value as {
-          checked?: boolean;
-          partialChecked?: boolean;
-        };
-        return selection.checked && !selection.partialChecked;
-      }),
-    [selectedNodeKeys],
-  );
-
-  // Listen for submit success/error responses
-  useEffect(() => {
-    const unsubscribeSuccess = ipc.on("workspace:submit:success", () => {
-      setIsSubmitting(false);
-      setCommitMessage("");
-      setSelectedNodeKeys(null);
-      // Clear the diff editor
-      if (editor) {
-        editor.setModel({
-          original: monaco.editor.createModel("", "text/plain"),
-          modified: monaco.editor.createModel("", "text/plain"),
-        });
-      }
-      setHighlightedRowKey(null);
-      // Refresh the pending changes from scratch
-      ipc.sendMessage("workspace:refresh", null);
-    });
-
-    const unsubscribeError = ipc.on("workspace:submit:error", (data) => {
-      setIsSubmitting(false);
-      setErrorMessage(data.message);
-      setErrorModalVisible(true);
-    });
-
-    return () => {
-      unsubscribeSuccess();
-      unsubscribeError();
-    };
-  }, [editor]);
-
-  useEffect(() => {
-    if (monacoEl?.current && workspaceDiff) {
-      setEditor((editor: any) => {
-        if (editor) {
-          editor.dispose();
-          monacoEl.current!.innerHTML = "";
-        }
-        const newEditor = monaco.editor.createDiffEditor(monacoEl.current!, {
-          theme: "vs-dark",
-          automaticLayout: true,
-        });
-
-        newEditor.setModel({
-          original: monaco.editor.createModel(
-            workspaceDiff ? workspaceDiff.left : "",
-            "text/plain",
-          ),
-          modified: monaco.editor.createModel(
-            workspaceDiff ? workspaceDiff.right : "",
-            "text/plain",
-          ),
-        });
-
-        newEditor.getOriginalEditor().updateOptions({ readOnly: true });
-        newEditor.getModifiedEditor().updateOptions({ readOnly: true });
-
-        return newEditor;
-      });
-    }
-
-    return () => editor?.dispose();
-  }, [monacoEl.current, workspaceDiff]);
-
-  useEffect(() => {
-    if (!currentWorkspace || !workspacePendingChanges) {
-      setNodes([]);
-      return;
-    }
-
-    // Build a nested directory tree from the flat pending changes record.
-    // Keys in files are relative paths; FileType.Directory entries are
-    // lazy-loadable (children fetched via getDirectoryPending on expand).
-    const rootChildren: TreeNode[] = [];
-
-    // Helper: find-or-create intermediate directory nodes along a path.
-    const ensureDirNode = (
-      parts: string[],
-      siblings: TreeNode[],
-      parentKey: string,
-    ): TreeNode => {
-      const name = parts[0];
-      const key = parentKey ? `${parentKey}/${name}` : name;
-
-      let node = siblings.find((n) => n.key === key);
-      if (!node) {
-        node = {
-          id: key,
-          key,
-          data: {
-            name,
-            ext: " ",
-            status: "",
-            size: "",
-            modified: "",
-            type: " ",
-            changelist: "",
-          },
-          leaf: false,
-          children: [],
-        };
-        siblings.push(node);
-      }
-
-      if (parts.length > 1) {
-        if (!node.children) node.children = [];
-        return ensureDirNode(parts.slice(1), node.children, key);
-      }
-
-      return node;
-    };
-
-    for (const [filePath, file] of Object.entries(
-      workspacePendingChanges.files,
-    )) {
-      const parts = filePath.split("/").filter((p) => p.length > 0);
-      if (parts.length === 0) continue;
-
-      const filename = parts[parts.length - 1];
-
-      if (file.type === FileType.Directory) {
-        // Explicit directory entry – create / update the node.
-        const node = ensureDirNode(parts, rootChildren, "");
-        node.data = {
-          name: filename,
-          ext: " ",
-          status: "",
-          size: "",
-          modified: "",
-          type: "Directory",
-          changelist: file.changelist ? file.changelist.toString() : "",
-        };
-        node.leaf = false;
-        // Mark as lazy-loadable: empty children array means we'll fetch
-        // contents from the daemon when the user expands this node.
-        if (!node.children || node.children.length === 0) {
-          node.children = [];
-        }
-      } else {
-        // File entry
-        const fileNode: TreeNode = {
-          id: filePath,
-          key: filePath,
-          data: {
-            path: file.path,
-            name: filename,
-            ext: filename.split(".").pop() || "",
-            status: FileStatus[file.status],
-            size: prettyBytes(file.size),
-            modified: new Date(file.modifiedAt).toLocaleDateString(),
-            type: FileType[file.type],
-            changelist: file.changelist ? file.changelist.toString() : "",
-          },
-          leaf: true,
-        };
-
-        if (parts.length === 1) {
-          rootChildren.push(fileNode);
-        } else {
-          // Nested file: ensure intermediate directory nodes exist.
-          const parentNode = ensureDirNode(
-            parts.slice(0, -1),
-            rootChildren,
-            "",
-          );
-          if (!parentNode.children) parentNode.children = [];
-          parentNode.children.push(fileNode);
-        }
-      }
-    }
-
-    setNodes(rootChildren);
-  }, [currentWorkspace, workspacePendingChanges]);
-
-  // ─── Handle lazy-loading when a directory node is expanded ─────────
-  const handleExpand = useCallback(
-    (event: { node: TreeNode }) => {
-      const node = event.node;
-      if (!node || !currentWorkspace) return;
-
-      // Only fetch when the node has no children yet (lazy placeholder).
-      if (node.children && node.children.length > 0) return;
-
-      const dirPath = node.key as string;
-
-      ipc.once("workspace:directory-pending-contents", (data) => {
-        if (data.path !== dirPath) return;
-
-        const directory = data.directory;
-        node.children = directory.children.map((file) => {
-          const childKey = dirPath ? `${dirPath}/${file.path}` : file.path;
-          const isDir = file.type === FileType.Directory;
-
-          const childNode: TreeNode = {
-            id: childKey,
-            key: childKey,
-            data: {
-              path: isDir ? undefined : childKey,
-              name: file.path,
-              ext: isDir ? " " : file.path.split(".").pop() || "",
-              status: FileStatus[file.status],
-              size: isDir ? "" : prettyBytes(file.size),
-              modified: isDir
-                ? ""
-                : new Date(file.modifiedAt).toLocaleDateString(),
-              type: isDir ? "Directory" : FileType[file.type],
-              changelist: file.changelist ? file.changelist.toString() : "",
-            },
-            leaf: !isDir,
-            children: isDir ? [] : undefined,
-          };
-
-          return childNode;
-        });
-
-        // Auto-check children if the parent directory was checked.
-        if (
-          checkedDirsRef.current.has(dirPath) &&
-          selectedNodeKeysRef.current
-        ) {
-          const updated = { ...selectedNodeKeysRef.current };
-          for (const child of node.children ?? []) {
-            const ck = child.key as string;
-            updated[ck] = { checked: true, partialChecked: false };
-            if (!child.leaf) {
-              checkedDirsRef.current.add(ck);
-            }
-          }
-          setSelectedNodeKeys(updated);
-        }
-
-        // Trigger a re-render by cloning the nodes array.
-        setNodes((prev) => [...prev]);
-      });
-
-      ipc.sendMessage("workspace:get-directory-pending", { path: dirPath });
-    },
-    [currentWorkspace],
-  );
-
-  // ─── Track checked directories for auto-check on lazy load ────────
-  const handleSelectionChange = useCallback(
-    (e: { value: TreeTableSelectionKeysType | string }) => {
-      const newKeys = e.value;
-
-      if (typeof newKeys === "string") {
-        // This case happens when selectionMode is "single", but we use "checkbox" mode, so it shouldn't occur.
-        setSelectedNodeKeys({
-          [newKeys]: { checked: true, partialChecked: false },
-        });
-        return;
-      }
-
-      setSelectedNodeKeys(newKeys);
-
-      // Rebuild the set of checked directory keys.
-      const dirs = new Set<string>();
-      for (const [key, value] of Object.entries(newKeys)) {
-        const sel = value as {
-          checked?: boolean;
-          partialChecked?: boolean;
-        };
-        if (sel.checked && !sel.partialChecked) {
-          dirs.add(key);
-        }
-      }
-      checkedDirsRef.current = dirs;
-    },
-    [],
-  );
-
-  const columnPt = useMemo<ColumnPassThroughOptions>(
-    () => ({
-      headerCell: {
-        style: {
-          borderColor: "var(--color-border-default)",
-          borderWidth: "0 1px 1px 0",
-          borderStyle: "solid",
-          paddingLeft: "0.5rem",
-          fontSize: "0.75em",
-          position: "sticky",
-          top: 0,
-          // Solid surface token so scrolling rows pass under the sticky header.
-          backgroundColor: "var(--color-bg-secondary)",
-          zIndex: 1,
-        },
+    const targets: MenuItem[] = buckets
+      .filter((b) => b.kind !== "unstaged" && b.id !== from.id)
+      .map((b) => ({
+        label:
+          b.kind === "default"
+            ? `${b.label} (default)`
+            : `${b.label}${b.description ? `  ${firstLine(b.description)}` : ""}`,
+        command: () => moveTo(sel.paths, b),
+      }));
+    targets.push(
+      ...(targets.length > 0 ? [{ separator: true }] : []),
+      {
+        label: "New changelist...",
+        command: () => setCreateFor({ paths: sel.paths }),
       },
-      bodyCell: {
-        style: {
-          fontSize: "0.9em",
-          paddingTop: 0,
-          paddingBottom: 0,
-          paddingLeft: "0.2rem",
-        },
-      },
-      rowToggler: {
-        className: "treetable-toggler",
-        style: {
-          backgroundColor: "transparent",
-          padding: "0.4rem",
-        },
-      },
-    }),
-    [],
-  );
-
-  const treeTablePt = useMemo(
-    () => ({
-      resizeHelper: {
-        style: {
-          width: "0.1rem",
-          backgroundColor: "var(--color-border-default)",
-        },
-      },
-      tbody: {
-        style: {
-          maxHeight: "initial",
-          overflowY: "auto" as const,
-        },
-      },
-      wrapper: {
-        style: {
-          height: "100%",
-          width: "100%",
-        },
-      },
-      table: {
-        style: {
-          maxHeight: "100%",
-          width: "100%",
-          borderCollapse: "separate" as const,
-          borderSpacing: 0,
-          minWidth: "50rem",
-          opacity: isSubmitting ? 0.5 : 1,
-          pointerEvents: isSubmitting ? ("none" as const) : ("auto" as const),
-        },
-      },
-    }),
-    [isSubmitting],
-  );
-
-  const itemBodyTemplate = useCallback((rowData: any) => {
-    return (
-      <div style={itemBodyStyle}>
-        <FileIcon extension={rowData.data.ext} />
-        <span style={itemBodyNameStyle}>{rowData.data.name}</span>
-      </div>
     );
-  }, []);
 
-  const handleToggle = useCallback(
-    (e: { value: TreeTableExpandedKeysType }) => setExpandedKeys(e.value),
-    [],
+    if (from.kind === "unstaged") {
+      return [
+        {
+          label: `Stage${count}`,
+          disabled,
+          command: () =>
+            moveTo(sel.paths, buckets.find((b) => b.id === `default:${domain}`)!),
+        },
+        { label: "Stage to", disabled, items: targets },
+      ];
+    }
+    return [
+      {
+        label: `Unstage${count}`,
+        disabled,
+        command: () => moveTo(sel.paths, buckets.find((b) => b.kind === "unstaged")!),
+      },
+      { label: "Move to", disabled, items: targets },
+    ];
+  };
+
+  const handleContextMenu = (
+    event: React.MouseEvent,
+    node: PendingTreeNode,
+    sel: PendingSelection,
+  ) => {
+    if (!currentWorkspace) return;
+    const workspaceLocalPath = currentWorkspace.localPath
+      .split(/[/\\]/)
+      .join("/");
+
+    // The per-file actions below the staging ones apply to the clicked row.
+    currentFileRef.current = {
+      absolutePath: workspaceLocalPath + "/" + node.path,
+      relativePath: node.path,
+      isDirectory: node.isDirectory,
+      status: node.file ? (FileStatus[node.file.status] ?? "") : "",
+      hasChangelist: node.file?.changelist != null,
+      changelistId: node.file?.changelist ?? null,
+    };
+    // Render the items before showing, so the menu measures its real
+    // height when deciding whether it fits below the cursor.
+    flushSync(() => setMenuItems(buildMenuItems(stagingItems(sel))));
+    showContextMenu(event, currentFileRef.current);
+  };
+
+  const hasChanges = buckets.some((b) => b.files.length > 0);
+  const horizontal = layout === "horizontal";
+
+  const filesPanel = (
+    <div className="h-full w-full overflow-auto p-2">
+      {hasChanges || pendingChangelists.changelists.length > 0 ? (
+        <StagedChangesTree
+          buckets={buckets}
+          selection={selection}
+          onSelectionChange={handleSelectionChange}
+          onContextMenu={handleContextMenu}
+          onMove={(paths, _from, to) => moveTo(paths, to)}
+          onSubmit={(bucket) => {
+            setSubmitError(null);
+            setSubmitBucketId(bucket.id);
+          }}
+          onEditDescription={setEditBucket}
+          onDelete={(bucket) => {
+            if (
+              window.confirm(
+                `Delete changelist ${bucket.label}? Its files stay staged and move to the ${bucket.branchName} default changelist.`,
+              )
+            ) {
+              ipc.sendMessage("workspace:pending-cl:delete", {
+                changelistId: bucket.changelistId!,
+              });
+            }
+          }}
+          disabled={isSubmitting}
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center">
+          <EmptyState
+            icon={<FontAwesomeIcon icon={faCircleCheck} size="2x" />}
+            title="No Pending Changes"
+            description="Your workspace is up to date. Edited files will show up here."
+          />
+        </div>
+      )}
+    </div>
   );
 
-  const rowClassName = useCallback(
-    (node: TreeNode) => {
-      const classes: Record<string, boolean> = {};
-      if (node.key === highlightedRowKey) {
-        classes["row-highlighted"] = true;
-      }
-      return classes;
-    },
-    [highlightedRowKey],
-  );
-
-  const handleRowClick = useCallback(
-    (event: any) => {
-      if (isSubmitting) return;
-      const target = event.originalEvent.target as HTMLElement;
-      if (target && target.tagName === "INPUT") return;
-      if (event.node.data?.path) {
-        setHighlightedRowKey(event.node.key as string);
-        ipc.sendMessage("workspace:diff:file", {
-          path: event.node.data.path,
-        });
-      }
-    },
-    [isSubmitting],
-  );
-
-  const handleContextMenu = useCallback(
-    (event: any) => {
-      handleRowContextMenu(event.originalEvent as React.MouseEvent, event.node);
-    },
-    [handleRowContextMenu],
+  const diffPanel = workspaceDiff ? (
+    <div className={styles.Editor} ref={setMonacoHost} />
+  ) : (
+    <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg-secondary)] text-sm text-[var(--color-text-muted)]">
+      Select a file to view the diff
+    </div>
   );
 
   return (
@@ -649,35 +485,35 @@ export default function WorkspacePendingChanges() {
           ]}
         />
         <Button
-          className="px-3 py-1 text-xs"
-          label="Stage"
-          disabled={isSubmitting || !selectedPaths.length}
-          onClick={() => {
-            if (selectedPaths.length) {
-              ipc.sendMessage("workspace:stage", { paths: selectedPaths });
-            }
-          }}
-        />
+          variant="secondary"
+          size="sm"
+          title={
+            horizontal
+              ? "Diff is beside the files; click to show it below"
+              : "Diff is below the files; click to show it beside"
+          }
+          onClick={() => setLayout(horizontal ? "vertical" : "horizontal")}
+        >
+          <FontAwesomeIcon
+            icon={faTableColumns}
+            rotation={horizontal ? undefined : 90}
+          />
+        </Button>
         <Button
-          className="px-3 py-1 text-xs"
-          label="Unstage"
-          disabled={isSubmitting || !selectedPaths.length}
-          onClick={() => {
-            if (selectedPaths.length) {
-              ipc.sendMessage("workspace:unstage", {
-                paths: selectedPaths,
-              });
-            }
-          }}
-        />
+          variant="secondary"
+          size="sm"
+          disabled={isSubmitting}
+          onClick={() => setCreateFor({ paths: [] })}
+        >
+          <FontAwesomeIcon icon={faPlus} />
+          New Changelist
+        </Button>
       </div>
-      <div
-        className="row-span-1"
-        style={{ textAlign: "left", overflow: "hidden" }}
-      >
+      <div className="row-span-1 overflow-hidden text-left">
         <Splitter
-          layout="vertical"
-          className="w-full h-full"
+          key={layout}
+          layout={horizontal ? "horizontal" : "vertical"}
+          className="h-full w-full"
           pt={{
             gutter: {
               className: "pending-changes-splitter-gutter",
@@ -685,89 +521,76 @@ export default function WorkspacePendingChanges() {
           }}
         >
           <SplitterPanel
-            className="flex"
-            size={10}
-            style={{
-              backgroundColor: "var(--color-bg-secondary)",
-            }}
-          >
-            <textarea
-              className="m-2 w-full resize-none rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-text-secondary)] focus:border-[var(--color-accent)] focus:outline-none"
-              placeholder="Add a message to submit..."
-              disabled={isSubmitting}
-              style={{
-                textAlign: "start",
-                marginBottom: "0",
-                zIndex: 1,
-                opacity: isSubmitting ? 0.5 : 1,
-              }}
-              value={commitMessage}
-              onChange={(e) => setCommitMessage(e.target.value)}
-            />
-          </SplitterPanel>
-          <SplitterPanel
-            className="flex"
-            size={60}
-            style={{ overflow: "hidden" }}
-          >
-            {buckets.every((b) => b.files.length === 0) ? (
-              <div className="flex h-full w-full items-center justify-center">
-                <EmptyState
-                  icon={<FontAwesomeIcon icon={faCircleCheck} size="2x" />}
-                  title="No Pending Changes"
-                  description="Your workspace is up to date. Edited files will show up here."
-                />
-              </div>
-            ) : (
-              <div className="h-full w-full overflow-auto p-2">
-                <StagedChangesTree
-                  buckets={buckets}
-                  selectedPath={selectedPath}
-                  onSelect={handleSelect}
-                  onContextMenu={handleFileContextMenu}
-                  onMove={handleMoveBetweenBuckets}
-                  onSubmit={handleSubmitBucket}
-                  submitDisabled={isSubmitting || commitMessage.trim() === ""}
-                />
-              </div>
-            )}
-          </SplitterPanel>
-          <SplitterPanel
-            className="flex"
-            size={30}
+            className="flex overflow-hidden"
+            size={horizontal ? 40 : 55}
+            minSize={15}
             style={{ opacity: isSubmitting ? 0.5 : 1 }}
           >
-            {workspaceDiff && (
-              <div className={styles.Editor} ref={monacoEl}></div>
-            )}
-            {!workspaceDiff && (
-              <div
-                className="h-full w-full"
-                style={{ backgroundColor: "var(--color-bg-secondary)" }}
-              >
-                <div
-                  className="m-auto text-sm text-[var(--color-text-muted)]"
-                  style={{ textAlign: "center" }}
-                >
-                  Select a file to view the diff
-                </div>
-              </div>
-            )}
+            {filesPanel}
+          </SplitterPanel>
+          <SplitterPanel
+            className="flex overflow-hidden"
+            size={horizontal ? 60 : 45}
+            minSize={15}
+            style={{ opacity: isSubmitting ? 0.5 : 1 }}
+          >
+            {diffPanel}
           </SplitterPanel>
         </Splitter>
       </div>
 
+      <SubmitChangelistDialog
+        bucket={submitBucket}
+        ownRows={ownRows}
+        submitting={isSubmitting}
+        error={submitError}
+        onSubmit={handleSubmit}
+        onHide={() => setSubmitBucketId(null)}
+      />
+
+      <ChangelistDescriptionDialog
+        visible={editBucket !== null}
+        header={editBucket ? `Edit ${editBucket.label}` : "Edit changelist"}
+        confirmLabel="Save"
+        initialDescription={editBucket?.description ?? ""}
+        onHide={() => setEditBucket(null)}
+        onConfirm={(description) => {
+          if (editBucket) {
+            ipc.sendMessage("workspace:pending-cl:set-description", {
+              description,
+              ...targetOf(editBucket),
+            });
+          }
+          setEditBucket(null);
+        }}
+      />
+
+      <ChangelistDescriptionDialog
+        visible={createFor !== null}
+        header="New Changelist"
+        confirmLabel="Create"
+        initialDescription=""
+        branches={branches}
+        onHide={() => setCreateFor(null)}
+        onConfirm={(description, branchName) => {
+          ipc.sendMessage("workspace:pending-cl:create", {
+            description,
+            ...(branchName ? { branchName } : {}),
+            ...(createFor?.paths.length ? { paths: createFor.paths } : {}),
+          });
+          setCreateFor(null);
+        }}
+      />
+
       <Dialog
-        header="Submit Error"
-        visible={errorModalVisible}
+        header="Error"
+        visible={errorMessage !== null}
         style={{ width: "30rem" }}
-        onHide={() => setErrorModalVisible(false)}
+        onHide={() => setErrorMessage(null)}
         footer={
-          <Button
-            label="OK"
-            onClick={() => setErrorModalVisible(false)}
-            className="px-4 py-1.5 text-sm"
-          />
+          <Button size="sm" onClick={() => setErrorMessage(null)}>
+            OK
+          </Button>
         }
         pt={{
           root: {
@@ -802,7 +625,7 @@ export default function WorkspacePendingChanges() {
           },
         }}
       >
-        <p>{errorMessage}</p>
+        <p className="m-0">{errorMessage}</p>
       </Dialog>
 
       <FileContextMenu

@@ -37,6 +37,18 @@ import {
   clearStagedBlob,
 } from "../../../util/staged-blobs.js";
 import { prepareCompositeRoot } from "../../../util/composite-root.js";
+import {
+  assignToPendingChangelist,
+  changelistOf,
+  completePendingChangelistSubmit,
+  createPendingChangelist,
+  deletePendingChangelist,
+  destinedBranch,
+  getPendingChangelist,
+  getPendingChangelists,
+  setDefaultChangelistDescription,
+  updatePendingChangelistDescription,
+} from "../../../util/pending-changelists.js";
 
 /**
  * Resolves the manager and workspace for a daemon call, throwing the same way
@@ -446,6 +458,11 @@ export const pendingRouter = router({
          * branch; callers do not supply modifications.
          */
         branchName: z.string().optional(),
+        /**
+         * Submit this numbered pending changelist instead of a branch's
+         * default one. Its branch is the target; `branchName` is ignored.
+         */
+        changelistId: z.number().int().optional(),
         keepCheckedOut: z.boolean().optional(),
         // When true, skip progress/step callbacks entirely (no per-tick
         // callback overhead). Used by the CLI's --no-progress flag.
@@ -480,7 +497,20 @@ export const pendingRouter = router({
         });
       }
 
-      const targetBranch = input.branchName ?? workspace.domainBranchName;
+      const changelistId = input.changelistId ?? null;
+      let targetBranch = input.branchName ?? workspace.domainBranchName;
+      if (changelistId !== null) {
+        try {
+          targetBranch = (
+            await getPendingChangelist(workspace.localPath, changelistId)
+          ).branchName;
+        } catch (err) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
 
       if (
         targetBranch !== workspace.domainBranchName &&
@@ -492,24 +522,24 @@ export const pendingRouter = router({
         });
       }
 
-      // Submit exactly the staged files destined for this branch. Unstaged
-      // work is never submitted, and work staged to a different bucket stays
-      // where it is. This is why the caller supplies no file list: the staged
-      // set plus each file's claim already says what belongs here.
+      // Submit exactly the staged files in this changelist: destined for its
+      // branch, and in the numbered changelist asked for (or in none, for the
+      // branch's default one). Unstaged work is never submitted, and work in
+      // another changelist stays where it is. This is why the caller supplies
+      // no file list: the staged set, each file's claim, and the changelist
+      // assignments already say what belongs here.
       const pending = await manager.refreshWorkspaceContents(workspace);
       const staged = manager.getStaged(workspace.id);
+      const changelists = await getPendingChangelists(workspace.localPath);
 
       const modifications = Object.values(pending.files)
         .filter((f) => staged.has(f.path))
-        .filter((f) => {
-          // The open claim is where the file is being worked on now; a
-          // submitted one is where earlier work went (a parent in a stack).
-          const claim = f.claims.find((c) => c.state === "OPEN") ?? f.claims[0];
-          // No claim means nothing has pinned this file to a branch, so it
-          // belongs to the domain root by default.
-          const destined = claim?.branchName ?? workspace.domainBranchName;
-          return destined === targetBranch;
-        })
+        .filter(
+          (f) =>
+            destinedBranch(f, workspace.domainBranchName) === targetBranch &&
+            changelistOf(f, changelists, workspace.domainBranchName) ===
+              changelistId,
+        )
         .map((f) => ({
           path: f.path,
           delete: f.status === FileStatus.Deleted,
@@ -518,7 +548,10 @@ export const pendingRouter = router({
       if (modifications.length === 0) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: `Nothing staged for "${targetBranch}". Stage files before submitting.`,
+          message:
+            changelistId !== null
+              ? `Pending changelist ${changelistId} has no staged files.`
+              : `Nothing staged for "${targetBranch}". Stage files before submitting.`,
         });
       }
 
@@ -675,6 +708,16 @@ export const pendingRouter = router({
             await manager.unmarkForAdd(workspace, submittedPaths);
           }
 
+          // Assignments are keyed by the pending row, which for a collapsed
+          // untracked folder is the folder rather than its expanded files.
+          await completePendingChangelistSubmit(
+            workspace.localPath,
+            [...modifications.map((m) => m.path), ...submittedPaths],
+            changelistId !== null
+              ? { id: changelistId }
+              : { defaultOf: targetBranch },
+          );
+
           jobManager.completeJob(job.id);
         } catch (e: any) {
           jobManager.failJob(job.id, e.message ?? String(e));
@@ -792,12 +835,31 @@ export const pendingRouter = router({
          * root, which is where work goes unless you say otherwise.
          */
         branchName: z.string().optional(),
+        /**
+         * Which numbered pending changelist to put the files in; its branch
+         * is the target and `branchName` is ignored. Absent or null stages
+         * into the branch's default changelist.
+         */
+        changelistId: z.number().int().nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const { manager, workspace } = resolveWorkspace(ctx, input);
 
-      const targetBranch = input.branchName ?? workspace.domainBranchName;
+      const changelistId = input.changelistId ?? null;
+      let targetBranch = input.branchName ?? workspace.domainBranchName;
+      if (changelistId !== null) {
+        try {
+          targetBranch = (
+            await getPendingChangelist(workspace.localPath, changelistId)
+          ).branchName;
+        } catch (err) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
 
       // You may only stage into a bucket you actually have overlaid, or the
       // domain root. Staging elsewhere would destine a change for a base that
@@ -895,12 +957,113 @@ export const pendingRouter = router({
       }
 
       await manager.stage(workspace, normalizedPaths);
+      await assignToPendingChangelist(
+        workspace.localPath,
+        normalizedPaths,
+        changelistId,
+      );
 
       return {
         success: true,
         paths: normalizedPaths,
         branchName: targetBranch,
+        changelistId,
       };
+    }),
+
+  /** The workspace's numbered pending changelists and their files. */
+  listChangelists: publicProcedure
+    .input(z.object({ daemonId: z.string(), workspaceId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const { workspace } = resolveWorkspace(ctx, input);
+      return getPendingChangelists(workspace.localPath);
+    }),
+
+  /** Creates an empty numbered pending changelist. */
+  createChangelist: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        description: z.string().default(""),
+        /** Defaults to the workspace's domain root. */
+        branchName: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { workspace } = resolveWorkspace(ctx, input);
+      const branchName = input.branchName ?? workspace.domainBranchName;
+      if (
+        branchName !== workspace.domainBranchName &&
+        !workspace.activeBranches.includes(branchName)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `"${branchName}" is not active in this workspace.`,
+        });
+      }
+      return createPendingChangelist(
+        workspace.localPath,
+        branchName,
+        input.description,
+      );
+    }),
+
+  /**
+   * Sets a changelist's description: a numbered one by id, or a branch's
+   * default one by branchName.
+   */
+  setChangelistDescription: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        description: z.string(),
+        changelistId: z.number().int().optional(),
+        branchName: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { workspace } = resolveWorkspace(ctx, input);
+      try {
+        if (input.changelistId !== undefined) {
+          await updatePendingChangelistDescription(
+            workspace.localPath,
+            input.changelistId,
+            input.description,
+          );
+        } else {
+          await setDefaultChangelistDescription(
+            workspace.localPath,
+            input.branchName ?? workspace.domainBranchName,
+            input.description,
+          );
+        }
+      } catch (err) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return { success: true };
+    }),
+
+  /**
+   * Deletes a numbered pending changelist. Its files stay staged and return
+   * to their branch's default changelist.
+   */
+  deleteChangelist: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        changelistId: z.number().int(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { workspace } = resolveWorkspace(ctx, input);
+      await deletePendingChangelist(workspace.localPath, input.changelistId);
+      return { success: true };
     }),
 
   /**
@@ -1183,6 +1346,11 @@ export const pendingRouter = router({
       );
 
       await manager.unstage(workspace, normalizedPaths);
+      await assignToPendingChangelist(
+        workspace.localPath,
+        normalizedPaths,
+        null,
+      );
 
       return { success: true, paths: normalizedPaths };
     }),
@@ -1228,6 +1396,11 @@ export const pendingRouter = router({
       // Already staged by definition, but make it idempotent so a move can
       // also pull an unstaged file into a bucket.
       await manager.stage(workspace, normalizedPaths);
+      await assignToPendingChangelist(
+        workspace.localPath,
+        normalizedPaths,
+        null,
+      );
 
       return {
         success: true,

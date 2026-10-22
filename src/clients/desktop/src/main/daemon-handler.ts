@@ -26,6 +26,7 @@ import {
   workspaceHistoryAtom,
   workspaceLabelsAtom,
   workspacePendingChangesAtom,
+  workspacePendingChangelistsAtom,
   workspacesAtom,
   workspaceSyncStatusAtom,
   workspaceSyncPreviewAtom,
@@ -259,6 +260,37 @@ export default class DaemonHandler {
 
     ipcOn(this.ipcMain, "workspace:unstage", async (_event, data) => {
       await this.workspaceUnstage(data);
+    });
+
+    ipcOn(this.ipcMain, "workspace:pending-cl:create", async (_event, data) => {
+      await this.pendingChangelistCall("create", async (client, ids) => {
+        const { paths, ...changelist } = data;
+        const created = await client.workspaces.pending.createChangelist.mutate(
+          { ...ids, ...changelist },
+        );
+        if (paths?.length) {
+          await this.workspaceStage({ paths, changelistId: created.id });
+        }
+      });
+    });
+
+    ipcOn(
+      this.ipcMain,
+      "workspace:pending-cl:set-description",
+      async (_event, data) => {
+        await this.pendingChangelistCall("set-description", (client, ids) =>
+          client.workspaces.pending.setChangelistDescription.mutate({
+            ...ids,
+            ...data,
+          }),
+        );
+      },
+    );
+
+    ipcOn(this.ipcMain, "workspace:pending-cl:delete", async (_event, data) => {
+      await this.pendingChangelistCall("delete", (client, ids) =>
+        client.workspaces.pending.deleteChangelist.mutate({ ...ids, ...data }),
+      );
     });
 
     ipcOn(this.ipcMain, "workspace:create-label", async (event, data) => {
@@ -1087,6 +1119,8 @@ export default class DaemonHandler {
     console.log("Fetched pending changes: ", pendingChanges);
 
     store.set(workspacePendingChangesAtom, pendingChanges || null);
+    // A stage, unstage, or submit changes changelist membership too.
+    await this.refreshPendingChangelists();
 
     // Reset workspaceDirectoriesAtom to trigger tree re-initialization
     store.set(workspaceDirectoriesAtom, {
@@ -1224,12 +1258,63 @@ export default class DaemonHandler {
         workspaceId: currentWorkspace.id,
         paths: data.paths,
         ...(data.branchName ? { branchName: data.branchName } : {}),
+        changelistId: data.changelistId ?? null,
       });
       this.workspaceRefresh();
     } catch (error: any) {
       if (this.webContents) {
         ipcSend(this.webContents, "workspace:submit:error", {
           message: error?.message || "Failed to stage files",
+        });
+      }
+    }
+  }
+
+  /** Re-reads the workspace's pending changelists into their atom. */
+  private async refreshPendingChangelists(): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace || this.isMocked) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      store.set(
+        workspacePendingChangelistsAtom,
+        await client.workspaces.pending.listChangelists.query({
+          daemonId: currentWorkspace.daemonId,
+          workspaceId: currentWorkspace.id,
+        }),
+      );
+    } catch (error) {
+      // Not worth failing a refresh over: files just show in their defaults.
+      console.error("Failed to load pending changelists:", error);
+    }
+  }
+
+  /**
+   * Runs one pending-changelist edit, then refreshes the list. A failure is
+   * shown the way stage and submit failures are.
+   */
+  private async pendingChangelistCall(
+    action: string,
+    call: (
+      client: Awaited<ReturnType<typeof CreateDaemonClient>>,
+      ids: { daemonId: string; workspaceId: string },
+    ) => Promise<unknown>,
+  ): Promise<void> {
+    const currentWorkspace = store.get(currentWorkspaceAtom);
+    if (!currentWorkspace || this.isMocked) return;
+
+    try {
+      const client = await CreateDaemonClient();
+      await call(client, {
+        daemonId: currentWorkspace.daemonId,
+        workspaceId: currentWorkspace.id,
+      });
+      await this.refreshPendingChangelists();
+    } catch (error: any) {
+      if (this.webContents) {
+        ipcSend(this.webContents, "workspace:submit:error", {
+          message: error?.message || `Failed to ${action} pending changelist`,
         });
       }
     }

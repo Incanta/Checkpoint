@@ -108,11 +108,31 @@ export type Channels = {
   "workspace:revert": { filePaths: string[] };
   "workspace:submit": {
     message: string;
-    /** Which bucket to submit. Defaults to the workspace's domain root. */
+    /** Which branch's default changelist to submit. Defaults to the domain root. */
+    branchName?: string;
+    /** Submit this numbered pending changelist instead. */
+    changelistId?: number;
+  };
+  "workspace:stage": {
+    paths: string[];
+    branchName?: string;
+    /** A numbered pending changelist; null or absent is the branch default. */
+    changelistId?: number | null;
+  };
+  "workspace:unstage": { paths: string[] };
+  "workspace:pending-cl:create": {
+    description: string;
+    branchName?: string;
+    /** Staged into the new changelist once it exists. */
+    paths?: string[];
+  };
+  /** A numbered changelist by id, or a branch's default one by branchName. */
+  "workspace:pending-cl:set-description": {
+    description: string;
+    changelistId?: number;
     branchName?: string;
   };
-  "workspace:stage": { paths: string[]; branchName?: string };
-  "workspace:unstage": { paths: string[] };
+  "workspace:pending-cl:delete": { changelistId: number };
   "workspace:submit:success": null;
   "workspace:submit:error": { message: string };
   "workspace:diff:file": { path: string };

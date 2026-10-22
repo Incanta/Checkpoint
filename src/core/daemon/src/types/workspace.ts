@@ -162,3 +162,34 @@ export interface Directory {
 }
 
 export type Modification = CommonModification;
+
+/**
+ * A named group of staged changes waiting to be submitted together, as a
+ * Perforce pending changelist. Local to the workspace: the server never sees
+ * one until it is submitted.
+ */
+export interface PendingChangelist {
+  /** Workspace-local number; never reused, and never a server CL number. */
+  id: number;
+  description: string;
+  /** The branch it submits to: the domain root or an active overlay. */
+  branchName: string;
+  createdAt: number;
+}
+
+/**
+ * The workspace's pending changelists and which staged files belong to them.
+ *
+ * Every branch also has an unnumbered default changelist, holding each staged
+ * file destined for that branch that no numbered one claims. An assignment
+ * only counts while its changelist targets the file's branch (the branch its
+ * claim names); otherwise the file falls back to that branch's default, so a
+ * claim moved elsewhere can never leave a file submitted to the wrong branch.
+ */
+export interface PendingChangelistState {
+  changelists: PendingChangelist[];
+  /** Repo-relative path to the id of the changelist it is in. */
+  assignments: Record<string, number>;
+  /** Draft description of each branch's default changelist. */
+  defaultDescriptions: Record<string, string>;
+}

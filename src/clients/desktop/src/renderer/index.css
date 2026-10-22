@@ -503,6 +503,24 @@ button.p-treetable-toggler:focus-visible {
   background-color: color-mix(in srgb, var(--accent-muted), var(--accent) 25%) !important;
 }
 
+/* Rows of the Pending page's changelist sections (StagedChangesTree). */
+.pending-row {
+  border-left: 2px solid transparent;
+}
+
+.pending-row:hover {
+  background-color: var(--bg-surface);
+}
+
+.pending-row.is-selected {
+  background-color: var(--accent-muted);
+  border-left-color: var(--accent);
+}
+
+.pending-row.is-selected:hover {
+  background-color: color-mix(in srgb, var(--accent-muted), var(--accent) 25%);
+}
+
 .p-contextmenu {
   z-index: 100000;
   background-color: var(--bg-overlay);

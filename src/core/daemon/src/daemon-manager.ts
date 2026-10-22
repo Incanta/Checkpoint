@@ -1541,8 +1541,8 @@ export class DaemonManager {
       checkouts,
     );
 
+    await this.applyStagedFlags(workspace, result);
     this.attachClaims(result, checkouts as FileClaimInfo[]);
-    this.applyStagedFlags(workspace.id, result);
     this.workspacePendingChanges.set(workspace.id, result);
 
     // Clear dirty files since we just did a full refresh
@@ -1753,8 +1753,8 @@ export class DaemonManager {
       checkouts,
     );
 
+    await this.applyStagedFlags(workspace, result);
     this.attachClaims(result, checkouts as FileClaimInfo[]);
-    this.applyStagedFlags(workspace.id, result);
     this.workspacePendingChanges.set(workspace.id, result);
     this.dirtyFiles.set(workspace.id, new Set());
 
@@ -2013,14 +2013,58 @@ export class DaemonManager {
     }
   }
 
-  private applyStagedFlags(
-    workspaceId: string,
+  private async applyStagedFlags(
+    workspace: Workspace,
     result: WorkspacePendingChanges,
-  ): void {
-    const staged = this.getStaged(workspaceId);
+  ): Promise<void> {
+    const staged = this.getStaged(workspace.id);
     for (const [relativePath, file] of Object.entries(result.files)) {
       file.staged = staged.has(relativePath);
     }
+
+    // An untracked folder is reported as one collapsed row, so a file staged
+    // from inside it (by expanding the folder) has no row of its own and
+    // would be neither listed nor submitted. Give it one; the folder row
+    // stays for the rest of its contents.
+    const markedForAdd = this.getMarkedForAdd(workspace.id);
+    for (const relativePath of staged) {
+      if (result.files[relativePath]) continue;
+      if (!this.isUnderCollapsedDir(relativePath, result)) continue;
+      let stat: Stats;
+      try {
+        stat = await fs.lstat(path.join(workspace.localPath, relativePath));
+      } catch {
+        continue;
+      }
+      result.files[relativePath] = {
+        path: relativePath,
+        type: stat.isDirectory() ? FileType.Directory : FileType.Text,
+        size: stat.isDirectory() ? 0 : stat.size,
+        modifiedAt: stat.mtimeMs,
+        status: markedForAdd.has(relativePath)
+          ? FileStatus.Added
+          : FileStatus.Local,
+        id: null,
+        changelist: null,
+        claims: [],
+        staged: true,
+      };
+      result.numChanges++;
+    }
+  }
+
+  /** Whether some ancestor of the path is a collapsed folder row. */
+  private isUnderCollapsedDir(
+    relativePath: string,
+    result: WorkspacePendingChanges,
+  ): boolean {
+    let slash = relativePath.lastIndexOf("/");
+    while (slash > 0) {
+      const ancestor = relativePath.slice(0, slash);
+      if (result.files[ancestor]?.type === FileType.Directory) return true;
+      slash = ancestor.lastIndexOf("/");
+    }
+    return false;
   }
 
   /**

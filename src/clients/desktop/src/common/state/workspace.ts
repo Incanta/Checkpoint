@@ -4,6 +4,7 @@ import type {
   Directory,
   Workspace,
   WorkspacePendingChanges,
+  PendingChangelistState,
   ApiTypes,
 } from "@checkpointvcs/daemon/types";
 
@@ -20,6 +21,10 @@ export const workspacePendingChangesAtom = atom<WorkspacePendingChanges | null>(
   null,
 );
 syncAtom(workspacePendingChangesAtom, "workspacePendingChanges");
+
+export const workspacePendingChangelistsAtom =
+  atom<PendingChangelistState | null>(null);
+syncAtom(workspacePendingChangelistsAtom, "workspacePendingChangelists");
 
 export const workspaceDiffAtom = atom<{ left: string; right: string } | null>(
   null,
