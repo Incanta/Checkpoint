@@ -46,7 +46,8 @@ public:
 
 /**
  * Worker for the CheckIn operation.
- * Submits changes via the daemon.
+ * Submits a pending changelist via the daemon: the command's changelist, or
+ * the domain root's default one when none is given.
  */
 class FCheckpointCheckInWorker final : public ICheckpointSourceControlWorker {
 public:
@@ -62,6 +63,12 @@ public:
   virtual bool UpdateStates() override;
 
   TArray<FString> SubmittedFiles;
+
+  /** The changelist that was submitted */
+  FCheckpointSourceControlChangelist SubmittedChangelist;
+
+  /** Whether the submit went through */
+  bool bSubmitted = false;
 };
 
 /**
@@ -225,8 +232,8 @@ public:
 
 /**
  * Worker for the UpdateChangelistsStatus operation.
- * Populates changelist state with pending file changes.
- * Currently only supports the default changelist (local changes).
+ * Rebuilds every pending changelist (numbered ones and each branch's
+ * default) with its description and files.
  */
 class FCheckpointUpdateChangelistsStatusWorker final
   : public ICheckpointSourceControlWorker {
@@ -243,17 +250,124 @@ public:
 
   virtual bool UpdateStates() override;
 
-  /** File states collected for the default changelist */
-  TMap<FString, ECheckpointFileStatus::Type> DefaultChangelistFiles;
+  /** Every changelist that exists, with its description */
+  TMap<FCheckpointSourceControlChangelist, FString> ChangelistDescriptions;
 
-  /** Other user checkout info */
-  TMap<FString, FString> OtherCheckouts;
+  /** Absolute path -> status, for the files in each changelist */
+  TMap<
+    FCheckpointSourceControlChangelist,
+    TMap<FString, ECheckpointFileStatus::Type>>
+    ChangelistFiles;
 
-  /** Absolute path -> the branch a blocking claim is held on. */
-  TMap<FString, FString> ClaimBranches;
+  /** Whether file membership was fetched, so ChangelistFiles is complete */
+  bool bUpdatedFiles = false;
 
-  /** Locked files */
-  TSet<FString> LockedFiles;
+  /** Whether the changelists themselves were fetched */
+  bool bUpdated = false;
+};
+
+/**
+ * Worker for the NewChangelist operation.
+ * Creates a numbered pending changelist and stages any given files into it.
+ */
+class FCheckpointNewChangelistWorker final
+  : public ICheckpointSourceControlWorker {
+public:
+  FCheckpointNewChangelistWorker(FCheckpointSourceControlProvider &InProvider) :
+    ICheckpointSourceControlWorker(InProvider) {}
+
+  virtual FName GetName() const override {
+    return TEXT("NewChangelist");
+  }
+
+  virtual bool Execute(FCheckpointSourceControlCommand &InCommand) override;
+
+  virtual bool UpdateStates() override;
+
+  /** The changelist that was created */
+  FCheckpointSourceControlChangelist NewChangelist;
+
+  FString NewDescription;
+
+  /** Files moved into the new changelist */
+  TArray<FString> MovedFiles;
+
+  bool bCreated = false;
+};
+
+/**
+ * Worker for the DeleteChangelist operation.
+ * Deletes a numbered pending changelist; its files stay staged.
+ */
+class FCheckpointDeleteChangelistWorker final
+  : public ICheckpointSourceControlWorker {
+public:
+  FCheckpointDeleteChangelistWorker(
+    FCheckpointSourceControlProvider &InProvider
+  ) : ICheckpointSourceControlWorker(InProvider) {}
+
+  virtual FName GetName() const override {
+    return TEXT("DeleteChangelist");
+  }
+
+  virtual bool Execute(FCheckpointSourceControlCommand &InCommand) override;
+
+  virtual bool UpdateStates() override;
+
+  FCheckpointSourceControlChangelist DeletedChangelist;
+
+  bool bDeleted = false;
+};
+
+/**
+ * Worker for the EditChangelist operation.
+ * Sets the description of a numbered or default pending changelist.
+ */
+class FCheckpointEditChangelistWorker final
+  : public ICheckpointSourceControlWorker {
+public:
+  FCheckpointEditChangelistWorker(
+    FCheckpointSourceControlProvider &InProvider
+  ) : ICheckpointSourceControlWorker(InProvider) {}
+
+  virtual FName GetName() const override {
+    return TEXT("EditChangelist");
+  }
+
+  virtual bool Execute(FCheckpointSourceControlCommand &InCommand) override;
+
+  virtual bool UpdateStates() override;
+
+  FCheckpointSourceControlChangelist EditedChangelist;
+
+  FString EditedDescription;
+
+  bool bEdited = false;
+};
+
+/**
+ * Worker for the MoveToChangelist operation.
+ * Stages files into a numbered pending changelist or a branch's default one.
+ */
+class FCheckpointMoveToChangelistWorker final
+  : public ICheckpointSourceControlWorker {
+public:
+  FCheckpointMoveToChangelistWorker(
+    FCheckpointSourceControlProvider &InProvider
+  ) : ICheckpointSourceControlWorker(InProvider) {}
+
+  virtual FName GetName() const override {
+    return TEXT("MoveToChangelist");
+  }
+
+  virtual bool Execute(FCheckpointSourceControlCommand &InCommand) override;
+
+  virtual bool UpdateStates() override;
+
+  FCheckpointSourceControlChangelist DestinationChangelist;
+
+  /** Files moved into the destination changelist */
+  TArray<FString> MovedFiles;
 };
 
 // Worker registration

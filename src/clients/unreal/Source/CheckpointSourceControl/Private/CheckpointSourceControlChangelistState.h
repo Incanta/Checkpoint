@@ -7,8 +7,8 @@
 #include "CheckpointSourceControlChangelist.h"
 
 /**
- * State for a Checkpoint changelist. Checkpoint doesn't use
- * P4-style changelists, so this is minimal.
+ * State for a Checkpoint pending changelist: its description and the files
+ * in it.
  */
 class FCheckpointSourceControlChangelistState
   : public ISourceControlChangelistState {
@@ -27,12 +27,14 @@ public:
   }
 
   virtual FText GetDisplayText() const override {
-    return FText::FromString(
-      FString::Printf(
-        TEXT("Changelist %s"),
-        *Changelist.GetIdentifier()
-      )
-    );
+    const FString& Branch = Changelist.GetBranchName();
+    FString Name = Changelist.IsNumbered()
+      ? FString::Printf(TEXT("Changelist %d"), Changelist.GetId())
+      : FString(TEXT("Default"));
+    if (!Branch.IsEmpty()) {
+      Name += FString::Printf(TEXT(" (%s)"), *Branch);
+    }
+    return FText::FromString(Name);
   }
 
   virtual FText GetDescriptionText() const override {
@@ -40,11 +42,18 @@ public:
   }
 
   virtual bool SupportsPersistentDescription() const override {
-    return false;
+    // The daemon keeps a draft description for each branch's default
+    // changelist too, so even the default one can be edited in place.
+    return true;
   }
 
   virtual FText GetDisplayTooltip() const override {
-    return GetDisplayText();
+    const FString& Branch = Changelist.GetBranchName();
+    return FText::FromString(
+      Branch.IsEmpty()
+        ? FString(TEXT("Submits to the workspace's domain root"))
+        : FString::Printf(TEXT("Submits to %s"), *Branch)
+    );
   }
 
   virtual const FDateTime& GetTimeStamp() const override {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -259,6 +260,41 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId,
   }
 }
 
+// ─── Helpers: pending changelists ────────────────────────────────
+
+inline PendingChangelistState fetchPendingChangelists(
+    DaemonClient& client, const WorkspaceConfig& ws) {
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+  };
+  PendingChangelistState state;
+  auto result = client.query("workspaces.pending.listChangelists", input);
+  if (result.is_object()) from_json(result, state);
+  return state;
+}
+
+inline std::string firstLine(const std::string& text) {
+  auto newline = text.find_first_of("\r\n");
+  return newline == std::string::npos ? text : text.substr(0, newline);
+}
+
+/** Parses a pending changelist id, accepting a leading '#' ("#3"). */
+inline bool parseChangelistId(const std::string& text, int& id) {
+  std::string digits = (!text.empty() && text[0] == '#') ? text.substr(1) : text;
+  if (digits.empty() ||
+      !std::all_of(digits.begin(), digits.end(),
+                   [](unsigned char c) { return std::isdigit(c) != 0; })) {
+    return false;
+  }
+  try {
+    id = std::stoi(digits);
+  } catch (...) {
+    return false;
+  }
+  return id > 0;
+}
+
 // ═════════════════════════════════════════════════════════════════
 //  VERSION CHECK: verify CLI ↔ Daemon compatibility
 // ═════════════════════════════════════════════════════════════════
@@ -366,6 +402,13 @@ inline int cmdStatus() {
   PendingChanges pending;
   from_json(result, pending);
 
+  PendingChangelistState changelists;
+  try {
+    changelists = fetchPendingChangelists(client, ws);
+  } catch (...) {
+    // Without the grouping every staged file shows in its branch default.
+  }
+
   // Also get sync status
   nlohmann::json syncInput = {
       {"daemonId", ws.daemonId},
@@ -409,45 +452,78 @@ inline int cmdStatus() {
 
   std::cout << std::endl;
 
-  if (pending.files.empty()) {
+  if (pending.files.empty() && changelists.changelists.empty()) {
     std::cout << "No pending changes." << std::endl;
     return 0;
   }
 
   // Staged-ness and branch attribution both come from the daemon now, so a
-  // single refresh is enough. Staged files group by the bucket they will be
-  // submitted to.
-  std::map<std::string, std::vector<std::pair<std::string, FileStatus>>> buckets;
-  std::vector<std::pair<std::string, FileStatus>> unstaged;
+  // single refresh is enough. Staged files group by the changelist they will
+  // be submitted as: their branch's default one, or a numbered one.
+  using Entries = std::vector<std::pair<std::string, FileStatus>>;
+  std::map<std::string, Entries> defaults;
+  std::map<int, Entries> numbered;
+  Entries unstaged;
   size_t stagedCount = 0;
+
+  for (auto& cl : changelists.changelists) numbered[cl.id];
 
   for (auto& [path, file] : pending.files) {
     auto status = static_cast<FileStatus>(file.status);
     if (file.staged) {
-      const std::string& bucket =
-          file.claimBranch.empty() ? ws.domainBranchName : file.claimBranch;
-      buckets[bucket].push_back({path, status});
+      int id = changelistOf(path, file, changelists, ws.domainBranchName);
+      if (id != 0) {
+        numbered[id].push_back({path, status});
+      } else {
+        defaults[destinedBranch(file, ws.domainBranchName)].push_back(
+            {path, status});
+      }
       stagedCount++;
     } else {
       unstaged.push_back({path, status});
     }
   }
 
-  // Print staged changes, one section per bucket
-  if (stagedCount > 0) {
+  auto printEntries = [](const Entries& entries) {
+    for (auto& [path, status] : entries) {
+      std::cout << "  " << color::statusColor(status)
+                << fileStatusSymbol(status) << " " << path
+                << color::reset() << std::endl;
+    }
+  };
+
+  // Print staged changes: each branch default, then each numbered changelist
+  if (stagedCount > 0 || !numbered.empty()) {
     std::cout << color::dim() << "  (use \"chk restore --staged <file>\" to unstage,"
-              << " \"chk move <file> -b <branch>\" to restage elsewhere)"
-              << color::reset() << std::endl;
-    for (auto& [bucket, entries] : buckets) {
+              << " \"chk move <file> -b <branch>\" or \"-c <id>\" to restage"
+              << " elsewhere)" << color::reset() << std::endl;
+    for (auto& [branch, entries] : defaults) {
       std::cout << std::endl;
       std::cout << color::bold() << "Changes to be submitted to "
-                << color::cyan() << bucket << color::reset()
+                << color::cyan() << branch << color::reset()
                 << color::bold() << ":" << color::reset() << std::endl;
-      for (auto& [path, status] : entries) {
-        std::cout << "  " << color::statusColor(status)
-                  << fileStatusSymbol(status) << " " << path
+      auto draft = changelists.defaultDescriptions.find(branch);
+      if (draft != changelists.defaultDescriptions.end() &&
+          !draft->second.empty()) {
+        std::cout << color::dim() << "  " << firstLine(draft->second)
                   << color::reset() << std::endl;
       }
+      printEntries(entries);
+    }
+    for (auto& [id, entries] : numbered) {
+      const PendingChangelist* cl = changelists.find(id);
+      std::cout << std::endl;
+      std::cout << color::bold() << "Pending changelist #" << id << " ("
+                << color::cyan() << cl->branchName << color::reset()
+                << color::bold() << "):" << color::reset();
+      if (!cl->description.empty()) {
+        std::cout << " " << firstLine(cl->description);
+      }
+      std::cout << std::endl;
+      if (entries.empty()) {
+        std::cout << color::dim() << "  (empty)" << color::reset() << std::endl;
+      }
+      printEntries(entries);
     }
     std::cout << std::endl;
   }
@@ -479,7 +555,8 @@ inline int cmdStatus() {
 // ═════════════════════════════════════════════════════════════════
 
 inline int cmdAdd(const std::vector<std::string>& files,
-                  const std::string& branchName = "") {
+                  const std::string& branchName = "",
+                  int changelistId = 0) {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
@@ -588,7 +665,10 @@ inline int cmdAdd(const std::vector<std::string>& files,
         {"workspaceId", ws.id},
         {"paths", expandedPaths},
     };
-    if (!branchName.empty()) {
+    if (changelistId != 0) {
+      // The changelist's branch is the target, so no branchName goes along.
+      stageInput["changelistId"] = changelistId;
+    } else if (!branchName.empty()) {
       stageInput["branchName"] = branchName;
     }
     client.mutate("workspaces.pending.stage", stageInput);
@@ -598,7 +678,9 @@ inline int cmdAdd(const std::vector<std::string>& files,
     std::cout << color::green() << "  + " << path << color::reset() << std::endl;
   }
   std::cout << expandedPaths.size() << " file(s) staged";
-  if (!branchName.empty()) {
+  if (changelistId != 0) {
+    std::cout << " into pending changelist #" << changelistId;
+  } else if (!branchName.empty()) {
     std::cout << " to " << color::cyan() << branchName << color::reset();
   }
   std::cout << "." << std::endl;
@@ -709,11 +791,16 @@ inline int cmdAddPatch(const std::string& file, const std::string& branchName) {
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  COMMAND: move (restage files into a different branch bucket)
+//  COMMAND: move (restage files into a different branch or changelist)
 // ═════════════════════════════════════════════════════════════════
 
+/**
+ * With a branch, restages files into that branch's default changelist. With a
+ * changelist id (non-zero), stages them into that numbered changelist, whose
+ * branch is the target.
+ */
 inline int cmdMove(const std::vector<std::string>& files,
-                   const std::string& branchName) {
+                   const std::string& branchName, int changelistId = 0) {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
@@ -727,17 +814,176 @@ inline int cmdMove(const std::vector<std::string>& files,
       {"daemonId", ws.daemonId},
       {"workspaceId", ws.id},
       {"paths", resolvedPaths},
-      {"branchName", branchName},
   };
 
-  client.mutate("workspaces.pending.moveToBranch", input);
+  if (changelistId != 0) {
+    input["changelistId"] = changelistId;
+    client.mutate("workspaces.pending.stage", input);
+  } else {
+    input["branchName"] = branchName;
+    client.mutate("workspaces.pending.moveToBranch", input);
+  }
 
   for (auto& path : resolvedPaths) {
     std::cout << color::green() << "  > " << path << color::reset() << std::endl;
   }
-  std::cout << resolvedPaths.size() << " file(s) moved to " << color::cyan()
-            << branchName << color::reset() << "." << std::endl;
+  std::cout << resolvedPaths.size() << " file(s) moved to ";
+  if (changelistId != 0) {
+    std::cout << "pending changelist #" << changelistId;
+  } else {
+    std::cout << color::cyan() << branchName << color::reset();
+  }
+  std::cout << "." << std::endl;
 
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  COMMAND: changelist (manage pending changelists)
+// ═════════════════════════════════════════════════════════════════
+
+inline int cmdChangelistNew(const std::string& description,
+                            const std::string& branchName) {
+  auto ctx = getWorkspaceContext();
+  auto& ws = ctx.workspace;
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"description", description},
+  };
+  if (!branchName.empty()) {
+    input["branchName"] = branchName;
+  }
+
+  auto result =
+      ctx.client.mutate("workspaces.pending.createChangelist", input);
+  PendingChangelist cl;
+  if (result.is_object()) from_json(result, cl);
+
+  std::cout << "Created pending changelist " << color::bold() << "#" << cl.id
+            << color::reset() << " for " << color::cyan() << cl.branchName
+            << color::reset() << "." << std::endl;
+  return 0;
+}
+
+inline int cmdChangelistList() {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  nlohmann::json refreshInput = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+  };
+  auto refreshResult = client.query("workspaces.pending.refresh", refreshInput);
+  PendingChanges pending;
+  if (!refreshResult.is_null()) from_json(refreshResult, pending);
+
+  auto changelists = fetchPendingChangelists(client, ws);
+
+  // File counts per changelist, by the same rule submit uses.
+  std::map<std::string, size_t> defaultCounts;
+  std::map<int, size_t> numberedCounts;
+  for (auto& [path, file] : pending.files) {
+    if (!file.staged) continue;
+    int id = changelistOf(path, file, changelists, ws.domainBranchName);
+    if (id != 0) {
+      numberedCounts[id]++;
+    } else {
+      defaultCounts[destinedBranch(file, ws.domainBranchName)]++;
+    }
+  }
+  // A default changelist with only a draft description is still worth showing.
+  for (auto& [branch, description] : changelists.defaultDescriptions) {
+    if (!description.empty()) defaultCounts[branch];
+  }
+
+  if (defaultCounts.empty() && changelists.changelists.empty()) {
+    std::cout << "No pending changelists." << std::endl;
+    return 0;
+  }
+
+  auto printRow = [](const std::string& label, const std::string& branch,
+                     size_t count, const std::string& description) {
+    std::cout << color::bold() << label << color::reset() << " ("
+              << color::cyan() << branch << color::reset() << ") "
+              << color::dim() << count << " file(s)" << color::reset();
+    if (!description.empty()) {
+      std::cout << "  " << firstLine(description);
+    }
+    std::cout << std::endl;
+  };
+
+  for (auto& [branch, count] : defaultCounts) {
+    auto draft = changelists.defaultDescriptions.find(branch);
+    printRow("default", branch, count,
+             draft != changelists.defaultDescriptions.end() ? draft->second
+                                                            : "");
+  }
+  for (auto& cl : changelists.changelists) {
+    printRow("#" + std::to_string(cl.id), cl.branchName,
+             numberedCounts[cl.id], cl.description);
+  }
+  return 0;
+}
+
+/**
+ * Sets the description of a numbered changelist (changelistId non-zero), or of
+ * a branch's default changelist (branchName, empty for the domain root).
+ */
+inline int cmdChangelistEdit(int changelistId, const std::string& branchName,
+                             const std::string& description) {
+  auto ctx = getWorkspaceContext();
+  auto& ws = ctx.workspace;
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"description", description},
+  };
+  if (changelistId != 0) {
+    input["changelistId"] = changelistId;
+  } else if (!branchName.empty()) {
+    input["branchName"] = branchName;
+  }
+
+  ctx.client.mutate("workspaces.pending.setChangelistDescription", input);
+
+  if (changelistId != 0) {
+    std::cout << "Updated pending changelist #" << changelistId << "."
+              << std::endl;
+  } else {
+    std::cout << "Updated the default changelist for " << color::cyan()
+              << (branchName.empty() ? ws.domainBranchName : branchName)
+              << color::reset() << "." << std::endl;
+  }
+  return 0;
+}
+
+inline int cmdChangelistDelete(int changelistId) {
+  auto ctx = getWorkspaceContext();
+  auto& ws = ctx.workspace;
+
+  // The daemon treats deleting a missing changelist as a no-op; say so here
+  // instead of reporting a delete that did nothing.
+  auto changelists = fetchPendingChangelists(ctx.client, ws);
+  if (!changelists.find(changelistId)) {
+    std::cerr << "error: pending changelist #" << changelistId
+              << " does not exist." << std::endl;
+    return 1;
+  }
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+      {"changelistId", changelistId},
+  };
+  ctx.client.mutate("workspaces.pending.deleteChangelist", input);
+
+  std::cout << "Deleted pending changelist #" << changelistId
+            << "; its files stay staged in their branch's default changelist."
+            << std::endl;
   return 0;
 }
 
@@ -865,22 +1111,61 @@ inline int cmdRestore(const std::vector<std::string>& files, bool staged) {
 //  COMMAND: submit (push a version)
 // ═════════════════════════════════════════════════════════════════
 
-inline int cmdSubmit(const std::string& message, bool noProgress = false,
-                     const std::string& branchName = "") {
+/**
+ * Submits a branch's default changelist, or with a non-zero changelistId that
+ * numbered pending changelist. An empty message falls back to the
+ * changelist's description.
+ */
+inline int cmdSubmit(std::string message, bool noProgress = false,
+                     const std::string& branchName = "",
+                     int changelistId = 0) {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
 
+  std::string targetBranch =
+      branchName.empty() ? ws.domainBranchName : branchName;
+
+  if (changelistId != 0 || message.empty()) {
+    auto changelists = fetchPendingChangelists(client, ws);
+    std::string description;
+    if (changelistId != 0) {
+      const PendingChangelist* cl = changelists.find(changelistId);
+      if (!cl) {
+        std::cerr << "error: pending changelist #" << changelistId
+                  << " does not exist." << std::endl;
+        return 1;
+      }
+      targetBranch = cl->branchName;
+      description = cl->description;
+    } else {
+      auto draft = changelists.defaultDescriptions.find(targetBranch);
+      if (draft != changelists.defaultDescriptions.end()) {
+        description = draft->second;
+      }
+    }
+    if (message.empty()) message = description;
+  }
+
+  if (message.empty()) {
+    std::cerr << "error: a submit message is required; pass -m or set the "
+              << "changelist's description with \"chk changelist edit\"."
+              << std::endl;
+    return 1;
+  }
+
   // The daemon owns the staged set and derives the file list from it, so
-  // there is nothing to compute here. An empty bucket is rejected server-side
-  // with a message naming the branch.
+  // there is nothing to compute here. An empty changelist is rejected
+  // server-side with a message naming it.
   nlohmann::json submitInput = {
       {"daemonId", ws.daemonId},
       {"workspaceId", ws.id},
       {"message", message},
       {"noProgress", noProgress},
   };
-  if (!branchName.empty()) {
+  if (changelistId != 0) {
+    submitInput["changelistId"] = changelistId;
+  } else if (!branchName.empty()) {
     submitInput["branchName"] = branchName;
   }
 
@@ -893,10 +1178,14 @@ inline int cmdSubmit(const std::string& message, bool noProgress = false,
     return 1;
   }
 
-  std::cout << "Submitting staged changes to "
-            << color::cyan()
-            << (branchName.empty() ? ws.domainBranchName : branchName)
-            << color::reset() << "..." << std::endl;
+  std::cout << "Submitting ";
+  if (changelistId != 0) {
+    std::cout << "pending changelist #" << changelistId;
+  } else {
+    std::cout << "staged changes";
+  }
+  std::cout << " to " << color::cyan() << targetBranch << color::reset()
+            << "..." << std::endl;
 
   auto jobResult = pollJob(client, jobId, !noProgress);
 

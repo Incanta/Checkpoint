@@ -5,7 +5,170 @@
 #include "CheckpointSourceControlCommand.h"
 #include "CheckpointSourceControlModule.h"
 #include "CheckpointSourceControlProvider.h"
+#include "Misc/Paths.h"
 #include "SourceControlOperations.h"
+
+// ---- Pending changelist helpers ----
+
+namespace {
+  /**
+   * A branch as a changelist stores it: empty for the domain root, so the
+   * domain root's default changelist is Unreal's default changelist.
+   */
+  FString ToChangelistBranch(
+    const FString &BranchName, const FString &DomainBranchName
+  ) {
+    return BranchName == DomainBranchName ? FString() : BranchName;
+  }
+
+  /** The inverse: the branch name the daemon keys things by. */
+  FString ToDaemonBranch(
+    const FString &ChangelistBranch, const FString &DomainBranchName
+  ) {
+    return ChangelistBranch.IsEmpty() ? DomainBranchName : ChangelistBranch;
+  }
+
+  /**
+   * The branch a pending file is going to, as the daemon's destinedBranch():
+   * its open claim's, else its first claim's, else the domain root. Returned
+   * in changelist form (empty for the domain root).
+   */
+  FString DestinedBranch(
+    const TSharedPtr<FJsonObject> &File, const FString &DomainBranchName
+  ) {
+    const TArray<TSharedPtr<FJsonValue>> *Claims;
+    if (!File->TryGetArrayField(TEXT("claims"), Claims)) {
+      return FString();
+    }
+
+    TSharedPtr<FJsonObject> Chosen;
+    for (const auto &ClaimVal : *Claims) {
+      auto ClaimObj = ClaimVal->AsObject();
+      if (!ClaimObj.IsValid()) continue;
+      if (!Chosen.IsValid()) {
+        Chosen = ClaimObj;
+      }
+      FString State;
+      ClaimObj->TryGetStringField(TEXT("state"), State);
+      if (State == TEXT("OPEN")) {
+        Chosen = ClaimObj;
+        break;
+      }
+    }
+
+    FString BranchName;
+    if (Chosen.IsValid()) {
+      Chosen->TryGetStringField(TEXT("branchName"), BranchName);
+    }
+    return ToChangelistBranch(BranchName, DomainBranchName);
+  }
+
+  /**
+   * Which changelist a pending file is in, as the daemon's changelistOf():
+   * the numbered one it was staged into while that one targets the file's
+   * branch, else its branch's default.
+   *
+   * Unstaged changes are in no daemon changelist. They are listed in their
+   * branch's default one anyway, so they can still be submitted from the
+   * editor as they could before changelists existed.
+   */
+  FCheckpointSourceControlChangelist ChangelistOf(
+    const FString &RelPath,
+    const TSharedPtr<FJsonObject> &File,
+    const FCheckpointPendingChangelists &Changelists,
+    const FString &DomainBranchName
+  ) {
+    const FString BranchName = DestinedBranch(File, DomainBranchName);
+
+    bool bStaged = false;
+    File->TryGetBoolField(TEXT("staged"), bStaged);
+    if (bStaged) {
+      if (const int32 *Id = Changelists.Assignments.Find(RelPath)) {
+        const FCheckpointPendingChangelist *Changelist =
+          Changelists.Find(*Id);
+        if (Changelist &&
+            ToChangelistBranch(Changelist->BranchName, DomainBranchName) ==
+              BranchName) {
+          return FCheckpointSourceControlChangelist(*Id, BranchName);
+        }
+      }
+    }
+
+    return FCheckpointSourceControlChangelist::DefaultFor(BranchName);
+  }
+
+  /** Whether a pending file belongs in a changelist at all. */
+  bool IsSubmittable(const TSharedPtr<FJsonObject> &File) {
+    bool bStaged = false;
+    File->TryGetBoolField(TEXT("staged"), bStaged);
+    int32 Status = 0;
+    File->TryGetNumberField(TEXT("status"), Status);
+    FCheckpointSourceControlState FileState(
+      FString(), static_cast<ECheckpointFileStatus::Type>(Status)
+    );
+    return bStaged || FileState.CanCheckIn();
+  }
+
+  /** The changelist a command targets; none means Unreal's default one. */
+  FCheckpointSourceControlChangelist CommandChangelist(
+    const FCheckpointSourceControlCommand &InCommand
+  ) {
+    if (InCommand.Changelist.IsValid()) {
+      return static_cast<const FCheckpointSourceControlChangelist &>(
+        *InCommand.Changelist
+      );
+    }
+    return FCheckpointSourceControlChangelist();
+  }
+
+  /** A daemon-relative path as the state cache keys it. */
+  FString ToStateFilename(
+    const FCheckpointSourceControlProvider &Provider, const FString &RelPath
+  ) {
+    FString AbsPath =
+      FPaths::ConvertRelativePathToFull(Provider.ToAbsolutePath(RelPath));
+    FPaths::NormalizeFilename(AbsPath);
+    return AbsPath;
+  }
+
+  /**
+   * Resolve a command's file to a workspace-relative path, reporting it when
+   * it is outside the workspace root.
+   */
+  bool ToWorkspacePath(
+    const FCheckpointSourceControlProvider &Provider,
+    FCheckpointSourceControlCommand &InCommand,
+    const FString &File,
+    const TCHAR *Action,
+    FString &OutRelPath
+  ) {
+    OutRelPath = Provider.ToRelativePath(File);
+    if (OutRelPath.IsEmpty() || OutRelPath.StartsWith(TEXT("../")) ||
+        OutRelPath.StartsWith(TEXT("/"))) {
+      const FString Message = FString::Printf(
+        TEXT("File '%s' is outside of the workspace root, cannot %s"),
+        *File,
+        Action
+      );
+      UE_LOG(LogCheckpointSourceControl, Warning, TEXT("%s"), *Message);
+      InCommand.ResultInfo.ErrorMessages.Add(FText::FromString(Message));
+      return false;
+    }
+    return true;
+  }
+
+  /** Log a failed daemon call and surface it to the editor. */
+  void ReportFailure(
+    FCheckpointSourceControlCommand &InCommand,
+    const TCHAR *What,
+    const FString &Error
+  ) {
+    UE_LOG(
+      LogCheckpointSourceControl, Warning, TEXT("%s failed: %s"), What, *Error
+    );
+    InCommand.ResultInfo.ErrorMessages.Add(FText::FromString(Error));
+  }
+}
 
 // ---- Connect ----
 
@@ -145,6 +308,10 @@ bool FCheckpointCheckInWorker::Execute(
   auto &SccProvider = GetProvider();
   auto &Client = SccProvider.GetDaemonClient();
   auto &Settings = SccProvider.AccessSettings();
+  const FString &DomainBranchName = Settings.GetDomainBranchName();
+
+  // No changelist means Unreal's default one, which is the domain root's.
+  SubmittedChangelist = CommandChangelist(InCommand);
 
   // Build the modifications array from the files
   TArray<FString> SubmitPaths;
@@ -180,22 +347,90 @@ bool FCheckpointCheckInWorker::Execute(
   }
 
   // Get the description from the CheckIn operation
-  FString Description = TEXT("Submitted from Unreal Engine");
   TSharedRef<FCheckIn> CheckInOp =
     StaticCastSharedRef<FCheckIn>(InCommand.Operation);
-  Description = CheckInOp->GetDescription().ToString();
+  FString Description = CheckInOp->GetDescription().ToString();
 
   bool bKeepCheckedOut = CheckInOp->GetKeepCheckedOut();
 
   FString Error;
+
+  // A numbered changelist is submitted whole by id, but a default one is
+  // submitted from what is staged, and the Changelists window passes no
+  // files. Gather what it shows (unstaged changes included) so they are
+  // staged and go too.
+  const bool bNeedsDescription = Description.IsEmpty();
+  const bool bNeedsFiles =
+    SubmitPaths.Num() == 0 && !SubmittedChangelist.IsNumbered();
+  if (bNeedsDescription || bNeedsFiles) {
+    FCheckpointPendingChangelists Changelists;
+    if (!Client.ListChangelists(
+          Settings.GetDaemonId(),
+          Settings.GetWorkspaceId(),
+          Changelists,
+          Error
+        )) {
+      // An older daemon has no pending changelists, so everything is in a
+      // branch default and there is no stored description to fall back on.
+      UE_LOG(
+        LogCheckpointSourceControl,
+        Warning,
+        TEXT("ListChangelists failed: %s"),
+        *Error
+      );
+    }
+
+    if (bNeedsDescription) {
+      if (SubmittedChangelist.IsNumbered()) {
+        if (const FCheckpointPendingChangelist *Changelist =
+              Changelists.Find(SubmittedChangelist.GetId())) {
+          Description = Changelist->Description;
+        }
+      } else {
+        Description = Changelists.DefaultDescriptions.FindRef(ToDaemonBranch(
+          SubmittedChangelist.GetBranchName(), DomainBranchName
+        ));
+      }
+    }
+
+    if (bNeedsFiles) {
+      TMap<FString, TSharedPtr<FJsonObject>> PendingFiles;
+      if (!Client.GetPendingFiles(
+            Settings.GetDaemonId(),
+            Settings.GetWorkspaceId(),
+            PendingFiles,
+            Error
+          )) {
+        ReportFailure(InCommand, TEXT("GetPendingFiles"), Error);
+        return false;
+      }
+
+      for (const auto &Pair : PendingFiles) {
+        if (IsSubmittable(Pair.Value) &&
+            ChangelistOf(Pair.Key, Pair.Value, Changelists, DomainBranchName) ==
+              SubmittedChangelist) {
+          SubmitPaths.Add(Pair.Key);
+          SubmittedFiles.Add(ToStateFilename(SccProvider, Pair.Key));
+        }
+      }
+    }
+  }
+
+  if (Description.IsEmpty()) {
+    Description = TEXT("Submitted from Unreal Engine");
+  }
+
   if (!Client.Submit(
         Settings.GetDaemonId(),
         Settings.GetWorkspaceId(),
         Description,
         SubmitPaths,
-        FString(),
+        SubmittedChangelist.IsNumbered()
+          ? FString()
+          : SubmittedChangelist.GetBranchName(),
         bKeepCheckedOut,
-        Error
+        Error,
+        SubmittedChangelist.GetId()
       )) {
     UE_LOG(
       LogCheckpointSourceControl, Error, TEXT("Submit failed: %s"), *Error
@@ -204,26 +439,51 @@ bool FCheckpointCheckInWorker::Execute(
     return false;
   }
 
+  bSubmitted = true;
+
   UE_LOG(
     LogCheckpointSourceControl,
     Log,
-    TEXT("Successfully submitted %d files"),
-    SubmittedFiles.Num()
+    TEXT("Successfully submitted changelist %s"),
+    *SubmittedChangelist.GetIdentifier()
   );
 
   return true;
 }
 
 bool FCheckpointCheckInWorker::UpdateStates() {
+  if (!bSubmitted) {
+    return false;
+  }
+
   auto &SccProvider = GetProvider();
-  for (const FString &File : SubmittedFiles) {
+
+  TArray<FString> Files = SubmittedFiles;
+  auto ChangelistState =
+    SccProvider.GetChangelistStateInternal(SubmittedChangelist);
+  if (SubmittedChangelist.IsNumbered()) {
+    // The daemon submitted everything in it, whatever the command listed.
+    for (const FSourceControlStateRef &FileState : ChangelistState->Files) {
+      Files.AddUnique(FileState->GetFilename());
+    }
+  }
+
+  for (const FString &File : Files) {
     auto State = SccProvider.GetStateInternal(File);
     State->SetFileStatus(ECheckpointFileStatus::ReadOnlyControlled);
   }
-  if (SubmittedFiles.Num() > 0) {
-    SccProvider.BroadcastStateChanged();
+
+  // A submitted numbered changelist is deleted by the daemon; a default one
+  // stays, but loses its draft description.
+  SccProvider.RemoveFilesFromChangelists(Files);
+  if (SubmittedChangelist.IsNumbered()) {
+    SccProvider.RemoveChangelistFromCache(SubmittedChangelist);
+  } else {
+    ChangelistState->Description.Empty();
   }
-  return SubmittedFiles.Num() > 0;
+
+  SccProvider.BroadcastStateChanged();
+  return true;
 }
 
 // ---- MarkForAdd ----
@@ -388,6 +648,10 @@ bool FCheckpointRevertWorker::UpdateStates() {
     }
   }
   if (RevertedFiles.Num() > 0) {
+    // Reverted work has nothing left to submit. The next changelist update
+    // puts back anything that still belongs in one (a file reverted from
+    // Added to Local, say).
+    SccProvider.RemoveFilesFromChangelists(RevertedFiles);
     SccProvider.BroadcastStateChanged();
   }
   return RevertedFiles.Num() > 0;
@@ -887,53 +1151,88 @@ bool FCheckpointUpdateChangelistsStatusWorker::Execute(
 
   auto Op =
     StaticCastSharedRef<FUpdatePendingChangelistsStatus>(InCommand.Operation);
+  const FString &DomainBranchName = Settings.GetDomainBranchName();
 
-  // Determine if we need to update the default changelist
-  bool bUpdateDefault = Op->ShouldUpdateAllChangelists();
-
-  if (!bUpdateDefault) {
-    // Check if the default changelist is in the list
-    for (const FSourceControlChangelistRef &CL : Op->GetChangelistsToUpdate()) {
-      if (CL->IsDefault()) {
-        bUpdateDefault = true;
-        break;
-      }
-    }
+  // The daemon reports every changelist in one call, so all of them are
+  // rebuilt whichever ones were asked for.
+  FString Error;
+  FCheckpointPendingChangelists Changelists;
+  if (!Client.ListChangelists(
+        Settings.GetDaemonId(), Settings.GetWorkspaceId(), Changelists, Error
+      )) {
+    // An older daemon has no pending changelists. Everything is then in a
+    // branch default, which is still worth showing.
+    UE_LOG(
+      LogCheckpointSourceControl,
+      Warning,
+      TEXT("ListChangelists failed: %s"),
+      *Error
+    );
   }
 
-  if (!bUpdateDefault) {
-    // Nothing to do — Checkpoint only has a default changelist for now
-    return true;
+  auto AddDefault = [&](const FString &BranchName) {
+    ChangelistDescriptions.Add(
+      FCheckpointSourceControlChangelist::DefaultFor(BranchName),
+      Changelists.DefaultDescriptions.FindRef(
+        ToDaemonBranch(BranchName, DomainBranchName)
+      )
+    );
+  };
+
+  // The domain root and every active overlay can be submitted to, so each
+  // has a default changelist even while it is empty.
+  AddDefault(FString());
+  for (const FString &BranchName : Settings.GetActiveBranches()) {
+    AddDefault(ToChangelistBranch(BranchName, DomainBranchName));
+  }
+
+  for (const FCheckpointPendingChangelist &Changelist :
+       Changelists.Changelists) {
+    ChangelistDescriptions.Add(
+      FCheckpointSourceControlChangelist(
+        Changelist.Id,
+        ToChangelistBranch(Changelist.BranchName, DomainBranchName)
+      ),
+      Changelist.Description
+    );
   }
 
   // Get pending changes from the daemon via refresh
   if (Op->ShouldUpdateFilesStates()) {
-    FString Error;
-    TMap<FString, int32> PendingFiles;
+    TMap<FString, TSharedPtr<FJsonObject>> PendingFiles;
 
-    if (!Client.GetPendingChanges(
+    if (!Client.GetPendingFiles(
           Settings.GetDaemonId(), Settings.GetWorkspaceId(), PendingFiles, Error
         )) {
+      // Still succeed: the changelists are known, just not their files.
       UE_LOG(
         LogCheckpointSourceControl,
         Warning,
-        TEXT("GetPendingChanges failed: %s"),
+        TEXT("GetPendingFiles failed: %s"),
         *Error
       );
-      // Still succeed — we just won't have file states
-      return true;
-    }
+    } else {
+      bUpdatedFiles = true;
 
-    for (const auto &Pair : PendingFiles) {
-      FString AbsPath = SccProvider.ToAbsolutePath(Pair.Key);
+      for (const auto &Pair : PendingFiles) {
+        if (!IsSubmittable(Pair.Value)) {
+          continue;
+        }
 
-      ECheckpointFileStatus::Type Status =
-        static_cast<ECheckpointFileStatus::Type>(Pair.Value);
+        FCheckpointSourceControlChangelist Changelist =
+          ChangelistOf(Pair.Key, Pair.Value, Changelists, DomainBranchName);
 
-      FCheckpointSourceControlState FileState(AbsPath, Status);
-      if (FileState.CanCheckIn()) {
-        DefaultChangelistFiles.Add(
-          AbsPath, static_cast<ECheckpointFileStatus::Type>(Pair.Value)
+        // A file can still be going to a branch that is no longer active.
+        // List it in that branch's default rather than hide it.
+        if (!ChangelistDescriptions.Contains(Changelist)) {
+          AddDefault(Changelist.GetBranchName());
+        }
+
+        int32 Status = 0;
+        Pair.Value->TryGetNumberField(TEXT("status"), Status);
+        ChangelistFiles.FindOrAdd(Changelist).Add(
+          ToStateFilename(SccProvider, Pair.Key),
+          static_cast<ECheckpointFileStatus::Type>(Status)
         );
       }
     }
@@ -943,48 +1242,356 @@ bool FCheckpointUpdateChangelistsStatusWorker::Execute(
   // When shelving support is added, ShouldUpdateShelvedFilesStates() will
   // be handled here.
 
+  bUpdated = true;
   return true;
 }
 
 bool FCheckpointUpdateChangelistsStatusWorker::UpdateStates() {
+  if (!bUpdated) {
+    return false;
+  }
+
+  auto &SccProvider = GetProvider();
+  const FDateTime Now = FDateTime::Now();
+
+  TSet<FCheckpointSourceControlChangelist> Existing;
+  for (const auto &Pair : ChangelistDescriptions) {
+    Existing.Add(Pair.Key);
+
+    auto ChangelistState = SccProvider.GetChangelistStateInternal(Pair.Key);
+    ChangelistState->Changelist = Pair.Key;
+    ChangelistState->Description = Pair.Value;
+    ChangelistState->TimeStamp = Now;
+
+    if (bUpdatedFiles) {
+      // Clear and rebuild file list
+      ChangelistState->Files.Empty();
+      if (const auto *Files = ChangelistFiles.Find(Pair.Key)) {
+        for (const auto &FilePair : *Files) {
+          auto FileState = SccProvider.GetStateInternal(FilePair.Key);
+          FileState->SetFileStatus(FilePair.Value);
+          FileState->TimeStamp = Now;
+          ChangelistState->Files.Add(FileState);
+        }
+      }
+    }
+
+    // Shelved files: empty for now
+    ChangelistState->ShelvedFiles.Empty();
+  }
+
+  // Drop changelists submitted or deleted elsewhere (the desktop app, the
+  // CLI) since the last update.
+  SccProvider.PruneChangelistCache(Existing);
+
+  // The Changelists window redraws from this broadcast, so it fires even
+  // when every changelist is empty.
+  SccProvider.BroadcastStateChanged();
+
+  return true;
+}
+
+// ---- NewChangelist ----
+
+bool FCheckpointNewChangelistWorker::Execute(
+  FCheckpointSourceControlCommand &InCommand
+) {
+  auto &SccProvider = GetProvider();
+  auto &Client = SccProvider.GetDaemonClient();
+  auto &Settings = SccProvider.AccessSettings();
+  const FString &DomainBranchName = Settings.GetDomainBranchName();
+
+  auto Op = StaticCastSharedRef<FNewChangelist>(InCommand.Operation);
+  NewDescription = Op->GetDescription().ToString();
+
+  TArray<FString> RelPaths;
+  TArray<FString> Files;
+  for (const FString &File : InCommand.Files) {
+    FString RelPath;
+    if (ToWorkspacePath(
+          SccProvider, InCommand, File, TEXT("move to a changelist"), RelPath
+        )) {
+      RelPaths.Add(RelPath);
+      Files.Add(File);
+    }
+  }
+
+  FString Error;
+
+  // A changelist submits to one branch, and staging into it moves each
+  // file's claim there. Create it on the branch the files are already going
+  // to, so that moving overlay work into a new changelist does not retarget
+  // it to the domain root.
+  FString BranchName;
+  if (RelPaths.Num() > 0) {
+    TMap<FString, TSharedPtr<FJsonObject>> PendingFiles;
+    if (!Client.GetPendingFiles(
+          Settings.GetDaemonId(), Settings.GetWorkspaceId(), PendingFiles, Error
+        )) {
+      ReportFailure(InCommand, TEXT("GetPendingFiles"), Error);
+      return false;
+    }
+
+    bool bFoundBranch = false;
+    for (const FString &RelPath : RelPaths) {
+      const TSharedPtr<FJsonObject> *File = PendingFiles.Find(RelPath);
+      if (!File) {
+        // Nothing pending, so nothing pins it to a branch.
+        continue;
+      }
+      const FString FileBranch = DestinedBranch(*File, DomainBranchName);
+      if (!bFoundBranch) {
+        BranchName = FileBranch;
+        bFoundBranch = true;
+      } else if (FileBranch != BranchName) {
+        ReportFailure(
+          InCommand,
+          TEXT("NewChangelist"),
+          TEXT("These files are going to different branches, so they cannot ")
+          TEXT("share one changelist.")
+        );
+        return false;
+      }
+    }
+  }
+
+  FCheckpointPendingChangelist Created;
+  if (!Client.CreateChangelist(
+        Settings.GetDaemonId(),
+        Settings.GetWorkspaceId(),
+        NewDescription,
+        BranchName,
+        Created,
+        Error
+      )) {
+    ReportFailure(InCommand, TEXT("CreateChangelist"), Error);
+    return false;
+  }
+
+  NewChangelist = FCheckpointSourceControlChangelist(
+    Created.Id, ToChangelistBranch(Created.BranchName, DomainBranchName)
+  );
+
+  if (RelPaths.Num() > 0) {
+    if (!Client.Stage(
+          Settings.GetDaemonId(),
+          Settings.GetWorkspaceId(),
+          RelPaths,
+          FString(),
+          Created.Id,
+          Error
+        )) {
+      ReportFailure(InCommand, TEXT("Stage"), Error);
+
+      // Do not leave an empty changelist behind for a move that failed, as
+      // the Perforce provider does.
+      FString DeleteError;
+      Client.DeleteChangelist(
+        Settings.GetDaemonId(),
+        Settings.GetWorkspaceId(),
+        Created.Id,
+        DeleteError
+      );
+      return false;
+    }
+    MovedFiles = Files;
+  }
+
+  Op->SetNewChangelist(
+    MakeShared<FCheckpointSourceControlChangelist, ESPMode::ThreadSafe>(
+      NewChangelist
+    )
+  );
+  bCreated = true;
+  return true;
+}
+
+bool FCheckpointNewChangelistWorker::UpdateStates() {
+  if (!bCreated) {
+    return false;
+  }
+
+  auto &SccProvider = GetProvider();
+  auto ChangelistState = SccProvider.GetChangelistStateInternal(NewChangelist);
+  ChangelistState->Description = NewDescription;
+  ChangelistState->TimeStamp = FDateTime::Now();
+
+  if (MovedFiles.Num() > 0) {
+    SccProvider.MoveFilesToChangelist(MovedFiles, NewChangelist);
+  }
+
+  SccProvider.BroadcastStateChanged();
+  return true;
+}
+
+// ---- DeleteChangelist ----
+
+bool FCheckpointDeleteChangelistWorker::Execute(
+  FCheckpointSourceControlCommand &InCommand
+) {
+  auto &SccProvider = GetProvider();
+  auto &Client = SccProvider.GetDaemonClient();
+  auto &Settings = SccProvider.AccessSettings();
+
+  DeletedChangelist = CommandChangelist(InCommand);
+  if (!DeletedChangelist.IsNumbered()) {
+    ReportFailure(
+      InCommand,
+      TEXT("DeleteChangelist"),
+      TEXT("A branch's default changelist cannot be deleted.")
+    );
+    return false;
+  }
+
+  FString Error;
+  if (!Client.DeleteChangelist(
+        Settings.GetDaemonId(),
+        Settings.GetWorkspaceId(),
+        DeletedChangelist.GetId(),
+        Error
+      )) {
+    ReportFailure(InCommand, TEXT("DeleteChangelist"), Error);
+    return false;
+  }
+
+  bDeleted = true;
+  return true;
+}
+
+bool FCheckpointDeleteChangelistWorker::UpdateStates() {
+  if (!bDeleted) {
+    return false;
+  }
+
   auto &SccProvider = GetProvider();
 
-  // Ensure the default changelist exists in the cache
-  FCheckpointSourceControlChangelist DefaultCL;
-  auto DefaultCLState = SccProvider.GetChangelistStateInternal(DefaultCL);
-
-  // Update description
-  DefaultCLState->Description = TEXT("");
-  DefaultCLState->TimeStamp = FDateTime::Now();
-
-  // Clear and rebuild file list
-  DefaultCLState->Files.Empty();
-
-  for (auto &Pair : DefaultChangelistFiles) {
-    auto FileState = SccProvider.GetStateInternal(Pair.Key);
-    FileState->SetFileStatus(Pair.Value);
-    FileState->TimeStamp = FDateTime::Now();
-
-    // Set other checkout info
-    if (FString *ClaimBranch = ClaimBranches.Find(Pair.Key)) {
-      FileState->ClaimBranch = *ClaimBranch;
-    }
-    if (FString *Other = OtherCheckouts.Find(Pair.Key)) {
-      FileState->OtherUserCheckedOut = *Other;
-    }
-
-    FileState->bIsLocked = LockedFiles.Contains(Pair.Key);
-
-    DefaultCLState->Files.Add(FileState);
+  // Its files stay staged and fall back to their branch's default changelist.
+  TArray<FString> Files;
+  auto ChangelistState =
+    SccProvider.GetChangelistStateInternal(DeletedChangelist);
+  for (const FSourceControlStateRef &FileState : ChangelistState->Files) {
+    Files.Add(FileState->GetFilename());
   }
 
-  // Shelved files: empty for now
-  DefaultCLState->ShelvedFiles.Empty();
-
-  if (DefaultChangelistFiles.Num() > 0) {
-    SccProvider.BroadcastStateChanged();
+  SccProvider.RemoveChangelistFromCache(DeletedChangelist);
+  if (Files.Num() > 0) {
+    SccProvider.MoveFilesToChangelist(
+      Files,
+      FCheckpointSourceControlChangelist::DefaultFor(
+        DeletedChangelist.GetBranchName()
+      )
+    );
   }
 
+  SccProvider.BroadcastStateChanged();
+  return true;
+}
+
+// ---- EditChangelist ----
+
+bool FCheckpointEditChangelistWorker::Execute(
+  FCheckpointSourceControlCommand &InCommand
+) {
+  auto &SccProvider = GetProvider();
+  auto &Client = SccProvider.GetDaemonClient();
+  auto &Settings = SccProvider.AccessSettings();
+
+  auto Op = StaticCastSharedRef<FEditChangelist>(InCommand.Operation);
+  EditedChangelist = CommandChangelist(InCommand);
+  EditedDescription = Op->GetDescription().ToString();
+
+  // A numbered changelist is addressed by id, a default one by its branch
+  // (empty lets the daemon pick the domain root).
+  FString Error;
+  if (!Client.SetChangelistDescription(
+        Settings.GetDaemonId(),
+        Settings.GetWorkspaceId(),
+        EditedDescription,
+        EditedChangelist.GetId(),
+        EditedChangelist.IsNumbered() ? FString()
+                                      : EditedChangelist.GetBranchName(),
+        Error
+      )) {
+    ReportFailure(InCommand, TEXT("SetChangelistDescription"), Error);
+    return false;
+  }
+
+  bEdited = true;
+  return true;
+}
+
+bool FCheckpointEditChangelistWorker::UpdateStates() {
+  if (!bEdited) {
+    return false;
+  }
+
+  auto &SccProvider = GetProvider();
+  auto ChangelistState =
+    SccProvider.GetChangelistStateInternal(EditedChangelist);
+  ChangelistState->Description = EditedDescription;
+  ChangelistState->TimeStamp = FDateTime::Now();
+
+  SccProvider.BroadcastStateChanged();
+  return true;
+}
+
+// ---- MoveToChangelist ----
+
+bool FCheckpointMoveToChangelistWorker::Execute(
+  FCheckpointSourceControlCommand &InCommand
+) {
+  auto &SccProvider = GetProvider();
+  auto &Client = SccProvider.GetDaemonClient();
+  auto &Settings = SccProvider.AccessSettings();
+
+  DestinationChangelist = CommandChangelist(InCommand);
+
+  TArray<FString> RelPaths;
+  TArray<FString> Files;
+  for (const FString &File : InCommand.Files) {
+    FString RelPath;
+    if (ToWorkspacePath(
+          SccProvider, InCommand, File, TEXT("move to a changelist"), RelPath
+        )) {
+      RelPaths.Add(RelPath);
+      Files.Add(File);
+    }
+  }
+
+  if (RelPaths.Num() == 0) {
+    return InCommand.ResultInfo.ErrorMessages.Num() == 0;
+  }
+
+  // Staging is what puts a file in a changelist. It also moves the file's
+  // claim to the changelist's branch, so the work is submitted wherever the
+  // changelist goes.
+  FString Error;
+  if (!Client.Stage(
+        Settings.GetDaemonId(),
+        Settings.GetWorkspaceId(),
+        RelPaths,
+        DestinationChangelist.IsNumbered()
+          ? FString()
+          : DestinationChangelist.GetBranchName(),
+        DestinationChangelist.GetId(),
+        Error
+      )) {
+    ReportFailure(InCommand, TEXT("Stage"), Error);
+    return false;
+  }
+
+  MovedFiles = Files;
+  return InCommand.ResultInfo.ErrorMessages.Num() == 0;
+}
+
+bool FCheckpointMoveToChangelistWorker::UpdateStates() {
+  if (MovedFiles.Num() == 0) {
+    return false;
+  }
+
+  auto &SccProvider = GetProvider();
+  SccProvider.MoveFilesToChangelist(MovedFiles, DestinationChangelist);
+  SccProvider.BroadcastStateChanged();
   return true;
 }
 
@@ -1094,6 +1701,34 @@ void CheckpointSourceControlWorkers::RegisterWorkers() {
     TEXT("UpdateChangelistsStatus"),
     [](FCheckpointSourceControlProvider &P) -> FCheckpointWorkerRef {
       return MakeShareable(new FCheckpointUpdateChangelistsStatusWorker(P));
+    }
+  );
+
+  Register(
+    TEXT("NewChangelist"),
+    [](FCheckpointSourceControlProvider &P) -> FCheckpointWorkerRef {
+      return MakeShareable(new FCheckpointNewChangelistWorker(P));
+    }
+  );
+
+  Register(
+    TEXT("DeleteChangelist"),
+    [](FCheckpointSourceControlProvider &P) -> FCheckpointWorkerRef {
+      return MakeShareable(new FCheckpointDeleteChangelistWorker(P));
+    }
+  );
+
+  Register(
+    TEXT("EditChangelist"),
+    [](FCheckpointSourceControlProvider &P) -> FCheckpointWorkerRef {
+      return MakeShareable(new FCheckpointEditChangelistWorker(P));
+    }
+  );
+
+  Register(
+    TEXT("MoveToChangelist"),
+    [](FCheckpointSourceControlProvider &P) -> FCheckpointWorkerRef {
+      return MakeShareable(new FCheckpointMoveToChangelistWorker(P));
     }
   );
 }

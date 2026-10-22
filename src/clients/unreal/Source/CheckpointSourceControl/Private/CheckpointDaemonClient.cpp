@@ -449,6 +449,39 @@ bool FCheckpointDaemonClient::UndoCheckout(
   );
 }
 
+bool FCheckpointDaemonClient::Stage(
+  const FString &DaemonId,
+  const FString &WorkspaceId,
+  const TArray<FString> &Paths,
+  const FString &BranchName,
+  int32 ChangelistId,
+  FString &OutError
+) {
+  TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
+  Input->SetStringField(TEXT("daemonId"), DaemonId);
+  Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
+  TArray<TSharedPtr<FJsonValue>> PathValues;
+  for (const FString &Path : Paths) {
+    PathValues.Add(MakeShareable(new FJsonValueString(Path)));
+  }
+  Input->SetArrayField(TEXT("paths"), PathValues);
+  if (!BranchName.IsEmpty()) {
+    Input->SetStringField(TEXT("branchName"), BranchName);
+  }
+  // Null is explicit on purpose: it takes the files out of any numbered
+  // changelist they were in, back into their branch's default one.
+  if (ChangelistId >= 0) {
+    Input->SetNumberField(TEXT("changelistId"), ChangelistId);
+  } else {
+    Input->SetField(TEXT("changelistId"), MakeShareable(new FJsonValueNull()));
+  }
+
+  TSharedPtr<FJsonObject> Result;
+  return MutateProcedure(
+    TEXT("workspaces.pending.stage"), Input, Result, OutError
+  );
+}
+
 bool FCheckpointDaemonClient::Submit(
   const FString &DaemonId,
   const FString &WorkspaceId,
@@ -456,29 +489,15 @@ bool FCheckpointDaemonClient::Submit(
   const TArray<FString> &Paths,
   const FString &BranchName,
   bool bKeepCheckedOut,
-  FString &OutError
+  FString &OutError,
+  int32 ChangelistId
 ) {
   // Submit sends exactly what is staged for a branch and takes no file list,
   // so stage the caller's paths first. Staging also points each file's claim
   // at that branch, which is what makes "staged here" and "destined for this
   // branch" the same fact.
   if (Paths.Num() > 0) {
-    TSharedPtr<FJsonObject> StageInput = MakeShareable(new FJsonObject());
-    StageInput->SetStringField(TEXT("daemonId"), DaemonId);
-    StageInput->SetStringField(TEXT("workspaceId"), WorkspaceId);
-    TArray<TSharedPtr<FJsonValue>> PathValues;
-    for (const FString &Path : Paths) {
-      PathValues.Add(MakeShareable(new FJsonValueString(Path)));
-    }
-    StageInput->SetArrayField(TEXT("paths"), PathValues);
-    if (!BranchName.IsEmpty()) {
-      StageInput->SetStringField(TEXT("branchName"), BranchName);
-    }
-
-    TSharedPtr<FJsonObject> StageResult;
-    if (!MutateProcedure(
-          TEXT("workspaces.pending.stage"), StageInput, StageResult, OutError
-        )) {
+    if (!Stage(DaemonId, WorkspaceId, Paths, BranchName, ChangelistId, OutError)) {
       return false;
     }
   }
@@ -488,7 +507,9 @@ bool FCheckpointDaemonClient::Submit(
   Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
   Input->SetStringField(TEXT("message"), Message);
   Input->SetBoolField(TEXT("keepCheckedOut"), bKeepCheckedOut);
-  if (!BranchName.IsEmpty()) {
+  if (ChangelistId >= 0) {
+    Input->SetNumberField(TEXT("changelistId"), ChangelistId);
+  } else if (!BranchName.IsEmpty()) {
     Input->SetStringField(TEXT("branchName"), BranchName);
   }
 
@@ -505,6 +526,150 @@ bool FCheckpointDaemonClient::Submit(
 
   TSharedPtr<FJsonObject> JobResult;
   return PollJob(JobId, JobResult, OutError);
+}
+
+namespace {
+  /** Read a changelist object as the daemon sends it. */
+  FCheckpointPendingChangelist
+  ParsePendingChangelist(const TSharedPtr<FJsonObject> &Obj) {
+    FCheckpointPendingChangelist Changelist;
+    Obj->TryGetNumberField(TEXT("id"), Changelist.Id);
+    Obj->TryGetStringField(TEXT("description"), Changelist.Description);
+    Obj->TryGetStringField(TEXT("branchName"), Changelist.BranchName);
+    return Changelist;
+  }
+}
+
+bool FCheckpointDaemonClient::ListChangelists(
+  const FString &DaemonId,
+  const FString &WorkspaceId,
+  FCheckpointPendingChangelists &OutChangelists,
+  FString &OutError
+) {
+  TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
+  Input->SetStringField(TEXT("daemonId"), DaemonId);
+  Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
+
+  TSharedPtr<FJsonObject> Result;
+  if (!QueryProcedure(
+        TEXT("workspaces.pending.listChangelists"), Input, Result, OutError
+      )) {
+    return false;
+  }
+
+  if (!Result.IsValid()) {
+    OutError = TEXT("Unexpected response format for listChangelists");
+    return false;
+  }
+
+  const TArray<TSharedPtr<FJsonValue>> *ChangelistsArray;
+  if (Result->TryGetArrayField(TEXT("changelists"), ChangelistsArray)) {
+    for (const auto &Value : *ChangelistsArray) {
+      const TSharedPtr<FJsonObject> *Obj;
+      if (Value->TryGetObject(Obj)) {
+        OutChangelists.Changelists.Add(ParsePendingChangelist(*Obj));
+      }
+    }
+  }
+
+  const TSharedPtr<FJsonObject> *AssignmentsObj;
+  if (Result->TryGetObjectField(TEXT("assignments"), AssignmentsObj)) {
+    for (const auto &Pair : (*AssignmentsObj)->Values) {
+      int32 Id = INDEX_NONE;
+      if (Pair.Value->TryGetNumber(Id)) {
+        OutChangelists.Assignments.Add(Pair.Key, Id);
+      }
+    }
+  }
+
+  const TSharedPtr<FJsonObject> *DescriptionsObj;
+  if (Result->TryGetObjectField(TEXT("defaultDescriptions"), DescriptionsObj)) {
+    for (const auto &Pair : (*DescriptionsObj)->Values) {
+      FString Description;
+      if (Pair.Value->TryGetString(Description)) {
+        OutChangelists.DefaultDescriptions.Add(Pair.Key, Description);
+      }
+    }
+  }
+
+  return true;
+}
+
+bool FCheckpointDaemonClient::CreateChangelist(
+  const FString &DaemonId,
+  const FString &WorkspaceId,
+  const FString &Description,
+  const FString &BranchName,
+  FCheckpointPendingChangelist &OutChangelist,
+  FString &OutError
+) {
+  TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
+  Input->SetStringField(TEXT("daemonId"), DaemonId);
+  Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
+  Input->SetStringField(TEXT("description"), Description);
+  if (!BranchName.IsEmpty()) {
+    Input->SetStringField(TEXT("branchName"), BranchName);
+  }
+
+  TSharedPtr<FJsonObject> Result;
+  if (!MutateProcedure(
+        TEXT("workspaces.pending.createChangelist"), Input, Result, OutError
+      )) {
+    return false;
+  }
+
+  if (!Result.IsValid()) {
+    OutError = TEXT("Unexpected response format for createChangelist");
+    return false;
+  }
+
+  OutChangelist = ParsePendingChangelist(Result);
+  if (OutChangelist.Id < 0) {
+    OutError = TEXT("No changelist id returned from createChangelist");
+    return false;
+  }
+  return true;
+}
+
+bool FCheckpointDaemonClient::SetChangelistDescription(
+  const FString &DaemonId,
+  const FString &WorkspaceId,
+  const FString &Description,
+  int32 ChangelistId,
+  const FString &BranchName,
+  FString &OutError
+) {
+  TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
+  Input->SetStringField(TEXT("daemonId"), DaemonId);
+  Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
+  Input->SetStringField(TEXT("description"), Description);
+  if (ChangelistId >= 0) {
+    Input->SetNumberField(TEXT("changelistId"), ChangelistId);
+  } else if (!BranchName.IsEmpty()) {
+    Input->SetStringField(TEXT("branchName"), BranchName);
+  }
+
+  TSharedPtr<FJsonObject> Result;
+  return MutateProcedure(
+    TEXT("workspaces.pending.setChangelistDescription"), Input, Result, OutError
+  );
+}
+
+bool FCheckpointDaemonClient::DeleteChangelist(
+  const FString &DaemonId,
+  const FString &WorkspaceId,
+  int32 ChangelistId,
+  FString &OutError
+) {
+  TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
+  Input->SetStringField(TEXT("daemonId"), DaemonId);
+  Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
+  Input->SetNumberField(TEXT("changelistId"), ChangelistId);
+
+  TSharedPtr<FJsonObject> Result;
+  return MutateProcedure(
+    TEXT("workspaces.pending.deleteChangelist"), Input, Result, OutError
+  );
 }
 
 bool FCheckpointDaemonClient::Pull(
@@ -648,6 +813,26 @@ bool FCheckpointDaemonClient::GetPendingChanges(
   TMap<FString, int32> &OutFileStatuses,
   FString &OutError
 ) {
+  TMap<FString, TSharedPtr<FJsonObject>> Files;
+  if (!GetPendingFiles(DaemonId, WorkspaceId, Files, OutError)) {
+    return false;
+  }
+
+  for (const auto &Pair : Files) {
+    int32 Status = 0;
+    Pair.Value->TryGetNumberField(TEXT("status"), Status);
+    OutFileStatuses.Add(Pair.Key, Status);
+  }
+
+  return true;
+}
+
+bool FCheckpointDaemonClient::GetPendingFiles(
+  const FString &DaemonId,
+  const FString &WorkspaceId,
+  TMap<FString, TSharedPtr<FJsonObject>> &OutFiles,
+  FString &OutError
+) {
   TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
   Input->SetStringField(TEXT("daemonId"), DaemonId);
   Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
@@ -662,15 +847,13 @@ bool FCheckpointDaemonClient::GetPendingChanges(
     return false;
   }
 
-  // Parse the files map from the response: { files: { [relPath]: { status } } }
+  // Parse the files map from the response: { files: { [relPath]: File } }
   const TSharedPtr<FJsonObject> *FilesObj;
   if (Result->TryGetObjectField(TEXT("files"), FilesObj)) {
     for (const auto &Pair : (*FilesObj)->Values) {
       const TSharedPtr<FJsonObject> *FileObj;
       if (Pair.Value->TryGetObject(FileObj)) {
-        int32 Status = 0;
-        (*FileObj)->TryGetNumberField(TEXT("status"), Status);
-        OutFileStatuses.Add(Pair.Key, Status);
+        OutFiles.Add(Pair.Key, *FileObj);
       }
     }
   }

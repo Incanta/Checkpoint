@@ -14,6 +14,29 @@
 // this is decoupled from versions.json at the repo root.
 #define UNREAL_DAEMON_API 1
 
+/** A numbered pending changelist, as `workspaces.pending.listChangelists` reports it. */
+struct FCheckpointPendingChangelist {
+  int32 Id = INDEX_NONE;
+  FString Description;
+  /** The branch it submits to, as the daemon names it (never empty). */
+  FString BranchName;
+};
+
+/** The workspace's pending changelists and which staged files are in them. */
+struct FCheckpointPendingChangelists {
+  TArray<FCheckpointPendingChangelist> Changelists;
+  /** Repo-relative path -> id of the changelist it was put in. */
+  TMap<FString, int32> Assignments;
+  /** Branch name -> draft description of that branch's default changelist. */
+  TMap<FString, FString> DefaultDescriptions;
+
+  const FCheckpointPendingChangelist *Find(int32 Id) const {
+    return Changelists.FindByPredicate(
+      [Id](const FCheckpointPendingChangelist &CL) { return CL.Id == Id; }
+    );
+  }
+};
+
 /**
  * HTTP client for communicating with the Checkpoint daemon's tRPC API.
  * The daemon runs locally and exposes a tRPC HTTP server with superjson
@@ -111,6 +134,10 @@ public:
    *
    * The daemon derives the changelist contents from the staged set, so there
    * is no modification list to pass. Shelving is gone entirely.
+   *
+   * With a `ChangelistId`, the paths are staged into that numbered pending
+   * changelist instead and exactly its files are submitted; its own branch is
+   * the target and `BranchName` is ignored.
    */
   bool Submit(
     const FString &DaemonId,
@@ -120,6 +147,69 @@ public:
     /** Empty means the workspace's domain root. */
     const FString &BranchName,
     bool bKeepCheckedOut,
+    FString &OutError,
+    /** INDEX_NONE submits the branch's default changelist. */
+    int32 ChangelistId = INDEX_NONE
+  );
+
+  /**
+   * Stage `Paths` and point their claims at the target branch.
+   *
+   * With a `ChangelistId` the files go into that numbered pending changelist
+   * and its branch is the target. With INDEX_NONE they go into the default
+   * changelist of `BranchName`, leaving any numbered one they were in.
+   */
+  bool Stage(
+    const FString &DaemonId,
+    const FString &WorkspaceId,
+    const TArray<FString> &Paths,
+    /** Empty means the workspace's domain root. */
+    const FString &BranchName,
+    int32 ChangelistId,
+    FString &OutError
+  );
+
+  /** List the workspace's numbered pending changelists and assignments. */
+  bool ListChangelists(
+    const FString &DaemonId,
+    const FString &WorkspaceId,
+    FCheckpointPendingChangelists &OutChangelists,
+    FString &OutError
+  );
+
+  /** Create an empty numbered pending changelist. */
+  bool CreateChangelist(
+    const FString &DaemonId,
+    const FString &WorkspaceId,
+    const FString &Description,
+    /** Empty means the workspace's domain root. */
+    const FString &BranchName,
+    FCheckpointPendingChangelist &OutChangelist,
+    FString &OutError
+  );
+
+  /**
+   * Set a changelist's description: a numbered one by `ChangelistId`, or with
+   * INDEX_NONE the default changelist of `BranchName`.
+   */
+  bool SetChangelistDescription(
+    const FString &DaemonId,
+    const FString &WorkspaceId,
+    const FString &Description,
+    int32 ChangelistId,
+    /** Empty means the workspace's domain root. */
+    const FString &BranchName,
+    FString &OutError
+  );
+
+  /**
+   * Delete a numbered pending changelist. Its files stay staged and return
+   * to their branch's default changelist.
+   */
+  bool DeleteChangelist(
+    const FString &DaemonId,
+    const FString &WorkspaceId,
+    int32 ChangelistId,
     FString &OutError
   );
 
@@ -171,6 +261,17 @@ public:
     const FString &DaemonId,
     const FString &WorkspaceId,
     TMap<FString, int32> &OutFileStatuses,
+    FString &OutError
+  );
+
+  /**
+   * Refresh workspace and get every pending file as the daemon reports it
+   * (`status`, `staged`, `claims`, ...), keyed by relative path.
+   */
+  bool GetPendingFiles(
+    const FString &DaemonId,
+    const FString &WorkspaceId,
+    TMap<FString, TSharedPtr<FJsonObject>> &OutFiles,
     FString &OutError
   );
 

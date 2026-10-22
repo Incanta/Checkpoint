@@ -9,12 +9,19 @@ A cross-platform C++ command-line client for interacting with the Checkpoint dae
 | `chk status`                     | Show pending changes          | `chk status`                        |
 | `chk add <file...>`              | Stage files for submission    | `chk add src/main.cpp`              |
 | `chk add -b <branch> <file...>`  | Stage into a feature branch   | `chk add -b feature/hud hud.uasset` |
+| `chk add -c <id> <file...>`      | Stage into a pending changelist | `chk add -c 3 hud.uasset`         |
 | `chk move -b <branch> <file...>` | Restage into another branch   | `chk move -b feature/hud hud.uasset`|
+| `chk move -c <id> <file...>`     | Restage into a pending changelist | `chk move -c 3 hud.uasset`      |
+| `chk changelist new [-m <msg>] [-b <branch>]` | Create an empty pending changelist and print its id (alias `chk cl`) | `chk cl new -m "HUD pass"` |
+| `chk changelist list`            | List pending changelists with file counts (also the default with no action) | `chk cl list` |
+| `chk changelist edit <id\|default> -m <msg> [-b <branch>]` | Set a changelist's description; `-b` picks whose default changelist | `chk cl edit default -m "WIP" -b feature/hud` |
+| `chk changelist delete <id>`     | Delete a pending changelist; its files stay staged in their branch's default | `chk cl delete 3` |
 | `chk restore --staged <file...>` | Unstage files                 | `chk restore --staged src/main.cpp` |
 | `chk restore <file...>`          | Revert files to head          | `chk restore src/main.cpp`          |
 | `chk chmod (+x\|-x) <file...>`   | Executable or not in the next submit (works on Windows, which has no executable bit) | `chk chmod +x tools/build.sh` |
 | `chk submit -m <message>`        | Submit staged files           | `chk submit -m "Fix bug"`           |
 | `chk submit -b <branch> -m <msg>`| Submit one branch's bucket    | `chk submit -b feature/hud -m "WIP"`|
+| `chk submit -c <id> [-m <msg>]`  | Submit a pending changelist   | `chk submit -c 3`                   |
 | `chk pull`                       | Sync changes from remote      | `chk pull`                          |
 | `chk log`                        | Show version history          | `chk log`                           |
 | `chk branch`                     | List branches                 | `chk branch`                        |
@@ -24,6 +31,14 @@ A cross-platform C++ command-line client for interacting with the Checkpoint dae
 | `chk bug-report`                 | Collect a redacted log bundle (zip) for a bug report and print its path | `chk bug-report` |
 | `chk redact <file> [-o out]`     | Write a redacted copy of a log file, e.g. `docker compose logs` output | `chk redact logs.txt` |
 | `chk diff <file>`                | Show diff for a file          | `chk diff src/main.cpp`             |
+
+### Pending changelists
+
+Like Perforce, staged files can be grouped into numbered pending changelists that submit separately. Each changelist belongs to one branch (the domain root or an active overlay) and submits there. Every branch also has an unnumbered default changelist, which holds any staged file not in a numbered one. The grouping is local to the workspace (`.checkpoint/pending-changelists.json`); losing it only returns files to their branch's default changelist.
+
+`chk status` lists each branch's default changelist, then each numbered one (including empty ones). `chk add` and `chk move -b` put files in a branch's default changelist; `-c <id>` puts them in a numbered one instead. `chk restore --staged` takes a file out of its changelist along with unstaging it.
+
+`chk submit` submits one changelist: the domain root's default, the default of `-b <branch>`, or numbered changelist `-c <id>`. Without `-m`, the changelist's description is the message. A submitted numbered changelist is deleted, and a default changelist's description is cleared.
 
 ## Build
 

@@ -8,9 +8,12 @@
  * Commands:
  *   status                        Show pending changes
  *   add <file...>                 Stage files for submission
+ *   move (-b <branch>|-c <id>) <file...>  Restage into a branch or changelist
+ *   changelist (cl) <action>      Manage pending changelists (new, list,
+ *                                 edit, delete)
  *   restore [--staged] <file...>  Unstage or revert files
  *   chmod (+x|-x) <file...>       Executable or not in the next submit
- *   submit --message <msg>        Submit staged files
+ *   submit [-m <msg>] [-c <id>]   Submit staged files
  *   pull                          Sync changes from remote
  *   log                           Show version history
  *   branch                        List branches
@@ -33,6 +36,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -40,14 +44,30 @@
 #include "argparse.hpp"
 #include "commands.hpp"
 
+// Pending changelist ids start at 1; the commands take 0 to mean "none".
+static bool checkChangelistArg(const std::optional<int>& id) {
+  if (id.has_value() && *id <= 0) {
+    std::cerr << "error: invalid changelist id " << *id << "." << std::endl;
+    return false;
+  }
+  return true;
+}
+
 int main(int argc, char** argv) {
   // Preprocess argv: expand "-N" shorthand to "--limit N" for the log command.
   // e.g. `chk log -5` becomes `chk log --limit 5`
   // Two-pass: collect strings first, then take pointers (avoids dangling from realloc).
+  // Also expands the `cl` alias to `changelist` when it is the command (the
+  // first non-option argument); argparse has no subcommand aliases.
   std::vector<std::string> argStorage;
   bool seenLog = false;
+  bool seenCommand = false;
   for (int i = 0; i < argc; ++i) {
     std::string arg = argv[i];
+    if (i > 0 && !seenCommand && !arg.empty() && arg[0] != '-') {
+      seenCommand = true;
+      if (arg == "cl") arg = "changelist";
+    }
     if (i > 0 && arg == "log") seenLog = true;
     if (seenLog && arg.size() >= 2 && arg[0] == '-' && arg[1] != '-' &&
         std::all_of(arg.begin() + 1, arg.end(), ::isdigit)) {
@@ -96,6 +116,9 @@ int main(int argc, char** argv) {
   addCmd.add_argument("--branch", "-b")
       .help("Stage into this feature branch's changelist (default: domain root)")
       .default_value(std::string(""));
+  addCmd.add_argument("--changelist", "-c")
+      .help("Stage into this numbered pending changelist (submits to its branch)")
+      .scan<'i', int>();
   addCmd.add_argument("files")
       .help("File(s) to stage")
       .nargs(argparse::nargs_pattern::at_least_one);
@@ -133,11 +156,14 @@ int main(int argc, char** argv) {
   argparse::ArgumentParser submitCmd("submit");
   submitCmd.add_description("Submit staged files as a new version");
   submitCmd.add_argument("--message", "-m")
-      .help("Submission message")
-      .required();
-  submitCmd.add_argument("--branch", "-b")
-      .help("Submit this branch's staged changes (default: domain root)")
+      .help("Submission message (default: the changelist's description)")
       .default_value(std::string(""));
+  submitCmd.add_argument("--branch", "-b")
+      .help("Submit this branch's default changelist (default: domain root)")
+      .default_value(std::string(""));
+  submitCmd.add_argument("--changelist", "-c")
+      .help("Submit this numbered pending changelist instead")
+      .scan<'i', int>();
   submitCmd.add_argument("--no-progress")
       .help("Disable the progress bar (also skips progress callbacks entirely)")
       .default_value(false)
@@ -322,16 +348,65 @@ int main(int argc, char** argv) {
 
   program.add_subparser(statusCmd);
   argparse::ArgumentParser moveCmd("move");
-  moveCmd.add_description("Restage files into a different branch's changelist");
+  moveCmd.add_description(
+      "Restage files into a different branch's default changelist, or into a "
+      "numbered pending changelist");
   moveCmd.add_argument("--branch", "-b")
       .help("Target branch (must be active in this workspace)")
-      .required();
+      .default_value(std::string(""));
+  moveCmd.add_argument("--changelist", "-c")
+      .help("Target numbered pending changelist")
+      .scan<'i', int>();
   moveCmd.add_argument("files")
       .help("Files to move")
       .remaining();
 
+  // changelist (alias: cl), with its own sub-commands
+  argparse::ArgumentParser changelistCmd("changelist");
+  changelistCmd.add_description(
+      "Manage pending changelists: numbered groupings of staged files that "
+      "submit together (alias: cl)");
+
+  argparse::ArgumentParser clNewCmd("new");
+  clNewCmd.add_description("Create an empty pending changelist and print its id");
+  clNewCmd.add_argument("--message", "-m")
+      .help("Description")
+      .default_value(std::string(""));
+  clNewCmd.add_argument("--branch", "-b")
+      .help("Branch it submits to (default: domain root)")
+      .default_value(std::string(""));
+
+  argparse::ArgumentParser clListCmd("list");
+  clListCmd.add_description("List pending changelists and their file counts");
+
+  argparse::ArgumentParser clEditCmd("edit");
+  clEditCmd.add_description(
+      "Set the description of a numbered changelist, or of a branch's default "
+      "changelist");
+  clEditCmd.add_argument("changelist")
+      .help("Changelist id, or \"default\"");
+  clEditCmd.add_argument("--message", "-m")
+      .help("New description")
+      .required();
+  clEditCmd.add_argument("--branch", "-b")
+      .help("With \"default\": whose default changelist (default: domain root)")
+      .default_value(std::string(""));
+
+  argparse::ArgumentParser clDeleteCmd("delete");
+  clDeleteCmd.add_description(
+      "Delete a pending changelist; its files stay staged in their branch's "
+      "default changelist");
+  clDeleteCmd.add_argument("changelist")
+      .help("Changelist id");
+
+  changelistCmd.add_subparser(clNewCmd);
+  changelistCmd.add_subparser(clListCmd);
+  changelistCmd.add_subparser(clEditCmd);
+  changelistCmd.add_subparser(clDeleteCmd);
+
   program.add_subparser(addCmd);
   program.add_subparser(moveCmd);
+  program.add_subparser(changelistCmd);
   program.add_subparser(restoreCmd);
   program.add_subparser(chmodCmd);
   program.add_subparser(submitCmd);
@@ -374,6 +449,19 @@ int main(int argc, char** argv) {
         std::cerr << addCmd;
       } else if (cmd == "move") {
         std::cerr << moveCmd;
+      } else if (cmd == "changelist") {
+        std::string action = argc >= 3 ? argv[2] : "";
+        if (action == "new") {
+          std::cerr << clNewCmd;
+        } else if (action == "list") {
+          std::cerr << clListCmd;
+        } else if (action == "edit") {
+          std::cerr << clEditCmd;
+        } else if (action == "delete") {
+          std::cerr << clDeleteCmd;
+        } else {
+          std::cerr << changelistCmd;
+        }
       } else if (cmd == "restore") {
         std::cerr << restoreCmd;
       } else if (cmd == "submit") {
@@ -449,24 +537,83 @@ int main(int argc, char** argv) {
     if (program.is_subcommand_used(moveCmd)) {
       auto files = moveCmd.get<std::vector<std::string>>("files");
       auto branch = moveCmd.get<std::string>("--branch");
+      auto changelist = moveCmd.present<int>("--changelist");
+      if (!checkChangelistArg(changelist)) return 1;
       if (files.empty()) {
         std::cerr << "error: move requires at least one file." << std::endl;
         return 1;
       }
-      return checkpoint::cmdMove(files, branch);
+      if (branch.empty() == !changelist.has_value()) {
+        std::cerr << "error: move takes exactly one of -b <branch> or "
+                  << "-c <changelist>." << std::endl;
+        return 1;
+      }
+      return checkpoint::cmdMove(files, branch, changelist.value_or(0));
+    }
+
+    if (program.is_subcommand_used(changelistCmd)) {
+      if (changelistCmd.is_subcommand_used(clNewCmd)) {
+        return checkpoint::cmdChangelistNew(
+            clNewCmd.get<std::string>("--message"),
+            clNewCmd.get<std::string>("--branch"));
+      }
+      if (changelistCmd.is_subcommand_used(clEditCmd)) {
+        auto target = clEditCmd.get<std::string>("changelist");
+        auto branch = clEditCmd.get<std::string>("--branch");
+        auto message = clEditCmd.get<std::string>("--message");
+        if (target == "default") {
+          return checkpoint::cmdChangelistEdit(0, branch, message);
+        }
+        int id = 0;
+        if (!checkpoint::parseChangelistId(target, id)) {
+          std::cerr << "error: invalid changelist \"" << target
+                    << "\"; use an id or \"default\"." << std::endl;
+          return 1;
+        }
+        if (!branch.empty()) {
+          std::cerr << "error: -b only applies to \"default\"; a numbered "
+                    << "changelist already has a branch." << std::endl;
+          return 1;
+        }
+        return checkpoint::cmdChangelistEdit(id, "", message);
+      }
+      if (changelistCmd.is_subcommand_used(clDeleteCmd)) {
+        auto target = clDeleteCmd.get<std::string>("changelist");
+        int id = 0;
+        if (!checkpoint::parseChangelistId(target, id)) {
+          std::cerr << "error: invalid changelist id \"" << target << "\"."
+                    << std::endl;
+          return 1;
+        }
+        return checkpoint::cmdChangelistDelete(id);
+      }
+      // `list`, or no action at all, lists.
+      return checkpoint::cmdChangelistList();
     }
 
     if (program.is_subcommand_used(addCmd)) {
       auto files = addCmd.get<std::vector<std::string>>("files");
       auto branch = addCmd.get<std::string>("--branch");
+      auto changelist = addCmd.present<int>("--changelist");
+      if (!checkChangelistArg(changelist)) return 1;
+      if (changelist.has_value() && !branch.empty()) {
+        std::cerr << "error: add takes -b or -c, not both; a changelist "
+                  << "submits to its own branch." << std::endl;
+        return 1;
+      }
       if (addCmd.get<bool>("--patch")) {
+        if (changelist.has_value()) {
+          std::cerr << "error: add --patch does not take -c; stage the hunks, "
+                    << "then \"chk move -c\" the file." << std::endl;
+          return 1;
+        }
         if (files.size() != 1) {
           std::cerr << "error: add --patch takes exactly one file." << std::endl;
           return 1;
         }
         return checkpoint::cmdAddPatch(files[0], branch);
       }
-      return checkpoint::cmdAdd(files, branch);
+      return checkpoint::cmdAdd(files, branch, changelist.value_or(0));
     }
 
     if (program.is_subcommand_used(restoreCmd)) {
@@ -490,7 +637,15 @@ int main(int argc, char** argv) {
       auto message = submitCmd.get<std::string>("--message");
       bool noProgress = submitCmd.get<bool>("--no-progress");
       auto branch = submitCmd.get<std::string>("--branch");
-      return checkpoint::cmdSubmit(message, noProgress, branch);
+      auto changelist = submitCmd.present<int>("--changelist");
+      if (!checkChangelistArg(changelist)) return 1;
+      if (changelist.has_value() && !branch.empty()) {
+        std::cerr << "error: submit takes -b or -c, not both; a changelist "
+                  << "submits to its own branch." << std::endl;
+        return 1;
+      }
+      return checkpoint::cmdSubmit(message, noProgress, branch,
+                                   changelist.value_or(0));
     }
 
     if (program.is_subcommand_used(pullCmd)) {

@@ -155,6 +155,35 @@
         "category": "Checkpoint"
       },
       {
+        "command": "checkpoint.newChangelist",
+        "title": "New Pending Changelist",
+        "category": "Checkpoint",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "checkpoint.editChangelistDescription",
+        "title": "Edit Changelist Description",
+        "category": "Checkpoint",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "checkpoint.deleteChangelist",
+        "title": "Delete Changelist",
+        "category": "Checkpoint",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "checkpoint.submitChangelist",
+        "title": "Submit Changelist",
+        "category": "Checkpoint",
+        "icon": "$(check)"
+      },
+      {
+        "command": "checkpoint.moveToChangelist",
+        "title": "Move to Changelist...",
+        "category": "Checkpoint"
+      },
+      {
         "command": "checkpoint.markForAdd",
         "title": "Mark for Add",
         "category": "Checkpoint",
@@ -292,6 +321,26 @@
           "when": "false"
         },
         {
+          "command": "checkpoint.newChangelist",
+          "when": "checkpoint.enabled"
+        },
+        {
+          "command": "checkpoint.editChangelistDescription",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.deleteChangelist",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.submitChangelist",
+          "when": "false"
+        },
+        {
+          "command": "checkpoint.moveToChangelist",
+          "when": "false"
+        },
+        {
           "command": "checkpoint.markForAdd",
           "when": "false"
         },
@@ -362,9 +411,39 @@
           "command": "checkpoint.showHistory",
           "group": "1_checkpoint@3",
           "when": "scmProvider == checkpoint"
+        },
+        {
+          "command": "checkpoint.newChangelist",
+          "group": "2_changelists@1",
+          "when": "scmProvider == checkpoint"
         }
       ],
       "scm/resourceGroup/context": [
+        {
+          "command": "checkpoint.submitChangelist",
+          "group": "inline@0",
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(branch|changelist):/"
+        },
+        {
+          "command": "checkpoint.submitChangelist",
+          "group": "2_changelist@1",
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(branch|changelist):/"
+        },
+        {
+          "command": "checkpoint.editChangelistDescription",
+          "group": "2_changelist@2",
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(branch|changelist):/"
+        },
+        {
+          "command": "checkpoint.newChangelist",
+          "group": "2_changelist@3",
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^branch:/"
+        },
+        {
+          "command": "checkpoint.deleteChangelist",
+          "group": "2_changelist@4",
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^changelist:/"
+        },
         {
           "command": "checkpoint.resolveConflicts",
           "group": "1_modification",
@@ -438,12 +517,17 @@
         {
           "command": "checkpoint.unstage",
           "group": "inline@0",
-          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^branch:/"
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(branch|changelist):/"
         },
         {
           "command": "checkpoint.moveToBranch",
           "group": "2_modification@3",
-          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^branch:/"
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(branch|changelist):/"
+        },
+        {
+          "command": "checkpoint.moveToChangelist",
+          "group": "2_modification@4",
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(unstaged$|branch:|changelist:)/"
         },
         {
           "command": "checkpoint.openDiff",

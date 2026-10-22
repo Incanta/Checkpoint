@@ -123,6 +123,25 @@ public:
     const FCheckpointSourceControlChangelist &InChangelist
   );
 
+  /** Drop a changelist from the cache. Returns whether it was there. */
+  bool RemoveChangelistFromCache(
+    const FCheckpointSourceControlChangelist &InChangelist
+  );
+
+  /** Drop every cached changelist that is not in `InKeep`. */
+  void PruneChangelistCache(
+    const TSet<FCheckpointSourceControlChangelist> &InKeep
+  );
+
+  /** Take files out of whichever cached changelists list them. */
+  void RemoveFilesFromChangelists(const TArray<FString> &InFiles);
+
+  /** Move files from whichever cached changelists list them into another. */
+  void MoveFilesToChangelist(
+    const TArray<FString> &InFiles,
+    const FCheckpointSourceControlChangelist &InDestination
+  );
+
   /** Access the daemon client */
   FCheckpointDaemonClient &GetDaemonClient() {
     return DaemonClient;

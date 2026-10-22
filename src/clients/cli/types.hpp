@@ -129,9 +129,20 @@ inline void from_json(const nlohmann::json& j, FileInfo& f) {
   f.status = j.value("status", 0);
   f.staged = j.value("staged", false);
   if (j.contains("claims") && j["claims"].is_array() && !j["claims"].empty()) {
-    const auto& claim = j["claims"][0];
-    f.claimBranch = claim.value("branchName", "");
-    f.blocked = claim.value("blocking", false);
+    const auto& claims = j["claims"];
+    f.blocked = claims[0].value("blocking", false);
+    // Same rule as the daemon's destinedBranch: the open claim is where the
+    // file is being worked on now; a submitted one is where earlier work went.
+    const nlohmann::json* destined = &claims[0];
+    for (const auto& claim : claims) {
+      if (claim.is_object() && claim.value("state", "") == "OPEN") {
+        destined = &claim;
+        break;
+      }
+    }
+    if (destined->contains("branchName") && (*destined)["branchName"].is_string()) {
+      f.claimBranch = (*destined)["branchName"].get<std::string>();
+    }
   }
   if (j.contains("id") && !j["id"].is_null()) {
     f.id = j["id"].get<std::string>();
@@ -157,6 +168,84 @@ inline void from_json(const nlohmann::json& j, PendingChanges& pc) {
       pc.files[key] = fi;
     }
   }
+}
+
+// ─── Pending changelists ─────────────────────────────────────────
+
+/**
+ * A numbered, workspace-local grouping of staged files (Perforce-style). Its
+ * id is never a server changelist number.
+ */
+struct PendingChangelist {
+  int id = 0;
+  std::string description;
+  /** The branch it submits to: the domain root or an active overlay. */
+  std::string branchName;
+  /** Milliseconds since the epoch. */
+  int64_t createdAt = 0;
+};
+
+inline void from_json(const nlohmann::json& j, PendingChangelist& cl) {
+  cl.id = j.value("id", 0);
+  cl.description = j.value("description", "");
+  cl.branchName = j.value("branchName", "");
+  cl.createdAt = j.value("createdAt", (int64_t)0);
+}
+
+struct PendingChangelistState {
+  std::vector<PendingChangelist> changelists;
+  /** Repo-relative path to the id of the changelist it is in. */
+  std::map<std::string, int> assignments;
+  /** Draft description of each branch's default changelist. */
+  std::map<std::string, std::string> defaultDescriptions;
+
+  const PendingChangelist* find(int id) const {
+    for (const auto& cl : changelists) {
+      if (cl.id == id) return &cl;
+    }
+    return nullptr;
+  }
+};
+
+inline void from_json(const nlohmann::json& j, PendingChangelistState& s) {
+  if (j.contains("changelists") && j["changelists"].is_array()) {
+    for (const auto& entry : j["changelists"]) {
+      PendingChangelist cl;
+      from_json(entry, cl);
+      s.changelists.push_back(cl);
+    }
+  }
+  if (j.contains("assignments") && j["assignments"].is_object()) {
+    for (const auto& [path, id] : j["assignments"].items()) {
+      if (id.is_number_integer()) s.assignments[path] = id.get<int>();
+    }
+  }
+  if (j.contains("defaultDescriptions") && j["defaultDescriptions"].is_object()) {
+    for (const auto& [branch, desc] : j["defaultDescriptions"].items()) {
+      if (desc.is_string()) s.defaultDescriptions[branch] = desc.get<std::string>();
+    }
+  }
+}
+
+/** The branch a staged file is going to: its claim's, else the domain root. */
+inline std::string destinedBranch(const FileInfo& file,
+                                  const std::string& domainBranchName) {
+  return file.claimBranch.empty() ? domainBranchName : file.claimBranch;
+}
+
+/**
+ * Which numbered changelist a staged file is in, or 0 for its branch's
+ * default. Mirrors the daemon: an assignment to a changelist on another
+ * branch does not count.
+ */
+inline int changelistOf(const std::string& path, const FileInfo& file,
+                        const PendingChangelistState& state,
+                        const std::string& domainBranchName) {
+  auto it = state.assignments.find(path);
+  if (it == state.assignments.end()) return 0;
+  const PendingChangelist* cl = state.find(it->second);
+  if (!cl) return 0;
+  return cl->branchName == destinedBranch(file, domainBranchName) ? cl->id : 0;
 }
 
 // ─── Workspace ───────────────────────────────────────────────────

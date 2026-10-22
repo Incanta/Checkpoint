@@ -31,7 +31,7 @@ void FCheckpointSourceControlProvider::Init(bool bForceConnection) {
   if (bForceConnection && bSettingsOk) {
     // Check daemon-API compatibility before proceeding. The plugin is
     // distributed independently and its UNREAL_DAEMON_API may lag behind the
-    // installed daemon — we only hard-block when below the daemon's stated
+    // installed daemon, so we only hard-block when below the daemon's stated
     // minimum.
     {
       FString DaemonClientVersion, VersionError;
@@ -96,7 +96,7 @@ void FCheckpointSourceControlProvider::Init(bool bForceConnection) {
       LogCheckpointSourceControl,
       Log,
       TEXT(
-        "Checkpoint: No workspace configured yet — "
+        "Checkpoint: No workspace configured yet; "
         "use the settings dialog to create one"
       )
     );
@@ -106,6 +106,7 @@ void FCheckpointSourceControlProvider::Init(bool bForceConnection) {
 void FCheckpointSourceControlProvider::Close() {
   bServerAvailable = false;
   StateCache.Empty();
+  ChangelistsStateCache.Empty();
   CommandQueue.Empty();
   UserEmail.Empty();
   UserName.Empty();
@@ -402,11 +403,10 @@ bool FCheckpointSourceControlProvider::UsesLocalReadOnlyState() const {
 }
 
 bool FCheckpointSourceControlProvider::UsesChangelists() const {
-  // TODO MIKE HERE: While Checkpoint has the concept of changelists,
-  // we currently use them like commits (e.g. they have been pushed to a branch and are immutable)
-  // This setting is for creating changelists prior to submit, which we don't support yet.
-  // This likely would get supported when we introduce shelve.
-  return false;
+  // Pending changelists: workspace-local groups of staged files, each
+  // submitting to its own branch. See FCheckpointSourceControlChangelist for
+  // how they map onto Unreal's changelists.
+  return true;
 }
 
 bool FCheckpointSourceControlProvider::UsesUncontrolledChangelists() const {
@@ -505,6 +505,52 @@ FCheckpointSourceControlProvider::GetChangelistStateInternal(
     MakeShareable(new FCheckpointSourceControlChangelistState(InChangelist));
   ChangelistsStateCache.Add(InChangelist, NewState);
   return NewState;
+}
+
+bool FCheckpointSourceControlProvider::RemoveChangelistFromCache(
+  const FCheckpointSourceControlChangelist &InChangelist
+) {
+  return ChangelistsStateCache.Remove(InChangelist) > 0;
+}
+
+void FCheckpointSourceControlProvider::PruneChangelistCache(
+  const TSet<FCheckpointSourceControlChangelist> &InKeep
+) {
+  for (auto It = ChangelistsStateCache.CreateIterator(); It; ++It) {
+    if (!InKeep.Contains(It.Key())) {
+      It.RemoveCurrent();
+    }
+  }
+}
+
+void FCheckpointSourceControlProvider::RemoveFilesFromChangelists(
+  const TArray<FString> &InFiles
+) {
+  for (const FString &File : InFiles) {
+    TSharedRef<FCheckpointSourceControlState, ESPMode::ThreadSafe> FileState =
+      GetStateInternal(File);
+    for (auto &Pair : ChangelistsStateCache) {
+      Pair.Value->Files.Remove(FileState);
+    }
+  }
+}
+
+void FCheckpointSourceControlProvider::MoveFilesToChangelist(
+  const TArray<FString> &InFiles,
+  const FCheckpointSourceControlChangelist &InDestination
+) {
+  RemoveFilesFromChangelists(InFiles);
+
+  TSharedRef<FCheckpointSourceControlChangelistState, ESPMode::ThreadSafe>
+    Destination = GetChangelistStateInternal(InDestination);
+  const FDateTime Now = FDateTime::Now();
+  for (const FString &File : InFiles) {
+    TSharedRef<FCheckpointSourceControlState, ESPMode::ThreadSafe> FileState =
+      GetStateInternal(File);
+    FileState->TimeStamp = Now;
+    Destination->Files.Add(FileState);
+  }
+  Destination->TimeStamp = Now;
 }
 
 FString FCheckpointSourceControlProvider::ToRelativePath(

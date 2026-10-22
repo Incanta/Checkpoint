@@ -5,9 +5,11 @@ import { FileStatus } from "@checkpointvcs/daemon";
 import { emptyUri, headUri } from "./contentProvider";
 import type { CheckpointModel } from "./model";
 import {
+  branchFromGroupId,
   CheckpointRepository,
   CheckpointResource,
   errorMessage,
+  type ChangelistTarget,
 } from "./repository";
 import { relativeWorkspacePath } from "./util";
 import {
@@ -64,6 +66,11 @@ export function registerCommands(model: CheckpointModel): vscode.Disposable {
       const first = arg.resourceStates[0];
       if (first instanceof CheckpointResource) {
         return first.repository;
+      }
+      // An empty group, such as a changelist just created.
+      const repo = model.repositoryList.find((r) => r.ownsGroup(arg));
+      if (repo) {
+        return repo;
       }
     }
     if (arg instanceof vscode.Uri) {
@@ -544,6 +551,70 @@ export function registerCommands(model: CheckpointModel): vscode.Disposable {
       return;
     }
     await repository.moveToBranch(resolveRelPaths(repository, args));
+  });
+
+  // ── Pending changelists ───────────────────────────────────────────
+
+  /**
+   * The repository and changelist a group context command targets. Only
+   * branch groups (default changelists) and numbered changelist groups
+   * stand for a changelist.
+   */
+  async function resolveChangelistGroup(
+    arg: unknown,
+  ): Promise<
+    { repository: CheckpointRepository; target: ChangelistTarget } | undefined
+  > {
+    if (!isResourceGroup(arg)) {
+      return undefined;
+    }
+    const repository = await resolveRepository(arg);
+    const target = repository?.targetForGroup(arg.id);
+    return repository && target ? { repository, target } : undefined;
+  }
+
+  register("checkpoint.newChangelist", async (arg) => {
+    const repository = await resolveRepository(arg);
+    if (!repository) {
+      return;
+    }
+    // From a branch group's menu, the changelist is for that branch.
+    const branchName = isResourceGroup(arg)
+      ? branchFromGroupId(arg.id)
+      : undefined;
+    await repository.newChangelist(branchName);
+  });
+
+  register("checkpoint.editChangelistDescription", async (arg) => {
+    const resolved = await resolveChangelistGroup(arg);
+    if (!resolved) {
+      return;
+    }
+    await resolved.repository.editChangelistDescription(resolved.target);
+  });
+
+  register("checkpoint.deleteChangelist", async (arg) => {
+    const resolved = await resolveChangelistGroup(arg);
+    if (!resolved || resolved.target.changelistId === null) {
+      return;
+    }
+    await resolved.repository.deleteChangelist(resolved.target.changelistId);
+  });
+
+  register("checkpoint.submitChangelist", async (arg) => {
+    const resolved = await resolveChangelistGroup(arg);
+    if (!resolved) {
+      return;
+    }
+    await resolved.repository.submitChangelist(resolved.target);
+  });
+
+  register("checkpoint.moveToChangelist", async (...args) => {
+    const repository = await resolveRepository(args[0]);
+    if (!repository) {
+      return;
+    }
+    await repository.moveToChangelist(resolveRelPaths(repository, args));
   });
 
   register("checkpoint.markForAdd", async (...args) => {

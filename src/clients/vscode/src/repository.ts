@@ -3,7 +3,11 @@ import { promises as fs } from "fs";
 import * as vscode from "vscode";
 import type { LineChange } from "./staging";
 import { FileStatus, FileType } from "@checkpointvcs/daemon";
-import type { File } from "@checkpointvcs/daemon";
+import type {
+  File,
+  PendingChangelist,
+  PendingChangelistState,
+} from "@checkpointvcs/daemon";
 import { pollJob, type DaemonClient, type JobResult } from "./daemon";
 import type { CheckpointModel } from "./model";
 import {
@@ -37,10 +41,12 @@ export interface WorkspaceConfigFile {
 /**
  * Resource-group identity.
  *
- * The fixed three, plus one per branch bucket. A bucket id is
- * `branch:<name>`, which is why this is a string rather than a union: the
- * set of groups now depends on which feature branches the workspace has
- * overlaid, not just on FileStatus.
+ * The fixed three, plus one per branch bucket and one per numbered pending
+ * changelist. A bucket id is `branch:<name>` (that branch's default
+ * changelist) and a numbered changelist's is `changelist:<id>`, which is why
+ * this is a string rather than a union: the set of groups depends on which
+ * feature branches the workspace has overlaid and which changelists exist,
+ * not just on FileStatus.
  */
 export type GroupId = string;
 
@@ -57,6 +63,31 @@ export function branchFromGroupId(groupId: GroupId): string | undefined {
     ? groupId.slice("branch:".length)
     : undefined;
 }
+
+export function changelistGroupId(changelistId: number): GroupId {
+  return `changelist:${changelistId}`;
+}
+
+export function changelistFromGroupId(groupId: GroupId): number | undefined {
+  if (!groupId.startsWith("changelist:")) return undefined;
+  const id = Number(groupId.slice("changelist:".length));
+  return Number.isInteger(id) ? id : undefined;
+}
+
+/**
+ * What a submit or a move targets: a numbered pending changelist, or the
+ * default changelist of a branch (`changelistId` null).
+ */
+export interface ChangelistTarget {
+  branchName: string;
+  changelistId: number | null;
+}
+
+const NO_CHANGELISTS: PendingChangelistState = {
+  changelists: [],
+  assignments: {},
+  defaultDescriptions: {},
+};
 
 interface StatusInfo {
   /**
@@ -204,6 +235,17 @@ export class CheckpointRepository implements vscode.Disposable {
    * and disposed when they go away. Keyed by GroupId, not branch name.
    */
   private branchGroups = new Map<GroupId, vscode.SourceControlResourceGroup>();
+  /**
+   * One group per numbered pending changelist. Unlike branch groups these
+   * live as long as the changelist does, empty or not, so a freshly created
+   * changelist is visible and can be moved into.
+   */
+  private changelistGroups = new Map<
+    GroupId,
+    vscode.SourceControlResourceGroup
+  >();
+  /** The daemon's pending changelists as of the last refresh. */
+  private changelistState: PendingChangelistState = NO_CHANGELISTS;
 
   /** Pending files keyed by workspace-relative path (forward slashes). */
   private pendingFiles = new Map<string, File>();
@@ -345,6 +387,75 @@ export class CheckpointRepository implements vscode.Disposable {
     return uri.scheme === "file" && isDescendant(this.root, uri.fsPath);
   }
 
+  /**
+   * Whether a resource group is one of ours. Needed because an empty group
+   * (a new changelist) has no resource state to resolve the repository from.
+   */
+  public ownsGroup(group: vscode.SourceControlResourceGroup): boolean {
+    return (
+      group === this.conflictsGroup ||
+      group === this.unstagedGroup ||
+      group === this.localGroup ||
+      [...this.branchGroups.values()].includes(group) ||
+      [...this.changelistGroups.values()].includes(group)
+    );
+  }
+
+  /** The branches this workspace can stage to: the domain root first. */
+  public get stageableBranches(): string[] {
+    return [
+      this.config.domainBranchName,
+      ...(this.config.activeBranches ?? []),
+    ];
+  }
+
+  public get pendingChangelists(): PendingChangelist[] {
+    return this.changelistState.changelists;
+  }
+
+  /** A changelist's description: a numbered one's, or a default's draft. */
+  public descriptionOf(target: ChangelistTarget): string {
+    if (target.changelistId !== null) {
+      return (
+        this.changelistState.changelists.find(
+          (c) => c.id === target.changelistId,
+        )?.description ?? ""
+      );
+    }
+    return this.changelistState.defaultDescriptions[target.branchName] ?? "";
+  }
+
+  /** The changelist a resource group stands for, if it stands for one. */
+  public targetForGroup(groupId: GroupId): ChangelistTarget | undefined {
+    const changelistId = changelistFromGroupId(groupId);
+    if (changelistId !== undefined) {
+      const changelist = this.changelistState.changelists.find(
+        (c) => c.id === changelistId,
+      );
+      return changelist
+        ? { branchName: changelist.branchName, changelistId }
+        : undefined;
+    }
+    const branchName = branchFromGroupId(groupId);
+    return branchName !== undefined
+      ? { branchName, changelistId: null }
+      : undefined;
+  }
+
+  /** How a changelist reads in pickers and prompts. */
+  public labelFor(target: ChangelistTarget): string {
+    const onDomain = target.branchName === this.config.domainBranchName;
+    if (target.changelistId === null) {
+      return `Default changelist (${target.branchName})`;
+    }
+    const summary = firstLine(this.descriptionOf(target));
+    return (
+      `#${target.changelistId}` +
+      (summary ? ` ${summary}` : "") +
+      (onDomain ? "" : ` (${target.branchName})`)
+    );
+  }
+
   private createDebouncedRefresh(): (() => void) & { dispose: () => void } {
     const config = vscode.workspace.getConfiguration("checkpoint");
     const delay = Math.max(100, config.get<number>("autoRefreshDelay", 1000));
@@ -370,7 +481,9 @@ export class CheckpointRepository implements vscode.Disposable {
   private isRefreshExcluded(uri: vscode.Uri): boolean {
     const segments = uri.fsPath.split(/[\\/]/);
     if (segments.includes(".checkpoint")) {
-      return true;
+      // Except the pending changelists, which another client (the desktop
+      // app, the CLI) can edit without any working-tree file changing.
+      return segments[segments.length - 1] !== "pending-changelists.json";
     }
     const excluded = vscode.workspace
       .getConfiguration("checkpoint")
@@ -390,12 +503,25 @@ export class CheckpointRepository implements vscode.Disposable {
       await this.reloadWorkspaceConfig();
 
       const client = await this.model.getClient();
-      const pending = await client.workspaces.pending.refresh.query({
-        daemonId: this.daemonId,
-        workspaceId: this.workspaceId,
-      });
+      const [pending, changelists] = await Promise.all([
+        client.workspaces.pending.refresh.query({
+          daemonId: this.daemonId,
+          workspaceId: this.workspaceId,
+        }),
+        client.workspaces.pending.listChangelists
+          .query({
+            daemonId: this.daemonId,
+            workspaceId: this.workspaceId,
+          })
+          // A daemon that predates pending changelists has no such
+          // procedure; everything is then in its branch's default one.
+          .catch(() => NO_CHANGELISTS),
+      ]);
 
-      this.applyPendingFiles(new Map(Object.entries(pending?.files ?? {})));
+      this.applyPendingFiles(
+        new Map(Object.entries(pending?.files ?? {})),
+        changelists,
+      );
     } catch (error) {
       this.model.handleDaemonError("refreshing pending changes", error);
     } finally {
@@ -422,25 +548,36 @@ export class CheckpointRepository implements vscode.Disposable {
    * instance, untouched groups are never reassigned, and the decoration event
    * carries just the URIs whose badge actually changed.
    */
-  private applyPendingFiles(next: Map<string, File>): void {
+  private applyPendingFiles(
+    next: Map<string, File>,
+    nextChangelists: PendingChangelistState,
+  ): void {
     const changedUris: vscode.Uri[] = [];
     const dirtyGroups = new Set<GroupId>();
     const resources = new Map<string, CheckpointResource>();
+    // Previous rows are keyed against the changelists they were grouped
+    // with, so a file moving between changelists registers as a change even
+    // when nothing about the file itself did.
+    const previousChangelists = this.changelistState;
 
     for (const [relPath, file] of next) {
       const previous = this.pendingFiles.get(relPath);
-      const previousKey = previous ? this.renderKeyFor(previous) : undefined;
-      const key = this.renderKeyFor(file);
+      const previousKey = previous
+        ? this.renderKeyFor(previous, previousChangelists)
+        : undefined;
+      const key = this.renderKeyFor(file, nextChangelists);
 
       if (previousKey !== key) {
         changedUris.push(this.uriFor(relPath));
-        const previousBucket = previous ? this.bucketFor(previous) : undefined;
+        const previousBucket = previous
+          ? this.bucketFor(previous, previousChangelists)
+          : undefined;
         if (previousBucket) {
           dirtyGroups.add(previousBucket);
         }
       }
 
-      const bucket = this.bucketFor(file);
+      const bucket = this.bucketFor(file, nextChangelists);
       if (!bucket) {
         continue;
       }
@@ -451,7 +588,8 @@ export class CheckpointRepository implements vscode.Disposable {
       const existing = this.resources.get(relPath);
       resources.set(
         relPath,
-        existing && this.renderKeyFor(existing.file) === key
+        existing &&
+          this.renderKeyFor(existing.file, previousChangelists) === key
           ? existing
           : new CheckpointResource(this, relPath, file, bucket),
       );
@@ -462,7 +600,7 @@ export class CheckpointRepository implements vscode.Disposable {
         continue;
       }
       changedUris.push(this.uriFor(relPath));
-      const bucket = this.bucketFor(file);
+      const bucket = this.bucketFor(file, previousChangelists);
       if (bucket) {
         dirtyGroups.add(bucket);
       }
@@ -470,6 +608,10 @@ export class CheckpointRepository implements vscode.Disposable {
 
     this.pendingFiles = next;
     this.resources = resources;
+    this.changelistState = nextChangelists;
+    // Done even when no row moved: creating, renaming, or deleting an empty
+    // changelist changes the view without touching any file.
+    this.syncChangelistGroups();
 
     const baselineChanged = this.baselineMoved;
     this.baselineMoved = false;
@@ -493,6 +635,7 @@ export class CheckpointRepository implements vscode.Disposable {
       GROUP_UNSTAGED,
       GROUP_LOCAL,
       ...this.branchGroups.keys(),
+      ...this.changelistGroups.keys(),
     ]) {
       groups.set(groupId, []);
     }
@@ -525,7 +668,12 @@ export class CheckpointRepository implements vscode.Disposable {
     const count =
       (groups.get(GROUP_CONFLICTS)?.length ?? 0) +
       [...groups]
-        .filter(([id]) => id.startsWith("branch:") || id === GROUP_UNSTAGED)
+        .filter(
+          ([id]) =>
+            id.startsWith("branch:") ||
+            id.startsWith("changelist:") ||
+            id === GROUP_UNSTAGED,
+        )
         .reduce((sum, [, entries]) => sum + entries.length, 0);
     if (count !== this.lastCount) {
       this.lastCount = count;
@@ -542,6 +690,11 @@ export class CheckpointRepository implements vscode.Disposable {
     if (groupId === GROUP_UNSTAGED) return this.unstagedGroup;
     if (groupId === GROUP_LOCAL) return this.localGroup;
 
+    // Numbered changelists get their group from syncChangelistGroups, which
+    // runs before any rows are assigned, so it already exists here.
+    const changelistGroup = this.changelistGroups.get(groupId);
+    if (changelistGroup) return changelistGroup;
+
     // Branch buckets are created the first time a file is staged into them
     // and disposed in applyPendingFiles when they empty out, so the SCM view
     // never shows a bucket for a branch that is no longer overlaid.
@@ -550,7 +703,7 @@ export class CheckpointRepository implements vscode.Disposable {
       const branchName = branchFromGroupId(groupId) ?? groupId;
       group = this.sourceControl.createResourceGroup(
         groupId,
-        `Staged: ${branchName}`,
+        this.branchGroupLabel(branchName),
       );
       group.hideWhenEmpty = true;
       this.branchGroups.set(groupId, group);
@@ -560,32 +713,118 @@ export class CheckpointRepository implements vscode.Disposable {
   }
 
   /**
+   * Gives every numbered changelist a group, drops the groups of ones that
+   * are gone, and keeps labels in step with descriptions.
+   *
+   * A numbered changelist's group shows even when empty, so one just created
+   * is there to move files into, as in Perforce. VS Code orders groups by
+   * creation, which puts changelists in the order they were made.
+   */
+  private syncChangelistGroups(): void {
+    const live = new Set<GroupId>();
+    for (const changelist of [...this.changelistState.changelists].sort(
+      (a, b) => a.id - b.id,
+    )) {
+      const groupId = changelistGroupId(changelist.id);
+      live.add(groupId);
+      const label = this.labelFor({
+        branchName: changelist.branchName,
+        changelistId: changelist.id,
+      });
+      const group = this.changelistGroups.get(groupId);
+      if (!group) {
+        const created = this.sourceControl.createResourceGroup(groupId, label);
+        created.hideWhenEmpty = false;
+        this.changelistGroups.set(groupId, created);
+      } else if (group.label !== label) {
+        group.label = label;
+      }
+    }
+
+    for (const [groupId, group] of this.changelistGroups) {
+      if (!live.has(groupId)) {
+        group.dispose();
+        this.changelistGroups.delete(groupId);
+      }
+    }
+
+    for (const [groupId, group] of this.branchGroups) {
+      const label = this.branchGroupLabel(
+        branchFromGroupId(groupId) ?? groupId,
+      );
+      if (group.label !== label) {
+        group.label = label;
+      }
+    }
+  }
+
+  /** A default changelist's group label: its branch, then any draft. */
+  private branchGroupLabel(branchName: string): string {
+    const draft = firstLine(
+      this.changelistState.defaultDescriptions[branchName] ?? "",
+    );
+    return `Staged: ${branchName}` + (draft ? ` - ${draft}` : "");
+  }
+
+  /**
    * Which group a file belongs in.
    *
    * Staging is what moves a file between groups, and it does not change the
    * file's status, so this cannot be derived from FileStatus alone the way it
    * used to be. Conflicts still win: an unresolved file is not submittable
-   * whatever its staged flag says.
+   * whatever its staged flag says. A staged file is in the numbered
+   * changelist it is assigned to when that changelist is on the branch the
+   * file is destined for, and otherwise in that branch's default one, which
+   * is the daemon's changelistOf rule.
    */
-  private bucketFor(file: File): GroupId | undefined {
+  private bucketFor(
+    file: File,
+    changelists: PendingChangelistState,
+  ): GroupId | undefined {
     const info = getStatusInfo(file.status);
     if (!info) return undefined;
     if (info.group === GROUP_CONFLICTS) return GROUP_CONFLICTS;
     if (!file.staged) return info.group;
 
-    const destination =
-      destinationClaim(file)?.branchName ?? this.config.domainBranchName;
-    return branchGroupId(destination);
+    const changelistId = this.changelistOf(file, changelists);
+    if (changelistId !== null) {
+      return changelistGroupId(changelistId);
+    }
+    return branchGroupId(this.destinedBranch(file));
+  }
+
+  /** Mirrors destinedBranch in the daemon's pending-changelists util. */
+  private destinedBranch(file: File): string {
+    return destinationClaim(file)?.branchName ?? this.config.domainBranchName;
+  }
+
+  /** Mirrors changelistOf in the daemon's pending-changelists util. */
+  private changelistOf(
+    file: File,
+    changelists: PendingChangelistState,
+  ): number | null {
+    const id = changelists.assignments[file.path];
+    if (id === undefined) return null;
+    const changelist = changelists.changelists.find((c) => c.id === id);
+    if (!changelist) return null;
+    return changelist.branchName === this.destinedBranch(file) ? id : null;
   }
 
   /**
    * Identity for change detection.
    *
    * Status alone is not enough now: staging a file moves it between groups
-   * without touching its status, and so does moving it between buckets.
+   * without touching its status, and so does moving it between buckets or
+   * pending changelists.
    */
-  private renderKeyFor(file: File): string {
-    return `${file.status}|${file.staged ? 1 : 0}|${destinationClaim(file)?.branchName ?? ""}`;
+  private renderKeyFor(
+    file: File,
+    changelists: PendingChangelistState,
+  ): string {
+    const changelistId = file.staged
+      ? this.changelistOf(file, changelists)
+      : null;
+    return `${file.status}|${file.staged ? 1 : 0}|${destinationClaim(file)?.branchName ?? ""}|${changelistId ?? ""}`;
   }
 
   private uriFor(relPath: string): vscode.Uri {
@@ -761,31 +1000,48 @@ export class CheckpointRepository implements vscode.Disposable {
       return;
     }
 
-    // Submit is per-bucket: it sends exactly what is staged for one branch.
-    // Work out which bucket, and stage anything the user selected that is not
-    // staged yet, which is the common "select some rows and hit submit" path.
-    let branchName: string;
+    // Submit is per-changelist: it sends exactly what is in one numbered
+    // pending changelist, or in one branch's default changelist. Work out
+    // which, and stage anything the user selected that is not staged yet,
+    // which is the common "select some rows and hit submit" path.
+    let target: ChangelistTarget;
     let toStage: string[] = [];
 
     if (resources && resources.length > 0) {
-      const buckets = new Set(
-        resources.map(
-          (r) => branchFromGroupId(r.groupId) ?? this.config.domainBranchName,
-        ),
-      );
-      if (buckets.size > 1) {
+      const targets = new Map<string, ChangelistTarget>();
+      for (const r of resources) {
+        const t = this.targetForGroup(r.groupId) ?? {
+          branchName: this.config.domainBranchName,
+          changelistId: null,
+        };
+        targets.set(`${t.changelistId ?? ""}|${t.branchName}`, t);
+      }
+      if (targets.size > 1) {
         void vscode.window.showErrorMessage(
-          "Checkpoint: those files are staged for different branches. Submit one branch at a time.",
+          "Checkpoint: those files are in different changelists. Submit one changelist at a time.",
         );
         return;
       }
-      branchName = [...buckets][0]!;
+      target = [...targets.values()][0]!;
       toStage = resources.filter((r) => !r.file.staged).map((r) => r.relPath);
     } else {
-      const candidates = [...this.branchGroups.entries()]
-        .filter(([, g]) => g.resourceStates.length > 0)
-        .map(([id]) => branchFromGroupId(id)!)
-        .sort();
+      const candidates: ChangelistTarget[] = [
+        ...[...this.branchGroups.entries()]
+          .filter(([, g]) => g.resourceStates.length > 0)
+          .map(([id]) => ({
+            branchName: branchFromGroupId(id)!,
+            changelistId: null,
+          }))
+          .sort((a, b) => a.branchName.localeCompare(b.branchName)),
+        ...this.changelistState.changelists
+          .filter(
+            (c) =>
+              (this.changelistGroups.get(changelistGroupId(c.id))
+                ?.resourceStates.length ?? 0) > 0,
+          )
+          .sort((a, b) => a.id - b.id)
+          .map((c) => ({ branchName: c.branchName, changelistId: c.id })),
+      ];
 
       if (candidates.length === 0) {
         // Nothing staged anywhere. Offer the unstaged rows as the selection,
@@ -798,25 +1054,69 @@ export class CheckpointRepository implements vscode.Disposable {
           );
           return;
         }
-        branchName = this.config.domainBranchName;
+        target = {
+          branchName: this.config.domainBranchName,
+          changelistId: null,
+        };
         toStage = unstaged.map((r) => r.relPath);
       } else if (candidates.length === 1) {
-        branchName = candidates[0]!;
+        target = candidates[0]!;
       } else {
-        const picked = await vscode.window.showQuickPick(candidates, {
-          placeHolder: "Which branch's staged changes should be submitted?",
-          ignoreFocusOut: true,
-        });
+        const picked = await vscode.window.showQuickPick(
+          candidates.map((c) => ({
+            label: this.labelFor(c),
+            description:
+              c.changelistId === null
+                ? firstLine(this.descriptionOf(c))
+                : c.branchName,
+            target: c,
+          })),
+          {
+            placeHolder: "Which changelist should be submitted?",
+            ignoreFocusOut: true,
+          },
+        );
         if (!picked) return;
-        branchName = picked;
+        target = picked.target;
       }
     }
 
-    let message = this.sourceControl.inputBox.value.trim();
+    await this.submitTarget(target, toStage);
+  }
+
+  /**
+   * Submits one changelist (a numbered one, or a branch's default), the
+   * target of the Submit Changelist command on a group.
+   */
+  public async submitChangelist(target: ChangelistTarget): Promise<void> {
+    if (this.conflictsGroup.resourceStates.length > 0) {
+      void vscode.window.showErrorMessage(
+        "Checkpoint: resolve the conflicted files before submitting.",
+      );
+      return;
+    }
+    await this.submitTarget(target, []);
+  }
+
+  private async submitTarget(
+    target: ChangelistTarget,
+    toStage: string[],
+  ): Promise<void> {
+    const { branchName, changelistId } = target;
+    const name =
+      changelistId !== null
+        ? `changelist #${changelistId} to "${branchName}"`
+        : `"${branchName}"`;
+
+    // The SCM input box wins when the user typed into it; otherwise ask,
+    // starting from the changelist's description.
+    const fromInputBox = this.sourceControl.inputBox.value.trim();
+    let message = fromInputBox;
     if (!message) {
       const input = await vscode.window.showInputBox({
-        prompt: `Submit staged changes to "${branchName}"`,
+        prompt: `Submit ${name}`,
         placeHolder: "Describe your changes",
+        value: this.descriptionOf(target),
         ignoreFocusOut: true,
       });
       if (input === undefined || input.trim() === "") {
@@ -832,7 +1132,7 @@ export class CheckpointRepository implements vscode.Disposable {
             daemonId: this.daemonId,
             workspaceId: this.workspaceId,
             paths: toStage,
-            branchName,
+            ...(changelistId !== null ? { changelistId } : { branchName }),
           });
         }
 
@@ -840,13 +1140,15 @@ export class CheckpointRepository implements vscode.Disposable {
           daemonId: this.daemonId,
           workspaceId: this.workspaceId,
           message,
-          branchName,
+          ...(changelistId !== null ? { changelistId } : { branchName }),
         });
       });
-      this.sourceControl.inputBox.value = "";
+      if (fromInputBox) {
+        this.sourceControl.inputBox.value = "";
+      }
       this.baselineMoved = true;
       void vscode.window.showInformationMessage(
-        `Checkpoint: submitted to "${branchName}".`,
+        `Checkpoint: submitted ${name}.`,
       );
     } catch (error) {
       void vscode.window.showErrorMessage(
@@ -854,6 +1156,204 @@ export class CheckpointRepository implements vscode.Disposable {
       );
     }
 
+    await this.refresh();
+  }
+
+  // ─── Pending changelists ───────────────────────────────────────────
+
+  /**
+   * Asks which branch a new changelist is for. Only asks when there is a
+   * choice, which is when the workspace has feature branches overlaid.
+   */
+  private async pickBranch(placeHolder: string): Promise<string | undefined> {
+    const branches = this.stageableBranches;
+    if (branches.length < 2) {
+      return branches[0];
+    }
+    return vscode.window.showQuickPick(branches, {
+      placeHolder,
+      ignoreFocusOut: true,
+    });
+  }
+
+  /**
+   * Prompts for a description (and a branch, when overlays exist) and
+   * creates an empty numbered changelist. `branchName` skips the branch
+   * prompt.
+   */
+  public async newChangelist(
+    branchName?: string,
+  ): Promise<PendingChangelist | undefined> {
+    const description = await vscode.window.showInputBox({
+      prompt: "Description for the new pending changelist",
+      placeHolder: "Describe the changes this changelist will hold",
+      ignoreFocusOut: true,
+    });
+    if (description === undefined) {
+      return undefined;
+    }
+
+    const branch =
+      branchName ?? (await this.pickBranch("Which branch is it for?"));
+    if (!branch) {
+      return undefined;
+    }
+
+    let created: PendingChangelist | undefined;
+    try {
+      const client = await this.model.getClient();
+      created = await client.workspaces.pending.createChangelist.mutate({
+        daemonId: this.daemonId,
+        workspaceId: this.workspaceId,
+        description: description.trim(),
+        branchName: branch,
+      });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Checkpoint: creating the changelist failed. ${errorMessage(error)}`,
+      );
+    }
+    await this.refresh();
+    return created;
+  }
+
+  public async editChangelistDescription(
+    target: ChangelistTarget,
+  ): Promise<void> {
+    const description = await vscode.window.showInputBox({
+      prompt: `Description for ${this.labelFor(target)}`,
+      value: this.descriptionOf(target),
+      ignoreFocusOut: true,
+    });
+    if (description === undefined) {
+      return;
+    }
+
+    try {
+      const client = await this.model.getClient();
+      await client.workspaces.pending.setChangelistDescription.mutate({
+        daemonId: this.daemonId,
+        workspaceId: this.workspaceId,
+        description: description.trim(),
+        ...(target.changelistId !== null
+          ? { changelistId: target.changelistId }
+          : { branchName: target.branchName }),
+      });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Checkpoint: editing the description failed. ${errorMessage(error)}`,
+      );
+    }
+    await this.refresh();
+  }
+
+  /** Deletes a numbered changelist; its files stay staged, in the default. */
+  public async deleteChangelist(changelistId: number): Promise<void> {
+    const target = this.targetForGroup(changelistGroupId(changelistId));
+    if (!target) {
+      return;
+    }
+    const confirm = await vscode.window.showWarningMessage(
+      `Delete pending changelist ${this.labelFor(target)}?`,
+      {
+        modal: true,
+        detail: `Its files stay staged and move to the default changelist of "${target.branchName}".`,
+      },
+      "Delete",
+    );
+    if (confirm !== "Delete") {
+      return;
+    }
+
+    try {
+      const client = await this.model.getClient();
+      await client.workspaces.pending.deleteChangelist.mutate({
+        daemonId: this.daemonId,
+        workspaceId: this.workspaceId,
+        changelistId,
+      });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Checkpoint: deleting the changelist failed. ${errorMessage(error)}`,
+      );
+    }
+    await this.refresh();
+  }
+
+  /**
+   * Moves files into a changelist the user picks: a branch's default one, a
+   * numbered one, or a new one. Unstaged files are staged on the way, since
+   * only staged files belong to a changelist.
+   */
+  public async moveToChangelist(relPaths: string[]): Promise<void> {
+    if (relPaths.length === 0) {
+      return;
+    }
+
+    type Item = vscode.QuickPickItem & { target?: ChangelistTarget };
+    const items: Item[] = [];
+    for (const branchName of this.stageableBranches) {
+      const target: ChangelistTarget = { branchName, changelistId: null };
+      items.push({
+        label: this.labelFor(target),
+        description: firstLine(this.descriptionOf(target)),
+        target,
+      });
+    }
+    const numbered = [...this.changelistState.changelists].sort(
+      (a, b) => a.id - b.id,
+    );
+    if (numbered.length > 0) {
+      items.push({ label: "", kind: vscode.QuickPickItemKind.Separator });
+      for (const c of numbered) {
+        const target: ChangelistTarget = {
+          branchName: c.branchName,
+          changelistId: c.id,
+        };
+        items.push({
+          label: this.labelFor(target),
+          description: c.branchName,
+          target,
+        });
+      }
+    }
+    items.push({ label: "", kind: vscode.QuickPickItemKind.Separator });
+    items.push({ label: "$(add) New changelist..." });
+
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: "Move to which changelist?",
+      ignoreFocusOut: true,
+    });
+    if (!picked) {
+      return;
+    }
+
+    let target = picked.target;
+    if (!target) {
+      const created = await this.newChangelist();
+      if (!created) {
+        return;
+      }
+      target = { branchName: created.branchName, changelistId: created.id };
+    }
+
+    try {
+      const client = await this.model.getClient();
+      // Staging into a branch's default clears any numbered assignment, and
+      // staging into a numbered one targets that changelist's branch.
+      await client.workspaces.pending.stage.mutate({
+        daemonId: this.daemonId,
+        workspaceId: this.workspaceId,
+        paths: relPaths,
+        ...(target.changelistId !== null
+          ? { changelistId: target.changelistId }
+          : { branchName: target.branchName, changelistId: null }),
+      });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Checkpoint: move failed. ${errorMessage(error)}`,
+      );
+    }
     await this.refresh();
   }
 
@@ -1500,7 +2000,16 @@ export class CheckpointRepository implements vscode.Disposable {
     for (const d of this.disposables) {
       d.dispose();
     }
+    for (const group of this.changelistGroups.values()) {
+      group.dispose();
+    }
+    this.changelistGroups.clear();
   }
+}
+
+/** The first line of a description, for labels. */
+function firstLine(text: string): string {
+  return text.split(/\r?\n/, 1)[0]!.trim();
 }
 
 export function errorMessage(error: unknown): string {
