@@ -47,6 +47,11 @@ export interface UpdateCheckResult {
   checked: boolean;
   currentVersion: string;
   latestVersion: string | null;
+  /**
+   * Release tag holding latestVersion's bundles. Staging needs it: a nightly
+   * lives on the rolling tag, not on `v<version>`.
+   */
+  latestReleaseTag: string | null;
   updateAvailable: boolean;
   notified: boolean;
   reason?: string;
@@ -78,10 +83,23 @@ export function isUpdateCheckEnabled(): boolean {
   return readConfig<boolean>("enabled", true) !== false;
 }
 
+/**
+ * The channel this instance follows.
+ *
+ * A bundle deployment in channel mode already chose its channel: the runtime
+ * bootstrap boots whatever CHECKPOINT_BUNDLE_CHANNEL points at and passes that
+ * variable through to this process. Watching any other channel would compare
+ * the running build against the wrong manifest (a nightly against the latest
+ * release reads as "up to date") and stage from the wrong release tag. Config
+ * only decides for deployments the bootstrap does not drive.
+ */
 export function getUpdateChannel(): "release" | "nightly" {
-  return readConfig<string>("channel", "release") === "nightly"
-    ? "nightly"
-    : "release";
+  const fromRuntime =
+    process.env.CHECKPOINT_BUNDLE_MODE === "channel"
+      ? process.env.CHECKPOINT_BUNDLE_CHANNEL
+      : undefined;
+  const channel = fromRuntime || readConfig<string>("channel", "release");
+  return channel === "nightly" ? "nightly" : "release";
 }
 
 export function getCheckIntervalMs(): number {
@@ -249,6 +267,7 @@ export async function checkForServerUpdate(
     checked: false,
     currentVersion: SERVER_VERSION,
     latestVersion: null,
+    latestReleaseTag: null,
     updateAvailable: false,
     notified: false,
   };
@@ -273,7 +292,7 @@ export async function checkForServerUpdate(
 
 async function runUpdateCheck(
   db: PrismaClient,
-  base: UpdateCheckResult,
+  initial: UpdateCheckResult,
 ): Promise<UpdateCheckResult> {
   const url = getManifestUrl();
   let manifest: ChannelManifest | null;
@@ -282,7 +301,7 @@ async function runUpdateCheck(
     manifest = await fetchManifest(url);
   } catch (err: unknown) {
     Logger.warn(`[Updates] Could not read ${url}: ${String(err)}`);
-    return { ...base, reason: "manifest unreachable" };
+    return { ...initial, reason: "manifest unreachable" };
   }
 
   await db.instanceSettings.updateMany({
@@ -290,14 +309,26 @@ async function runUpdateCheck(
     data: { lastUpdateCheckAt: new Date() },
   });
 
-  const latestVersion = manifest?.components?.server?.version ?? null;
+  const server = manifest?.components?.server;
+  const latestVersion = server?.version ?? null;
   if (!latestVersion) {
     return {
-      ...base,
+      ...initial,
       checked: true,
       reason: "manifest carries no server version",
     };
   }
+
+  // Older manifests carry no releaseTag; fall back the same way
+  // scripts/build-channel-manifest.js picks one.
+  const base: UpdateCheckResult = {
+    ...initial,
+    latestReleaseTag:
+      server?.releaseTag ??
+      (getUpdateChannel() === "nightly"
+        ? readConfig<string>("nightly-tag", "nightly")
+        : `v${latestVersion}`),
+  };
 
   const updateAvailable = compareVersions(latestVersion, SERVER_VERSION) > 0;
 
@@ -352,8 +383,6 @@ async function runUpdateCheck(
       reason: "no recipients",
     };
   }
-
-  const server = manifest?.components?.server;
 
   // A pinned or air-gapped deployment can see the update but must not be told
   // to click Install: its version comes from its configuration.

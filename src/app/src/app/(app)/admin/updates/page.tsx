@@ -222,7 +222,10 @@ export default function AdminUpdatesPage(): React.ReactElement {
                   onClick={() => {
                     setError(null);
                     setBusy("download");
-                    download.mutate({ version: data.latestVersion! });
+                    download.mutate({
+                      version: data.latestVersion!,
+                      releaseTag: data.latestReleaseTag,
+                    });
                   }}
                 >
                   {staging
@@ -240,7 +243,10 @@ export default function AdminUpdatesPage(): React.ReactElement {
                   onClick={() => {
                     setError(null);
                     setBusy("install");
-                    install.mutate({ version: data.latestVersion! });
+                    install.mutate({
+                      version: data.latestVersion!,
+                      releaseTag: data.latestReleaseTag,
+                    });
                   }}
                 >
                   Install and restart

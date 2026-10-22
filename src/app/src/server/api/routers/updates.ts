@@ -107,6 +107,7 @@ export const updatesRouter = createTRPCRouter({
 
       // What is available.
       latestVersion,
+      latestReleaseTag: check?.latestReleaseTag ?? null,
       updateAvailable: check?.updateAvailable ?? false,
       staged:
         latestVersion && bundleDeployment
