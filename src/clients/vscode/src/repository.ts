@@ -218,6 +218,13 @@ export class CheckpointResource implements vscode.SourceControlResourceState {
   }
 }
 
+/** An untracked folder's non-ignored files and subfolders. */
+interface UntrackedFolderContents {
+  files: Map<string, File>;
+  /** The folder itself and every non-empty subfolder. */
+  folders: string[];
+}
+
 interface SyncStatusSummary {
   upToDate: boolean;
   localChangelistNumber: number;
@@ -249,6 +256,17 @@ export class CheckpointRepository implements vscode.Disposable {
 
   /** Pending files keyed by workspace-relative path (forward slashes). */
   private pendingFiles = new Map<string, File>();
+  /**
+   * The contents of the untracked folders the daemon reports as single
+   * collapsed rows, keyed by that folder. `null` means the folder holds more
+   * than `checkpoint.untrackedFolderFileLimit` entries and stays collapsed.
+   * Entries are dropped when anything under the folder changes on disk.
+   */
+  private folderContents = new Map<string, UntrackedFolderContents | null>();
+  /** Bumped on every folderContents invalidation, to discard stale listings. */
+  private folderContentsGeneration = 0;
+  /** Untracked folders whose files are listed individually, for decorations. */
+  private untrackedFolders = new Set<string>();
   /**
    * The resource state currently handed to VS Code, keyed the same way.
    * Instances are reused across refreshes so the SCM tree only re-renders rows
@@ -336,6 +354,9 @@ export class CheckpointRepository implements vscode.Disposable {
       new vscode.RelativePattern(rootUri, "**/*"),
     );
     const onFsEvent = (uri: vscode.Uri): void => {
+      // Before the exclusion check: a listing is stale whether or not the
+      // change is worth an automatic refresh.
+      this.invalidateFolderContents(uri);
       if (this.isRefreshExcluded(uri)) {
         return;
       }
@@ -391,6 +412,15 @@ export class CheckpointRepository implements vscode.Disposable {
 
   public getPendingFile(relPath: string): File | undefined {
     return this.pendingFiles.get(relPath);
+  }
+
+  /**
+   * Whether the path is an untracked folder whose files are listed
+   * individually. Such a folder has no pending row of its own, but should
+   * still read as untracked in the explorer.
+   */
+  public isUntrackedFolder(relPath: string): boolean {
+    return this.untrackedFolders.has(relPath);
   }
 
   public containsUri(uri: vscode.Uri): boolean {
@@ -530,10 +560,14 @@ export class CheckpointRepository implements vscode.Disposable {
           .catch(() => NO_CHANGELISTS),
       ]);
 
-      this.applyPendingFiles(
-        new Map(Object.entries(pending?.files ?? {})),
-        changelists,
-      );
+      if (ignoreRulesChanged) {
+        this.folderContents.clear();
+        this.folderContentsGeneration++;
+      }
+      const files = new Map(Object.entries(pending?.files ?? {}));
+      await this.expandUntrackedFolders(client, files);
+
+      this.applyPendingFiles(files, changelists);
 
       if (ignoreRulesChanged) {
         this.model.notifyIgnoreRulesChanged(this);
@@ -550,6 +584,161 @@ export class CheckpointRepository implements vscode.Disposable {
       }
     }
     this.updateStatusBar();
+  }
+
+  /**
+   * Replaces each collapsed untracked folder row with the files inside it.
+   *
+   * The daemon reports a folder holding no tracked files as one row, which
+   * the SCM view can only draw as a file and which can only be acted on as a
+   * whole. Listing its files instead lets the tree view show a real folder
+   * and lets single files be marked for add, staged, or moved into a
+   * changelist. The listing comes from the same one-level
+   * `getDirectoryPending` the desktop app uses to expand a folder, walked
+   * level by level (each level is one batched request).
+   *
+   * Only `Local` folders are expanded. A folder marked for add as a whole
+   * stays one row: its files are not individually marked, so listing them
+   * would show actions that do not apply to them.
+   */
+  private async expandUntrackedFolders(
+    client: DaemonClient,
+    files: Map<string, File>,
+  ): Promise<void> {
+    const limit = vscode.workspace
+      .getConfiguration("checkpoint")
+      .get<number>("untrackedFolderFileLimit", 5000);
+
+    const folders = [...files]
+      .filter(
+        ([, file]) =>
+          file.type === FileType.Directory && file.status === FileStatus.Local,
+      )
+      .map(([relPath]) => relPath);
+
+    for (const folder of this.folderContents.keys()) {
+      if (!folders.includes(folder)) {
+        this.folderContents.delete(folder);
+      }
+    }
+
+    const nextUntrackedFolders = new Set<string>();
+    if (limit > 0) {
+      const generation = this.folderContentsGeneration;
+      const missing = folders.filter((f) => !this.folderContents.has(f));
+      const listed = await Promise.all(
+        missing.map((folder) =>
+          this.listUntrackedFolder(client, folder, limit),
+        ),
+      );
+      // A change on disk during the listing makes it stale; use it for this
+      // refresh, but list again next time.
+      if (generation === this.folderContentsGeneration) {
+        missing.forEach((folder, i) =>
+          this.folderContents.set(folder, listed[i]!),
+        );
+      }
+
+      const fresh = new Map(missing.map((folder, i) => [folder, listed[i]]));
+      for (const folder of folders) {
+        const contents = fresh.has(folder)
+          ? fresh.get(folder)
+          : this.folderContents.get(folder);
+        if (!contents) {
+          continue;
+        }
+        files.delete(folder);
+        for (const [relPath, file] of contents.files) {
+          // A file staged from inside the folder already has its own row.
+          if (!files.has(relPath)) {
+            files.set(relPath, file);
+          }
+        }
+        for (const sub of contents.folders) {
+          nextUntrackedFolders.add(sub);
+        }
+      }
+    } else {
+      this.folderContents.clear();
+    }
+
+    const changed = [
+      ...[...nextUntrackedFolders].filter((f) => !this.untrackedFolders.has(f)),
+      ...[...this.untrackedFolders].filter((f) => !nextUntrackedFolders.has(f)),
+    ];
+    this.untrackedFolders = nextUntrackedFolders;
+    if (changed.length > 0) {
+      this.model.notifyRepositoryChanged(
+        this,
+        changed.map((f) => this.uriFor(f)),
+      );
+    }
+  }
+
+  /**
+   * Lists an untracked folder's files, or returns null when it holds more
+   * than `limit` entries (files and subfolders).
+   */
+  private async listUntrackedFolder(
+    client: DaemonClient,
+    folder: string,
+    limit: number,
+  ): Promise<UntrackedFolderContents | null> {
+    const contents: UntrackedFolderContents = {
+      files: new Map(),
+      folders: [folder],
+    };
+    let budget = limit;
+    let level = [folder];
+
+    while (level.length > 0) {
+      const results = await Promise.all(
+        level.map((dir) =>
+          client.workspaces.pending.getDirectoryPending.query({
+            daemonId: this.daemonId,
+            workspaceId: this.workspaceId,
+            path: dir,
+          }),
+        ),
+      );
+
+      const nextLevel: string[] = [];
+      for (const [i, { children }] of results.entries()) {
+        for (const child of children) {
+          if (--budget < 0) {
+            return null;
+          }
+          const relPath = `${level[i]}/${child.path}`;
+          if (child.type === FileType.Directory) {
+            nextLevel.push(relPath);
+            contents.folders.push(relPath);
+          } else {
+            contents.files.set(relPath, { ...child, path: relPath });
+          }
+        }
+      }
+      level = nextLevel;
+    }
+
+    return contents;
+  }
+
+  /** Drops the listings of the untracked folders a change on disk touches. */
+  private invalidateFolderContents(uri: vscode.Uri): void {
+    if (this.folderContents.size === 0) {
+      return;
+    }
+    const relPath = relativeWorkspacePath(this.root, uri.fsPath);
+    let invalidated = false;
+    for (const folder of this.folderContents.keys()) {
+      if (relPath === folder || relPath.startsWith(`${folder}/`)) {
+        this.folderContents.delete(folder);
+        invalidated = true;
+      }
+    }
+    if (invalidated) {
+      this.folderContentsGeneration++;
+    }
   }
 
   /**

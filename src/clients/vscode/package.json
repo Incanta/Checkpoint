@@ -589,6 +589,43 @@
           "group": "2_history@1",
           "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
         }
+      ],
+      "scm/resourceFolder/context": [
+        {
+          "command": "checkpoint.markForAdd",
+          "group": "inline@1",
+          "when": "scmProvider == checkpoint && scmResourceGroup == local"
+        },
+        {
+          "command": "checkpoint.markForAdd",
+          "group": "1_modification@1",
+          "when": "scmProvider == checkpoint && scmResourceGroup == local"
+        },
+        {
+          "command": "checkpoint.stage",
+          "group": "inline@0",
+          "when": "scmProvider == checkpoint && scmResourceGroup == unstaged"
+        },
+        {
+          "command": "checkpoint.unstage",
+          "group": "inline@0",
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(branch|changelist):/"
+        },
+        {
+          "command": "checkpoint.revert",
+          "group": "1_modification@2",
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceGroup != local"
+        },
+        {
+          "command": "checkpoint.moveToBranch",
+          "group": "2_modification@3",
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(branch|changelist):/"
+        },
+        {
+          "command": "checkpoint.moveToChangelist",
+          "group": "2_modification@4",
+          "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(unstaged$|branch:|changelist:)/"
+        }
       ]
     },
     "configuration": {
@@ -621,6 +658,12 @@
             "node_modules"
           ],
           "description": "Directory names whose file changes never trigger an automatic refresh. Matched against any path segment. Paths under .checkpoint are always excluded."
+        },
+        "checkpoint.untrackedFolderFileLimit": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 0,
+          "description": "The daemon reports a folder holding no tracked files as a single row. Folders with up to this many files and subfolders are listed file by file instead, so single files can be marked for add or staged. Larger folders stay a single row. Set to 0 to never list them."
         },
         "checkpoint.syncStatusInterval": {
           "type": "number",

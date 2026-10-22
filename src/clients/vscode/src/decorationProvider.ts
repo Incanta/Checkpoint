@@ -200,7 +200,10 @@ export class CheckpointDecorationProvider
     const relPath = relativeWorkspacePath(repository.root, uri.fsPath);
     const file = repository.getPendingFile(relPath);
     if (!file) {
-      return undefined;
+      // An untracked folder listed file by file has no row of its own.
+      return repository.isUntrackedFolder(relPath)
+        ? this.untrackedFolderDecoration()
+        : undefined;
     }
 
     const info = getStatusInfo(file.status);
@@ -216,6 +219,18 @@ export class CheckpointDecorationProvider
       // (potentially huge) untracked set.
       propagate: file.status !== FileStatus.Local,
     };
+  }
+
+  /** Looks the same as the collapsed folder row it replaces. */
+  private untrackedFolderDecoration(): vscode.FileDecoration | undefined {
+    const info = getStatusInfo(FileStatus.Local);
+    return info
+      ? {
+          badge: info.badge,
+          color: new vscode.ThemeColor(info.colorId),
+          tooltip: `Checkpoint: ${info.label}`,
+        }
+      : undefined;
   }
 
   public dispose(): void {

@@ -15,6 +15,7 @@ import { DaemonManager } from "../../../core/daemon/src/daemon-manager.js";
 import { matchesPattern } from "../../../core/daemon/src/file-status.js";
 import {
   FileStatus,
+  FileType,
   type Workspace,
 } from "../../../core/daemon/src/types/index.js";
 
@@ -216,6 +217,42 @@ describe("getDirectoryPending", () => {
     // Every file under Content/ is ignored, so the directory contributes
     // nothing to the pending listing.
     expect(children.map((c) => c.path).sort()).toEqual(["Source"]);
+  });
+});
+
+describe("getDirectoryPending inside an untracked folder", () => {
+  // The VS Code extension walks a collapsed untracked folder level by level
+  // with this call to list its files, so it relies on exactly this shape.
+  it("lists bare names, types subfolders, and skips empty and ignored entries", async () => {
+    await write(".chkignore", `*.obj${NL}`);
+    await write("Source/Game.Build.cs");
+    await write("Source/Game/Game.cpp");
+    await write("Source/Game/Game.obj");
+    await write("Source/Junk/only.obj");
+    await mkdir(path.join(workspacePath, "Source/Empty"), { recursive: true });
+
+    await manager.registerWorkspace(workspace, { watch: false });
+
+    const top = await manager.getDirectoryPending(
+      workspace.id,
+      workspace,
+      "Source",
+    );
+    expect(
+      top.children
+        .map((c) => [c.path, c.type === FileType.Directory, c.status])
+        .sort(),
+    ).toEqual([
+      ["Game", true, FileStatus.Local],
+      ["Game.Build.cs", false, FileStatus.Local],
+    ]);
+
+    const nested = await manager.getDirectoryPending(
+      workspace.id,
+      workspace,
+      "Source/Game",
+    );
+    expect(nested.children.map((c) => c.path)).toEqual(["Game.cpp"]);
   });
 });
 
