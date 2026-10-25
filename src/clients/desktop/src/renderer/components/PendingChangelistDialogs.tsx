@@ -3,36 +3,28 @@ import { Dialog } from "primereact/dialog";
 import { Button } from "./ui";
 import { PendingFileTree, type Bucket } from "./StagedChangesTree";
 
+// PrimeReact ships no base theme here, so the Dialog gets its padding, borders,
+// and close button from these passthrough classes (matching SettingsDialog).
 const dialogPt = {
   root: {
-    style: {
-      backgroundColor: "var(--color-bg-secondary)",
-      border: "1px solid var(--color-border-default)",
-      borderRadius: "0.5rem",
-      overflow: "hidden",
-    },
+    className:
+      "rounded-lg border border-[var(--color-border-default)] shadow-xl overflow-hidden",
   },
   header: {
-    style: {
-      backgroundColor: "var(--color-bg-secondary)",
-      color: "var(--color-text-primary)",
-      fontWeight: 600,
-      borderBottom: "1px solid var(--color-border-default)",
-    },
+    className:
+      "flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-5 py-3.5 text-base font-semibold text-[var(--color-text-primary)]",
   },
   content: {
-    style: {
-      backgroundColor: "var(--color-bg-secondary)",
-      color: "var(--color-text-secondary)",
-      padding: "1.25rem 1.5rem",
-    },
+    className:
+      "bg-[var(--color-bg-secondary)] px-5 py-4 text-[var(--color-text-secondary)]",
   },
   footer: {
-    style: {
-      backgroundColor: "var(--color-bg-secondary)",
-      borderTop: "1px solid var(--color-border-default)",
-      padding: "0.75rem",
-    },
+    className:
+      "border-t border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-5 py-3.5",
+  },
+  closeButton: {
+    className:
+      "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-bg-overlay)] hover:text-[var(--color-text-primary)]",
   },
 };
 
