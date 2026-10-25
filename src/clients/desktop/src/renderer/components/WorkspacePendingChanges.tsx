@@ -180,6 +180,11 @@ export default function WorkspacePendingChanges() {
   );
 
   const [selection, setSelection] = useState<PendingSelection | null>(null);
+  // The file the diff editor was last asked to show. Once it is no longer
+  // pending (reverted, submitted), the editor clears as if it were deselected.
+  const [diffPath, setDiffPath] = useState<string | null>(null);
+  const showDiff =
+    workspaceDiff !== null && diffPath !== null && ownRows.has(diffPath);
   const [layout, setLayout] = useState<DiffLayout>(readLayout);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -339,6 +344,7 @@ export default function WorkspacePendingChanges() {
       setSelection(next);
       // Directories have nothing to diff; they only stand in for their files.
       if (clicked && !clicked.isDirectory) {
+        setDiffPath(clicked.path);
         ipc.sendMessage("workspace:diff:file", { path: clicked.path });
       }
     },
@@ -484,7 +490,7 @@ export default function WorkspacePendingChanges() {
     </div>
   );
 
-  const diffPanel = workspaceDiff ? (
+  const diffPanel = showDiff ? (
     <div className={styles.Editor} ref={setMonacoHost} />
   ) : (
     <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg-secondary)] text-sm text-[var(--color-text-muted)]">
