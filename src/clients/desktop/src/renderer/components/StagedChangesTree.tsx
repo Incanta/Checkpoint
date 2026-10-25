@@ -342,8 +342,18 @@ function Row(props: RowProps) {
                 ? " "
                 : (node.name.split(".").pop()?.toLowerCase() ?? "")
             }
+            link={!!node.file?.link}
           />
-          <span className="truncate">{node.name}</span>
+          <span
+            className="truncate"
+            title={
+              node.file?.link
+                ? `Link to ${node.file.link.target || "an unknown target"}`
+                : undefined
+            }
+          >
+            {node.name}
+          </span>
         </span>
 
         {node.file && marker && (

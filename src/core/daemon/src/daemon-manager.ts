@@ -48,6 +48,7 @@ import {
 import { groupByKey, workspacePathKey } from "./util/volume.js";
 import type { StateDelta } from "./util/state-delta.js";
 import { PathIndex, pathsUnderAny } from "./util/path-index.js";
+import { isDirectoryLink, readLinkInfo } from "./util/links.js";
 import {
   scanWorkspaceIgnoreFiles,
   buildIgnoreCacheFromPatterns,
@@ -617,7 +618,15 @@ export class DaemonManager {
           continue;
         }
 
-        if (entry.isFile() || entry.isSymbolicLink()) {
+        if (entry.isFile()) {
+          return true;
+        }
+
+        // A link to a folder is never submitted (see util/links.ts).
+        if (
+          entry.isSymbolicLink() &&
+          !(await isDirectoryLink(path.join(fullDir, entry.name)))
+        ) {
           return true;
         }
 
@@ -759,10 +768,22 @@ export class DaemonManager {
           // Check if the file is untracked (Local)
           const stateFile = workspaceState?.files[relativePath];
           if (!stateFile) {
-            const stat = await fs.stat(path.join(fullDir, entry.name));
+            const fullPath = path.join(fullDir, entry.name);
+            const link = entry.isSymbolicLink()
+              ? await readLinkInfo(fullPath)
+              : undefined;
+            // A link to a folder is never a pending change (util/links.ts).
+            if (link?.directory) continue;
+            let stat: Stats;
+            try {
+              stat = await fs.lstat(fullPath);
+            } catch {
+              continue;
+            }
             childrenMap.set(entry.name, {
+              ...(link && { link }),
               path: entry.name,
-              type: FileType.Text,
+              type: link ? FileType.Symlink : FileType.Text,
               size: stat.size,
               modifiedAt: stat.mtimeMs,
               status: FileStatus.Local,
@@ -888,20 +909,25 @@ export class DaemonManager {
     for (let i = 0; i < modifications.length; i += CONCURRENCY) {
       const batch = modifications.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
-        batch.map(async (mod) => {
+        batch.map(async (mod): Promise<ClassifiedMod | null> => {
           const normalizedPath = mod.path
             .replace(/^[/\\]/, "")
             .replace(/\\/g, "/");
           const fullPath = path.join(workspace.localPath, normalizedPath);
           try {
-            const stat = await fs.stat(fullPath);
+            // lstat: a link is never followed into what it points at.
+            const stat = await fs.lstat(fullPath);
+            if (stat.isSymbolicLink() && (await isDirectoryLink(fullPath))) {
+              // A link to a folder is never submitted (see util/links.ts).
+              return null;
+            }
             return { mod, normalizedPath, isDir: stat.isDirectory() };
           } catch {
             return { mod, normalizedPath, isDir: false };
           }
         }),
       );
-      for (const r of results) classified.push(r);
+      for (const r of results) if (r) classified.push(r);
     }
 
     // Process non-directory modifications (the vast majority). A path that
@@ -932,6 +958,12 @@ export class DaemonManager {
 
         if (entry.isDirectory()) {
           subdirs.push(childRelative);
+        } else if (
+          entry.isSymbolicLink() &&
+          (await isDirectoryLink(path.join(dirFull, entry.name)))
+        ) {
+          // A link to a folder is never submitted (see util/links.ts).
+          continue;
         } else {
           push({ delete: false, path: childRelative });
         }
@@ -1147,9 +1179,13 @@ export class DaemonManager {
         : FileStatus.ChangedNotCheckedOut;
     }
 
+    const link = stat.isSymbolicLink()
+      ? await readLinkInfo(path.join(workspace.localPath, relativePath))
+      : undefined;
+
     return {
       path: relativePath,
-      type: stat.isSymbolicLink() ? FileType.Symlink : FileType.Binary,
+      type: link ? FileType.Symlink : FileType.Binary,
       size: stat.size,
       modifiedAt: stat.mtimeMs,
       status,
@@ -1158,6 +1194,7 @@ export class DaemonManager {
       claims: [],
       staged: false,
       ...(executableChange !== undefined && { executableChange }),
+      ...(link && { link }),
     };
   }
 
@@ -1432,6 +1469,12 @@ export class DaemonManager {
             return;
           }
           await walk(fullPath);
+        } else if (
+          entry.isSymbolicLink() &&
+          (await isDirectoryLink(fullPath))
+        ) {
+          // A link to a folder is never a pending change (util/links.ts).
+          return;
         } else {
           diskFiles.push(entry);
         }
@@ -1688,6 +1731,10 @@ export class DaemonManager {
               }
             }
           }
+          continue;
+        }
+        // A link to a folder is never a pending change (util/links.ts).
+        if (stat.isSymbolicLink() && (await isDirectoryLink(fullPath))) {
           continue;
         }
       } catch {
@@ -2054,15 +2101,26 @@ export class DaemonManager {
     for (const relativePath of staged) {
       if (result.files[relativePath]) continue;
       if (!this.isUnderCollapsedDir(relativePath, result)) continue;
+      const fullPath = path.join(workspace.localPath, relativePath);
       let stat: Stats;
       try {
-        stat = await fs.lstat(path.join(workspace.localPath, relativePath));
+        stat = await fs.lstat(fullPath);
       } catch {
         continue;
       }
+      const link = stat.isSymbolicLink()
+        ? await readLinkInfo(fullPath)
+        : undefined;
+      // A link to a folder is never a pending change (util/links.ts).
+      if (link?.directory) continue;
       result.files[relativePath] = {
+        ...(link && { link }),
         path: relativePath,
-        type: stat.isDirectory() ? FileType.Directory : FileType.Text,
+        type: stat.isDirectory()
+          ? FileType.Directory
+          : link
+            ? FileType.Symlink
+            : FileType.Text,
         size: stat.isDirectory() ? 0 : stat.size,
         modifiedAt: stat.mtimeMs,
         status: FileStatus.Local,

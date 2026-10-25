@@ -38,6 +38,24 @@ import {
   withDirectoriesFirst,
 } from "./file-tree-sort";
 
+/**
+ * Row fields for a symbolic link or junction, which would otherwise pass for
+ * a plain file: the icon of what it points to (badged as a link), and a type
+ * that says it is one. A link to a folder stays a leaf, since Checkpoint never
+ * follows it. Nothing for any other row.
+ */
+function linkRowFields(file: {
+  link?: { target: string; directory: boolean };
+}): Record<string, string> {
+  if (!file.link) return {};
+  return {
+    // A folder link is never submitted, so it has no status either.
+    ...(file.link.directory && { ext: " ", status: "" }),
+    type: file.link.directory ? "Link to folder" : "Link to file",
+    linkTarget: file.link.target,
+  };
+}
+
 export default function WorkspaceExplorer() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const workspaceDirectories = useAtomValue(workspaceDirectoriesAtom);
@@ -208,6 +226,7 @@ export default function WorkspaceExplorer() {
               type: isDirectory ? " " : FileType[file.type],
               changelist: file.changelist ? file.changelist.toString() : "",
               ...treeSortFields(name, isDirectory),
+              ...linkRowFields(file),
             },
             leaf: !isDirectory,
           };
@@ -269,6 +288,7 @@ export default function WorkspaceExplorer() {
                   type: isDirectory ? " " : FileType[file.type],
                   changelist: file.changelist ? file.changelist.toString() : "",
                   ...treeSortFields(name, isDirectory),
+                  ...linkRowFields(file),
                 },
                 leaf: !isDirectory,
               };
@@ -374,9 +394,20 @@ export default function WorkspaceExplorer() {
   );
 
   const itemBodyTemplate = useCallback((rowData: any) => {
+    const linkTarget: string | undefined = rowData.data.linkTarget;
     return (
-      <div style={{ display: "inline" }}>
-        <FileIcon extension={rowData.data.ext} />
+      <div
+        style={{ display: "inline" }}
+        title={
+          linkTarget !== undefined
+            ? `Link to ${linkTarget || "an unknown target"}`
+            : undefined
+        }
+      >
+        <FileIcon
+          extension={rowData.data.ext}
+          link={linkTarget !== undefined}
+        />
         <span style={{ marginLeft: ".5em" }}>{rowData.data.name}</span>
       </div>
     );
@@ -510,6 +541,7 @@ export default function WorkspaceExplorer() {
                               ? file.changelist.toString()
                               : "",
                             ...treeSortFields(name, isDirectory),
+                            ...linkRowFields(file),
                           },
                           leaf: !isDirectory,
                         };

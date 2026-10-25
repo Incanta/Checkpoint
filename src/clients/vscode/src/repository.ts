@@ -207,6 +207,22 @@ export class CheckpointResource implements vscode.SourceControlResourceState {
 
   public get decorations(): vscode.SourceControlResourceDecorations {
     const info = getStatusInfo(this.file);
+    const link = this.file.link;
+    const color = info ? new vscode.ThemeColor(info.colorId) : undefined;
+    // A symbolic link or junction gets the codicon VS Code's own explorer
+    // uses for one, tinted like the badge it replaces, so it does not pass
+    // for a plain file. Links to folders never reach pending changes.
+    if (link) {
+      return {
+        strikeThrough: this.file.status === FileStatus.Deleted,
+        faded: false,
+        tooltip: `${info?.label ?? "Link"}: link to ${link.target || "an unknown target"}`,
+        iconPath: new vscode.ThemeIcon(
+          link.directory ? "file-symlink-directory" : "file-symlink-file",
+          color,
+        ),
+      };
+    }
     return {
       strikeThrough: this.file.status === FileStatus.Deleted,
       faded: false,
@@ -220,10 +236,7 @@ export class CheckpointResource implements vscode.SourceControlResourceState {
       // the row's status color, so they at least read as directories.
       iconPath:
         this.file.type === FileType.Directory
-          ? new vscode.ThemeIcon(
-              "folder",
-              info ? new vscode.ThemeColor(info.colorId) : undefined,
-            )
+          ? new vscode.ThemeIcon("folder", color)
           : undefined,
     };
   }

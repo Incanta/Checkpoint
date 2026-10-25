@@ -117,6 +117,10 @@ struct FileInfo {
   std::string claimBranch;
   /** True when someone else's exclusive claim blocks this file. */
   bool blocked = false;
+  /** A symbolic link or junction, which `status` prints as one. */
+  bool isLink = false;
+  /** What the link points to, as stored in it. */
+  std::string linkTarget;
 };
 
 inline void from_json(const nlohmann::json& j, FileInfo& f) {
@@ -147,6 +151,10 @@ inline void from_json(const nlohmann::json& j, FileInfo& f) {
   }
   if (j.contains("changelist") && !j["changelist"].is_null()) {
     f.changelist = j["changelist"].get<int>();
+  }
+  if (j.contains("link") && j["link"].is_object()) {
+    f.isLink = true;
+    f.linkTarget = j["link"].value("target", "");
   }
 }
 

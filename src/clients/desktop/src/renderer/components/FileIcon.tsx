@@ -1,4 +1,6 @@
 import React from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faLink } from "@fortawesome/free-solid-svg-icons/faLink";
 
 // Public assets must go through BASE_URL. The packaged app loads index.html
 // over file://, where a leading "/" resolves to the drive root instead of the
@@ -19,8 +21,14 @@ const aliases: Record<string, string> = {
 
 export const FileIcon = React.memo(function FileIcon({
   extension,
+  link = false,
 }: {
   extension: string;
+  /**
+   * The row is a symbolic link or junction: badge the icon with a link mark,
+   * the way a shortcut is drawn, so it does not pass for a plain file.
+   */
+  link?: boolean;
 }) {
   if (extension === "none") {
     return <span />;
@@ -29,7 +37,7 @@ export const FileIcon = React.memo(function FileIcon({
   const ext =
     extension === " " ? "folder" : aliases[extension] || extension || "blank";
 
-  return (
+  const icon = (
     <>
       {overrides[ext] && (
         <img style={{ width: "0.9rem" }} src={overrides[ext]} alt={ext} />
@@ -38,5 +46,23 @@ export const FileIcon = React.memo(function FileIcon({
         <span className={`fiv-sqo fiv-icon-blank fiv-icon-${ext}`}></span>
       )}
     </>
+  );
+
+  if (!link) return icon;
+
+  return (
+    <span className="relative inline-flex">
+      {icon}
+      <span
+        className="absolute -bottom-0.5 -left-1 flex items-center justify-center rounded-sm text-[0.5rem] leading-none"
+        style={{
+          background: "var(--color-bg-primary)",
+          color: "var(--color-text-primary)",
+          padding: "1px",
+        }}
+      >
+        <FontAwesomeIcon icon={faLink} />
+      </span>
+    </span>
   );
 });

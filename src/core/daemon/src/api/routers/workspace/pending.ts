@@ -21,6 +21,7 @@ import {
   getWorkspaceState,
 } from "../../../util/index.js";
 import { interruptedPullMessage } from "../../../util/interrupted-pull.js";
+import { readLinkInfo } from "../../../util/links.js";
 import { DaemonConfig } from "../../../daemon-config.js";
 import { TRPCError } from "@trpc/server";
 import { JobManager } from "../../../job-manager.js";
@@ -50,6 +51,9 @@ import {
   setPendingChangelistBranch,
   updatePendingChangelistDescription,
 } from "../../../util/pending-changelists.js";
+
+/** Ids of the workspaces with a submit job running. */
+const submitsInFlight = new Set<string>();
 
 /**
  * Resolves the manager and workspace for a daemon call, throwing the same way
@@ -397,19 +401,33 @@ export const pendingRouter = router({
             input.path,
             entry.name,
           );
-          const stats = await fs.stat(entryPath);
+          // lstat: a link is listed as a link, not as what it points at (and
+          // a link whose target is gone must not fail the whole listing).
+          const stats = await fs.lstat(entryPath);
+          const link = entry.isSymbolicLink()
+            ? await readLinkInfo(entryPath)
+            : undefined;
           const statusResult = statuses.get(relativePath);
 
           const f: File = {
             path: entry.name,
-            type: entry.isDirectory() ? FileType.Directory : FileType.Text,
+            type: entry.isDirectory()
+              ? FileType.Directory
+              : link
+                ? FileType.Symlink
+                : FileType.Text,
             size: stats.size,
             modifiedAt: stats.mtimeMs,
-            status: statusResult?.status ?? 0,
+            // A link to a folder is never submitted, so it has no status to
+            // show or act on (see util/links.ts).
+            status: link?.directory
+              ? FileStatus.Unknown
+              : (statusResult?.status ?? 0),
             id: statusResult?.fileId ?? null,
             changelist: statusResult?.changelist ?? null,
             claims: claimsMap[relativePath] ?? [],
             staged: stagedSet.has(relativePath),
+            ...(link && { link }),
           };
 
           return f;
@@ -589,44 +607,22 @@ export const pendingRouter = router({
         });
       }
 
-      // Expand any directory paths into individual file modifications
-      const expandedModifications = await manager.expandDirectoriesForSubmit(
-        workspace,
-        modifications,
-      );
-
-      // Check for conflicts before submitting (sync, fail fast)
-      const modificationPaths = expandedModifications.map((m) =>
-        m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
-      );
-      const conflictResult = await checkConflicts(
-        {
-          id: workspace.id,
-          repoId: workspace.repoId,
-          domainBranchName: workspace.domainBranchName,
-          activeBranches: workspace.activeBranches,
-          workspaceName: workspace.name,
-          localPath: workspace.localPath,
-          daemonId: workspace.daemonId,
-        },
-        modificationPaths,
-        undefined,
-        // Compared with the branch being submitted to, not the domain root:
-        // a feature branch's own changes are not upstream changes.
-        targetBranch,
-      );
-
-      if (conflictResult.hasConflicts) {
-        const conflictPaths = conflictResult.conflicts
-          .map((c) => c.path)
-          .join(", ");
+      // One submit per workspace at a time. Nothing awaits between this check
+      // and claiming the slot, so two requests cannot both get through.
+      if (submitsInFlight.has(workspace.id)) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: `Cannot submit: ${conflictResult.conflicts.length} conflicting file(s) detected. These files have been modified locally and also changed on the remote. Please pull first to resolve: ${conflictPaths}`,
+          message:
+            "A submit is already running in this workspace. Wait for it to finish before submitting again.",
         });
       }
+      submitsInFlight.add(workspace.id);
 
-      // Create async job for the long-running work
+      // Everything from here runs as a job, and the request returns its id
+      // right away. Expanding folders and checking for conflicts take time
+      // proportional to the files submitted, and a caller waiting on the
+      // request instead of the job hits its HTTP timeout on a big submit
+      // (Node's fetch gives up after 5 minutes with a bare "fetch failed").
       const jobManager = JobManager.Get();
       const job = jobManager.createJob("submit");
 
@@ -640,20 +636,54 @@ export const pendingRouter = router({
         daemonId: workspace.daemonId,
       };
 
-      // Whether the submit only edits files the workspace already tracks
-      // (no adds, no deletes), decided before the submit changes the state.
-      const trackedBefore =
-        manager.getWorkspaceState(workspace.id)?.files ?? {};
-      const onlyEditsTracked = expandedModifications.every(
-        (m) =>
-          !m.delete &&
-          m.path.replace(/^[/\\]/, "").replace(/\\/g, "/") in trackedBefore,
-      );
-
       // Fire-and-forget: run the submit in the background
       (async () => {
         manager.beginVcsOperation(workspace.id);
         try {
+          jobManager.updateStep(job.id, "Collecting files");
+
+          // Expand any directory paths into individual file modifications
+          const expandedModifications =
+            await manager.expandDirectoriesForSubmit(workspace, modifications);
+          if (expandedModifications.length === 0) {
+            throw new Error(
+              "Nothing to submit: the staged folders hold no files that can be submitted.",
+            );
+          }
+
+          jobManager.updateStep(job.id, "Checking for conflicts");
+          const modificationPaths = expandedModifications.map((m) =>
+            m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
+          );
+          const conflictResult = await checkConflicts(
+            workspaceInfo,
+            modificationPaths,
+            undefined,
+            // Compared with the branch being submitted to, not the domain
+            // root: a feature branch's own changes are not upstream changes.
+            targetBranch,
+          );
+
+          if (conflictResult.hasConflicts) {
+            const conflictPaths = conflictResult.conflicts
+              .map((c) => c.path)
+              .join(", ");
+            throw new Error(
+              `Cannot submit: ${conflictResult.conflicts.length} conflicting file(s) detected. These files have been modified locally and also changed on the remote. Please pull first to resolve: ${conflictPaths}`,
+            );
+          }
+
+          // Whether the submit only edits files the workspace already tracks
+          // (no adds, no deletes), decided before the submit changes the
+          // state.
+          const trackedBefore =
+            manager.getWorkspaceState(workspace.id)?.files ?? {};
+          const onlyEditsTracked = expandedModifications.every(
+            (m) =>
+              !m.delete &&
+              m.path.replace(/^[/\\]/, "").replace(/\\/g, "/") in trackedBefore,
+          );
+
           jobManager.updateStep(job.id, "Merging outdated text files");
 
           const mergeResult = await pullTextFilesForSubmit(
@@ -740,6 +770,7 @@ export const pendingRouter = router({
         } catch (e: any) {
           jobManager.failJob(job.id, e.message ?? String(e));
         } finally {
+          submitsInFlight.delete(workspace.id);
           await manager.endVcsOperation(workspace.id);
         }
       })();

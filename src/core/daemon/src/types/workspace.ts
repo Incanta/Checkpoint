@@ -158,6 +158,20 @@ export interface File {
    * Linux and macOS, which are submitted with whatever mode they have.
    */
   executableChange?: boolean;
+
+  /**
+   * Set when the path is a symbolic link or a Windows junction (`type` is
+   * then {@link FileType.Symlink}), so clients can show it as one. Links are
+   * not stored as links yet: a link to a file is submitted with its target's
+   * contents, and a link to a folder is never submitted, so it only appears
+   * when browsing a directory, never in pending changes.
+   */
+  link?: {
+    /** What the link points to, as stored in it. */
+    target: string;
+    /** Whether it points to a folder. */
+    directory: boolean;
+  };
 }
 
 export interface Directory {

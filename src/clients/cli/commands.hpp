@@ -468,17 +468,21 @@ inline int cmdStatus() {
 
   for (auto& [path, file] : pending.files) {
     auto status = static_cast<FileStatus>(file.status);
+    // A link is printed as `ls -l` does, so it does not pass for a plain file.
+    std::string shown =
+        file.isLink ? path + " -> " + (file.linkTarget.empty() ? "?" : file.linkTarget)
+                    : path;
     if (file.staged) {
       int id = changelistOf(path, file, changelists, ws.domainBranchName);
       if (id != 0) {
-        numbered[id].push_back({path, status});
+        numbered[id].push_back({shown, status});
       } else {
         defaults[destinedBranch(file, ws.domainBranchName)].push_back(
-            {path, status});
+            {shown, status});
       }
       stagedCount++;
     } else {
-      unstaged.push_back({path, status});
+      unstaged.push_back({shown, status});
     }
   }
 

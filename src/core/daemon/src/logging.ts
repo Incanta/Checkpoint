@@ -1,6 +1,7 @@
 import pino, { type Logger as PinoLogger } from "pino";
 import fs from "fs";
 import path from "path";
+import util from "util";
 import { homedir } from "os";
 import { format } from "date-fns";
 import pretty from "pino-pretty"; // this ensures pkg will bundle it
@@ -180,6 +181,29 @@ export class RotatingLogFile {
   }
 }
 
+let consoleTimestamped = false;
+
+/**
+ * Prefixes everything written through `console` with the local time. A
+ * launcher's capture of stdout (the Windows tray's daemon-process.log) is
+ * otherwise mostly plain console lines with no time of their own, which makes
+ * it impossible to line a failure up against what a client saw. Native output
+ * from the addon does not go through `console` and stays as it is; the stamped
+ * lines around it still bound when it happened.
+ */
+export function TimestampConsole(): void {
+  if (consoleTimestamped) return;
+  consoleTimestamped = true;
+  for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+    const original = console[method].bind(console);
+    // Formatted first, so a format string in the first argument still works.
+    console[method] = (...args: unknown[]) =>
+      original(
+        `${format(new Date(), "yyyy-MM-dd HH:mm:ss.SSS")} ${util.format(...args)}`,
+      );
+  }
+}
+
 export async function InitLogger(
   options: { ephemeral?: boolean } = {},
 ): Promise<void> {
@@ -191,6 +215,7 @@ export async function InitLogger(
   // daemon-process.log) sets this so the capture holds problems and native
   // crash output rather than a second copy of daemon.log.
   const consoleLevelOverride = process.env["CHECKPOINT_CONSOLE_LOG_LEVEL"];
+  if (consoleLevelOverride) TimestampConsole();
   const normalLevel = (
     consoleLevelOverride && consoleLevelOverride in pino.levels.values
       ? consoleLevelOverride
