@@ -8,7 +8,14 @@ import {
 import { Button } from "./ui";
 import { ipc } from "../pages/ipc";
 import { TreeTable } from "primereact/treetable";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { TreeNode } from "primereact/treenode";
 import { Column, ColumnPassThroughOptions } from "primereact/column";
 import { ContextMenu } from "primereact/contextmenu";
@@ -16,6 +23,82 @@ import { MenuItem } from "primereact/menuitem";
 import ChangelistChanges from "./ChangelistChanges";
 import CreateLabelDialog from "./CreateLabelDialog";
 import CreateBranchDialog from "./CreateBranchDialog";
+
+// Column indexes (in render order) that size to their content. Every other
+// column (Message) gets no explicit width, so the fixed table layout gives it
+// the remaining space.
+const CONTENT_SIZED_COLUMNS = [0, 2, 3];
+// Keep a long value (e.g. an email) from squeezing Message out entirely.
+const MAX_CONTENT_COLUMN_WIDTH = 320;
+// Rows measured per pass; plenty to find the widest value without walking
+// a very long history.
+const MAX_MEASURED_ROWS = 500;
+
+/** Natural width of a cell's content, ignoring the cell's current width. */
+function measureContentWidth(el: Element): number {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  return range.getBoundingClientRect().width;
+}
+
+function horizontalChrome(el: Element): number {
+  const style = getComputedStyle(el);
+  return (
+    parseFloat(style.paddingLeft) +
+    parseFloat(style.paddingRight) +
+    parseFloat(style.borderLeftWidth) +
+    parseFloat(style.borderRightWidth)
+  );
+}
+
+/**
+ * Sizes the content-sized columns to fit their widest header or cell. The
+ * scrollable TreeTable renders the header and body as separate tables, each
+ * with its own colgroup, so the width has to be set on both.
+ */
+function autoSizeColumns(wrapper: HTMLElement) {
+  const headerTable = wrapper.querySelector(
+    'table[data-pc-section="scrollableheadertable"]',
+  );
+  const bodyTable = wrapper.querySelector(
+    'table[data-pc-section="scrollablebodytable"]',
+  );
+  if (!headerTable || !bodyTable) return;
+
+  const headerCells = headerTable.querySelectorAll("thead > tr > th");
+  const bodyRows = Array.from(bodyTable.querySelectorAll("tbody > tr")).slice(
+    0,
+    MAX_MEASURED_ROWS,
+  );
+
+  for (const index of CONTENT_SIZED_COLUMNS) {
+    let width = 0;
+
+    const th = headerCells[index];
+    if (th) {
+      // Measure the title + sort icon, not the th itself (which also holds
+      // the absolutely positioned resize handle).
+      const content = th.querySelector(".p-column-header-content") ?? th;
+      width = measureContentWidth(content) + horizontalChrome(th);
+    }
+
+    for (const row of bodyRows) {
+      const td = row.children[index];
+      if (!td) continue;
+      width = Math.max(width, measureContentWidth(td) + horizontalChrome(td));
+    }
+
+    if (width <= 0) continue;
+    const px = `${Math.ceil(Math.min(width, MAX_CONTENT_COLUMN_WIDTH)) + 1}px`;
+
+    for (const table of [headerTable, bodyTable]) {
+      const col = table.querySelector("colgroup")?.children[index] as
+        | HTMLElement
+        | undefined;
+      if (col) col.style.width = px;
+    }
+  }
+}
 
 export default function WorkspaceHistory() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
@@ -25,6 +108,10 @@ export default function WorkspaceHistory() {
 
   const treeTableRef = useRef<TreeTable>(null);
   const contextMenuRef = useRef<ContextMenu>(null);
+  const tableWrapperRef = useRef<HTMLDivElement>(null);
+  // Once the user drags a column, stop auto-sizing so a refresh doesn't
+  // undo their layout.
+  const userResizedRef = useRef(false);
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const contextChangelistRef = useRef<number | null>(null);
@@ -64,6 +151,15 @@ export default function WorkspaceHistory() {
 
     setNodes(newNodes);
   }, [currentWorkspace, workspaceHistory]);
+
+  // Runs after the rows are in the DOM, before paint, so there's no flash of
+  // uniform columns. Also re-runs when the table remounts after returning
+  // from the changelist details view.
+  useLayoutEffect(() => {
+    if (userResizedRef.current) return;
+    const wrapper = tableWrapperRef.current;
+    if (wrapper) autoSizeColumns(wrapper);
+  }, [nodes]);
 
   const handleViewChanges = useCallback((changelistNumber: number) => {
     ipc.sendMessage("workspace:history:view-changes", { changelistNumber });
@@ -163,6 +259,28 @@ export default function WorkspaceHistory() {
       },
     }),
     [],
+  );
+
+  // Content-sized columns stay on one line so their measured width is the
+  // full value; anything past the width cap is ellipsized.
+  const compactColumnPt = useMemo<ColumnPassThroughOptions>(
+    () => ({
+      ...columnPt,
+      bodyCell: {
+        style: {
+          paddingLeft: "0.5rem",
+          whiteSpace: "nowrap",
+          textOverflow: "ellipsis",
+        },
+      },
+      headerCell: {
+        style: {
+          ...(columnPt.headerCell as { style: React.CSSProperties }).style,
+          whiteSpace: "nowrap",
+        },
+      },
+    }),
+    [columnPt],
   );
 
   const treeTablePt = useMemo(
@@ -271,6 +389,7 @@ export default function WorkspaceHistory() {
           className="row-span-1"
           style={{ textAlign: "left", overflow: "hidden" }}
           onDoubleClick={handleTableDoubleClick}
+          ref={tableWrapperRef}
         >
           <TreeTable
             ref={treeTableRef}
@@ -284,6 +403,9 @@ export default function WorkspaceHistory() {
             onContextMenu={(e) => {
               handleRowContextMenu(e.originalEvent as React.MouseEvent, e.node);
             }}
+            onColumnResizeEnd={() => {
+              userResizedRef.current = true;
+            }}
             pt={treeTablePt}
             style={{ height: "100%" }}
           >
@@ -293,7 +415,7 @@ export default function WorkspaceHistory() {
               expander
               resizeable
               sortable
-              pt={columnPt}
+              pt={compactColumnPt}
             ></Column>
             <Column
               field="message"
@@ -307,14 +429,14 @@ export default function WorkspaceHistory() {
               header="Date"
               resizeable
               sortable
-              pt={columnPt}
+              pt={compactColumnPt}
             ></Column>
             <Column
               field="user"
               header="User"
               resizeable
               sortable
-              pt={columnPt}
+              pt={compactColumnPt}
             ></Column>
           </TreeTable>
         </div>
