@@ -435,6 +435,19 @@ export default function WorkspaceHistory() {
             <Column
               field="message"
               header="Message"
+              body={(node: TreeNode) => {
+                const message = (node.data?.message as string) ?? "";
+                // Block-level so the whole cell width shows the full
+                // message (which may be clipped or multi-line) on hover.
+                return (
+                  <span
+                    className="block overflow-hidden text-ellipsis"
+                    title={message}
+                  >
+                    {message}
+                  </span>
+                );
+              }}
               resizeable
               sortable
               pt={columnPt}
