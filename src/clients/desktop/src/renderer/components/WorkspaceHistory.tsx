@@ -100,6 +100,19 @@ function autoSizeColumns(wrapper: HTMLElement) {
   }
 }
 
+/** Local date plus a 12-hour time, e.g. "10/27/2026, 3:42 PM". */
+function formatChangelistTime(epochMs: number | undefined): string {
+  if (epochMs === undefined || isNaN(epochMs)) return "";
+  return new Date(epochMs).toLocaleString(undefined, {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 export default function WorkspaceHistory() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const workspaceHistory = useAtomValue(workspaceHistoryAtom);
@@ -141,7 +154,9 @@ export default function WorkspaceHistory() {
         data: {
           changelist: changelist.number,
           message: changelist.message,
-          date: new Date(changelist.createdAt).toLocaleDateString(),
+          // Kept as epoch ms so sorting is chronological; formatted for
+          // display by the Time column's body template.
+          time: new Date(changelist.createdAt).getTime(),
           user: changelist.user?.email || "Unknown",
         },
       };
@@ -425,8 +440,9 @@ export default function WorkspaceHistory() {
               pt={columnPt}
             ></Column>
             <Column
-              field="date"
-              header="Date"
+              field="time"
+              header="Time"
+              body={(node: TreeNode) => formatChangelistTime(node.data?.time)}
               resizeable
               sortable
               pt={compactColumnPt}
