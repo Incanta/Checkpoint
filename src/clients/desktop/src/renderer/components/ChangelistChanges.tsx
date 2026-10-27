@@ -16,6 +16,10 @@ import type { FileTreeNode } from "./FileTreeItem";
 import { buildFileTree, collectDirPaths } from "./build-file-tree";
 import { Button, EmptyState } from "./ui";
 
+const DESCRIPTION_MIN_HEIGHT = 32;
+const DESCRIPTION_AUTO_MAX_HEIGHT = 96;
+const CONTENT_MIN_HEIGHT = 160;
+
 interface ChangelistChangesProps {
   isPopout?: boolean;
 }
@@ -43,6 +47,45 @@ export default function ChangelistChanges({
     useState<monaco.editor.IStandaloneDiffEditor | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [treeNodes, setTreeNodes] = useState<FileTreeNode[]>([]);
+
+  // Description panel height. null = fit the message, capped by
+  // DESCRIPTION_AUTO_MAX_HEIGHT; a number = the height the user dragged to.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const descriptionRef = useRef<HTMLDivElement | null>(null);
+  const dragStartRef = useRef<{ y: number; height: number } | null>(null);
+  const [descriptionHeight, setDescriptionHeight] = useState<number | null>(
+    null,
+  );
+
+  const handleDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!descriptionRef.current) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragStartRef.current = {
+      y: e.clientY,
+      height: descriptionRef.current.offsetHeight,
+    };
+  };
+
+  const handleDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = dragStartRef.current;
+    if (!start) return;
+    // Leave room for the file list and diff below.
+    const maxHeight = Math.max(
+      DESCRIPTION_MIN_HEIGHT,
+      (rootRef.current?.offsetHeight ?? 0) - CONTENT_MIN_HEIGHT,
+    );
+    const next = start.height + (e.clientY - start.y);
+    setDescriptionHeight(
+      Math.min(maxHeight, Math.max(DESCRIPTION_MIN_HEIGHT, next)),
+    );
+  };
+
+  const handleDragEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current) return;
+    dragStartRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
 
   const handleBack = () => {
     if (isPopout) {
@@ -194,13 +237,10 @@ export default function ChangelistChanges({
 
   return (
     <div
-      className={
-        isPopout
-          ? "grid grid-rows-[2.5rem_calc(100vh-2.5rem)]"
-          : "grid grid-rows-[2.5rem_calc(100vh-8.5rem)] gap-4"
-      }
+      ref={rootRef}
+      className={`flex flex-col ${isPopout ? "h-screen" : "h-full"}`}
     >
-      <div className="row-span-1 flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
         <Button
           variant="ghost"
           size="sm"
@@ -227,12 +267,6 @@ export default function ChangelistChanges({
           <span className="font-semibold">
             CL {changelistChanges.changelistNumber}
           </span>
-          {changelistChanges.message && (
-            <span className="text-[var(--color-text-muted)]">
-              {" "}
-              &mdash; {changelistChanges.message}
-            </span>
-          )}
         </span>
         {!isPopout && (
           <Button
@@ -260,8 +294,36 @@ export default function ChangelistChanges({
           </Button>
         )}
       </div>
+      {changelistChanges.message && (
+        <>
+          <div
+            ref={descriptionRef}
+            className="scroll-on-secondary shrink-0 overflow-y-auto whitespace-pre-wrap break-words bg-[var(--color-bg-secondary)] px-3 py-2 text-left text-sm text-[var(--color-text-muted)] select-text"
+            style={
+              descriptionHeight === null
+                ? { maxHeight: DESCRIPTION_AUTO_MAX_HEIGHT }
+                : { height: descriptionHeight }
+            }
+          >
+            {changelistChanges.message}
+          </div>
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            title="Drag to resize. Double-click to reset."
+            className="flex h-[calc(4px+0.4rem)] shrink-0 cursor-row-resize touch-none items-center justify-center border-y border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] transition-colors hover:bg-[var(--color-accent)]"
+            onPointerDown={handleDragStart}
+            onPointerMove={handleDragMove}
+            onPointerUp={handleDragEnd}
+            onPointerCancel={handleDragEnd}
+            onDoubleClick={() => setDescriptionHeight(null)}
+          >
+            <div className="h-1 w-6 rounded-lg bg-[var(--color-text-muted)]" />
+          </div>
+        </>
+      )}
       <div
-        className="row-span-1"
+        className="min-h-0 flex-1"
         style={{ textAlign: "left", overflow: "hidden" }}
       >
         <Splitter
@@ -274,12 +336,12 @@ export default function ChangelistChanges({
           }}
         >
           <SplitterPanel className="flex flex-col" size={30}>
-            <div className="h-full overflow-y-auto bg-[var(--color-bg-secondary)]">
+            <div className="scroll-on-secondary h-full overflow-y-auto bg-[var(--color-bg-secondary)]">
               {changelistChanges.files.length === 0 ? (
                 <EmptyState title="No files changed in this changelist" />
               ) : (
-                <div className="py-1">
-                  <div className="mb-1 border-b border-[var(--color-border-muted)] px-3 py-1.5 text-xs text-[var(--color-text-muted)]">
+                <div>
+                  <div className="border-b border-[var(--color-border-muted)] px-3 py-1.5 text-xs text-[var(--color-text-muted)]">
                     {changelistChanges.files.length} file
                     {changelistChanges.files.length !== 1 ? "s" : ""} changed
                   </div>

@@ -248,6 +248,11 @@ button.p-treetable-toggler:focus-visible {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
+/* For scroll areas painted with the secondary background, so the track
+   doesn't show up as a darker stripe. */
+.scroll-on-secondary::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
 
 /* ──────────────── PrimeReact overrides (no base theme is imported) ──────────────── */
 
