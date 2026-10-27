@@ -747,6 +747,22 @@ export const pendingRouter = router({
             m.path.replace(/^[/\\]/, "").replace(/\\/g, "/"),
           );
 
+          // Staged and assignment entries are keyed by the pending row, which
+          // for a collapsed untracked folder is the folder rather than its
+          // expanded files, so both spellings are cleared.
+          const landedPaths = [
+            ...new Set([
+              ...modifications.map((m) => m.path),
+              ...submittedPaths,
+            ]),
+          ];
+
+          // The submitted work has landed, so it is no longer staged. Without
+          // this, the next edit to one of these files shows up already staged
+          // in the changelist that was just submitted. Done straight after the
+          // submit, so a failure in the steps below cannot leave it staged.
+          await manager.unstage(workspace, landedPaths);
+
           jobManager.updateStep(job.id, "Reloading workspace state");
           // Only the submitted paths changed baseline. Adding or deleting a
           // tracked path changes how untracked folders show, so that case
@@ -756,11 +772,9 @@ export const pendingRouter = router({
             onlyEditsTracked ? submittedPaths : undefined,
           );
 
-          // Assignments are keyed by the pending row, which for a collapsed
-          // untracked folder is the folder rather than its expanded files.
           await completePendingChangelistSubmit(
             workspace.localPath,
-            [...modifications.map((m) => m.path), ...submittedPaths],
+            landedPaths,
             changelistId !== null
               ? { id: changelistId }
               : { defaultOf: targetBranch },
