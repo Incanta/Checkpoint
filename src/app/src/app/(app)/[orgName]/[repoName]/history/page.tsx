@@ -207,7 +207,7 @@ export default function RepoHistoryPage() {
                     </div>
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                    <div className="whitespace-pre-wrap break-words text-sm font-medium text-[var(--color-text-primary)]">
                       {linkify(cl.message)}
                     </div>
                     <div className="mt-0.5 text-xs text-[var(--color-text-secondary)]">

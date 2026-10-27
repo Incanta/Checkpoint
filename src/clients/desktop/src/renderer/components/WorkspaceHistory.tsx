@@ -439,9 +439,11 @@ export default function WorkspaceHistory() {
                 const message = (node.data?.message as string) ?? "";
                 // Block-level so the whole cell width shows the full
                 // message (which may be clipped or multi-line) on hover.
+                // whitespace-pre keeps the message's own line breaks; the
+                // resizable table's td rule would otherwise collapse them.
                 return (
                   <span
-                    className="block overflow-hidden text-ellipsis"
+                    className="block overflow-hidden text-ellipsis whitespace-pre"
                     title={message}
                   >
                     {message}
