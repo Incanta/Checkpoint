@@ -25,7 +25,6 @@ export default function WorkspaceHistory() {
 
   const treeTableRef = useRef<TreeTable>(null);
   const contextMenuRef = useRef<ContextMenu>(null);
-  const tableWrapperRef = useRef<HTMLDivElement>(null);
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const contextChangelistRef = useRef<number | null>(null);
@@ -112,22 +111,12 @@ export default function WorkspaceHistory() {
     [handleViewChanges],
   );
 
-  const handleRowDoubleClick = useCallback(
-    (node: TreeNode) => {
-      const changelistNumber = node.data?.changelist as number;
-      if (changelistNumber !== undefined) {
-        handleViewChanges(changelistNumber);
-      }
-    },
-    [handleViewChanges],
-  );
-
-  // Event delegation for double-click on table rows
-  useEffect(() => {
-    const wrapper = tableWrapperRef.current;
-    if (!wrapper) return;
-
-    const handleDblClick = (e: MouseEvent) => {
+  // Event delegation for double-click on table rows. This is a React prop
+  // rather than a manual listener because the wrapper div unmounts while
+  // ChangelistChanges is shown, and a mount-time listener would not be
+  // re-attached to the new div when the user navigates back.
+  const handleTableDoubleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement;
       const row = target.closest("tr");
       if (!row) return;
@@ -146,11 +135,9 @@ export default function WorkspaceHistory() {
           handleViewChanges(changelistNumber);
         }
       }
-    };
-
-    wrapper.addEventListener("dblclick", handleDblClick);
-    return () => wrapper.removeEventListener("dblclick", handleDblClick);
-  }, [handleViewChanges]);
+    },
+    [handleViewChanges],
+  );
 
   const columnPt = useMemo<ColumnPassThroughOptions>(
     () => ({
@@ -283,7 +270,7 @@ export default function WorkspaceHistory() {
         <div
           className="row-span-1"
           style={{ textAlign: "left", overflow: "hidden" }}
-          ref={tableWrapperRef}
+          onDoubleClick={handleTableDoubleClick}
         >
           <TreeTable
             ref={treeTableRef}
