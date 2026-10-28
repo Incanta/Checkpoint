@@ -941,6 +941,20 @@ export const pendingRouter = router({
         p.replace(/^[/\\]/, "").replace(/\\/g, "/"),
       );
 
+      // Files in a nested workspace (a Team Sync linked repo mounted here, or
+      // any folder with its own .checkpoint) belong to that repo. Submitting
+      // them here would put them in the wrong repo.
+      const nested = normalizedPaths
+        .map((p) => ({ p, owner: manager.nestedOwnerOf(workspace.id, p) }))
+        .filter((x) => x.owner !== null);
+      if (nested.length > 0) {
+        const owners = [...new Set(nested.map((x) => x.owner))];
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `${nested.map((x) => x.p).join(", ")} ${nested.length === 1 ? "is" : "are"} in another workspace nested here (${owners.join(", ")}). Stage and submit ${nested.length === 1 ? "it" : "them"} from that workspace.`,
+        });
+      }
+
       // A rename by case or normalization only (Explorer, Finder) shows as
       // the old spelling deleted and the new one untracked. On a volume
       // where both are one file, staging either stages both, so the submit

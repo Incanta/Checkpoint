@@ -102,6 +102,9 @@ function applyDefaults(): void {
 
   // Logging: silence by default
   setConfig("logging.level", "error");
+  // The app's server-side file reads (readFileAtChangelist) pass this to the
+  // native addon, faked in tests.
+  setConfig("logging.longtail-level", "error");
 
   // Email: disabled
   setConfig("email.enabled", false);

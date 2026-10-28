@@ -26,6 +26,11 @@ import type { InputJsonValue } from "@prisma/client/runtime/library";
 import { walkChangelistAncestry } from "~/server/changelist-walk";
 import { compareTreePaths } from "~/lib/file-tree-sort";
 import { classifyPaths } from "~/server/team-sync/classify";
+import { getTeamSyncConfig } from "~/server/team-sync/config";
+import {
+  mountPathsOf,
+  mountSubmitProblem,
+} from "~/server/team-sync/mounts";
 import { settleClaimsForSubmit } from "~/server/claims/claims";
 import { resolveDomainBranchName } from "~/server/claims/domain";
 import {
@@ -460,6 +465,26 @@ export const changelistRouter = createTRPCRouter({
           code: "BAD_REQUEST",
           message: `Branch ${input.branchName} is archived and read-only`,
         });
+      }
+
+      // Folders nested linked repos are mounted at belong to those repos
+      // (Team Sync linkedRepos with a path). An invalid or unreadable config
+      // mounts nothing, so it never blocks a submit.
+      const teamSyncConfig = await getTeamSyncConfig(
+        ctx.db,
+        ctx.session.user.id,
+        repo,
+        submitBranch.headNumber,
+      ).catch(() => null);
+      const mountProblem = mountSubmitProblem(
+        input.modifications.map((mod) => ({
+          path: toRepoPath(mod.path),
+          delete: mod.delete,
+        })),
+        mountPathsOf(teamSyncConfig?.config?.linkedRepos),
+      );
+      if (mountProblem) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: mountProblem });
       }
 
       // Resolve the claim domain this submit lands in. Claims anchored at

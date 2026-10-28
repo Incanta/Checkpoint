@@ -21,6 +21,7 @@ import {
   isSafeWorkspacePath,
   resolveInWorkspace,
 } from "../../../util/workspace-path.js";
+import { removeTreeKeepingOwned } from "../../../util/nested-workspaces.js";
 
 export const syncRouter = router({
   pull: publicProcedure
@@ -350,13 +351,19 @@ export const syncRouter = router({
                     restoredToBaseline.push(file.path);
                     restoredFiles++;
                   }
+                } else if (file.type === FileType.Directory) {
+                  // Untracked directory entry: remove it, except any nested
+                  // workspace inside it (a linked repo mounted there, or a
+                  // folder with its own .checkpoint), which is another repo's.
+                  await removeTreeKeepingOwned(
+                    workspace.localPath,
+                    file.path,
+                    manager.getIgnoreCache(workspace.id).owned,
+                  );
+                  deletedFiles++;
                 } else {
-                  // Untracked file (staged or not) or untracked directory
-                  // entry: remove it from disk entirely
-                  await fs.rm(localFilePath, {
-                    recursive: file.type === FileType.Directory,
-                    force: true,
-                  });
+                  // Untracked file (staged or not): remove it from disk
+                  await fs.rm(localFilePath, { force: true });
                   deletedFiles++;
                 }
               }

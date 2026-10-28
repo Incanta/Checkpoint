@@ -130,6 +130,12 @@ function randomDelta(rand: () => number): StateDelta {
         changelist: Math.floor(rand() * 100),
         at: "x",
       }),
+      mountPaths: maybe(
+        ["Plugins/StudioPlugins", "Art/Source"].slice(
+          0,
+          Math.floor(rand() * 3),
+        ),
+      ),
     };
   }
   return delta;

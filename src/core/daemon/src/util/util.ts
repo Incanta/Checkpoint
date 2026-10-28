@@ -122,6 +122,12 @@ export interface WorkspaceTeamSyncState {
   linkedPins?: Record<string, AppliedLinkPin>;
   /** The parent that last moved this workspace (linked workspaces). */
   linkHolder?: LinkHolder;
+  /**
+   * Folders inside this workspace that belong to a nested linked repo (the
+   * `path` of each link in the repo config at the synced changelist). Never
+   * scanned, submitted, or cleaned here. See docs/linked-repos-plan.md.
+   */
+  mountPaths?: string[];
 }
 
 export type ArtifactStateFile = WorkspaceStateFile & {

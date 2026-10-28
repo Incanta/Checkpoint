@@ -238,7 +238,7 @@ describe("scanWorkspaceIgnoreFiles", () => {
 
     const patterns = await scanWorkspaceIgnoreFiles(workspacePath);
 
-    expect(patterns).toEqual({ ignore: [], hidden: [] });
+    expect(patterns).toEqual({ ignore: [], hidden: [], nestedWorkspaces: [] });
   });
 });
 

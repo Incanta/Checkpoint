@@ -10,6 +10,8 @@ import {
   findFileSourceChangelist,
   readFileAtChangelist,
 } from "~/server/read-file-at-changelist";
+import { listStateTreeDir } from "~/server/state-tree";
+import { mountCollisionErrors } from "./mounts";
 
 interface CacheEntry {
   sourceChangelistNumber: number;
@@ -27,7 +29,7 @@ const cache = (globalForCache[CACHE_KEY] ??= new Map<string, CacheEntry>());
 
 /**
  * Reads, validates, and caches the repo-committed Team Sync config
- * (`.checkpoint/teamsync.yaml`) as resolved at `changelistNumber`.
+ * (`teamsync.yaml` at the repo root) as resolved at `changelistNumber`.
  */
 export async function getTeamSyncConfig(
   db: PrismaClient,
@@ -68,10 +70,41 @@ export async function getTeamSyncConfig(
       file.content.toString("utf-8"),
       sourceChangelistNumber,
     );
+    result = await rejectMountCollisions(
+      db,
+      repo.id,
+      sourceChangelistNumber,
+      result,
+    );
   }
 
   cache.set(repo.id, { sourceChangelistNumber, result });
   return result;
+}
+
+/**
+ * Invalidates a config whose nested links (`path`) are mounted onto files
+ * this repo tracks at the config's changelist: the folder would belong to
+ * both repos. Later submits can't add files there (see mountSubmitProblem).
+ */
+async function rejectMountCollisions(
+  db: PrismaClient,
+  repoId: string,
+  changelistNumber: number,
+  result: TeamSyncConfigResult,
+): Promise<TeamSyncConfigResult> {
+  const links = result.config?.linkedRepos;
+  if (!links?.some((l) => l.path !== undefined)) return result;
+
+  const changelist = await db.changelist.findUnique({
+    where: { repoId_number: { repoId, number: changelistNumber } },
+    select: { stateRootHash: true },
+  });
+  const errors = await mountCollisionErrors(links, (dir) =>
+    listStateTreeDir(db, repoId, changelist?.stateRootHash ?? null, dir),
+  );
+  if (errors.length === 0) return result;
+  return { config: null, sourceChangelistNumber: changelistNumber, errors };
 }
 
 export function parseTeamSyncConfig(

@@ -2,8 +2,7 @@
 
 Plan for letting a Team Sync repo pin other repos at a changelist and keep local workspaces of them in sync. The motivating case is a custom Unreal Engine kept in its own repo and synced once per machine, shared by every game, instead of the Perforce convention of committing `Engine/` next to (or around) each game. Written 2026-10-27 on `1b2757a`.
 
-**Progress (2026-10-27): phases 1, 2, and 3 are implemented** (phase 3 uncommitted). See [Phase 1 as built](#phase-1-as-built), [Phase 2 as built](#phase-2-as-built), and [Phase 3 as built](#phase-3-as-built) for where they live and where they differ from this plan.
-
+**Progress (2026-10-27): phases 1 through 4 are implemented** (phases 3 and 4 uncommitted). See [Phase 1 as built](#phase-1-as-built), [Phase 2 as built](#phase-2-as-built), [Phase 3 as built](#phase-3-as-built), and [Phase 4 as built](#phase-4-as-built) for where they live and where they differ from this plan.
 ## Goals
 
 - A game repo says which engine repo and changelist it builds against. Syncing the game to any changelist brings the engine to the changelist that game CL was pinned to.
@@ -13,7 +12,7 @@ Plan for letting a Team Sync repo pin other repos at a changelist and keep local
 
 ## Config
 
-Links live in the parent repo's `.checkpoint/teamsync.yaml`, as a new top-level `linkedRepos` list. Because the server already serves `teamSync.getConfig` as of any changelist, the pin resolves per changelist for free, and bumping the engine is an ordinary, reviewable changelist in the game repo.
+Links live in the parent repo's `teamsync.yaml` (at the repo root), as a new top-level `linkedRepos` list. Because the server already serves `teamSync.getConfig` as of any changelist, the pin resolves per changelist for free, and bumping the engine is an ordinary, reviewable changelist in the game repo.
 
 ```yaml
 linkedRepos:
@@ -110,7 +109,7 @@ How the folder gets registered is up to the team:
 - Optionally, as `command` build steps in the engine repo's own `teamsync.yaml`, so linking stays agnostic and the engine registers itself. Registration differs per OS, so each step is limited to one OS with the new `ifOs` field (see [Build step OS condition](#build-step-os-condition)):
 
 ```yaml
-# UE5 repo's .checkpoint/teamsync.yaml
+# UE5 repo's teamsync.yaml
 buildSteps:
   - id: register-engine-windows
     name: Register engine
@@ -224,7 +223,7 @@ Build step OS condition:
 
 Pin-change badge:
 
-- The app's `teamSync.getChangelistMeta` returns `pinChanges` per changelist (`repo`, `from`, `to`; `from` is null for an added link, `to` for a removed one). Only changelists whose file changes include `.checkpoint/teamsync.yaml` are checked, each against its parent's config, so a merge counts what it brought in. A changelist where either config is invalid gets no badge. The logic is pure in `src/app/src/server/team-sync/pin-changes.ts`, with the config reader passed in.
+- The app's `teamSync.getChangelistMeta` returns `pinChanges` per changelist (`repo`, `from`, `to`; `from` is null for an added link, `to` for a removed one). Only changelists whose file changes include `teamsync.yaml` are checked, each against its parent's config, so a merge counts what it brought in. A changelist where either config is invalid gets no badge. The logic is pure in `src/app/src/server/team-sync/pin-changes.ts`, with the config reader passed in.
 - The desktop changelist browser shows a "UE5 update" chip before the message, with the old and new pin on hover. It says the linked repo's name rather than "engine", since links are engine-agnostic.
 
 Bisect warning:
@@ -252,6 +251,38 @@ Confirmation:
 - The CLI's `pull` takes `--confirm-links <repo...>` and `--skip-links`, and after a pull stopped at linked repos it prints the command line to go ahead. When the workspace itself is already up to date (or at the `-c` changelist), it asks the daemon for link statuses and pulls anyway if a `follow-pin` link is behind its pin or busy, so CI agents don't build against the wrong engine. Manual links behind their pin are only mentioned. After a pull it lists the linked repos it moved and any stale pins.
 
 Tests: `src/tests/src/server/team-sync-pin-changes.test.ts` (diffing, comparisons, per-changelist detection), and new cases in `src/tests/src/daemon/linked-repos.test.ts` (confirmation detail in the failed job, reports not scanning for local changes, and creating a linked workspace with its refusals). The desktop UI has no automated tests.
+
+## Phase 4 as built
+
+Which folders belong to a nested workspace ("owned" folders):
+
+- **Mount paths:** each link's `path` in the repo config at the workspace's synced changelist, whatever the link's mode, so an ignored link's empty folder is still the child's. The sync pipeline records them in the workspace state (`mountPaths` in `workspace_meta`) from the config it already reads for the sync filter, so the daemon knows them offline.
+- **Nested workspaces:** any folder below the root holding `.checkpoint/workspace.json`. The ignore-file scan finds them and doesn't descend (so their own `.chkignore` files don't leak into the parent). This also protects a workspace someone nested by hand, before phase 5 creates any.
+
+How the parent treats them:
+
+- **Scan, watcher, pending changes, submit:** owned folders go into the ignore cache as anchored patterns after every project ignore file, so no `!` rule can bring them back. Every walker already honors the ignore cache, and so does submit's directory expansion. Names compare without case. The `ignore` package can't escape `?`, so a `?` in a mount path stays a one-character wildcard (it can't appear in Windows names).
+- **Ownership changes:** the cache is rebuilt, and the pending list dropped, when a sync changes the mount paths or the watcher sees a `<folder>/.checkpoint` or `<folder>/.checkpoint/workspace.json` appear or vanish. Other events inside an owned folder (its state database, its ignore files) are dropped without work.
+- **Stage:** refuses paths in an owned folder, naming the folder ("stage and submit it from that workspace"). Submit's expansion also drops any such file staged before the folder became owned.
+- **`checkpoint clean`:** the scan collapses untracked files into their topmost untracked folder, so `Plugins/` holding a stray file and the mount `Plugins/StudioPlugins` would have been deleted whole. Untracked folders are now removed around owned folders (`util/nested-workspaces.ts`).
+- **Team Sync Clean Workspace:** its own walk skips mount paths and folders holding a workspace, and the re-check before deleting refuses both (checked on disk again, since one can appear after the preview).
+- **Sync filter reconcile and newly included files:** never delete or bring in files under a mount path, even if the parent somehow tracks some there.
+- **Revert** never deleted untracked files, so it needed nothing.
+
+Collisions (app server):
+
+- A nested link mounted onto files the repo tracks at the config's changelist makes the config invalid (`linkedRepos.N.path: "..." is where X would be mounted, but this repo tracks files there (...)`). The check walks the state tree one directory per path segment, without case, and also catches a file standing where the folder would go (`src/app/src/server/team-sync/mounts.ts`, used by `getTeamSyncConfig`).
+- A submit that adds or changes files under a mount path of the branch head's config is refused; deleting them is allowed, since that clears the way. An invalid or unreadable config mounts nothing and never blocks a submit. Merges are not checked.
+- The schema now also rejects a mount path inside `.checkpoint`, with a drive letter, or with empty or `.` segments, and two nested links at the same or nested folders.
+
+Not done (phase 5 or later): surfacing a nested child's pending changes in the parent's UI. The file browser shows owned folders as ignored.
+
+Tests: `src/tests/src/daemon/nested-workspace-ignore.test.ts` (scan, ignore cache, removal helper), `src/tests/src/daemon/nested-workspace-ownership.test.ts` (end to end: pending, stage, watcher, both cleans), `src/tests/src/server/team-sync-mounts.test.ts` (collision walk and submit guard), and new schema cases in `team-sync-linked-repos-config.test.ts`. With the config at the repo root, `src/tests/src/server/team-sync-config-file.test.ts` commits a real one and covers the collision check, the submit guard, and the pin-change badge end to end.
+
+## Config location
+
+- The config is `teamsync.yaml` at the repo root (`TEAM_SYNC_CONFIG_PATH` in the app's `config-schema.ts`, mirrored in common). It is an ordinary repo file: committed, reviewed, and branched like any other.
+- It sits outside `.checkpoint` because nothing under that folder can be submitted (it is the workspace's own), and that rule has no exceptions in the server, the daemon, or the scan.
 
 ## Open questions
 

@@ -10,6 +10,7 @@ import { Logger } from "../../logging.js";
 import { workspacePathKey, type PathKey } from "../volume.js";
 import { foldName, namesCheckpointDir } from "../repo-path-rules.js";
 import { resolveInWorkspace, UnsafePathError } from "../workspace-path.js";
+import { isWorkspaceRoot, ownerOf } from "../../file-status.js";
 
 // "Clean Workspace" (UnrealGameSync parity) removes files the workspace state
 // does not account for. Two rules keep it from losing work:
@@ -18,7 +19,9 @@ import { resolveInWorkspace, UnsafePathError } from "../workspace-path.js";
 //     artifact files, staged files (including new ones), pending modes, pull
 //     leftovers (pendingRemovals, which
 //     may be a directory sitting where a tracked file was), directories a pull
-//     could not rename, and anything under a .checkpoint directory. On a
+//     could not rename, anything under a .checkpoint directory, and anything
+//     in another workspace nested here (a nested linked repo's mount path,
+//     or a folder with its own .checkpoint). On a
 //     volume that takes two spellings for one file, each is matched under
 //     either spelling.
 //   - Only regenerable build output ("intermediate") is deleted outright. Any
@@ -113,6 +116,8 @@ interface Protection {
   dirRenames: Set<string>;
   /** Keys of `files` and `trees` where the volume folds spellings, else null. */
   folded: { key: PathKey; files: Set<string>; trees: Set<string> } | null;
+  /** Nested linked repos' mount paths: another workspace's folders. */
+  mountPaths: string[];
 }
 
 async function protectionFor(
@@ -138,7 +143,13 @@ async function protectionFor(
         trees: new Set([...trees].map(key)),
       }
     : null;
-  return { files, trees, dirRenames, folded };
+  return {
+    files,
+    trees,
+    dirRenames,
+    folded,
+    mountPaths: state.teamSync?.mountPaths ?? [],
+  };
 }
 
 /**
@@ -151,6 +162,10 @@ function protectedReason(relPath: string, p: Protection): string | null {
     if (isSkippedDirName(name)) {
       return `it is inside a ${name} directory`;
     }
+  }
+  const mount = ownerOf(p.mountPaths, relPath);
+  if (mount !== null) {
+    return `it is in ${mount}, which a nested linked repo owns`;
   }
 
   if (p.files.has(relPath)) return "it is tracked";
@@ -195,12 +210,24 @@ async function walk(
     return;
   }
 
+  // Another workspace lives here; none of it is this one's to clean.
+  if (
+    relDir &&
+    entries.some((e) => e.isDirectory() && namesCheckpointDir(e.name)) &&
+    (await isWorkspaceRoot(absDir))
+  ) {
+    return;
+  }
+
   for (const entry of entries) {
     const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
     const absPath = path.join(absDir, entry.name);
 
     if (entry.isDirectory()) {
       if (isSkippedDirName(entry.name)) {
+        continue;
+      }
+      if (ownerOf(protection.mountPaths, relPath) !== null) {
         continue;
       }
       await walk(absPath, relPath, protection, out);
@@ -283,6 +310,29 @@ async function pruneEmptyDirs(
   }
 }
 
+/**
+ * Why `relPath` is off limits because a folder above it holds another
+ * workspace, or null. Checked on disk, since one can appear between preview
+ * and clean.
+ */
+async function nestedWorkspaceReason(
+  root: string,
+  relPath: string,
+  checked: Map<string, boolean>,
+): Promise<string | null> {
+  const parts = relPath.split("/");
+  for (let i = 1; i < parts.length; i++) {
+    const dir = parts.slice(0, i).join("/");
+    let holds = checked.get(dir);
+    if (holds === undefined) {
+      holds = await isWorkspaceRoot(path.join(root, dir));
+      checked.set(dir, holds);
+    }
+    if (holds) return `it is in ${dir}, which is another workspace`;
+  }
+  return null;
+}
+
 /** True when `child` is `parent` or inside it (both already resolved). */
 function isWithin(parent: string, child: string): boolean {
   const rel = path.relative(parent, child);
@@ -355,6 +405,8 @@ export async function executeClean(
     result.skipped.push({ path: p, reason });
   };
   const seen = new Set<string>();
+  // Folder -> whether it holds a workspace, so a batch stats each once.
+  const nestedChecked = new Map<string, boolean>();
 
   for (const relPath of relPaths) {
     const normalizedRel = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
@@ -371,7 +423,9 @@ export async function executeClean(
       continue;
     }
 
-    const refusal = protectedReason(normalizedRel, protection);
+    const refusal =
+      protectedReason(normalizedRel, protection) ??
+      (await nestedWorkspaceReason(root, normalizedRel, nestedChecked));
     if (refusal) {
       skip(relPath, refusal);
       continue;

@@ -26,6 +26,13 @@ export interface IgnoreCache {
   ignore: Ignore;
   hidden: Ignore;
   lastUpdated: number;
+  /**
+   * Folders that belong to another workspace nested inside this one: Team
+   * Sync mount paths and folders holding their own `.checkpoint`. They are
+   * part of `ignore` too, so nothing scans, watches, or submits them; this
+   * list is for the operations that must also never delete them.
+   */
+  owned: string[];
 }
 
 /**
@@ -48,6 +55,11 @@ export interface IgnoreFileEntry {
 export interface WorkspaceIgnorePatterns {
   ignore: IgnoreFileEntry[];
   hidden: IgnoreFileEntry[];
+  /**
+   * Folders below the root that hold another workspace (their own
+   * `.checkpoint/workspace.json`). The scan does not descend into them.
+   */
+  nestedWorkspaces?: string[];
 }
 
 // ─── Separator Normalization ─────────────────────────────────────────
@@ -183,6 +195,7 @@ export async function scanWorkspaceIgnoreFiles(
 ): Promise<WorkspaceIgnorePatterns> {
   const ignoreEntries: IgnoreFileEntry[] = [];
   const hiddenEntries: IgnoreFileEntry[] = [];
+  const nestedWorkspaces: string[] = [];
 
   // Ignore patterns discovered so far, used to prune the walk as we descend.
   const discovered: string[] = [
@@ -201,6 +214,18 @@ export async function scanWorkspaceIgnoreFiles(
       entries = await fs.readdir(fullDir, { withFileTypes: true });
     } catch {
       // Directory disappeared or is not readable
+      return;
+    }
+
+    // Another workspace lives here: its files, and its own ignore files, are
+    // its business. Only a real workspace counts, not any folder that happens
+    // to be named .checkpoint.
+    if (
+      relativeDir &&
+      entries.some((e) => e.isDirectory() && e.name === CHECKPOINT_DIR) &&
+      (await isWorkspaceRoot(fullDir))
+    ) {
+      nestedWorkspaces.push(relativeDir);
       return;
     }
 
@@ -254,7 +279,57 @@ export async function scanWorkspaceIgnoreFiles(
 
   await walk("");
 
-  return { ignore: ignoreEntries, hidden: hiddenEntries };
+  return { ignore: ignoreEntries, hidden: hiddenEntries, nestedWorkspaces };
+}
+
+/** Whether `dir` holds a workspace (its own `.checkpoint/workspace.json`). */
+export async function isWorkspaceRoot(dir: string): Promise<boolean> {
+  try {
+    return (
+      await fs.stat(path.join(dir, CHECKPOINT_DIR, "workspace.json"))
+    ).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The owned folder `relativePath` is, or is inside, or null. Compared without
+ * case, as the ignore rules are, so a different spelling on a case-folding
+ * volume is still the same folder.
+ */
+export function ownerOf(
+  owned: readonly string[],
+  relativePath: string,
+): string | null {
+  const p = normalizeRelativePath(relativePath).toLowerCase();
+  for (const root of owned) {
+    const r = root.toLowerCase();
+    if (p === r || p.startsWith(`${r}/`)) return root;
+  }
+  return null;
+}
+
+/** Owned folders at or below `relativeDir` ("" is the workspace root). */
+export function ownedWithin(
+  owned: readonly string[],
+  relativeDir: string,
+): string[] {
+  const d = normalizeRelativePath(relativeDir).toLowerCase();
+  return owned.filter((root) => {
+    const r = root.toLowerCase();
+    return d === "" || r === d || r.startsWith(`${d}/`);
+  });
+}
+
+/**
+ * Escapes a literal path for a gitignore pattern. The `ignore` package has no
+ * working escape for `?`, so it stays a one-character wildcard: the folder is
+ * always matched, and at worst a sibling differing only there is too (`?`
+ * can't appear in Windows names anyway).
+ */
+function escapePattern(literal: string): string {
+  return literal.replace(/[\\*[\]!#]/g, "\\$&").replace(/ $/, "\\ ");
 }
 
 // ─── Cache Construction ──────────────────────────────────────────────
@@ -328,11 +403,30 @@ function flattenPatterns(
  */
 export function buildIgnoreCacheFromPatterns(
   preloaded: WorkspaceIgnorePatterns,
+  mountPaths: readonly string[] = [],
 ): IgnoreCache {
+  const owned = [
+    ...new Map(
+      [...mountPaths, ...(preloaded.nestedWorkspaces ?? [])]
+        .map((p) => normalizeRelativePath(p).replace(/\/+$/, ""))
+        .filter((p) => p !== "")
+        .map((p) => [p.toLowerCase(), p] as const),
+    ).values(),
+  ];
+  // Last, so no project ignore file can negate them: another workspace's
+  // files are never this one's to show or submit.
+  const ownedPatterns = owned.flatMap((p) => {
+    const anchored = `/${escapePattern(p)}`;
+    return [anchored, `${anchored}/**`];
+  });
   return {
-    ignore: ignore().add(flattenPatterns(preloaded.ignore, true)),
+    ignore: ignore().add([
+      ...flattenPatterns(preloaded.ignore, true),
+      ...ownedPatterns,
+    ]),
     hidden: ignore().add(flattenPatterns(preloaded.hidden, false)),
     lastUpdated: Date.now(),
+    owned,
   };
 }
 

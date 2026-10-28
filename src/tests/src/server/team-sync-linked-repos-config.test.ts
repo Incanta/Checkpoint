@@ -1,5 +1,5 @@
 /**
- * Validation of `linkedRepos` in `.checkpoint/teamsync.yaml` (the app's zod
+ * Validation of `linkedRepos` in `teamsync.yaml` (the app's zod
  * schema in src/app/src/server/team-sync/config-schema.ts).
  */
 import { describe, expect, it } from "vitest";
@@ -87,10 +87,43 @@ describe("teamsync.yaml linkedRepos", () => {
       "a backslash path leaving the repo",
       "  - repo: Art\n    branch: main\n    changelist: 1\n    path: 'Plugins\\..\\..\\x'",
     ],
+    [
+      "a path inside .checkpoint",
+      "  - repo: Art\n    branch: main\n    changelist: 1\n    path: .Checkpoint/art",
+    ],
+    [
+      "a path with a drive letter",
+      "  - repo: Art\n    branch: main\n    changelist: 1\n    path: 'C:/Art'",
+    ],
+    [
+      "a path with an empty segment",
+      "  - repo: Art\n    branch: main\n    changelist: 1\n    path: Art//Source",
+    ],
+    [
+      "a path with a '.' segment",
+      "  - repo: Art\n    branch: main\n    changelist: 1\n    path: ./Art",
+    ],
+    [
+      "two links mounted at one folder, spelled differently",
+      "  - repo: Art\n    branch: main\n    changelist: 1\n    path: Art\n  - repo: Art2\n    branch: main\n    changelist: 1\n    path: art/",
+    ],
+    [
+      "a link mounted inside another's folder",
+      "  - repo: Art\n    branch: main\n    changelist: 1\n    path: Art\n  - repo: Art2\n    branch: main\n    changelist: 1\n    path: Art/Source",
+    ],
   ])("rejects %s", (_name, body) => {
     const result = parse(`version: 1\nlinkedRepos:\n${body}\n`);
     expect(result.config).toBeNull();
     expect(result.errors?.length).toBeGreaterThan(0);
+  });
+
+  it("accepts nested links in sibling folders that share a prefix, and a trailing slash", () => {
+    const result = parse(
+      "version: 1\nlinkedRepos:\n" +
+        "  - repo: Art\n    branch: main\n    changelist: 1\n    path: Art\n" +
+        "  - repo: ArtTools\n    branch: main\n    changelist: 1\n    path: ArtTools/\n",
+    );
+    expect(result.errors).toBeNull();
   });
 
   it("rejects linking the same repo twice, even with different case", () => {

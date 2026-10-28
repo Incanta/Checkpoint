@@ -593,7 +593,7 @@ class SqliteStateStore implements StateStore {
         `SELECT key, value FROM workspace_meta
          WHERE key IN ('syncFilterHash', 'lastBuiltChangelist',
                        'lastScheduledSyncAt', 'appliedArtifacts',
-                       'linkedPins', 'linkHolder')`,
+                       'linkedPins', 'linkHolder', 'mountPaths')`,
       )
       .all() as Array<{ key: string; value: string }>;
     const meta = new Map(metaRows.map((r) => [r.key, r.value]));
@@ -636,7 +636,7 @@ class SqliteStateStore implements StateStore {
       }
     }
 
-    for (const key of ["linkedPins", "linkHolder"] as const) {
+    for (const key of ["linkedPins", "linkHolder", "mountPaths"] as const) {
       const raw = meta.get(key);
       if (raw === undefined) continue;
       try {
@@ -839,6 +839,7 @@ class SqliteStateStore implements StateStore {
         setScalar("appliedArtifacts", json(meta.appliedArtifacts));
         setScalar("linkedPins", json(meta.linkedPins));
         setScalar("linkHolder", json(meta.linkHolder));
+        setScalar("mountPaths", json(meta.mountPaths));
       }
     })();
   }
@@ -954,6 +955,12 @@ class SqliteStateStore implements StateStore {
           "linkHolder",
           teamSync?.linkHolder !== undefined
             ? JSON.stringify(teamSync.linkHolder)
+            : undefined,
+        ],
+        [
+          "mountPaths",
+          teamSync?.mountPaths !== undefined
+            ? JSON.stringify(teamSync.mountPaths)
             : undefined,
         ],
       ];

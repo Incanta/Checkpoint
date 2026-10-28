@@ -51,6 +51,8 @@ export interface StateDelta {
     /** Replaces the whole record; null clears it. */
     linkedPins?: Record<string, AppliedLinkPin> | null;
     linkHolder?: LinkHolder | null;
+    /** Replaces the whole list; null clears it. */
+    mountPaths?: string[] | null;
   };
 }
 
@@ -170,7 +172,8 @@ export function applyDeltaToState(
       | "lastScheduledSyncAt"
       | "appliedArtifacts"
       | "linkedPins"
-      | "linkHolder",
+      | "linkHolder"
+      | "mountPaths",
   >(
     key: K,
   ) => {
@@ -186,6 +189,7 @@ export function applyDeltaToState(
   scalar("appliedArtifacts");
   scalar("linkedPins");
   scalar("linkHolder");
+  scalar("mountPaths");
 
   if (delta.bisect) {
     const bisect: Record<number, BisectVerdict> = delta.bisect.clear

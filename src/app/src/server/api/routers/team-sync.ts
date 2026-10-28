@@ -81,9 +81,9 @@ function emptyReviewSummary(): ChangelistReviewSummary {
 }
 
 export const teamSyncRouter = createTRPCRouter({
-  // Parsed + validated repo-committed Team Sync config
-  // (`.checkpoint/teamsync.yaml`) as resolved at a changelist (default: the
-  // default branch's head).
+  // Parsed + validated repo-committed Team Sync config (`teamsync.yaml` at
+  // the repo root) as resolved at a changelist (default: the default
+  // branch's head).
   getConfig: protectedProcedure
     .input(
       z.object({

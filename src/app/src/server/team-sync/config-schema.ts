@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 // Canonical zod schema for the repo-committed Team Sync config file
-// (`.checkpoint/teamsync.yaml`). Applies defaults so consumers always see a
-// fully-resolved config.
+// (`teamsync.yaml` at the repo root). Applies defaults so consumers always
+// see a fully-resolved config.
 //
 // MIRROR NOTE: the app workspace cannot depend on @checkpointvcs/common
 // (type-only import cycle; see src/app/src/server/api/api-version.ts). The
@@ -10,7 +10,7 @@ import { z } from "zod";
 // src/core/common/src/types/teamsync-config.ts for the daemon and desktop.
 // Keep the two in sync.
 
-export const TEAM_SYNC_CONFIG_PATH = ".checkpoint/teamsync.yaml";
+export const TEAM_SYNC_CONFIG_PATH = "teamsync.yaml";
 
 const idSchema = z
   .string()
@@ -76,8 +76,19 @@ const linkedRepoSchema = z.object({
     .string()
     .min(1)
     .refine(
-      (p) => !p.startsWith("/") && !p.split(/[\\/]/).includes(".."),
+      (p) =>
+        !/^[\\/]/.test(p) &&
+        !/^[a-zA-Z]:/.test(p) &&
+        !p.split(/[\\/]/).includes(".."),
       "path must be repo-relative and stay inside the repo",
+    )
+    .refine((p) => {
+      const segments = p.replace(/[\\/]+$/, "").split(/[\\/]/);
+      return segments.every((s) => s !== "" && s !== ".");
+    }, "path must not have empty or '.' segments")
+    .refine(
+      (p) => p.split(/[\\/]/)[0]!.toLowerCase() !== ".checkpoint",
+      "path must not be inside the workspace's .checkpoint folder",
     )
     .optional(),
   /** Nested links only: create the child for workspaces with no entry. */
@@ -137,7 +148,33 @@ export const TeamSyncConfigSchema = z.object({
       (links) =>
         new Set(links.map((l) => l.repo.toLowerCase())).size === links.length,
       "each repo may only be linked once",
-    ),
+    )
+    .superRefine((links, ctx) => {
+      // Each mount folder belongs to one child; two children can't share
+      // one, or sit one inside the other. Compared without case, as Windows
+      // and macOS would.
+      const folder = (p: string) =>
+        p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+      const mounts = links
+        .map((l, index) => ({ index, repo: l.repo, path: l.path }))
+        .filter((m): m is { index: number; repo: string; path: string } =>
+          m.path !== undefined,
+        );
+      for (const a of mounts) {
+        for (const b of mounts) {
+          if (a.index >= b.index) continue;
+          const pa = folder(a.path);
+          const pb = folder(b.path);
+          if (pa === pb || pa.startsWith(`${pb}/`) || pb.startsWith(`${pa}/`)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [b.index, "path"],
+              message: `${b.repo} and ${a.repo} are mounted at overlapping folders ("${b.path}" and "${a.path}")`,
+            });
+          }
+        }
+      }
+    }),
   buildSteps: z
     .array(buildStepSchema)
     .default([])

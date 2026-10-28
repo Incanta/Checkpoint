@@ -62,6 +62,7 @@ import {
   isIgnoredOrHidden,
   matchesPattern,
   normalizeRelativePath,
+  ownerOf,
   IGNORE_FILE,
   HIDDEN_FILE,
   type WorkspaceIgnorePatterns,
@@ -472,6 +473,43 @@ export class DaemonManager {
     this.workspaceStates.set(workspace.id, state);
     this.dirtyFiles.set(workspace.id, new Set());
     this.pathIndexes.delete(workspace.id);
+    // A sync can move a nested linked repo's mount path.
+    this.rebuildIgnoreCacheIfOwnershipChanged(workspace);
+  }
+
+  /**
+   * Rebuilds the ignore cache when the folders other workspaces own (mount
+   * paths in the state, nested workspaces found on disk) differ from the
+   * ones it was built with, and drops the pending list, which may show files
+   * that are now the nested workspace's (or hide ones that no longer are).
+   */
+  private rebuildIgnoreCacheIfOwnershipChanged(workspace: Workspace): void {
+    const patterns = this.ignorePatterns.get(workspace.id);
+    if (!patterns) return; // Not scanned yet; the scan builds it.
+    const mountPaths =
+      this.workspaceStates.get(workspace.id)?.teamSync?.mountPaths ?? [];
+    const before = this.ignoreCaches.get(workspace.id)?.owned ?? [];
+    const next = buildIgnoreCacheFromPatterns(patterns, mountPaths);
+    const same =
+      before.length === next.owned.length &&
+      before.every((p, i) => p === next.owned[i]);
+    if (same) return;
+    this.ignoreCaches.set(workspace.id, next);
+    this.workspacePendingChanges.delete(workspace.id);
+    Logger.debug(
+      `[DaemonManager] Folders owned by nested workspaces in ${workspace.name}: ${next.owned.join(", ") || "none"}`,
+    );
+  }
+
+  /**
+   * The folder of a nested workspace (a Team Sync mount path, or a folder
+   * holding its own `.checkpoint`) that `relativePath` is in, or null.
+   */
+  public nestedOwnerOf(
+    workspaceId: string,
+    relativePath: string,
+  ): string | null {
+    return ownerOf(this.getIgnoreCache(workspaceId).owned, relativePath);
   }
 
   // ─── Ignore / Hidden File Management ────────────────────────────────
@@ -492,8 +530,22 @@ export class DaemonManager {
 
     this.ignorePatterns.set(workspace.id, patterns);
 
-    // Pre-build the IgnoreCache so the first refresh is instant
-    this.ignoreCaches.set(workspace.id, buildIgnoreCacheFromPatterns(patterns));
+    // Pre-build the IgnoreCache so the first refresh is instant. Nested
+    // workspaces found by the scan, and mount paths from the state, belong
+    // to their own workspaces.
+    const before = this.ignoreCaches.get(workspace.id)?.owned;
+    const cache = buildIgnoreCacheFromPatterns(
+      patterns,
+      this.workspaceStates.get(workspace.id)?.teamSync?.mountPaths ?? [],
+    );
+    this.ignoreCaches.set(workspace.id, cache);
+    if (
+      before &&
+      (before.length !== cache.owned.length ||
+        before.some((p, i) => p !== cache.owned[i]))
+    ) {
+      this.workspacePendingChanges.delete(workspace.id);
+    }
   }
 
   /**
@@ -956,8 +1008,17 @@ export class DaemonManager {
 
     // Process non-directory modifications (the vast majority). A path that
     // doesn't exist on disk passes through as-is: it is a deleted file.
+    // Nothing inside a nested workspace is ever submitted here (staging
+    // refuses it; this covers anything staged before the folder was one).
+    const owned = ignoreCache.owned;
     for (const { mod, isDir } of classified) {
       if (!isDir) {
+        if (ownerOf(owned, mod.path) !== null) {
+          Logger.warn(
+            `[DaemonManager] Not submitting ${mod.path}: it is in a nested workspace`,
+          );
+          continue;
+        }
         push(mod);
       }
     }
@@ -1939,6 +2000,32 @@ export class DaemonManager {
     if (isCheckpointDirPath(relativePath)) {
       return;
     }
+
+    // A workspace created, linked, or removed inside this one changes which
+    // folders are its. Its marker is `<folder>/.checkpoint/workspace.json`;
+    // the rest of its .checkpoint (the state database) changes constantly
+    // and means nothing here. A whole owned folder going away counts too.
+    const owner = this.nestedOwnerOf(workspace.id, relativePath);
+    const isMarker = /(^|\/)\.checkpoint(\/workspace\.json)?$/i.test(
+      relativePath,
+    );
+    if (
+      isMarker ||
+      (owner !== null && owner.toLowerCase() === relativePath.toLowerCase())
+    ) {
+      try {
+        await this.scanIgnoreFiles(workspace);
+      } catch (err) {
+        Logger.warn(
+          `[DaemonManager] Could not rescan for nested workspaces in ${workspace.name}: ${(err as Error).message}`,
+        );
+        this.workspacePendingChanges.delete(workspace.id);
+      }
+      return;
+    }
+    // Anything else inside another workspace is that workspace's business,
+    // its ignore files included.
+    if (owner !== null) return;
 
     // During VCS operations (pull/submit/merge) buffer events instead
     // of marking dirty. This prevents mid-operation queries from seeing

@@ -1,5 +1,5 @@
 /**
- * Validation of `ifOs` on build steps in `.checkpoint/teamsync.yaml` (the
+ * Validation of `ifOs` on build steps in `teamsync.yaml` (the
  * app's zod schema in src/app/src/server/team-sync/config-schema.ts).
  */
 import { describe, expect, it } from "vitest";

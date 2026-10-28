@@ -1,4 +1,5 @@
-// Types for the repo-committed Team Sync config file (`.checkpoint/teamsync.yaml`).
+// Types for the repo-committed Team Sync config file (`teamsync.yaml` at the
+// repo root).
 //
 // These are the RESOLVED shapes: the app server validates the YAML with the
 // canonical zod schema in `src/app/src/server/team-sync/config-schema.ts`
@@ -295,5 +296,5 @@ export interface TeamSyncConfigResult {
   errors: string[] | null;
 }
 
-/** Repo path of the Team Sync config file. */
-export const TEAM_SYNC_CONFIG_PATH = ".checkpoint/teamsync.yaml";
+/** Repo path of the Team Sync config file (mirrors the app's constant). */
+export const TEAM_SYNC_CONFIG_PATH = "teamsync.yaml";

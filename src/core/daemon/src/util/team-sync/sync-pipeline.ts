@@ -21,6 +21,7 @@ import { DaemonConfig } from "../../daemon-config.js";
 import { Logger } from "../../logging.js";
 import { isSafeWorkspacePath, resolveInWorkspace } from "../workspace-path.js";
 import { hasLocalChanges } from "../pull-local-changes.js";
+import { ownerOf } from "../../file-status.js";
 
 export interface SyncPipelineOptions {
   changelistId: number | null;
@@ -98,6 +99,9 @@ export async function runSyncPipeline(
     onStep,
     mergeResult.pulledPaths,
   );
+  if (reconcile.mountPaths) {
+    await recordMountPaths(workspace, reconcile.mountPaths, backend);
+  }
 
   let appliedArtifacts: AppliedArtifactSummary[] = [];
   let missingArtifactTypes: string[] = [];
@@ -162,7 +166,12 @@ export async function runSyncPipeline(
 async function resolveSyncFilter(
   workspace: Workspace,
   changelistNumber: number,
-): Promise<{ filter: CompiledSyncFilter; repoConfigResolved: boolean }> {
+): Promise<{
+  filter: CompiledSyncFilter;
+  repoConfigResolved: boolean;
+  /** The folders nested linked repos own at this changelist. */
+  mountPaths: string[];
+}> {
   const config = await getWorkspaceConfig(workspace.localPath);
 
   let repoConfig: TeamSyncConfig | null = null;
@@ -182,7 +191,44 @@ async function resolveSyncFilter(
   return {
     filter: compileFilter(repoConfig, config?.teamSync),
     repoConfigResolved,
+    mountPaths: mountPathsOf(repoConfig),
   };
+}
+
+/**
+ * The folders nested linked repos own (each link's `path`), whatever the
+ * link's mode: an ignored nested link leaves its folder empty, and it still
+ * belongs to the child.
+ */
+export function mountPathsOf(config: TeamSyncConfig | null): string[] {
+  return (config?.linkedRepos ?? [])
+    .map((l) => l.path)
+    .filter((p): p is string => typeof p === "string" && p.length > 0)
+    .map((p) => p.replace(/\\/g, "/").replace(/^\/+|\/+$/g, ""))
+    .filter((p) => p.length > 0);
+}
+
+/**
+ * Records the mount paths for the synced changelist, so the daemon treats
+ * them as the nested workspaces' even offline. Unchanged lists aren't
+ * rewritten.
+ */
+async function recordMountPaths(
+  workspace: Workspace,
+  mountPaths: string[],
+  backend: Awaited<ReturnType<typeof DaemonConfig.Get>>["stateBackend"],
+): Promise<void> {
+  const state = await getWorkspaceState(workspace.localPath, backend);
+  const before = state.teamSync?.mountPaths ?? [];
+  const same =
+    before.length === mountPaths.length &&
+    before.every((p, i) => p === mountPaths[i]);
+  if (same) return;
+  await updateWorkspaceState(
+    workspace,
+    { meta: { mountPaths: mountPaths.length > 0 ? mountPaths : null } },
+    backend,
+  );
 }
 
 /**
@@ -198,7 +244,7 @@ async function resolveNewlyIncluded(
   tracked: ReadonlySet<string>,
 ): Promise<{ path: string; cl: number; fileId: string }[]> {
   try {
-    const { filter, repoConfigResolved } = await resolveSyncFilter(
+    const { filter, repoConfigResolved, mountPaths } = await resolveSyncFilter(
       workspace,
       changelistNumber,
     );
@@ -216,9 +262,13 @@ async function resolveNewlyIncluded(
       fromNumber: 0,
       toNumber: changelistNumber,
     });
+    // A nested linked repo's folder is its own; the server refuses files
+    // there, but never write into it even if some got in.
     return everything.added.filter(
       (c: { path: string }) =>
-        !tracked.has(c.path) && (filter.isNoOp || filter.matches(c.path)),
+        !tracked.has(c.path) &&
+        ownerOf(mountPaths, c.path) === null &&
+        (filter.isNoOp || filter.matches(c.path)),
     );
   } catch (err) {
     Logger.warn(`Sync filter: could not look for newly included files: ${err}`);
@@ -265,6 +315,8 @@ export interface ReconcileResult {
   failed: { path: string; error: string }[];
   /** Set when the repo config could not be read, so nothing was touched. */
   skipped?: "repo-config-unavailable";
+  /** Folders nested linked repos own; absent when the config was unread. */
+  mountPaths?: string[];
 }
 
 /**
@@ -289,7 +341,7 @@ async function reconcileSyncFilter(
 ): Promise<ReconcileResult> {
   void orgId;
   const result: ReconcileResult = { removed: 0, kept: [], failed: [] };
-  const { filter, repoConfigResolved } = await resolveSyncFilter(
+  const { filter, repoConfigResolved, mountPaths } = await resolveSyncFilter(
     workspace,
     changelistNumber,
   );
@@ -300,6 +352,7 @@ async function reconcileSyncFilter(
     result.skipped = "repo-config-unavailable";
     return result;
   }
+  result.mountPaths = mountPaths;
   const state = await getWorkspaceState(workspace.localPath, backend);
   const currentHash = state.teamSync?.syncFilterHash;
 
@@ -322,7 +375,12 @@ async function reconcileSyncFilter(
     currentHash === filter.hash && pulledPaths
       ? pulledPaths.filter((p) => p in state.files)
       : Object.keys(state.files);
-  const excluded = candidates.filter((relPath) => !filter.matches(relPath));
+  // Never delete inside a nested linked repo's folder, even a file this
+  // workspace somehow tracks there.
+  const excluded = candidates.filter(
+    (relPath) =>
+      !filter.matches(relPath) && ownerOf(mountPaths, relPath) === null,
+  );
 
   if (excluded.length > 0) {
     onStep?.("Applying sync filter");
