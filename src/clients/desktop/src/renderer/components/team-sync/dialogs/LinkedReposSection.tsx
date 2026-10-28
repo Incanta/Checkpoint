@@ -156,8 +156,18 @@ function LinkRow({
         {link.source === "preset" && " Mode set by the preset."}
       </div>
 
-      {!nested && (
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {nested ? (
+          // A nested link's workspace is whatever is in its folder; Team
+          // Sync creates it there, so there is nothing to pick.
+          <span
+            className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-muted)]"
+            title={link.localPath}
+          >
+            In <span className="font-mono">{link.path}</span>
+            {link.workspaceName && ` (${link.workspaceName})`}
+          </span>
+        ) : (
           <select
             aria-label={`Workspace for ${link.repo}`}
             value={creating ? CREATE : (link.workspaceId ?? "")}
@@ -178,36 +188,36 @@ function LinkRow({
             ))}
             <option value={CREATE}>Create a new workspace...</option>
           </select>
-          <select
-            aria-label={`Mode for ${link.repo}`}
-            value={link.mode}
+        )}
+        <select
+          aria-label={`Mode for ${link.repo}`}
+          value={link.mode}
+          disabled={busy}
+          onChange={(e) => onMode(e.target.value as TeamSyncLinkMode)}
+          className={`${selectClass} disabled:opacity-50`}
+        >
+          {MODES.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        {link.source === "workspace" && (
+          <Button
+            variant="ghost"
+            size="sm"
             disabled={busy}
-            onChange={(e) => onMode(e.target.value as TeamSyncLinkMode)}
-            className={`${selectClass} disabled:opacity-50`}
+            onClick={() =>
+              ipc.sendMessage("team-sync:links:clear", { repo: link.repo })
+            }
+            title="Forget this choice and use the preset's mode, or the default"
           >
-            {MODES.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          {link.source === "workspace" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() =>
-                ipc.sendMessage("team-sync:links:clear", { repo: link.repo })
-              }
-              title="Forget this choice and use the preset's mode, or the default"
-            >
-              Reset
-            </Button>
-          )}
-        </div>
-      )}
+            Reset
+          </Button>
+        )}
+      </div>
 
-      {creating && (
+      {creating && !nested && (
         <div className="flex flex-col gap-2 rounded-md bg-[var(--color-bg-primary)] p-3">
           <div className="text-xs text-[var(--color-text-muted)]">
             A new, empty workspace of {link.repo} on {link.branch}. The next

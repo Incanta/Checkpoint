@@ -19,11 +19,14 @@ import {
   type WorkspaceTeamSyncSettings,
 } from "../../../util/util.js";
 import { DaemonConfig } from "../../../daemon-config.js";
-import { createAndRegisterWorkspace } from "./ops.js";
+import { createAndRegisterWorkspace } from "../../../util/workspace-create.js";
 import { getProjectInfo } from "../../../util/unreal/index.js";
 import { compileFilter } from "../../../util/team-sync/filter.js";
 import { previewClean, executeClean } from "../../../util/team-sync/clean.js";
-import { getLinkStatuses } from "../../../util/team-sync/linked-repos.js";
+import {
+  getLinkStatuses,
+  saveLinkEntry as saveLinkEntryToConfig,
+} from "../../../util/team-sync/linked-repos.js";
 import {
   getBisectState,
   setBisectVerdict,
@@ -88,23 +91,13 @@ async function saveLinkEntry(
   repo: string,
   entry: WorkspaceLinkedWorkspace,
 ): Promise<WorkspaceTeamSyncSettings> {
-  const persisted = await getWorkspaceConfig(parent.localPath);
-  if (!persisted) {
+  if (!(await getWorkspaceConfig(parent.localPath))) {
     throw new TRPCError({
       code: "NOT_FOUND",
       message: `Workspace config missing on disk for ${parent.id}`,
     });
   }
-  const teamSync: WorkspaceTeamSyncSettings = persisted.teamSync ?? {};
-  const entries = Object.fromEntries(
-    Object.entries(teamSync.linkedWorkspaces ?? {}).filter(
-      ([name]) => name.toLowerCase() !== repo.toLowerCase(),
-    ),
-  );
-  entries[repo] = entry;
-  persisted.teamSync = { ...teamSync, linkedWorkspaces: entries };
-  await saveWorkspaceConfig(persisted);
-  return persisted.teamSync;
+  return saveLinkEntryToConfig(parent.localPath, repo, entry);
 }
 
 /** Whether one folder is, contains, or is inside the other. */
@@ -553,7 +546,7 @@ export const teamSyncRouter = router({
         });
       }
       if (input.linkedWorkspaceId) {
-        const linked = ctx.manager
+        const linked = await ctx.manager
           .linkedSyncDeps()
           .findWorkspace(input.linkedWorkspaceId);
         if (!linked) {
@@ -651,7 +644,7 @@ export const teamSyncRouter = router({
       if (link.path !== undefined) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: `${link.repo} is mounted at ${link.path} inside this workspace, which Team Sync does not support yet.`,
+          message: `${link.repo} is mounted at ${link.path} inside this workspace; Team Sync creates its workspace there on the next sync.`,
         });
       }
 

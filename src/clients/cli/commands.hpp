@@ -450,6 +450,26 @@ inline int cmdStatus() {
               << color::reset() << std::endl;
   }
 
+  // Workspaces nested in this one (Team Sync nested linked repos) never show
+  // their files here; say where their pending work is instead.
+  try {
+    auto nested = client.query("workspaces.pending.nestedWorkspaces", input);
+    if (nested.is_array()) {
+      for (auto& n : nested) {
+        if (!n.contains("pendingCount") || !n["pendingCount"].is_number()) continue;
+        int count = n["pendingCount"].get<int>();
+        if (count <= 0) continue;
+        std::cout << color::yellow() << "Nested workspace "
+                  << n.value("path", std::string()) << " has " << count
+                  << " pending change(s)." << color::reset() << std::endl;
+        std::cout << color::dim() << "  (run \"chk status\" in that folder)"
+                  << color::reset() << std::endl;
+      }
+    }
+  } catch (...) {
+    // An older daemon has no such endpoint.
+  }
+
   std::cout << std::endl;
 
   if (pending.files.empty() && changelists.changelists.empty()) {
@@ -1184,7 +1204,12 @@ inline std::vector<std::string> linkedReposBehindPin(
     std::string repo = link.value("repo", "");
     std::string status = link.value("status", "");
     std::string mode = link.value("mode", "");
-    if (repo.empty() || (status != "out-of-date" && status != "busy")) continue;
+    // A nested link with no workspace yet is created by the pull.
+    bool toCreate = status == "not-created" && mode == "follow-pin";
+    if (repo.empty() ||
+        (status != "out-of-date" && status != "busy" && !toCreate)) {
+      continue;
+    }
     if (mode == "manual") {
       std::cout << "Linked repo " << repo << " is not at its pin (changelist "
                 << link.value("pin", 0)
@@ -1312,9 +1337,37 @@ inline int cmdPull(bool noProgress = false,
   if (jobResult.result.is_object() && jobResult.result.contains("linkedRepos") &&
       jobResult.result["linkedRepos"].is_array()) {
     for (auto& link : jobResult.result["linkedRepos"]) {
-      if (link.value("status", "") != "synced") continue;
-      std::cout << "Linked repo " << link.value("repo", "") << " synced to changelist #"
-                << link.value("pin", 0) << "." << std::endl;
+      std::string status = link.value("status", "");
+      std::string repo = link.value("repo", "");
+      if (status == "synced") {
+        std::cout << "Linked repo " << repo << " synced to changelist #"
+                  << link.value("pin", 0) << "." << std::endl;
+        continue;
+      }
+      // A followed link that didn't land doesn't stop the pull, so say so
+      // where a build log will show it, before a build trips over it.
+      if (link.value("mode", "") != "follow-pin") continue;
+      std::string why;
+      if (status == "create-failed") {
+        why = "could not create its workspace";
+        std::string error = link.value("error", "");
+        if (!error.empty()) why += ": " + error;
+      } else if (status == "missing-workspace") {
+        why = "its workspace is not registered on this machine";
+      } else if (status == "not-set-up") {
+        why = "no workspace is chosen for it";
+      } else if (status == "wrong-repo") {
+        why = "the chosen workspace is of another repo";
+      } else if (status == "wrong-branch") {
+        why = "the chosen workspace is on another branch";
+      } else if (status == "overlay-active") {
+        why = "the chosen workspace has a feature branch overlaid";
+      } else {
+        continue;
+      }
+      std::cerr << color::yellow() << "warning: linked repo " << repo
+                << " was not synced to changelist #" << link.value("pin", 0)
+                << ": " << why << "." << color::reset() << std::endl;
     }
   }
   if (jobResult.result.is_object() && jobResult.result.contains("stalePins") &&

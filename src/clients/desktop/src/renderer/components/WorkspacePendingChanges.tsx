@@ -15,6 +15,7 @@ import {
   workspaceDiffAtom,
   workspacePendingChangelistsAtom,
   workspacePendingChangesAtom,
+  workspaceNestedAtom,
   workspaceBranchesAtom,
 } from "../../common/state/workspace";
 import { ipc } from "../pages/ipc";
@@ -88,6 +89,45 @@ function changelistOf(
 
 function firstLine(text: string): string {
   return text.split("\n")[0] ?? "";
+}
+
+/**
+ * Workspaces nested in this one (Team Sync nested linked repos, or any
+ * folder with its own .checkpoint) that have pending changes. Their files
+ * never show here, since they belong to the other repo, so this says where
+ * the work is and opens that workspace. Empty (and takes no space) when
+ * there is nothing to show.
+ */
+function NestedPendingStrip(): React.ReactElement {
+  const nested = useAtomValue(workspaceNestedAtom).filter(
+    (n) => n.workspaceId !== null && (n.pendingCount ?? 0) > 0,
+  );
+  return (
+    <div className="row-span-1">
+      {nested.map((n) => (
+        <div
+          key={n.path}
+          className="flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-info)]/10 px-3 py-1.5 text-xs text-[var(--color-text-secondary)]"
+        >
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-mono">{n.path}</span> is another workspace
+            {n.workspaceName ? ` (${n.workspaceName})` : ""} with{" "}
+            {n.pendingCount} pending change{n.pendingCount === 1 ? "" : "s"}.
+            Submit them from there.
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              ipc.sendMessage("workspace:select", { id: n.workspaceId! })
+            }
+          >
+            Open
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function WorkspacePendingChanges() {
@@ -214,9 +254,7 @@ export default function WorkspacePendingChanges() {
         .map((b) => b.name),
     [workspaceBranches, branches],
   );
-  const [createFor, setCreateFor] = useState<{ paths: string[] } | null>(
-    null,
-  );
+  const [createFor, setCreateFor] = useState<{ paths: string[] } | null>(null);
   const submitBucket = buckets.find((b) => b.id === submitBucketId) ?? null;
 
   useEffect(() => {
@@ -389,13 +427,10 @@ export default function WorkspacePendingChanges() {
             : `${b.label}${b.description ? `  ${firstLine(b.description)}` : ""}`,
         command: () => moveTo(sel.paths, b),
       }));
-    targets.push(
-      ...(targets.length > 0 ? [{ separator: true }] : []),
-      {
-        label: "New changelist...",
-        command: () => setCreateFor({ paths: sel.paths }),
-      },
-    );
+    targets.push(...(targets.length > 0 ? [{ separator: true }] : []), {
+      label: "New changelist...",
+      command: () => setCreateFor({ paths: sel.paths }),
+    });
 
     if (from.kind === "unstaged") {
       return [
@@ -403,7 +438,10 @@ export default function WorkspacePendingChanges() {
           label: `Stage${count}`,
           disabled,
           command: () =>
-            moveTo(sel.paths, buckets.find((b) => b.id === `default:${domain}`)!),
+            moveTo(
+              sel.paths,
+              buckets.find((b) => b.id === `default:${domain}`)!,
+            ),
         },
         { label: "Stage to", disabled, items: targets },
       ];
@@ -412,7 +450,8 @@ export default function WorkspacePendingChanges() {
       {
         label: `Unstage${count}`,
         disabled,
-        command: () => moveTo(sel.paths, buckets.find((b) => b.kind === "unstaged")!),
+        command: () =>
+          moveTo(sel.paths, buckets.find((b) => b.kind === "unstaged")!),
       },
       { label: "Move to", disabled, items: targets },
     ];
@@ -499,7 +538,7 @@ export default function WorkspacePendingChanges() {
   );
 
   return (
-    <div className="grid h-full grid-rows-[2.5rem_1fr]">
+    <div className="grid h-full grid-rows-[2.5rem_auto_1fr]">
       <div className="row-span-1 flex items-center gap-2 bg-[var(--color-bg-secondary)] px-3">
         <DropdownButton
           className="px-3 py-1 text-xs"
@@ -542,6 +581,7 @@ export default function WorkspacePendingChanges() {
           New Changelist
         </Button>
       </div>
+      <NestedPendingStrip />
       <div className="row-span-1 overflow-hidden text-left">
         <Splitter
           key={layout}

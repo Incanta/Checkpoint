@@ -2,7 +2,8 @@
 
 Plan for letting a Team Sync repo pin other repos at a changelist and keep local workspaces of them in sync. The motivating case is a custom Unreal Engine kept in its own repo and synced once per machine, shared by every game, instead of the Perforce convention of committing `Engine/` next to (or around) each game. Written 2026-10-27 on `1b2757a`.
 
-**Progress (2026-10-27): phases 1 through 4 are implemented** (phases 3 and 4 uncommitted). See [Phase 1 as built](#phase-1-as-built), [Phase 2 as built](#phase-2-as-built), [Phase 3 as built](#phase-3-as-built), and [Phase 4 as built](#phase-4-as-built) for where they live and where they differ from this plan.
+**Progress (2026-10-28): all five phases are implemented** (phases 3 through 5 uncommitted). See [Phase 1 as built](#phase-1-as-built), [Phase 2 as built](#phase-2-as-built), [Phase 3 as built](#phase-3-as-built), [Phase 4 as built](#phase-4-as-built), and [Phase 5 as built](#phase-5-as-built) for where they live and where they differ from this plan. Earlier "as built" sections describe each phase when it landed; later phases supersede them where they overlap (for example, nested links are no longer "unsupported").
+
 ## Goals
 
 - A game repo says which engine repo and changelist it builds against. Syncing the game to any changelist brings the engine to the changelist that game CL was pinned to.
@@ -201,7 +202,7 @@ Not done in phase 1 (the first two and the CLI flags landed in phase 3):
 
 - **Creating a linked workspace in a chosen folder.**
 - **Confirmation in the desktop app.**
-- **The C++ CLI:** no `--confirm-links` flag, and a daemonless CLI only registers its own workspace, so its links report `missing-workspace`. The second part still stands.
+- **The C++ CLI:** no `--confirm-links` flag, and a daemonless CLI only registers its own workspace, so its links report `missing-workspace`. Both parts are fixed now (see "Daemonless CLI" under phase 5).
 
 ## Phase 2 as built
 
@@ -278,6 +279,40 @@ Collisions (app server):
 Not done (phase 5 or later): surfacing a nested child's pending changes in the parent's UI. The file browser shows owned folders as ignored.
 
 Tests: `src/tests/src/daemon/nested-workspace-ignore.test.ts` (scan, ignore cache, removal helper), `src/tests/src/daemon/nested-workspace-ownership.test.ts` (end to end: pending, stage, watcher, both cleans), `src/tests/src/server/team-sync-mounts.test.ts` (collision walk and submit guard), and new schema cases in `team-sync-linked-repos-config.test.ts`. With the config at the repo root, `src/tests/src/server/team-sync-config-file.test.ts` commits a real one and covers the collision check, the submit guard, and the pin-change badge end to end.
+
+## Phase 5 as built
+
+Nested links sync (`src/core/daemon/src/util/team-sync/linked-repos.ts`):
+
+- **Found by folder, not by choice:** a nested link's workspace is whichever registered workspace sits at `<parent>/<path>`. The `workspaceId` in `workspace.json` is only a record; a stale or wrong one is ignored. There is no workspace picker for nested links.
+- **Created on sync:** in `follow-pin` mode, a nested link with no workspace in its folder gets one. The parent's sync creates the folder, creates a workspace of the linked repo on the link's branch (found by name through `org.getOrg`), records `{ mode: follow-pin, workspaceId }` in the parent's `workspace.json`, rescans the parent's owned folders, and syncs the child to the pin like any linked workspace. It is named `<parent name> <repo>`. Creation happens after every link has been checked, like any move.
+- **Creation failure doesn't block:** no access to the repo, or a file where the folder goes, gives `create-failed` with an `error`, and the parent syncs anyway, as for a link that isn't set up. A child that was created but fails to sync stops the parent, like any linked sync.
+- **Modes:** `manual` never creates the child (`not-created`), and reports a mismatch once one exists. `ignore` leaves the folder empty, and the folder stays the child's (phase 4).
+- **`enabledByDefault: false`** resolves to `ignore` for a workspace with no entry, without writing one, so a later change to the default still applies to workspaces that never chose. That differs from the plan's "records `ignore`".
+- **A folder holding a workspace this daemon doesn't know** (its own, damaged, or `.checkpoint/workspace.json`, not registered) is reported as `missing-workspace` and left alone; nothing is created over it.
+- **Local changes, ahead of pin, busy:** the same confirmation and retry rules as other links. "Held by another" never applies, since only the parent moves its child.
+- New statuses `not-created` and `create-failed` replace `unsupported`; `LinkSyncResult` gains `path`, `error`, and `created`.
+- Workspace creation moved to `util/workspace-create.ts` (`createAndRegisterWorkspace`), shared by the app's workspace creation, `createLinkedWorkspace`, and nested children. `saveLinkEntry` moved into `linked-repos.ts`.
+
+Pending changes in the parent:
+
+- New daemon endpoint `workspaces.pending.nestedWorkspaces`: each owned folder (mount paths and folders holding a workspace) with the registered workspace there and its pending change count, or nulls when none is registered.
+- The desktop Files view shows a strip above the pending list for each nested workspace with pending changes ("Plugins/Studio is another workspace (bob-game StudioPlugins) with 2 pending changes. Submit them from there.") with an Open button. Selecting a workspace the dashboard list doesn't have yet (one the daemon created) reloads the list first.
+- `checkpoint status` prints a line per nested workspace with pending changes.
+
+Daemonless CLI (build agents; Horde's materializer always sets `CHECKPOINT_DAEMONLESS=1`):
+
+- An ephemeral daemon starts out knowing only the workspace it runs for. Linked lookups now register one they find: a nested child by its folder's `.checkpoint/workspace.json`, and an anywhere-on-disk link by its id in the shared daemon config, when its folder still holds it. Before, every link on such a machine reported `missing-workspace` and was never synced. A damaged `workspace.json` (no id, repo, or daemon id) is still left alone.
+- It creates nested children too, the same way `checkpoint init` already creates workspaces without a daemon. To narrow the race with a resident daemon writing the same `daemon.json`, creation from an ephemeral daemon (here and in `init`) re-reads it right before adding the workspace. It is still a read-then-write with no lock.
+- A workspace found this way has no org id locally, so the linked sync asks the server for the repo's org before pulling it (it would otherwise pull with an empty org).
+- `checkpoint status` counts a nested child's pending changes the same way.
+- `checkpoint pull` prints a warning on stderr for each `follow-pin` link that didn't land (could not create, not registered, not set up, wrong repo or branch, feature branch overlaid), with the reason. The pull still exits 0, as before.
+
+Desktop settings and status: nested links show their folder and the workspace in it instead of a workspace picker, keep the mode picker and Reset, and have wording for the new statuses ("created on next sync", "could not create"). `checkpoint pull` also pulls when a followed nested link has no workspace yet, even if the parent is up to date.
+
+Tests: `src/tests/src/daemon/nested-linked-repos.test.ts` (end to end: creation, following the pin, reuse, finding by folder, off by default, manual, failed creation, an unknown workspace in the folder, confirmation, the status report, the pending summary, and the same from a daemonless CLI), and nested cases in `linked-repos-rules.test.ts`.
+
+Not done: the desktop UI has no automated tests; a nested child whose mount path moves in the config stays at the old folder (still protected, since it holds a workspace), and a new one is created at the new path.
 
 ## Config location
 

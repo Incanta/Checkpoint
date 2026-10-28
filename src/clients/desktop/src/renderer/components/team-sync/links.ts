@@ -29,8 +29,13 @@ export function linkBadge(link: TeamSyncLinkReport): {
       return { label: "not set up", tone: "default" };
     case "ignored":
       return { label: "ignored", tone: "default" };
-    case "unsupported":
-      return { label: "nested, not synced yet", tone: "default" };
+    case "not-created":
+      return {
+        label: link.mode === "manual" ? "not created" : "created on next sync",
+        tone: link.mode === "manual" ? "default" : "warning",
+      };
+    case "create-failed":
+      return { label: "could not create", tone: "danger" };
     case "busy":
       return { label: "busy", tone: "warning" };
     case "missing-workspace":
@@ -63,20 +68,35 @@ export function describeLink(link: TeamSyncLinkReport): string {
     case "not-set-up":
       return `Pinned ${link.pin}. No workspace chosen: pick one, create one, or ignore the link. This workspace still syncs.`;
     case "ignored":
-      return "Ignored. Team Sync leaves it alone.";
-    case "unsupported":
-      return `Mounted at ${link.path ?? "a path"} inside this workspace. Team Sync doesn't sync nested links yet.`;
+      return link.path !== undefined
+        ? `Ignored. Team Sync leaves ${link.path} empty, and it stays the linked repo's folder.`
+        : "Ignored. Team Sync leaves it alone.";
+    case "not-created":
+      return link.mode === "manual"
+        ? `Pinned ${link.pin}. Manual mode: Team Sync doesn't create its workspace in ${link.path}. Switch to "Follow the pin" to have it created.`
+        : `Pinned ${link.pin}. The next sync creates its workspace in ${link.path} and syncs it to the pin.`;
+    case "create-failed":
+      return `Could not create its workspace in ${link.path}: ${link.error ?? "unknown error"}. This workspace still syncs.`;
     case "busy":
       return `Pinned ${link.pin}, ${at}. Another operation is running in it; syncing waits until it finishes.`;
     case "missing-workspace":
-      return "The chosen workspace isn't registered on this machine. Pick another or create one.";
+      return link.path !== undefined
+        ? `${link.path} holds a workspace this machine doesn't know. Add it in the app, or move it away so Team Sync can create one.`
+        : "The chosen workspace isn't registered on this machine. Pick another or create one.";
     case "wrong-repo":
-      return `The chosen workspace holds a different repo than ${link.repo}.`;
+      return `${chosen(link)} holds a different repo than ${link.repo}.`;
     case "wrong-branch":
-      return `The chosen workspace isn't on ${link.branch}, the branch the pin refers to.`;
+      return `${chosen(link)} isn't on ${link.branch}, the branch the pin refers to.`;
     case "overlay-active":
-      return "The chosen workspace has feature branches active, so Team Sync won't move it.";
+      return `${chosen(link)} has feature branches active, so Team Sync won't move it.`;
   }
+}
+
+/** How to refer to the link's workspace in a sentence. */
+function chosen(link: TeamSyncLinkReport): string {
+  return link.path !== undefined
+    ? `The workspace in ${link.path}`
+    : "The chosen workspace";
 }
 
 const REASONS: Record<TeamSyncLinkConfirmReason, string> = {

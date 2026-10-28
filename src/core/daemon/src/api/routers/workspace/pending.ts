@@ -144,6 +144,24 @@ export const pendingRouter = router({
       }
     }),
 
+  /**
+   * Workspaces nested inside this one (Team Sync nested linked repos, or any
+   * folder with its own .checkpoint) and how many pending changes each has.
+   * Their files never show in this workspace's pending changes, so clients
+   * show this instead, so work there isn't forgotten.
+   */
+  nestedWorkspaces: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { manager, workspace } = resolveWorkspace(ctx, input);
+      return manager.nestedWorkspaceSummary(workspace);
+    }),
+
   rescanIgnoreFiles: publicProcedure
     .input(
       z.object({

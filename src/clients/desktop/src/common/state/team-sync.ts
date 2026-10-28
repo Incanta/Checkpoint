@@ -144,8 +144,9 @@ export type TeamSyncLinkMode = "follow-pin" | "manual" | "ignore";
 
 /** How a link looks from this machine (mirrors the daemon's LinkStatus). */
 export type TeamSyncLinkStatus =
-  | "unsupported"
   | "ignored"
+  | "not-created"
+  | "create-failed"
   | "not-set-up"
   | "missing-workspace"
   | "wrong-repo"
@@ -171,7 +172,10 @@ export interface TeamSyncLinkReport {
   /** Where the mode came from: this workspace, its preset, or the default. */
   source: "workspace" | "preset" | "default";
   status: TeamSyncLinkStatus;
+  /** A nested link's folder inside this workspace. */
   path?: string;
+  /** Set with "create-failed": why. */
+  error?: string;
   workspaceId?: string;
   workspaceName?: string;
   localPath?: string;

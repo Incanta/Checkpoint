@@ -43,6 +43,7 @@ import {
   type ScheduledWorkspace,
 } from "./util/team-sync/scheduler.js";
 import { runSyncPipeline } from "./util/team-sync/sync-pipeline.js";
+import { createAndRegisterWorkspace } from "./util/workspace-create.js";
 import { compareWithBaseline } from "./util/baseline.js";
 import { recoverInterruptedPull } from "./util/interrupted-pull.js";
 import {
@@ -72,6 +73,45 @@ import {
 import { checkSyncStatus, type SyncStatus } from "./util/sync-status.js";
 import { hasConflictMarkers } from "./util/auto-merge.js";
 import { getBinaryExtensions, isBinaryFile } from "./util/binary-extensions.js";
+
+/**
+ * A folder's identity for comparing workspace locations: resolved, forward
+ * slashes, no trailing slash, and without case where the OS ignores it.
+ */
+function folderKey(folder: string): string {
+  const resolved = path.resolve(folder).replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" || process.platform === "darwin"
+    ? resolved.toLowerCase()
+    : resolved;
+}
+
+/**
+ * The manager's workspace for one an ephemeral daemon finds on disk.
+ * `.checkpoint/workspace.json` stores the lean config shape; the server-owned
+ * fields (userId, orgId, createdAt, deletedAt) are not persisted locally and
+ * are unused by local operations, so they get inert placeholders. These are
+ * never written back to the shared daemon.json.
+ */
+function workspaceFromConfig(
+  wsConfig: NonNullable<Awaited<ReturnType<typeof getWorkspaceConfig>>>,
+  localPath: string,
+): Workspace {
+  return {
+    id: wsConfig.id,
+    repoId: wsConfig.repoId,
+    name: wsConfig.workspaceName,
+    domainBranchName: wsConfig.domainBranchName,
+    activeBranches: wsConfig.activeBranches ?? [],
+    localPath,
+    daemonId: wsConfig.daemonId,
+    userId: "",
+    orgId: "",
+    createdAt: new Date(0),
+    deletedAt: null,
+    syncedChangelistNumber: null,
+    syncedAt: null,
+  };
+}
 
 /** Whether a repo-relative path is the workspace's .checkpoint directory or inside it. */
 function isCheckpointDirPath(relativePath: string): boolean {
@@ -291,29 +331,54 @@ export class DaemonManager {
       );
     }
 
-    // .checkpoint/workspace.json stores the lean config shape; the manager
-    // works with the richer server Workspace. The server-owned fields
-    // (userId, orgId, createdAt, deletedAt) are not persisted locally and are
-    // unused by local operations, so fill them with inert placeholders. These
-    // are never written back to the shared daemon.json in ephemeral mode.
-    const workspace: Workspace = {
-      id: wsConfig.id,
-      repoId: wsConfig.repoId,
-      name: wsConfig.workspaceName,
-      domainBranchName: wsConfig.domainBranchName,
-      activeBranches: wsConfig.activeBranches ?? [],
-      localPath: workspacePath,
-      daemonId: wsConfig.daemonId,
-      userId: "",
-      orgId: "",
-      createdAt: new Date(0),
-      deletedAt: null,
-      syncedChangelistNumber: null,
-      syncedAt: null,
-    };
-
-    await this.registerWorkspace(workspace, { watch: false });
+    await this.registerWorkspace(workspaceFromConfig(wsConfig, workspacePath), {
+      watch: false,
+    });
     // Intentionally NO watchWorkspace() and NO startSyncPolling().
+  }
+
+  /**
+   * The registered workspace whose folder is `localPath`. An ephemeral
+   * daemon registers only the workspace it was started for, so it also
+   * registers one it finds on disk there (a linked repo's), the same way.
+   */
+  public async workspaceAtFolder(
+    localPath: string,
+  ): Promise<Workspace | undefined> {
+    const key = folderKey(localPath);
+    for (const list of this.workspaces.values()) {
+      const found = list.find((w) => folderKey(w.localPath) === key);
+      if (found) return found;
+    }
+    if (!this.ephemeral) return undefined;
+    const wsConfig = await getWorkspaceConfig(localPath).catch(() => null);
+    // A damaged workspace.json is somebody's folder, not a workspace to use.
+    if (!wsConfig?.id || !wsConfig.repoId || !wsConfig.daemonId) {
+      return undefined;
+    }
+    const known = this.findWorkspaceById(wsConfig.id);
+    if (known) return known;
+    const workspace = workspaceFromConfig(
+      wsConfig,
+      localPath.replace(/\\/g, "/"),
+    );
+    await this.registerWorkspace(workspace, { watch: false });
+    return workspace;
+  }
+
+  /**
+   * The registered workspace with this id. An ephemeral daemon also picks up
+   * one the shared daemon config lists, when its folder still holds it.
+   */
+  public async workspaceWithId(id: string): Promise<Workspace | undefined> {
+    const known = this.findWorkspaceById(id);
+    if (known || !this.ephemeral) return known;
+    const listed = (DaemonConfig.Ensure().vars.workspaces ?? []).find(
+      (w) => w.id === id,
+    );
+    if (!listed?.localPath) return undefined;
+    const found = await this.workspaceAtFolder(listed.localPath);
+    return found?.id === id ? found : undefined;
   }
 
   /**
@@ -499,6 +564,48 @@ export class DaemonManager {
     Logger.debug(
       `[DaemonManager] Folders owned by nested workspaces in ${workspace.name}: ${next.owned.join(", ") || "none"}`,
     );
+  }
+
+  /**
+   * The workspaces nested inside this one (Team Sync mount paths and folders
+   * holding their own `.checkpoint`) with each one's pending change count,
+   * so work there isn't forgotten while looking at the parent. A folder with
+   * no workspace registered here (an ignored nested link, or one this daemon
+   * doesn't know) has no count.
+   */
+  public async nestedWorkspaceSummary(workspace: Workspace): Promise<
+    {
+      path: string;
+      workspaceId: string | null;
+      workspaceName: string | null;
+      pendingCount: number | null;
+    }[]
+  > {
+    const owned = this.getIgnoreCache(workspace.id).owned;
+    const summary = [];
+    for (const folder of owned) {
+      const child = await this.workspaceAtFolder(
+        path.join(workspace.localPath, folder),
+      );
+      let pendingCount: number | null = null;
+      if (child) {
+        try {
+          pendingCount = (await this.refreshWorkspaceContents(child))
+            .numChanges;
+        } catch (err) {
+          Logger.warn(
+            `[DaemonManager] Could not read pending changes of nested workspace ${child.name}: ${(err as Error).message}`,
+          );
+        }
+      }
+      summary.push({
+        path: folder,
+        workspaceId: child?.id ?? null,
+        workspaceName: child?.name ?? null,
+        pendingCount,
+      });
+    }
+    return summary;
   }
 
   /**
@@ -2553,7 +2660,7 @@ export class DaemonManager {
    */
   public linkedSyncDeps(): LinkedSyncDeps {
     return {
-      findWorkspace: (id) => this.findWorkspaceById(id),
+      findWorkspace: (id) => this.workspaceWithId(id),
       isBusy: (id) => this.vcsOperationActive.get(id) === true,
       hasLocalChanges: async (workspace) =>
         (await this.refreshWorkspaceContents(workspace)).numChanges > 0,
@@ -2583,9 +2690,18 @@ export class DaemonManager {
             );
           }
         }
+        // A workspace an ephemeral daemon found on disk has no org id.
+        let orgId = workspace.orgId;
+        if (!orgId) {
+          const client = await CreateApiClientAuth(workspace.daemonId);
+          const repo = await client.repo.getRepo.query({
+            id: workspace.repoId,
+          });
+          orgId = repo?.orgId ?? "";
+        }
         this.beginVcsOperation(workspace.id);
         try {
-          await runSyncPipeline(info, workspace.orgId, {
+          await runSyncPipeline(info, orgId, {
             changelistId: changelist,
             filePaths: null,
             reportProgress: false,
@@ -2595,6 +2711,37 @@ export class DaemonManager {
         } finally {
           await this.endVcsOperation(workspace.id);
         }
+      },
+      findWorkspaceAt: (localPath) => this.workspaceAtFolder(localPath),
+      createWorkspace: async (input) => {
+        // A daemonless CLI (a build agent's pull) creates the child too, the
+        // same way `checkpoint init` creates a workspace without a daemon.
+        const client = await CreateApiClientAuth(input.daemonId);
+        // getOrg lists the repos this user can reach, including through the
+        // org's default repo access (repo.list leaves those out).
+        const org = await client.org.getOrg.query({ id: input.orgId });
+        const repo = (org?.repos ?? []).find(
+          (r: { name: string; deletedAt: Date | null }) =>
+            !r.deletedAt && r.name.toLowerCase() === input.repo.toLowerCase(),
+        );
+        if (!repo) {
+          throw new Error(
+            `No repo named ${input.repo} in this organization, or you don't have access to it`,
+          );
+        }
+        await fs.mkdir(input.localPath, { recursive: true });
+        return createAndRegisterWorkspace(this, {
+          daemonId: input.daemonId,
+          name: input.name,
+          repoId: repo.id,
+          path: input.localPath,
+          defaultBranchName: input.branch,
+          reloadConfig: this.ephemeral,
+        });
+      },
+      refreshOwnership: async (parent) => {
+        const workspace = this.findWorkspaceById(parent.id);
+        if (workspace) await this.scanIgnoreFiles(workspace);
       },
     };
   }

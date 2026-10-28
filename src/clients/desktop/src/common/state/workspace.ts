@@ -22,6 +22,23 @@ export const workspacePendingChangesAtom = atom<WorkspacePendingChanges | null>(
 );
 syncAtom(workspacePendingChangesAtom, "workspacePendingChanges");
 
+/**
+ * A workspace nested inside the current one (a Team Sync nested linked repo,
+ * or any folder with its own .checkpoint). Its files never show in the
+ * current workspace's pending changes, so its own count is shown instead.
+ */
+export interface NestedWorkspaceSummary {
+  /** Folder, relative to the current workspace. */
+  path: string;
+  /** Null when no workspace in that folder is registered here. */
+  workspaceId: string | null;
+  workspaceName: string | null;
+  pendingCount: number | null;
+}
+
+export const workspaceNestedAtom = atom<NestedWorkspaceSummary[]>([]);
+syncAtom(workspaceNestedAtom, "workspaceNested");
+
 export const workspacePendingChangelistsAtom =
   atom<PendingChangelistState | null>(null);
 syncAtom(workspacePendingChangelistsAtom, "workspacePendingChangelists");

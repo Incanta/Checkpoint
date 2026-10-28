@@ -27,6 +27,7 @@ import {
   workspaceLabelsAtom,
   workspacePendingChangesAtom,
   workspacePendingChangelistsAtom,
+  workspaceNestedAtom,
   workspacesAtom,
   workspaceSyncStatusAtom,
   workspaceSyncPreviewAtom,
@@ -187,8 +188,24 @@ export default class DaemonHandler {
     });
 
     ipcOn(this.ipcMain, "workspace:select", async (_event, data) => {
-      const workspaces = store.get(workspacesAtom) || [];
-      const workspace = workspaces.find((ws) => ws.id === data.id);
+      let workspace = (store.get(workspacesAtom) || []).find(
+        (ws) => ws.id === data.id,
+      );
+      // The daemon creates some workspaces itself (a Team Sync nested linked
+      // repo's), which the list loaded for the dashboard doesn't have yet.
+      const user = store.get(currentUserAtom);
+      if (!workspace && user && !this.isMocked) {
+        try {
+          const client = await CreateDaemonClient();
+          const { workspaces } = await client.workspaces.ops.list.local.query({
+            daemonId: user.daemonId,
+          });
+          store.set(workspacesAtom, workspaces);
+          workspace = workspaces.find((ws) => ws.id === data.id);
+        } catch (error) {
+          console.error("Failed to reload workspaces:", error);
+        }
+      }
       if (workspace) {
         this.selectWorkspace(workspace);
       }
@@ -917,6 +934,7 @@ export default class DaemonHandler {
     store.set(workspaceSyncPreviewAtom, null);
     store.set(workspaceConflictsAtom, null);
     store.set(resolveConfirmSuppressedAtom, null);
+    store.set(workspaceNestedAtom, []);
 
     this.workspaceRefresh();
 
@@ -1129,6 +1147,7 @@ export default class DaemonHandler {
     store.set(workspacePendingChangesAtom, pendingChanges || null);
     // A stage, unstage, or submit changes changelist membership too.
     await this.refreshPendingChangelists();
+    await this.refreshNestedWorkspaces(currentWorkspace);
 
     // Reset workspaceDirectoriesAtom to trigger tree re-initialization
     store.set(workspaceDirectoriesAtom, {
@@ -1137,6 +1156,28 @@ export default class DaemonHandler {
         containsChanges: false,
       },
     });
+  }
+
+  /**
+   * Workspaces nested in this one and their pending change counts, shown
+   * beside its pending changes so work there isn't forgotten. An older
+   * daemon without the endpoint shows none.
+   */
+  private async refreshNestedWorkspaces(workspace: Workspace): Promise<void> {
+    try {
+      const client = await CreateDaemonClient();
+      const nested = await client.workspaces.pending.nestedWorkspaces.query({
+        daemonId: workspace.daemonId,
+        workspaceId: workspace.id,
+      });
+      // Only for the workspace still selected.
+      if (store.get(currentWorkspaceAtom)?.id === workspace.id) {
+        store.set(workspaceNestedAtom, nested);
+      }
+    } catch (error) {
+      console.error("Failed to fetch nested workspaces:", error);
+      store.set(workspaceNestedAtom, []);
+    }
   }
 
   private async workspaceRefreshIgnores(): Promise<void> {

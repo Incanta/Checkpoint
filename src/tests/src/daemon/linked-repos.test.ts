@@ -676,7 +676,7 @@ describe("Team Sync linked repos", { timeout: 120_000 }, () => {
         UE5: { mode: "follow-pin", workspaceId: result.workspace.id },
       });
 
-      const engine = DaemonManager.Get()
+      const engine = await DaemonManager.Get()
         .linkedSyncDeps()
         .findWorkspace(result.workspace.id);
       expect(engine).toMatchObject({
@@ -741,7 +741,9 @@ describe("Team Sync linked repos", { timeout: 120_000 }, () => {
         errors: null,
       });
       pins.set(s.gameRepoId, s.engineV1);
-      await expect(create()).rejects.toThrow(/does not support yet/);
+      await expect(create()).rejects.toThrow(
+        /Team Sync creates its workspace there on the next sync/,
+      );
     });
   });
 });

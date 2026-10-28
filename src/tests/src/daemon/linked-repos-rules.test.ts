@@ -208,11 +208,46 @@ describe("decideLinkSync", () => {
     });
   });
 
-  it("reports nested links as unsupported, whatever the choice", () => {
-    expect(decide({ link: { path: "Plugins/Shared" } }).action).toBe("report");
-    expect(decide({ link: { path: "Plugins/Shared" } })).toEqual({
-      action: "report",
-      status: "unsupported",
+  describe("nested links", () => {
+    const nested = { path: "Plugins/Shared" };
+
+    it("creates the workspace when its folder has none and the link follows the pin", () => {
+      // No workspace chosen is normal: a nested link's is in its folder.
+      expect(
+        decide({ link: nested, choice: { workspaceId: undefined }, facts: null }),
+      ).toEqual({ action: "create" });
+    });
+
+    it("does not create one in manual mode, or when ignored", () => {
+      expect(
+        decide({ link: nested, choice: { mode: "manual" }, facts: null }),
+      ).toEqual({ action: "report", status: "not-created" });
+      expect(
+        decide({ link: nested, choice: { mode: "ignore" }, facts: null }),
+      ).toEqual({ action: "report", status: "ignored" });
+    });
+
+    it("reports a folder holding a workspace this daemon doesn't have", () => {
+      expect(decide({ link: nested, facts: "missing" })).toEqual({
+        action: "report",
+        status: "missing-workspace",
+      });
+    });
+
+    it("treats the workspace in its folder like any linked workspace", () => {
+      expect(
+        decide({ link: nested, choice: { workspaceId: undefined } }),
+      ).toEqual({ action: "sync" });
+      expect(
+        decide({ link: nested, facts: { changelistNumber: 10 } }),
+      ).toEqual({ action: "report", status: "up-to-date" });
+      expect(decide({ link: nested, facts: { repoName: "Game" } })).toEqual({
+        action: "report",
+        status: "wrong-repo",
+      });
+      expect(
+        decide({ link: nested, facts: { hasLocalChanges: true } }),
+      ).toEqual({ action: "confirm", reasons: ["local-changes"] });
     });
   });
 

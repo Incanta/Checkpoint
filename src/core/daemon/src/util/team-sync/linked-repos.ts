@@ -6,16 +6,21 @@ import {
   type TeamSyncPreset,
 } from "@checkpointvcs/common";
 
+import path from "path";
+
 import {
   getWorkspaceConfig,
   getWorkspaceState,
+  saveWorkspaceConfig,
   updateWorkspaceState,
   syncTargetBranch,
   type AppliedLinkPin,
   type LinkHolder,
   type Workspace as UtilWorkspace,
+  type WorkspaceLinkedWorkspace,
   type WorkspaceTeamSyncSettings,
 } from "../util.js";
+import { isWorkspaceRoot } from "../../file-status.js";
 import type { Workspace as ManagerWorkspace } from "../../types/workspace.js";
 import { DaemonConfig } from "../../daemon-config.js";
 import { Logger } from "../../logging.js";
@@ -98,9 +103,14 @@ export function resolveLinkChoice(
 
 /** What a link looks like from this machine. */
 export type LinkStatus =
-  /** A nested link (`path`); not synced yet. */
-  | "unsupported"
   | "ignored"
+  /**
+   * A nested link (`path`) with no workspace at its folder yet. A sync
+   * creates one in follow-pin mode; manual mode leaves it to the user.
+   */
+  | "not-created"
+  /** Creating a nested link's workspace failed; see the result's `error`. */
+  | "create-failed"
   /** No local workspace chosen for the link. */
   | "not-set-up"
   /** The chosen workspace is not registered with this daemon. */
@@ -145,6 +155,8 @@ export interface LinkedWorkspaceFacts {
 export type LinkDecision =
   | { action: "report"; status: LinkStatus }
   | { action: "sync" }
+  /** Create the nested link's workspace at its folder, then sync it. */
+  | { action: "create" }
   | { action: "confirm"; reasons: LinkConfirmReason[] };
 
 /**
@@ -155,6 +167,11 @@ export type LinkDecision =
  * block the parent's sync. Configuration problems (no workspace chosen, the
  * wrong repo) are reported and leave the parent free to sync, as the plan
  * requires: a link that is not set up is never an error.
+ *
+ * `linked` is the chosen workspace for a link that can live anywhere, and the
+ * workspace at the link's folder for a nested one: null when there is none,
+ * "missing" when one is chosen (or a folder holds one) that this daemon
+ * doesn't have registered.
  */
 export function decideLinkSync(
   link: TeamSyncLinkedRepo,
@@ -163,10 +180,17 @@ export function decideLinkSync(
   linked: LinkedWorkspaceFacts | null | "missing",
   confirmed: boolean,
 ): LinkDecision {
-  if (link.path !== undefined)
-    return { action: "report", status: "unsupported" };
   if (choice.mode === "ignore") return { action: "report", status: "ignored" };
-  if (!choice.workspaceId) return { action: "report", status: "not-set-up" };
+  if (link.path !== undefined) {
+    // A nested link's workspace is wherever its folder is; nothing to pick.
+    if (linked === null) {
+      return choice.mode === "follow-pin"
+        ? { action: "create" }
+        : { action: "report", status: "not-created" };
+    }
+  } else if (!choice.workspaceId) {
+    return { action: "report", status: "not-set-up" };
+  }
   if (linked === null || linked === "missing") {
     return { action: "report", status: "missing-workspace" };
   }
@@ -214,6 +238,12 @@ export interface LinkSyncResult {
   reasons?: LinkConfirmReason[];
   /** Set with "held-by-other": the parent that last moved it. */
   holder?: LinkHolder;
+  /** A nested link's folder, relative to the parent workspace. */
+  path?: string;
+  /** Set with "create-failed": why. */
+  error?: string;
+  /** Set when this sync created the nested link's workspace. */
+  created?: boolean;
 }
 
 /** Thrown when a link needs the user's go-ahead; the parent was not synced. */
@@ -245,11 +275,95 @@ function describeConfirmations(links: LinkSyncResult[]): string {
 
 /** What the orchestration needs from the daemon manager. */
 export interface LinkedSyncDeps {
-  findWorkspace(workspaceId: string): ManagerWorkspace | undefined;
+  /**
+   * The workspace with this id. These lookups register a workspace found on
+   * disk when the daemon is an ephemeral one (a daemonless CLI), which
+   * starts out knowing only the workspace it runs for.
+   */
+  findWorkspace(workspaceId: string): Promise<ManagerWorkspace | undefined>;
   isBusy(workspaceId: string): boolean;
   hasLocalChanges(workspace: ManagerWorkspace): Promise<boolean>;
   /** Syncs a linked workspace to a changelist through the sync pipeline. */
   syncWorkspace(workspace: ManagerWorkspace, changelist: number): Promise<void>;
+  /** The registered workspace whose folder is `localPath`, if any. */
+  findWorkspaceAt(localPath: string): Promise<ManagerWorkspace | undefined>;
+  /**
+   * Creates and registers a workspace of `repo` (by name, in the org) on
+   * `branch` at `localPath`, for a nested link.
+   */
+  createWorkspace(input: {
+    daemonId: string;
+    orgId: string;
+    repo: string;
+    branch: string;
+    localPath: string;
+    name: string;
+  }): Promise<ManagerWorkspace>;
+  /** Re-reads which folders of the parent belong to nested workspaces. */
+  refreshOwnership(parent: UtilWorkspace): Promise<void>;
+}
+
+/** Where a nested link's folder is on disk. */
+export function mountFolder(parent: UtilWorkspace, link: TeamSyncLinkedRepo) {
+  return path
+    .join(parent.localPath, link.path ?? "")
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
+}
+
+/**
+ * The workspace a link points at: the chosen one for a link that can live
+ * anywhere, and the one in its folder for a nested link. "missing" when one
+ * is chosen but not registered, or a nested link's folder holds a workspace
+ * this daemon doesn't know; null when there is none.
+ */
+async function locateLinked(
+  deps: LinkedSyncDeps,
+  parent: UtilWorkspace,
+  link: TeamSyncLinkedRepo,
+  choice: ResolvedLinkChoice,
+  checkLocalChanges: boolean,
+): Promise<
+  | { facts: LinkedWorkspaceFacts; workspace: ManagerWorkspace }
+  | "missing"
+  | null
+> {
+  if (choice.mode === "ignore") return null;
+  if (link.path !== undefined) {
+    const folder = mountFolder(parent, link);
+    const workspace = await deps.findWorkspaceAt(folder);
+    if (workspace) {
+      return linkedFacts(deps, parent, workspace.id, checkLocalChanges);
+    }
+    return (await isWorkspaceRoot(folder)) ? "missing" : null;
+  }
+  if (!choice.workspaceId) return null;
+  return linkedFacts(deps, parent, choice.workspaceId, checkLocalChanges);
+}
+
+/**
+ * Writes a workspace's choice for one link to its workspace.json, replacing
+ * any entry spelled with different case.
+ */
+export async function saveLinkEntry(
+  localPath: string,
+  repo: string,
+  entry: WorkspaceLinkedWorkspace,
+): Promise<WorkspaceTeamSyncSettings> {
+  const persisted = await getWorkspaceConfig(localPath);
+  if (!persisted) {
+    throw new Error(`Workspace config missing on disk at ${localPath}`);
+  }
+  const teamSync: WorkspaceTeamSyncSettings = persisted.teamSync ?? {};
+  const entries = Object.fromEntries(
+    Object.entries(teamSync.linkedWorkspaces ?? {}).filter(
+      ([name]) => name.toLowerCase() !== repo.toLowerCase(),
+    ),
+  );
+  entries[repo] = entry;
+  persisted.teamSync = { ...teamSync, linkedWorkspaces: entries };
+  await saveWorkspaceConfig(persisted);
+  return persisted.teamSync;
 }
 
 export interface SyncLinkedReposOptions {
@@ -291,6 +405,36 @@ async function configAt(
   return { config: result.config, changelist: target };
 }
 
+/** A link's result before any decision, filled in from where it points. */
+function baseResult(
+  link: TeamSyncLinkedRepo,
+  choice: ResolvedLinkChoice,
+  found: Awaited<ReturnType<typeof locateLinked>>,
+): LinkSyncResult {
+  const located = found && found !== "missing" ? found : null;
+  // A nested link's workspace is the one in its folder, whatever the
+  // workspace.json entry last recorded.
+  const workspaceId =
+    link.path !== undefined ? located?.workspace.id : choice.workspaceId;
+  const result: LinkSyncResult = {
+    repo: link.repo,
+    branch: link.branch,
+    pin: link.changelist,
+    mode: choice.mode,
+    source: choice.source,
+    status: "not-set-up",
+    ...(workspaceId && { workspaceId }),
+    ...(link.path !== undefined && { path: link.path }),
+  };
+  if (located) {
+    result.workspaceName = located.workspace.name;
+    result.localPath = located.workspace.localPath;
+    result.fromChangelist = located.facts.changelistNumber;
+    if (located.facts.otherHolder) result.holder = located.facts.otherHolder;
+  }
+  return result;
+}
+
 /**
  * Facts about a chosen linked workspace, or "missing" when unregistered.
  * Checking for local changes scans the linked workspace, which is slow for an
@@ -304,7 +448,7 @@ async function linkedFacts(
 ): Promise<
   { facts: LinkedWorkspaceFacts; workspace: ManagerWorkspace } | "missing"
 > {
-  const workspace = deps.findWorkspace(workspaceId);
+  const workspace = await deps.findWorkspace(workspaceId);
   if (!workspace) return "missing";
 
   const client = await CreateApiClientAuth(workspace.daemonId);
@@ -316,7 +460,7 @@ async function linkedFacts(
   const otherHolder =
     holder &&
     holder.workspaceId !== parent.id &&
-    deps.findWorkspace(holder.workspaceId) &&
+    (await deps.findWorkspace(holder.workspaceId)) &&
     holder.changelist === state.changelistNumber
       ? holder
       : null;
@@ -377,39 +521,24 @@ export async function syncLinkedRepos(
     (options.confirm ?? []).map((r) => r.toLowerCase()),
   );
 
-  type Planned = { result: LinkSyncResult; workspace?: ManagerWorkspace };
+  type Planned = {
+    result: LinkSyncResult;
+    link: TeamSyncLinkedRepo;
+    workspace?: ManagerWorkspace;
+    create?: boolean;
+  };
   const planned: Planned[] = [];
 
   for (const link of links) {
     const choice = resolveLinkChoice(link, settings, presets);
-    const result: LinkSyncResult = {
-      repo: link.repo,
-      branch: link.branch,
-      pin: link.changelist,
-      mode: choice.mode,
-      source: choice.source,
-      status: "not-set-up",
-      ...(choice.workspaceId && { workspaceId: choice.workspaceId }),
-    };
-
-    const needsWorkspace =
-      link.path === undefined && choice.mode !== "ignore" && choice.workspaceId;
-    const found = needsWorkspace
-      ? await linkedFacts(deps, parent, choice.workspaceId!)
-      : null;
-    const facts = found === "missing" ? "missing" : (found?.facts ?? null);
-    if (found && found !== "missing") {
-      result.workspaceName = found.workspace.name;
-      result.localPath = found.workspace.localPath;
-      result.fromChangelist = found.facts.changelistNumber;
-      if (found.facts.otherHolder) result.holder = found.facts.otherHolder;
-    }
+    const found = await locateLinked(deps, parent, link, choice, true);
+    const result = baseResult(link, choice, found);
 
     const decision = decideLinkSync(
       link,
       choice,
       parentOrgId,
-      facts,
+      found === "missing" ? "missing" : (found?.facts ?? null),
       confirmed.has(link.repo.toLowerCase()),
     );
     if (decision.action === "report") {
@@ -417,15 +546,19 @@ export async function syncLinkedRepos(
     } else if (decision.action === "confirm") {
       result.status = "needs-confirmation";
       result.reasons = decision.reasons;
+    } else {
+      // Settled by the sync below.
+      result.status =
+        decision.action === "create" ? "not-created" : "out-of-date";
     }
     planned.push({
       result,
+      link,
       ...(decision.action === "sync" &&
         found &&
         found !== "missing" && { workspace: found.workspace }),
+      ...(decision.action === "create" && { create: true }),
     });
-    // Anything the decision did not settle is the "sync" path below.
-    if (decision.action === "sync") result.status = "out-of-date";
   }
 
   // A linked workspace in the middle of another operation can't be moved
@@ -451,7 +584,50 @@ export async function syncLinkedRepos(
   const now = () => new Date().toISOString();
   const pins: Record<string, AppliedLinkPin> = {};
 
-  for (const { result, workspace } of planned) {
+  for (const entry of planned) {
+    const { result } = entry;
+    let workspace = entry.workspace;
+
+    if (entry.create) {
+      // A nested link with no workspace yet: make one at its folder, record
+      // it, and sync it like any other. A failure here (no access to the
+      // repo, a file where the folder goes) is reported rather than stopping
+      // the parent, like a link that is not set up.
+      const folder = mountFolder(parent, entry.link);
+      options.onStep?.(
+        `Creating linked workspace ${result.repo} at ${entry.link.path}`,
+      );
+      try {
+        workspace = await deps.createWorkspace({
+          daemonId: parent.daemonId,
+          orgId: parentOrgId,
+          repo: entry.link.repo,
+          branch: entry.link.branch,
+          localPath: folder,
+          name: `${parent.workspaceName} ${entry.link.repo}`.slice(0, 100),
+        });
+      } catch (err) {
+        result.status = "create-failed";
+        result.error = err instanceof Error ? err.message : String(err);
+        Logger.warn(
+          `Linked repo ${result.repo}: could not create its workspace at ${folder}: ${result.error}`,
+        );
+        continue;
+      }
+      result.created = true;
+      result.workspaceId = workspace.id;
+      result.workspaceName = workspace.name;
+      result.localPath = workspace.localPath;
+      result.fromChangelist = 0;
+      await saveLinkEntry(parent.localPath, entry.link.repo, {
+        mode: "follow-pin",
+        workspaceId: workspace.id,
+      });
+      // The parent must treat the folder as the child's before the child's
+      // files arrive in it.
+      await deps.refreshOwnership(parent);
+    }
+
     if (workspace) {
       options.onStep?.(
         `Syncing linked repo ${result.repo} to changelist ${result.pin}`,
@@ -482,7 +658,7 @@ export async function syncLinkedRepos(
       );
     } else if (result.status === "up-to-date" && result.mode === "follow-pin") {
       // Claim it when nobody else holds it, so a second parent asks first.
-      const linked = deps.findWorkspace(result.workspaceId!);
+      const linked = await deps.findWorkspace(result.workspaceId!);
       if (linked && !result.holder) {
         const state = await getWorkspaceState(linked.localPath, backend);
         if (state.teamSync?.linkHolder?.workspaceId !== parent.id) {
@@ -608,30 +784,24 @@ export async function getLinkStatuses(
   const reports: LinkStatusReport[] = [];
   for (const link of links) {
     const choice = resolveLinkChoice(link, settings, presets);
-    const found =
-      link.path === undefined && choice.mode !== "ignore" && choice.workspaceId
-        ? await linkedFacts(deps, parent, choice.workspaceId, false)
-        : null;
-    const facts = found === "missing" ? "missing" : (found?.facts ?? null);
+    const found = await locateLinked(deps, parent, link, choice, false);
     // Reporting never syncs, so treat everything as confirmed and map a
-    // would-sync decision to "out-of-date".
-    const decision = decideLinkSync(link, choice, parentOrgId, facts, true);
-    const report: LinkStatusReport = {
-      repo: link.repo,
-      branch: link.branch,
-      pin: link.changelist,
-      mode: choice.mode,
-      source: choice.source,
-      status: decision.action === "report" ? decision.status : "out-of-date",
-      ...(link.path !== undefined && { path: link.path }),
-      ...(choice.workspaceId && { workspaceId: choice.workspaceId }),
-    };
-    if (found && found !== "missing") {
-      report.workspaceName = found.workspace.name;
-      report.localPath = found.workspace.localPath;
-      report.fromChangelist = found.facts.changelistNumber;
-      if (found.facts.otherHolder) report.holder = found.facts.otherHolder;
-    }
+    // would-sync decision to "out-of-date" (or "not-created" for a nested
+    // link the next sync creates).
+    const decision = decideLinkSync(
+      link,
+      choice,
+      parentOrgId,
+      found === "missing" ? "missing" : (found?.facts ?? null),
+      true,
+    );
+    const report: LinkStatusReport = baseResult(link, choice, found);
+    report.status =
+      decision.action === "report"
+        ? decision.status
+        : decision.action === "create"
+          ? "not-created"
+          : "out-of-date";
     const applied = lookup(parentState.teamSync?.linkedPins, link.repo);
     if (applied) report.appliedPin = applied;
     reports.push(report);
