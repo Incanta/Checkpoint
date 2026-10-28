@@ -30,8 +30,14 @@ import {
   closeAllStateStores,
   closeStateStore,
   resolveBranchChain,
+  checkConflicts,
   type WorkspaceState,
 } from "./util/index.js";
+import {
+  syncLinkedRepos,
+  stalePinsAfterSync,
+  type LinkedSyncDeps,
+} from "./util/team-sync/linked-repos.js";
 import {
   TeamSyncScheduler,
   type ScheduledWorkspace,
@@ -208,13 +214,31 @@ export class DaemonManager {
         // The manager workspace (registry entry) is needed for state reload;
         // the util workspace (config) drives the pipeline.
         const managerWorkspace = this.findWorkspaceById(workspace.id);
+        // Linked repos first; one needing confirmation fails the run (nobody
+        // is there to confirm), which leaves this workspace where it was.
+        const links = await syncLinkedRepos(
+          workspace,
+          orgId,
+          this.linkedSyncDeps(),
+          { targetChangelist },
+        );
         this.beginVcsOperation(workspace.id);
         try {
-          await runSyncPipeline(workspace, orgId, {
+          const result = await runSyncPipeline(workspace, orgId, {
             changelistId: targetChangelist,
             filePaths: null,
             reportProgress: false,
           });
+          const stale = await stalePinsAfterSync(
+            workspace,
+            result.syncedChangelistNumber,
+            links,
+          );
+          if (stale.length > 0) {
+            Logger.warn(
+              `Scheduled sync: the pin for ${stale.join(", ")} changed during the sync; the next sync updates it.`,
+            );
+          }
           if (managerWorkspace) {
             await this.reloadWorkspaceState(managerWorkspace);
           }
@@ -2435,6 +2459,59 @@ export class DaemonManager {
   /**
    * Finds a workspace by its ID across all daemon entries.
    */
+  /**
+   * What Team Sync's linked-repo sync needs from the manager: finding the
+   * linked workspace, telling whether it is busy or has local changes, and
+   * syncing it the way a pull from the desktop app does.
+   */
+  public linkedSyncDeps(): LinkedSyncDeps {
+    return {
+      findWorkspace: (id) => this.findWorkspaceById(id),
+      isBusy: (id) => this.vcsOperationActive.get(id) === true,
+      hasLocalChanges: async (workspace) =>
+        (await this.refreshWorkspaceContents(workspace)).numChanges > 0,
+      syncWorkspace: async (workspace, changelist) => {
+        const info = {
+          id: workspace.id,
+          repoId: workspace.repoId,
+          domainBranchName: workspace.domainBranchName,
+          activeBranches: workspace.activeBranches,
+          workspaceName: workspace.name,
+          localPath: workspace.localPath,
+          daemonId: workspace.daemonId,
+        };
+        // The same fail-fast conflict check a pull does: a local edit to a
+        // file the pin also changes stops the sync before anything moves.
+        const pending = await this.refreshWorkspaceContents(workspace);
+        if (pending.numChanges > 0) {
+          const conflicts = await checkConflicts(
+            info,
+            Object.keys(pending.files),
+          );
+          if (conflicts.hasConflicts) {
+            throw new Error(
+              `${conflicts.conflicts.length} file(s) changed locally also change at the pin: ${conflicts.conflicts
+                .map((c) => c.path)
+                .join(", ")}`,
+            );
+          }
+        }
+        this.beginVcsOperation(workspace.id);
+        try {
+          await runSyncPipeline(info, workspace.orgId, {
+            changelistId: changelist,
+            filePaths: null,
+            reportProgress: false,
+          });
+          await this.reloadWorkspaceState(workspace);
+          this.clearSyncStatus(workspace.id);
+        } finally {
+          await this.endVcsOperation(workspace.id);
+        }
+      },
+    };
+  }
+
   private findWorkspaceById(workspaceId: string): Workspace | undefined {
     for (const [, workspaceList] of this.workspaces) {
       const found = workspaceList.find((w) => w.id === workspaceId);

@@ -5,6 +5,7 @@ import { promises as fs } from "fs";
 import {
   CreateApiClientAuth,
   type TeamSyncBuildStep,
+  type TeamSyncLinkMode,
   type WorkspaceStateFile,
 } from "@checkpointvcs/common";
 import {
@@ -82,6 +83,30 @@ export interface AppliedArtifactInfo {
   invalidatedByLocalBuild?: boolean;
 }
 
+/** A linked repo pin this (parent) workspace last brought its link to. */
+export interface AppliedLinkPin {
+  /** The pinned changelist the linked workspace was synced to (or found at). */
+  changelist: number;
+  /** The linked workspace that satisfied the link. */
+  workspaceId: string;
+  /** ISO timestamp. */
+  appliedAt: string;
+}
+
+/**
+ * Which parent workspace last moved this (linked) workspace to a pin. Lets a
+ * second parent pinned elsewhere ask before moving it.
+ */
+export interface LinkHolder {
+  workspaceId: string;
+  workspaceName: string;
+  localPath: string;
+  /** The changelist the holder moved this workspace to. */
+  changelist: number;
+  /** ISO timestamp. */
+  at: string;
+}
+
 export interface WorkspaceTeamSyncState {
   /** Hash of the sync filter in effect for the files currently on disk. */
   syncFilterHash?: string;
@@ -93,6 +118,10 @@ export interface WorkspaceTeamSyncState {
   bisect?: Record<number, BisectVerdict>;
   /** ISO timestamp of the last scheduled sync run. */
   lastScheduledSyncAt?: string;
+  /** Linked repo name -> the pin last applied for it (parent workspaces). */
+  linkedPins?: Record<string, AppliedLinkPin>;
+  /** The parent that last moved this workspace (linked workspaces). */
+  linkHolder?: LinkHolder;
 }
 
 export type ArtifactStateFile = WorkspaceStateFile & {
@@ -234,7 +263,19 @@ export interface WorkspaceScheduledSyncSettings {
   target: "latest" | "latest-good" | "latest-starred";
 }
 
+/** This workspace's choice for one linked repo. */
+export interface WorkspaceLinkedWorkspace {
+  /** The local workspace that satisfies the link; absent when ignored or unset. */
+  workspaceId?: string;
+  mode: TeamSyncLinkMode;
+}
+
 export interface WorkspaceTeamSyncSettings {
+  /**
+   * Linked repo name -> this workspace's choice. A link with no entry falls
+   * back to the applied preset, then to "not set up" (see linked-repos.ts).
+   */
+  linkedWorkspaces?: Record<string, WorkspaceLinkedWorkspace>;
   /** Category id -> enabled override vs the repo config default. */
   categoryOverrides?: Record<string, boolean>;
   /** Ordered gitignore-style rules applied after category rules. */

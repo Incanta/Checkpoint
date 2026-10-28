@@ -1,7 +1,9 @@
 import type { WorkspaceStateFile } from "@checkpointvcs/common";
 import type {
   AppliedArtifactInfo,
+  AppliedLinkPin,
   ArtifactStateFile,
+  LinkHolder,
   BisectVerdict,
   InterruptedPull,
   WorkspaceState,
@@ -46,6 +48,9 @@ export interface StateDelta {
     lastBuiltChangelist?: number | null;
     lastScheduledSyncAt?: string | null;
     appliedArtifacts?: Record<string, AppliedArtifactInfo> | null;
+    /** Replaces the whole record; null clears it. */
+    linkedPins?: Record<string, AppliedLinkPin> | null;
+    linkHolder?: LinkHolder | null;
   };
 }
 
@@ -163,7 +168,9 @@ export function applyDeltaToState(
       | "syncFilterHash"
       | "lastBuiltChangelist"
       | "lastScheduledSyncAt"
-      | "appliedArtifacts",
+      | "appliedArtifacts"
+      | "linkedPins"
+      | "linkHolder",
   >(
     key: K,
   ) => {
@@ -177,6 +184,8 @@ export function applyDeltaToState(
   scalar("lastBuiltChangelist");
   scalar("lastScheduledSyncAt");
   scalar("appliedArtifacts");
+  scalar("linkedPins");
+  scalar("linkHolder");
 
   if (delta.bisect) {
     const bisect: Record<number, BisectVerdict> = delta.bisect.clear

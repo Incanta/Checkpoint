@@ -49,6 +49,32 @@ const buildStepSchema = z
     message: "command steps require a command",
   });
 
+export const LINK_MODES = ["follow-pin", "manual", "ignore"] as const;
+
+// A linked repo: another repo in the same org, pinned at a changelist, that a
+// workspace of this repo keeps a workspace of in sync (see
+// docs/linked-repos-plan.md). Linking is engine-agnostic: it only syncs.
+const linkedRepoSchema = z.object({
+  /** Repo name in the same org; also the key workspaces and presets use. */
+  repo: z.string().min(1).max(200),
+  branch: z.string().min(1).max(200),
+  changelist: z.number().int().nonnegative(),
+  /**
+   * Repo-relative mount path for a nested link. Accepted so configs written
+   * for nested links validate, but nested links are not synced yet.
+   */
+  path: z
+    .string()
+    .min(1)
+    .refine(
+      (p) => !p.startsWith("/") && !p.split(/[\\/]/).includes(".."),
+      "path must be repo-relative and stay inside the repo",
+    )
+    .optional(),
+  /** Nested links only: create the child for workspaces with no entry. */
+  enabledByDefault: z.boolean().default(true),
+});
+
 export const TeamSyncConfigSchema = z.object({
   version: z.literal(1),
   project: z
@@ -90,9 +116,19 @@ export const TeamSyncConfigSchema = z.object({
         locked: z.boolean().default(false),
         categories: z.record(z.string(), z.boolean()).default({}),
         buildSteps: z.record(z.string(), z.boolean()).default({}),
+        /** Linked repo name -> mode for workspaces that have not chosen one. */
+        linkedRepos: z.record(z.string(), z.enum(LINK_MODES)).default({}),
       }),
     )
     .default([]),
+  linkedRepos: z
+    .array(linkedRepoSchema)
+    .default([])
+    .refine(
+      (links) =>
+        new Set(links.map((l) => l.repo.toLowerCase())).size === links.length,
+      "each repo may only be linked once",
+    ),
   buildSteps: z.array(buildStepSchema).default([]),
   artifacts: z
     .array(

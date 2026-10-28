@@ -70,6 +70,39 @@ export interface TeamSyncPreset {
   categories: Record<string, boolean>;
   /** Build step id -> enabled override. */
   buildSteps: Record<string, boolean>;
+  /**
+   * Linked repo name -> mode for workspaces that have not chosen one. Absent
+   * on configs served by older app servers.
+   */
+  linkedRepos?: Record<string, TeamSyncLinkMode>;
+}
+
+/**
+ * How a workspace treats one of its repo's linked repos.
+ * - `follow-pin`: Team Sync syncs the linked workspace to the pinned changelist.
+ * - `manual`: Team Sync only reports when the linked workspace differs from the pin.
+ * - `ignore`: Team Sync leaves the link alone entirely.
+ */
+export type TeamSyncLinkMode = "follow-pin" | "manual" | "ignore";
+
+/**
+ * Another repo in the same org, pinned at a changelist. A workspace of this
+ * repo keeps a workspace of the linked repo synced to the pin. Linking is
+ * engine-agnostic: it only syncs. See docs/linked-repos-plan.md.
+ */
+export interface TeamSyncLinkedRepo {
+  /** Repo name in the same org; also the key workspaces and presets use. */
+  repo: string;
+  branch: string;
+  /** Exact pinned changelist. */
+  changelist: number;
+  /**
+   * Repo-relative mount path for a nested link. Nested links are not synced
+   * yet; a link with a path is reported as unsupported.
+   */
+  path?: string;
+  /** Nested links only: create the child for workspaces with no entry. */
+  enabledByDefault: boolean;
 }
 
 export interface TeamSyncBuildStepLink {
@@ -155,6 +188,8 @@ export interface TeamSyncConfig {
   codeExtensions?: string[];
   syncCategories: TeamSyncCategory[];
   presets: TeamSyncPreset[];
+  /** Repos this repo pins; absent on configs served by older app servers. */
+  linkedRepos?: TeamSyncLinkedRepo[];
   buildSteps: TeamSyncBuildStep[];
   artifacts: TeamSyncArtifactChannel[];
   badges?: { columns: TeamSyncBadgeColumn[] };

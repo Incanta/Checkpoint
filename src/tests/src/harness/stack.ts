@@ -782,16 +782,28 @@ export async function stageAndSubmit(
 }
 
 /** "Pull" in the desktop app or `chk pull`: sync to the latest changelist. */
-export async function syncLatest(seat: Seat): Promise<unknown> {
+export async function syncLatest(
+  seat: Seat,
+  opts: { confirmLinks?: string[]; skipLinks?: boolean } = {},
+): Promise<unknown> {
   const { daemon } = await daemonModules();
   const { jobId } = await daemon.workspaces.sync.pull({
     ...ids(seat),
     changelistId: null,
     filePaths: null,
     noProgress: true,
+    ...opts,
   });
   return waitForJob(jobId);
 }
+
+/** The daemon's endpoints, for tests that call one the helpers don't cover. */
+export async function daemonApi() {
+  return (await daemonModules()).daemon;
+}
+
+/** The daemon id and workspace id a seat's daemon endpoints take. */
+export const seatIds = ids;
 
 /** Switching branches, or activating a feature branch as an overlay. */
 export async function switchBranch(

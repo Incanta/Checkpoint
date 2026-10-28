@@ -82,6 +82,11 @@ export interface TeamSyncScheduledSync {
 
 /** Per-workspace Team Sync settings (subset of WorkspaceTeamSyncSettings). */
 export interface TeamSyncSettings {
+  /** Linked repo name -> this workspace's choice (see the daemon's linked-repos.ts). */
+  linkedWorkspaces?: Record<
+    string,
+    { workspaceId?: string; mode: "follow-pin" | "manual" | "ignore" }
+  >;
   categoryOverrides?: Record<string, boolean>;
   customIncludeRules?: string[];
   customExcludeRules?: string[];

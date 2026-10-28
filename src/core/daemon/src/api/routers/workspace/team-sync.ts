@@ -17,6 +17,7 @@ import {
 import { getProjectInfo } from "../../../util/unreal/index.js";
 import { compileFilter } from "../../../util/team-sync/filter.js";
 import { previewClean, executeClean } from "../../../util/team-sync/clean.js";
+import { getLinkStatuses } from "../../../util/team-sync/linked-repos.js";
 import {
   getBisectState,
   setBisectVerdict,
@@ -70,7 +71,17 @@ function resolveWorkspace(
   return workspace;
 }
 
+const linkModeInput = z.enum(["follow-pin", "manual", "ignore"]);
+
 const settingsInput = z.object({
+  // Linked repo name -> this workspace's choice; see setLinkedWorkspace for
+  // the validated way to set one entry.
+  linkedWorkspaces: z
+    .record(
+      z.string(),
+      z.object({ workspaceId: z.string().optional(), mode: linkModeInput }),
+    )
+    .optional(),
   categoryOverrides: z.record(z.string(), z.boolean()).optional(),
   customIncludeRules: z.array(z.string()).optional(),
   customExcludeRules: z.array(z.string()).optional(),
@@ -398,6 +409,176 @@ export const teamSyncRouter = router({
       await saveWorkspaceConfig(persisted);
 
       return merged;
+    }),
+
+  // ── Linked repos ─────────────────────────────────────────────────
+
+  // Every link in the repo config at the workspace's changelist (or the one
+  // given), with this machine's choice for it and where that workspace is.
+  getLinkedRepos: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        changelistNumber: z.number().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const workspace = resolveWorkspace(
+        ctx.manager,
+        input.daemonId,
+        input.workspaceId,
+      );
+      return getLinkStatuses(
+        await loadUtilWorkspace(workspace),
+        workspace.orgId,
+        ctx.manager.linkedSyncDeps(),
+        input.changelistNumber,
+      );
+    }),
+
+  // Workspaces on this machine that can satisfy a link: same org, the linked
+  // repo, and the link's branch when given.
+  listLinkCandidates: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        repo: z.string(),
+        branch: z.string().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const parent = resolveWorkspace(
+        ctx.manager,
+        input.daemonId,
+        input.workspaceId,
+      );
+      const client = await CreateApiClientAuth(input.daemonId);
+      const candidates: {
+        id: string;
+        name: string;
+        localPath: string;
+        domainBranchName: string;
+      }[] = [];
+      for (const workspaces of ctx.manager.workspaces.values()) {
+        for (const w of workspaces) {
+          if (w.id === parent.id || w.orgId !== parent.orgId) continue;
+          if (input.branch && w.domainBranchName !== input.branch) continue;
+          const repo = await client.repo.getRepo
+            .query({ id: w.repoId })
+            .catch(() => null);
+          if (repo?.name.toLowerCase() !== input.repo.toLowerCase()) continue;
+          candidates.push({
+            id: w.id,
+            name: w.name,
+            localPath: w.localPath,
+            domainBranchName: w.domainBranchName,
+          });
+        }
+      }
+      return candidates;
+    }),
+
+  // Sets this workspace's choice for one link. A workspace, when given, must
+  // be registered here and hold the linked repo; ignore needs none.
+  setLinkedWorkspace: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        repo: z.string().min(1),
+        mode: linkModeInput,
+        linkedWorkspaceId: z.string().nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const parent = resolveWorkspace(
+        ctx.manager,
+        input.daemonId,
+        input.workspaceId,
+      );
+      if (input.linkedWorkspaceId === parent.id) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "A workspace cannot be linked to itself.",
+        });
+      }
+      if (input.linkedWorkspaceId) {
+        const linked = ctx.manager
+          .linkedSyncDeps()
+          .findWorkspace(input.linkedWorkspaceId);
+        if (!linked) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `Workspace ${input.linkedWorkspaceId} is not registered on this machine.`,
+          });
+        }
+        const client = await CreateApiClientAuth(linked.daemonId);
+        const repo = await client.repo.getRepo.query({ id: linked.repoId });
+        if (
+          repo?.name.toLowerCase() !== input.repo.toLowerCase() ||
+          repo.orgId !== parent.orgId
+        ) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Workspace ${linked.name} holds ${repo?.name ?? "another repo"}, not ${input.repo}.`,
+          });
+        }
+      }
+
+      const persisted = await getWorkspaceConfig(parent.localPath);
+      if (!persisted) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Workspace config missing on disk for ${parent.id}`,
+        });
+      }
+      const teamSync: WorkspaceTeamSyncSettings = persisted.teamSync ?? {};
+      // Replace any entry spelled with different case.
+      const entries = Object.fromEntries(
+        Object.entries(teamSync.linkedWorkspaces ?? {}).filter(
+          ([name]) => name.toLowerCase() !== input.repo.toLowerCase(),
+        ),
+      );
+      entries[input.repo] = {
+        mode: input.mode,
+        ...(input.linkedWorkspaceId && {
+          workspaceId: input.linkedWorkspaceId,
+        }),
+      };
+      persisted.teamSync = { ...teamSync, linkedWorkspaces: entries };
+      await saveWorkspaceConfig(persisted);
+      return persisted.teamSync;
+    }),
+
+  // Removes this workspace's choice for a link, so it falls back to the
+  // preset or "not set up".
+  clearLinkedWorkspace: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        repo: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const parent = resolveWorkspace(
+        ctx.manager,
+        input.daemonId,
+        input.workspaceId,
+      );
+      const persisted = await getWorkspaceConfig(parent.localPath);
+      if (!persisted?.teamSync?.linkedWorkspaces) {
+        return persisted?.teamSync ?? {};
+      }
+      persisted.teamSync.linkedWorkspaces = Object.fromEntries(
+        Object.entries(persisted.teamSync.linkedWorkspaces).filter(
+          ([name]) => name.toLowerCase() !== input.repo.toLowerCase(),
+        ),
+      );
+      await saveWorkspaceConfig(persisted);
+      return persisted.teamSync;
     }),
 
   // Preview which currently-synced files a proposed filter change would remove

@@ -116,6 +116,20 @@ function randomDelta(rand: () => number): StateDelta {
           appliedAt: "x",
         },
       }),
+      linkedPins: maybe({
+        UE5: {
+          changelist: Math.floor(rand() * 100),
+          workspaceId: "ws-engine",
+          appliedAt: "x",
+        },
+      }),
+      linkHolder: maybe({
+        workspaceId: `ws-game-${Math.floor(rand() * 3)}`,
+        workspaceName: "game",
+        localPath: "/games/game",
+        changelist: Math.floor(rand() * 100),
+        at: "x",
+      }),
     };
   }
   return delta;

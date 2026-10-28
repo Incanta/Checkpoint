@@ -6,6 +6,11 @@ import path from "path";
 
 import { checkConflicts, readFileFromChangelist } from "../../../util/index.js";
 import { runSyncPipeline } from "../../../util/team-sync/sync-pipeline.js";
+import {
+  syncLinkedRepos,
+  stalePinsAfterSync,
+  type SyncLinkedReposResult,
+} from "../../../util/team-sync/linked-repos.js";
 import { TRPCError } from "@trpc/server";
 import { ApiTypes } from "../../../types/api-types.js";
 import { FileStatus, FileType } from "../../../types/index.js";
@@ -27,6 +32,11 @@ export const syncRouter = router({
         // When true, skip progress/step callbacks entirely (no per-tick
         // callback overhead). Used by the CLI's --no-progress flag.
         noProgress: z.boolean().optional(),
+        // Linked repo names the user agreed to move although they have local
+        // changes, are ahead of the pin, or another workspace moved them.
+        confirmLinks: z.array(z.string()).optional(),
+        // Sync only this workspace and leave its linked repos alone.
+        skipLinks: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -117,6 +127,33 @@ export const syncRouter = router({
 
       // Fire-and-forget: run the pull in the background
       (async () => {
+        // Linked repos sync before this workspace so a failure leaves it on
+        // its old changelist, matching its old dependencies. A partial pull
+        // (named files) never moves them.
+        let links: SyncLinkedReposResult | null = null;
+        if (input.filePaths === null && !input.skipLinks) {
+          try {
+            links = await syncLinkedRepos(
+              workspaceInfo,
+              repo.orgId,
+              manager.linkedSyncDeps(),
+              {
+                targetChangelist: input.changelistId,
+                confirm: input.confirmLinks,
+                onStep: input.noProgress
+                  ? undefined
+                  : (step) => jobManager.updateStep(job.id, step),
+              },
+            );
+          } catch (e: any) {
+            Logger.error(
+              `Pull for workspace ${workspace.name} stopped at its linked repos: ${e.message}`,
+            );
+            jobManager.failJob(job.id, e.message ?? String(e));
+            return;
+          }
+        }
+
         manager.beginVcsOperation(workspace.id);
         try {
           const reportProgress = !input.noProgress;
@@ -160,8 +197,21 @@ export const syncRouter = router({
           );
           manager.clearSyncStatus(workspace.id);
 
+          const stalePins = links
+            ? await stalePinsAfterSync(
+                workspaceInfo,
+                pipelineResult.syncedChangelistNumber,
+                links,
+              )
+            : [];
+
           jobManager.completeJob(job.id, {
             ...mergeResult,
+            ...(links &&
+              links.links.length > 0 && { linkedRepos: links.links }),
+            // Links whose pin moved between resolving the target and the
+            // pull; syncing again brings them along.
+            ...(stalePins.length > 0 && { stalePins }),
             // Files the sync filter excludes but left in place: kept for
             // their local work, or not removable (open in another program).
             ...(pipelineResult.filterKept.length > 0 && {

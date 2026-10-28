@@ -592,7 +592,8 @@ class SqliteStateStore implements StateStore {
       .prepare(
         `SELECT key, value FROM workspace_meta
          WHERE key IN ('syncFilterHash', 'lastBuiltChangelist',
-                       'lastScheduledSyncAt', 'appliedArtifacts')`,
+                       'lastScheduledSyncAt', 'appliedArtifacts',
+                       'linkedPins', 'linkHolder')`,
       )
       .all() as Array<{ key: string; value: string }>;
     const meta = new Map(metaRows.map((r) => [r.key, r.value]));
@@ -629,6 +630,17 @@ class SqliteStateStore implements StateStore {
         teamSync.appliedArtifacts = JSON.parse(
           appliedArtifacts,
         ) as WorkspaceTeamSyncState["appliedArtifacts"];
+        hasValue = true;
+      } catch {
+        // corrupted JSON: treat as unset
+      }
+    }
+
+    for (const key of ["linkedPins", "linkHolder"] as const) {
+      const raw = meta.get(key);
+      if (raw === undefined) continue;
+      try {
+        (teamSync as Record<string, unknown>)[key] = JSON.parse(raw);
         hasValue = true;
       } catch {
         // corrupted JSON: treat as unset
@@ -825,6 +837,8 @@ class SqliteStateStore implements StateStore {
         );
         setScalar("lastScheduledSyncAt", meta.lastScheduledSyncAt);
         setScalar("appliedArtifacts", json(meta.appliedArtifacts));
+        setScalar("linkedPins", json(meta.linkedPins));
+        setScalar("linkHolder", json(meta.linkHolder));
       }
     })();
   }
@@ -928,6 +942,18 @@ class SqliteStateStore implements StateStore {
           "appliedArtifacts",
           teamSync?.appliedArtifacts !== undefined
             ? JSON.stringify(teamSync.appliedArtifacts)
+            : undefined,
+        ],
+        [
+          "linkedPins",
+          teamSync?.linkedPins !== undefined
+            ? JSON.stringify(teamSync.linkedPins)
+            : undefined,
+        ],
+        [
+          "linkHolder",
+          teamSync?.linkHolder !== undefined
+            ? JSON.stringify(teamSync.linkHolder)
             : undefined,
         ],
       ];
