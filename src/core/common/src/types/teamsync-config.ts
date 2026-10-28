@@ -110,10 +110,19 @@ export interface TeamSyncBuildStepLink {
   url: string;
 }
 
+/** A host OS a build step can be limited to with `ifOs`. */
+export type TeamSyncHostOs = "windows" | "macos" | "linux";
+
 export interface TeamSyncBuildStep {
   /** Stable id; default steps reuse UGS's fixed GUIDs for config portability. */
   id: string;
   name: string;
+  /**
+   * Host OSes the step runs on; absent means every OS. Elsewhere it is
+   * skipped and hidden, and steps that require it treat it as satisfied.
+   * The YAML accepts one OS or a list; the resolved config always holds a list.
+   */
+  ifOs?: TeamSyncHostOs[];
   type: TeamSyncBuildStepType;
   /** unreal-compile: UBT target name. */
   target?: string;

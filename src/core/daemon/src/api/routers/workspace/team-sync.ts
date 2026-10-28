@@ -116,6 +116,7 @@ const settingsInput = z.object({
       z.object({
         id: z.string(),
         name: z.string(),
+        ifOs: z.array(z.enum(["windows", "macos", "linux"])).optional(),
         type: z
           .enum(["command", "unreal-compile", "unreal-cook"])
           .default("command"),

@@ -1,4 +1,32 @@
-import type { TeamSyncBuildStep } from "@checkpointvcs/common";
+import type { TeamSyncBuildStep, TeamSyncHostOs } from "@checkpointvcs/common";
+
+/**
+ * The host OS in `ifOs` terms, or null on a platform `ifOs` can't name
+ * (FreeBSD, say), where only steps without `ifOs` run.
+ */
+export function hostOs(
+  platform: NodeJS.Platform = process.platform,
+): TeamSyncHostOs | null {
+  switch (platform) {
+    case "win32":
+      return "windows";
+    case "darwin":
+      return "macos";
+    case "linux":
+      return "linux";
+    default:
+      return null;
+  }
+}
+
+/** Whether a step runs on this OS: no `ifOs` means every OS. */
+export function stepRunsOn(
+  step: Pick<TeamSyncBuildStep, "ifOs">,
+  os: TeamSyncHostOs | null,
+): boolean {
+  if (!step.ifOs || step.ifOs.length === 0) return true;
+  return os !== null && step.ifOs.includes(os);
+}
 
 /**
  * Fixed step ids for the default build steps. These mirror UnrealGameSync's

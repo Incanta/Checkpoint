@@ -21,10 +21,19 @@ const idSchema = z
     "ids may only contain letters, numbers, hyphens, and underscores",
   );
 
+export const HOST_OSES = ["windows", "macos", "linux"] as const;
+
+// One OS or a list; resolved to a list so consumers handle one shape.
+const ifOsSchema = z
+  .union([z.enum(HOST_OSES), z.array(z.enum(HOST_OSES)).min(1)])
+  .transform((value) => [...new Set(Array.isArray(value) ? value : [value])]);
+
 const buildStepSchema = z
   .object({
     id: idSchema,
     name: z.string().min(1).max(200),
+    /** Host OSes the step runs on; absent means every OS. */
+    ifOs: ifOsSchema.optional(),
     // Defaults to the engine-agnostic type: a repo that never mentions Unreal
     // still gets working build steps.
     type: z.enum(["command", "unreal-compile", "unreal-cook"]).default("command"),
@@ -129,7 +138,31 @@ export const TeamSyncConfigSchema = z.object({
         new Set(links.map((l) => l.repo.toLowerCase())).size === links.length,
       "each repo may only be linked once",
     ),
-  buildSteps: z.array(buildStepSchema).default([]),
+  buildSteps: z
+    .array(buildStepSchema)
+    .default([])
+    .superRefine((steps, ctx) => {
+      // A step that requires a step limited to other OSes treats it as
+      // satisfied wherever it is skipped. When the two never share an OS the
+      // requirement can never mean anything, which is almost certainly a
+      // mistake in the config. Ids not defined here (the Unreal default
+      // steps) run everywhere, so they never trip this.
+      const byId = new Map(steps.map((step) => [step.id, step]));
+      steps.forEach((step, index) => {
+        const mine = step.ifOs ?? HOST_OSES;
+        for (const requiredId of step.requires) {
+          const theirs = byId.get(requiredId)?.ifOs;
+          if (!theirs) continue;
+          if (!mine.some((os) => theirs.includes(os))) {
+            ctx.addIssue({
+              code: "custom",
+              path: [index, "requires"],
+              message: `step "${step.id}" (runs on ${mine.join(", ")}) requires "${requiredId}", which only runs on ${theirs.join(", ")}`,
+            });
+          }
+        }
+      });
+    }),
   artifacts: z
     .array(
       z.object({

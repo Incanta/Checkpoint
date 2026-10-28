@@ -2,7 +2,7 @@
 
 Plan for letting a Team Sync repo pin other repos at a changelist and keep local workspaces of them in sync. The motivating case is a custom Unreal Engine kept in its own repo and synced once per machine, shared by every game, instead of the Perforce convention of committing `Engine/` next to (or around) each game. Written 2026-10-27 on `1b2757a`.
 
-**Progress (2026-10-27): phase 1 is implemented** (uncommitted). See [Phase 1 as built](#phase-1-as-built) for where it lives and where it differs from this plan.
+**Progress (2026-10-27): phases 1 and 2 are implemented** (uncommitted). See [Phase 1 as built](#phase-1-as-built) and [Phase 2 as built](#phase-2-as-built) for where they live and where they differ from this plan.
 
 ## Goals
 
@@ -203,6 +203,22 @@ Not done in phase 1:
 - **Creating a linked workspace in a chosen folder:** phase 3's UI can use the existing workspace-creation flow and then call `setLinkedWorkspace`.
 - **Confirmation in the desktop app:** a blocked pull shows the error text until phase 3 adds a prompt that resends with `confirmLinks`.
 - **The C++ CLI:** it has no `--confirm-links` flag yet, and a daemonless CLI only registers its own workspace, so its links report `missing-workspace`.
+
+## Phase 2 as built
+
+Engine lookup (`src/core/daemon/src/util/unreal/engine-discovery.ts`):
+
+- `resolveEngine` looks up any registrable association (a GUID or a name like `StudioEngine`) in the builds registry key on Windows and `Install.ini` on macOS and Linux. An unregistered GUID still resolves to nothing; an unregistered name falls through to the launcher lookup, since a version like `5.4` can also be registered by hand.
+- Identifiers compare without case, and GUIDs match with or without braces.
+- `reg` now runs through `execFile`, never a shell. Before, an association that wasn't a GUID was pasted into a shell command for the HKLM lookup, so a hostile `.uproject` could run commands. Associations with control characters or path separators are not looked up at all.
+- The registry and `Install.ini` parsing are pure functions (`parseBuildsRegOutput`, `parseInstallIni`), tested directly.
+
+Build step OS condition:
+
+- `ifOs` in the app schema accepts one OS or a list and resolves to a list without repeats; `TeamSyncBuildStep.ifOs` in common is always a list. Validation rejects a step that requires a step sharing none of its OSes. Ids the config doesn't define (the Unreal default steps) run everywhere, so requiring them never trips it.
+- The daemon's `hostOs` and `stepRunsOn` (`util/build/steps.ts`) filter steps before ordering in `runBuild`, so a requirement on a skipped step counts as met. A skipped step requested by id gets a line in the build log saying why. A platform `ifOs` can't name runs only steps without `ifOs`.
+- Workspace custom steps accept `ifOs` too, and the desktop settings dialog hides steps for other OSes.
+- Tests: `src/tests/src/daemon/build-step-os.test.ts`, `src/tests/src/daemon/engine-association.test.ts` (including that the association never reaches a shell), and `src/tests/src/server/team-sync-build-step-os-config.test.ts`.
 
 ## Open questions
 

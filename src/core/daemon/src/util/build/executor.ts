@@ -24,7 +24,9 @@ import {
 import { readReceipt } from "./receipts.js";
 import {
   getUnrealDefaultBuildSteps,
+  hostOs,
   mergeBuildSteps,
+  stepRunsOn,
   topoSortSteps,
 } from "./steps.js";
 import { JobManager, type JobStepState } from "../../job-manager.js";
@@ -250,7 +252,21 @@ export async function runBuild(
     workspace.teamSync?.buildStepOverrides,
   );
 
+  // Steps for other OSes are skipped. Steps that require one treat it as
+  // satisfied, since topoSortSteps ignores requirements it can't find.
+  const os = hostOs();
+  // Asking for one by id still doesn't run it here; say why it didn't.
+  for (const { step } of merged) {
+    if (options.stepIds?.includes(step.id) && !stepRunsOn(step, os)) {
+      jobManager.appendLog(
+        jobId,
+        "sys",
+        `Skipping "${step.name}": it only runs on ${step.ifOs!.join(", ")}.`,
+      );
+    }
+  }
   const selected = merged
+    .filter(({ step }) => stepRunsOn(step, os))
     .filter(({ enabled }) => enabled)
     .filter(({ step }) => {
       if (options.stepIds && options.stepIds.length > 0) {

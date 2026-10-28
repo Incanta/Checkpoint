@@ -50,6 +50,22 @@ const SCHEDULE_TARGETS: {
   { value: "latest-starred", label: "Latest starred changelist" },
 ];
 
+/** The host OS in build-step `ifOs` terms (mirrors the daemon's hostOs). */
+function hostOs(
+  platform: string | undefined,
+): "windows" | "macos" | "linux" | null {
+  switch (platform) {
+    case "win32":
+      return "windows";
+    case "darwin":
+      return "macos";
+    case "linux":
+      return "linux";
+    default:
+      return null;
+  }
+}
+
 function parseLines(text: string): string[] {
   return text
     .split("\n")
@@ -161,7 +177,11 @@ export default function TeamSyncSettingsDialog({
 
   const categories = (config?.syncCategories ?? []).filter((c) => !c.hidden);
   const presets = config?.presets ?? [];
-  const buildSteps = config?.buildSteps ?? [];
+  // Steps limited to other OSes never run here, so they aren't listed.
+  const os = hostOs(window.electron?.platform);
+  const buildSteps = (config?.buildSteps ?? []).filter(
+    (step) => !step.ifOs?.length || (os !== null && step.ifOs.includes(os)),
+  );
 
   return (
     <Dialog
