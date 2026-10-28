@@ -3,17 +3,23 @@ import {
   CreateApiClientAuth,
   type TeamSyncConfigResult,
   type TeamSyncChangelistMetaResult,
+  type TeamSyncPinChange,
 } from "@checkpointvcs/common";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
 import {
   getWorkspaceConfig,
   getWorkspaceState,
   saveWorkspaceConfig,
   type Workspace as UtilWorkspace,
+  type WorkspaceLinkedWorkspace,
   type WorkspaceTeamSyncSettings,
 } from "../../../util/util.js";
+import { DaemonConfig } from "../../../daemon-config.js";
+import { createAndRegisterWorkspace } from "./ops.js";
 import { getProjectInfo } from "../../../util/unreal/index.js";
 import { compileFilter } from "../../../util/team-sync/filter.js";
 import { previewClean, executeClean } from "../../../util/team-sync/clean.js";
@@ -72,6 +78,47 @@ function resolveWorkspace(
 }
 
 const linkModeInput = z.enum(["follow-pin", "manual", "ignore"]);
+
+/**
+ * Writes this workspace's choice for one link to its workspace.json,
+ * replacing any entry spelled with different case.
+ */
+async function saveLinkEntry(
+  parent: Workspace,
+  repo: string,
+  entry: WorkspaceLinkedWorkspace,
+): Promise<WorkspaceTeamSyncSettings> {
+  const persisted = await getWorkspaceConfig(parent.localPath);
+  if (!persisted) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: `Workspace config missing on disk for ${parent.id}`,
+    });
+  }
+  const teamSync: WorkspaceTeamSyncSettings = persisted.teamSync ?? {};
+  const entries = Object.fromEntries(
+    Object.entries(teamSync.linkedWorkspaces ?? {}).filter(
+      ([name]) => name.toLowerCase() !== repo.toLowerCase(),
+    ),
+  );
+  entries[repo] = entry;
+  persisted.teamSync = { ...teamSync, linkedWorkspaces: entries };
+  await saveWorkspaceConfig(persisted);
+  return persisted.teamSync;
+}
+
+/** Whether one folder is, contains, or is inside the other. */
+function pathsOverlap(a: string, b: string): boolean {
+  const caseless =
+    process.platform === "win32" || process.platform === "darwin";
+  const norm = (p: string) => {
+    const resolved = path.resolve(p).replace(/\\/g, "/").replace(/\/+$/, "");
+    return caseless ? resolved.toLowerCase() : resolved;
+  };
+  const na = norm(a);
+  const nb = norm(b);
+  return na === nb || na.startsWith(`${nb}/`) || nb.startsWith(`${na}/`);
+}
 
 const settingsInput = z.object({
   // Linked repo name -> this workspace's choice; see setLinkedWorkspace for
@@ -528,29 +575,145 @@ export const teamSyncRouter = router({
         }
       }
 
-      const persisted = await getWorkspaceConfig(parent.localPath);
-      if (!persisted) {
+      return saveLinkEntry(parent, input.repo, {
+        mode: input.mode,
+        ...(input.linkedWorkspaceId && {
+          workspaceId: input.linkedWorkspaceId,
+        }),
+      });
+    }),
+
+  // Creates a workspace of a linked repo in a folder the user picked, on the
+  // link's branch, and links it. It starts empty; the parent's next sync
+  // brings it to the pin. Only for links that can live anywhere on disk.
+  createLinkedWorkspace: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        repo: z.string().min(1),
+        path: z.string().min(1),
+        name: z.string().min(1).max(100),
+        mode: z.enum(["follow-pin", "manual"]).default("follow-pin"),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const parent = resolveWorkspace(
+        ctx.manager,
+        input.daemonId,
+        input.workspaceId,
+      );
+
+      if (!path.isAbsolute(input.path)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Choose a full folder path for the new workspace.",
+        });
+      }
+      // The link is saved there last; check now so a failure can't leave a
+      // new workspace behind unlinked.
+      if (!(await getWorkspaceConfig(parent.localPath))) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: `Workspace config missing on disk for ${parent.id}`,
         });
       }
-      const teamSync: WorkspaceTeamSyncSettings = persisted.teamSync ?? {};
-      // Replace any entry spelled with different case.
-      const entries = Object.fromEntries(
-        Object.entries(teamSync.linkedWorkspaces ?? {}).filter(
-          ([name]) => name.toLowerCase() !== input.repo.toLowerCase(),
-        ),
+      // A workspace inside another (or around one) would show the inner
+      // one's files as untracked in the outer and could submit them to the
+      // wrong repo. Nested links handle that case on purpose; this does not.
+      for (const workspaces of ctx.manager.workspaces.values()) {
+        for (const w of workspaces) {
+          if (pathsOverlap(input.path, w.localPath)) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `That folder overlaps workspace ${w.name} (${w.localPath}). Choose a folder outside every workspace.`,
+            });
+          }
+        }
+      }
+
+      const backend = (await DaemonConfig.Get()).stateBackend;
+      const parentState = await getWorkspaceState(parent.localPath, backend);
+      const client = await CreateApiClientAuth(input.daemonId);
+      const { config } = await client.teamSync.getConfig.query({
+        repoId: parent.repoId,
+        changelistNumber: parentState.changelistNumber,
+      });
+      const link = config?.linkedRepos?.find(
+        (l) => l.repo.toLowerCase() === input.repo.toLowerCase(),
       );
-      entries[input.repo] = {
+      if (!link) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `This workspace's Team Sync config has no link to ${input.repo}.`,
+        });
+      }
+      if (link.path !== undefined) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `${link.repo} is mounted at ${link.path} inside this workspace, which Team Sync does not support yet.`,
+        });
+      }
+
+      // getOrg lists the repos this user can reach, including through the
+      // org's default repo access (repo.list leaves those out).
+      const org = await client.org.getOrg.query({ id: parent.orgId });
+      const repo = (org?.repos ?? []).find(
+        (r) => !r.deletedAt && r.name.toLowerCase() === link.repo.toLowerCase(),
+      );
+      if (!repo) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `No repo named ${link.repo} in this organization, or you don't have access to it.`,
+        });
+      }
+
+      await fs.mkdir(input.path, { recursive: true });
+      const created = await createAndRegisterWorkspace(ctx.manager, {
+        daemonId: input.daemonId,
+        name: input.name,
+        repoId: repo.id,
+        path: input.path,
+        defaultBranchName: link.branch,
+      });
+
+      const settings = await saveLinkEntry(parent, link.repo, {
         mode: input.mode,
-        ...(input.linkedWorkspaceId && {
-          workspaceId: input.linkedWorkspaceId,
-        }),
+        workspaceId: created.id,
+      });
+      return {
+        workspace: {
+          id: created.id,
+          name: created.name,
+          localPath: created.localPath,
+        },
+        settings,
       };
-      persisted.teamSync = { ...teamSync, linkedWorkspaces: entries };
-      await saveWorkspaceConfig(persisted);
-      return persisted.teamSync;
+    }),
+
+  // The linked repo pins that differ between the repo config at two
+  // changelists (bisect's range). Null when either config is invalid.
+  comparePins: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        fromChangelist: z.number().int().min(0),
+        toChangelist: z.number().int().min(0),
+      }),
+    )
+    .query(async ({ ctx, input }): Promise<TeamSyncPinChange[] | null> => {
+      const workspace = resolveWorkspace(
+        ctx.manager,
+        input.daemonId,
+        input.workspaceId,
+      );
+      const client = await CreateApiClientAuth(input.daemonId);
+      return client.teamSync.comparePins.query({
+        repoId: workspace.repoId,
+        fromChangelist: input.fromChangelist,
+        toChangelist: input.toChangelist,
+      });
     }),
 
   // Removes this workspace's choice for a link, so it falls back to the

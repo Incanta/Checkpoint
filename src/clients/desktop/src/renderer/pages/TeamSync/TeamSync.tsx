@@ -8,18 +8,41 @@ import { Button } from "../../components/ui";
 import StatusPanel from "../../components/team-sync/StatusPanel";
 import ChangelistBrowser from "../../components/team-sync/ChangelistBrowser";
 import LogPane from "../../components/team-sync/LogPane";
-import TeamSyncSettingsDialog from "../../components/team-sync/dialogs/TeamSyncSettingsDialog";
+import TeamSyncSettingsDialog, {
+  type TeamSyncSettingsTab,
+} from "../../components/team-sync/dialogs/TeamSyncSettingsDialog";
 import CleanWorkspaceDialog from "../../components/team-sync/dialogs/CleanWorkspaceDialog";
 import BisectPanel from "../../components/team-sync/dialogs/BisectPanel";
+import LinkConfirmDialog from "../../components/team-sync/dialogs/LinkConfirmDialog";
+import { teamSyncJobAtom, getWsRecord } from "../../../common/state/team-sync";
 
 export default function TeamSync(): React.ReactElement {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
+  const jobRecord = useAtomValue(teamSyncJobAtom);
   const navigate = useNavigate();
   const workspaceId = currentWorkspace?.id ?? null;
+  const job = getWsRecord(jobRecord, workspaceId) ?? null;
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] =
+    useState<TeamSyncSettingsTab>("filters");
   const [cleanOpen, setCleanOpen] = useState(false);
   const [bisectShown, setBisectShown] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  // Sync, build, and clean failures. A new job clears the last one.
+  useEffect(() => {
+    return ipc.on("team-sync:sync:error", (data) => setSyncError(data.message));
+  }, []);
+  useEffect(() => {
+    if (job) setSyncError(null);
+  }, [job]);
+  useEffect(() => setSyncError(null), [workspaceId]);
+
+  const openSettings = (tab: TeamSyncSettingsTab): void => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  };
 
   // Enter Team Sync for this workspace on mount so main fetches project info,
   // config, settings, and history and starts its head poll. Leave on unmount.
@@ -55,10 +78,25 @@ export default function TeamSync(): React.ReactElement {
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <StatusPanel
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => openSettings("filters")}
+          onOpenLinks={() => openSettings("links")}
           onOpenClean={() => setCleanOpen(true)}
           onToggleBisect={() => setBisectShown((prev) => !prev)}
         />
+        {syncError && (
+          <div className="flex items-start gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-danger)]/15 px-4 py-2 text-xs text-[var(--color-danger)]">
+            <span className="min-w-0 flex-1 whitespace-pre-wrap">
+              {syncError}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSyncError(null)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        )}
         <BisectPanel
           forceShow={bisectShown}
           onClose={() => setBisectShown(false)}
@@ -71,8 +109,10 @@ export default function TeamSync(): React.ReactElement {
 
       <TeamSyncSettingsDialog
         visible={settingsOpen}
+        initialTab={settingsTab}
         onHide={() => setSettingsOpen(false)}
       />
+      <LinkConfirmDialog />
       <CleanWorkspaceDialog
         visible={cleanOpen}
         onHide={() => setCleanOpen(false)}

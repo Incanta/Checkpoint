@@ -265,7 +265,14 @@ export type Channels = {
   // Re-fetch config/settings/status/history for the current workspace.
   "team-sync:refresh": null;
   // Run the sync pipeline (null = latest, or a specific changelist).
-  "team-sync:sync": { changelistNumber: number | null };
+  // `confirmLinks` names linked repos the user agreed to move despite local
+  // changes, being ahead of the pin, or another workspace holding them;
+  // `skipLinks` syncs this workspace alone.
+  "team-sync:sync": {
+    changelistNumber: number | null;
+    confirmLinks?: string[];
+    skipLinks?: boolean;
+  };
   "team-sync:sync:error": { message: string };
   // Launch the Unreal editor; `config` is an optional build configuration.
   "team-sync:launch-editor": { config?: string };
@@ -327,6 +334,30 @@ export type Channels = {
   // next sync (UGS's destructive-filter warning).
   "team-sync:filter:preview": { settings: any };
   "team-sync:filter:preview:data": { toDelete: string[] };
+
+  // ─── Team Sync linked repos ──────────────────────────────────────
+  // Re-fetch link statuses and candidate workspaces into teamSyncLinksAtom.
+  "team-sync:links:refresh": null;
+  // Set this workspace's choice for a link (a mode, and a workspace or none).
+  "team-sync:links:set": {
+    repo: string;
+    mode: "follow-pin" | "manual" | "ignore";
+    linkedWorkspaceId: string | null;
+  };
+  // Drop this workspace's choice, falling back to the preset or default.
+  "team-sync:links:clear": { repo: string };
+  // Create a workspace of the linked repo in a folder and link it.
+  "team-sync:links:create": {
+    repo: string;
+    path: string;
+    name: string;
+    mode: "follow-pin" | "manual";
+  };
+  // Pick a folder for a new linked workspace; main replies with :data.
+  "team-sync:links:pick-folder": { repo: string };
+  "team-sync:links:pick-folder:data": { repo: string; path: string };
+  // Close the "linked repos need confirmation" prompt without syncing.
+  "team-sync:link-confirm:dismiss": null;
 };
 
 export type InvokeChannels = {

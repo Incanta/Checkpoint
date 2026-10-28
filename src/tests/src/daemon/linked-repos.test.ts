@@ -19,7 +19,9 @@ import {
   it,
   vi,
 } from "vitest";
-import { rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 vi.mock("~/server/repo-path", async (importOriginal) =>
   (await import("../harness/repo-path-switch")).repoPathModule(importOriginal),
@@ -257,6 +259,25 @@ describe("Team Sync linked repos", { timeout: 120_000 }, () => {
     expect(only(await syncLatest(s.bobGame)).status).toBe("up-to-date");
   });
 
+  it("brings a link up to its pin when the parent is already current", async () => {
+    // What `checkpoint pull` relies on: it asks for link statuses when the
+    // workspace is up to date, and pulls anyway if a link is behind.
+    pins.set(s.gameRepoId, s.engineV1);
+    await syncLatest(s.bobGame);
+    const gameCl = await clOf(s.bobGame);
+    await link(s.bobGame, "follow-pin");
+
+    const daemon = await daemonApi();
+    const report = await daemon.workspaces.teamSync.getLinkedRepos(
+      seatIds(s.bobGame),
+    );
+    expect(report.links[0]).toMatchObject({ status: "out-of-date", mode: "follow-pin" });
+
+    expect(only(await syncLatest(s.bobGame)).status).toBe("synced");
+    expect(await clOf(s.bobEngine)).toBe(s.engineV1);
+    expect(await clOf(s.bobGame)).toBe(gameCl);
+  });
+
   it("syncs the parent and reports a link with no workspace chosen as not set up", async () => {
     pins.set(s.gameRepoId, s.engineV1);
 
@@ -357,6 +378,40 @@ describe("Team Sync linked repos", { timeout: 120_000 }, () => {
     );
     expect(await clOf(s.bobEngine)).toBe(s.engineV1);
     expect(await read(s.bobEngine, "Engine/Build/Build.version")).toBe("v1\n");
+  });
+
+  it("hands the links that need confirmation to the client in the failed job", async () => {
+    pins.set(s.gameRepoId, s.engineV2);
+    await link(s.bobGame, "follow-pin");
+    await put(s.bobEngine, "Engine/Source/patch.cpp", "bob's engine patch\n");
+
+    const failure = await syncLatest(s.bobGame).then(
+      () => null,
+      (err: { jobResult?: unknown }) => err,
+    );
+    const confirmations = (
+      failure?.jobResult as { linkConfirmations?: LinkSyncResult[] } | null
+    )?.linkConfirmations;
+    expect(confirmations).toHaveLength(1);
+    expect(confirmations?.[0]).toMatchObject({
+      repo: "UE5",
+      status: "needs-confirmation",
+      reasons: ["local-changes"],
+      pin: s.engineV2,
+      fromChangelist: 0,
+      workspaceName: s.bobEngine.workspace.name,
+    });
+  });
+
+  it("puts no confirmation detail on a pull that failed for another reason", async () => {
+    pins.set(s.gameRepoId, 9999);
+    await link(s.bobGame, "follow-pin");
+    const failure = await syncLatest(s.bobGame).then(
+      () => null,
+      (err: { jobResult?: unknown }) => err,
+    );
+    expect(failure).not.toBeNull();
+    expect(failure?.jobResult ?? null).toBeNull();
   });
 
   it("asks before moving an engine with local changes, and keeps them when confirmed", async () => {
@@ -532,6 +587,161 @@ describe("Team Sync linked repos", { timeout: 120_000 }, () => {
       });
       const settings = await daemon.workspaces.teamSync.getSettings(seatIds(s.bobGame));
       expect(settings.linkedWorkspaces).toEqual({});
+    });
+
+    it("reports without scanning the linked workspace for local changes", async () => {
+      pins.set(s.gameRepoId, s.engineV1);
+      await link(s.bobGame, "follow-pin");
+      await put(s.bobEngine, "Engine/Source/patch.cpp", "bob's engine patch\n");
+      const manager = DaemonManager.Get();
+      const real = manager.linkedSyncDeps.bind(manager);
+      const scanned = vi.fn();
+      vi.spyOn(manager, "linkedSyncDeps").mockImplementation(() => {
+        const deps = real();
+        return {
+          ...deps,
+          hasLocalChanges: async (w) => {
+            scanned(w.id);
+            return deps.hasLocalChanges(w);
+          },
+        };
+      });
+
+      const daemon = await daemonApi();
+      const report = await daemon.workspaces.teamSync.getLinkedRepos(
+        seatIds(s.bobGame),
+      );
+      expect(report.links[0]?.status).toBe("out-of-date");
+      expect(scanned).not.toHaveBeenCalled();
+
+      // A sync still checks, and asks.
+      await expect(syncLatest(s.bobGame)).rejects.toThrow(/has local changes/);
+      expect(scanned).toHaveBeenCalledWith(s.bobEngine.workspace.id);
+    });
+  });
+
+  describe("creating a linked workspace", () => {
+    let folders: string[] = [];
+    let created: { id: string; daemonId: string }[] = [];
+
+    beforeEach(async () => {
+      folders = [];
+      created = [];
+      // Real workspaces always have a workspace.json; the seats don't.
+      await setTeamSync(s.bobGame, {});
+    });
+
+    afterEach(async () => {
+      const manager = DaemonManager.Get();
+      for (const w of created) manager.unlinkWorkspace(w.id, w.daemonId);
+      closeAllStateStores();
+      for (const folder of folders) {
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
+
+    const freshFolder = async () => {
+      const folder = (
+        await mkdtemp(path.join(tmpdir(), "chk-linked-create-"))
+      ).replace(/\\/g, "/");
+      folders.push(folder);
+      return `${folder}/Engines/UE5`;
+    };
+
+    const create = async (
+      extra: { path?: string; repo?: string; name?: string } = {},
+    ) => {
+      const daemon = await daemonApi();
+      const result = await daemon.workspaces.teamSync.createLinkedWorkspace({
+        ...seatIds(s.bobGame),
+        repo: "UE5",
+        name: "bob-ue5",
+        path: extra.path ?? (await freshFolder()),
+        ...extra,
+      });
+      created.push({
+        id: result.workspace.id,
+        daemonId: s.bobGame.workspace.daemonId,
+      });
+      return result;
+    };
+
+    it("creates an empty workspace of the linked repo on the link's branch, links it, and the next sync fills it", async () => {
+      pins.set(s.gameRepoId, s.engineV1);
+      const folder = await freshFolder();
+
+      const result = await create({ path: folder });
+      expect(result.workspace.localPath).toBe(folder);
+      expect(result.settings.linkedWorkspaces).toEqual({
+        UE5: { mode: "follow-pin", workspaceId: result.workspace.id },
+      });
+
+      const engine = DaemonManager.Get()
+        .linkedSyncDeps()
+        .findWorkspace(result.workspace.id);
+      expect(engine).toMatchObject({
+        repoId: s.engineRepoId,
+        domainBranchName: "main",
+        localPath: folder,
+      });
+
+      expect(only(await syncLatest(s.bobGame))).toMatchObject({
+        status: "synced",
+        workspaceId: result.workspace.id,
+        pin: s.engineV1,
+      });
+      expect(
+        await readFile(path.join(folder, "Engine/Build/Build.version"), "utf8"),
+      ).toBe("v1\n");
+    });
+
+    it("refuses a folder that overlaps a workspace", async () => {
+      pins.set(s.gameRepoId, s.engineV1);
+      // Inside the game workspace, around it, and the same folder.
+      for (const folder of [
+        `${s.bobGame.root}/Engine`,
+        path.dirname(s.bobGame.root),
+        s.bobEngine.root,
+      ]) {
+        await expect(create({ path: folder })).rejects.toThrow(
+          /overlaps workspace/,
+        );
+      }
+    });
+
+    it("refuses a relative folder", async () => {
+      pins.set(s.gameRepoId, s.engineV1);
+      await expect(create({ path: "Engines/UE5" })).rejects.toThrow(
+        /full folder path/,
+      );
+    });
+
+    it("refuses a repo the config doesn't link", async () => {
+      pins.set(s.gameRepoId, s.engineV1);
+      await expect(create({ repo: "Game2" })).rejects.toThrow(
+        /no link to Game2/,
+      );
+    });
+
+    it("refuses a link mounted inside the workspace", async () => {
+      overrides.teamSyncConfig = async () => ({
+        config: {
+          ...configFor(s.gameRepoId),
+          linkedRepos: [
+            {
+              repo: "UE5",
+              branch: "main",
+              changelist: s.engineV1,
+              path: "Engine",
+              enabledByDefault: true,
+            },
+          ],
+        },
+        sourceChangelistNumber: 1,
+        errors: null,
+      });
+      pins.set(s.gameRepoId, s.engineV1);
+      await expect(create()).rejects.toThrow(/does not support yet/);
     });
   });
 });

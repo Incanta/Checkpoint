@@ -2,7 +2,7 @@
 
 Plan for letting a Team Sync repo pin other repos at a changelist and keep local workspaces of them in sync. The motivating case is a custom Unreal Engine kept in its own repo and synced once per machine, shared by every game, instead of the Perforce convention of committing `Engine/` next to (or around) each game. Written 2026-10-27 on `1b2757a`.
 
-**Progress (2026-10-27): phases 1 and 2 are implemented** (uncommitted). See [Phase 1 as built](#phase-1-as-built) and [Phase 2 as built](#phase-2-as-built) for where they live and where they differ from this plan.
+**Progress (2026-10-27): phases 1, 2, and 3 are implemented** (phase 3 uncommitted). See [Phase 1 as built](#phase-1-as-built), [Phase 2 as built](#phase-2-as-built), and [Phase 3 as built](#phase-3-as-built) for where they live and where they differ from this plan.
 
 ## Goals
 
@@ -198,11 +198,11 @@ Decisions made while building:
 - **Nested links:** `path` and `enabledByDefault` validate, but such links report `unsupported` and are never synced until phase 5.
 - **Stale pins:** if a changelist that moves a pin lands between resolving the target and the parent's pull, the job result lists the link in `stalePins`; the next sync fixes it.
 
-Not done in phase 1:
+Not done in phase 1 (the first two and the CLI flags landed in phase 3):
 
-- **Creating a linked workspace in a chosen folder:** phase 3's UI can use the existing workspace-creation flow and then call `setLinkedWorkspace`.
-- **Confirmation in the desktop app:** a blocked pull shows the error text until phase 3 adds a prompt that resends with `confirmLinks`.
-- **The C++ CLI:** it has no `--confirm-links` flag yet, and a daemonless CLI only registers its own workspace, so its links report `missing-workspace`.
+- **Creating a linked workspace in a chosen folder.**
+- **Confirmation in the desktop app.**
+- **The C++ CLI:** no `--confirm-links` flag, and a daemonless CLI only registers its own workspace, so its links report `missing-workspace`. The second part still stands.
 
 ## Phase 2 as built
 
@@ -219,6 +219,39 @@ Build step OS condition:
 - The daemon's `hostOs` and `stepRunsOn` (`util/build/steps.ts`) filter steps before ordering in `runBuild`, so a requirement on a skipped step counts as met. A skipped step requested by id gets a line in the build log saying why. A platform `ifOs` can't name runs only steps without `ifOs`.
 - Workspace custom steps accept `ifOs` too, and the desktop settings dialog hides steps for other OSes.
 - Tests: `src/tests/src/daemon/build-step-os.test.ts`, `src/tests/src/daemon/engine-association.test.ts` (including that the association never reaches a shell), and `src/tests/src/server/team-sync-build-step-os-config.test.ts`.
+
+## Phase 3 as built
+
+Pin-change badge:
+
+- The app's `teamSync.getChangelistMeta` returns `pinChanges` per changelist (`repo`, `from`, `to`; `from` is null for an added link, `to` for a removed one). Only changelists whose file changes include `.checkpoint/teamsync.yaml` are checked, each against its parent's config, so a merge counts what it brought in. A changelist where either config is invalid gets no badge. The logic is pure in `src/app/src/server/team-sync/pin-changes.ts`, with the config reader passed in.
+- The desktop changelist browser shows a "UE5 update" chip before the message, with the old and new pin on hover. It says the linked repo's name rather than "engine", since links are engine-agnostic.
+
+Bisect warning:
+
+- New app endpoint `teamSync.comparePins` (proxied by the daemon) compares the pins at the good and bad bounds. When they differ, the bisect banner says which pins move and offers "Hold linked repos where they are", which makes "Sync to next" sync with `skipLinks`. Off by default, since following the pins is what builds. A pin moved and moved back inside the range doesn't show; that's accepted.
+
+Settings and status:
+
+- A "Linked Repos" tab in Team Sync settings (`LinkedReposSection.tsx`), shown when the head config or the synced changelist has links. Each link shows its pin, a status badge, one sentence on where it stands ("Pinned 48213, at 48100. The next sync moves it to the pin."), a workspace picker (candidates from `listLinkCandidates`, "No workspace", and "Create a new workspace..."), a mode picker, and Reset (drops the workspace's entry so the preset or default applies). Nested links show as not synced yet, without controls.
+- Link changes apply immediately rather than on Save, since creating a workspace can't be undone by Cancel. Save leaves `linkedWorkspaces` out, so the copy loaded when the dialog opened can't undo them.
+- The status bar shows a badge per non-ignored link ("UE5: needs sync", "UE5: at 48213", "UE5: not set up"); clicking one opens the Linked Repos tab. Links refresh on entering Team Sync, on refresh, and after each sync.
+- Status reports no longer scan the linked workspace for local changes (slow for an engine, and only a sync needs it). A report shows a link with local changes as plain out-of-date; the sync then asks.
+
+Creating a linked workspace:
+
+- Daemon endpoint `createLinkedWorkspace` (repo, folder, name): reads the link from the config at the parent's changelist, finds the repo by name through `org.getOrg`, creates the workspace on the link's branch with the same code as normal workspace creation (now `createAndRegisterWorkspace` in `ops.ts`), and links it. It starts empty; the next parent sync brings it to the pin.
+- Refused: a relative folder, a folder that is, contains, or is inside any registered workspace (the inner one's files would show as untracked in the outer), a repo the config doesn't link, and a nested link. The parent's `workspace.json` is checked before anything is created.
+- It uses `org.getOrg` rather than `repo.list` because `repo.list` leaves out repos a member reaches only through the org's default repo access. That inconsistency in `repo.list` is not fixed here.
+
+Confirmation:
+
+- A pull stopped by `LinkConfirmationRequiredError` fails its job with `result.linkConfirmations` (the same link reports the error text describes); `JobManager.failJob` takes an optional result for this.
+- The desktop shows "Move linked repos?" (`LinkConfirmDialog.tsx`) listing each link, its move, and why it needs confirmation, with Move and sync (resends with `confirmLinks`), Sync without them (`skipLinks`), and Cancel. It also sends an OS notification, since the sync may have been started and left.
+- The Team Sync page now shows sync, build, and clean errors in a dismissible banner. Before, nothing in the renderer listened for them, so errors like "busy, try again" only appeared as an OS notification.
+- The CLI's `pull` takes `--confirm-links <repo...>` and `--skip-links`, and after a pull stopped at linked repos it prints the command line to go ahead. When the workspace itself is already up to date (or at the `-c` changelist), it asks the daemon for link statuses and pulls anyway if a `follow-pin` link is behind its pin or busy, so CI agents don't build against the wrong engine. Manual links behind their pin are only mentioned. After a pull it lists the linked repos it moved and any stale pins.
+
+Tests: `src/tests/src/server/team-sync-pin-changes.test.ts` (diffing, comparisons, per-changelist detection), and new cases in `src/tests/src/daemon/linked-repos.test.ts` (confirmation detail in the failed job, reports not scanning for local changes, and creating a linked workspace with its refusals). The desktop UI has no automated tests.
 
 ## Open questions
 

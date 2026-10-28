@@ -291,11 +291,16 @@ async function configAt(
   return { config: result.config, changelist: target };
 }
 
-/** Facts about a chosen linked workspace, or "missing" when unregistered. */
+/**
+ * Facts about a chosen linked workspace, or "missing" when unregistered.
+ * Checking for local changes scans the linked workspace, which is slow for an
+ * engine, so status reports (which never sync) skip it.
+ */
 async function linkedFacts(
   deps: LinkedSyncDeps,
   parent: UtilWorkspace,
   workspaceId: string,
+  checkLocalChanges = true,
 ): Promise<
   { facts: LinkedWorkspaceFacts; workspace: ManagerWorkspace } | "missing"
 > {
@@ -324,7 +329,9 @@ async function linkedFacts(
       domainBranchName: workspace.domainBranchName,
       activeBranches: workspace.activeBranches ?? [],
       changelistNumber: state.changelistNumber,
-      hasLocalChanges: await deps.hasLocalChanges(workspace),
+      hasLocalChanges: checkLocalChanges
+        ? await deps.hasLocalChanges(workspace)
+        : false,
       busy: deps.isBusy(workspace.id),
       otherHolder,
     },
@@ -603,7 +610,7 @@ export async function getLinkStatuses(
     const choice = resolveLinkChoice(link, settings, presets);
     const found =
       link.path === undefined && choice.mode !== "ignore" && choice.workspaceId
-        ? await linkedFacts(deps, parent, choice.workspaceId)
+        ? await linkedFacts(deps, parent, choice.workspaceId, false)
         : null;
     const facts = found === "missing" ? "missing" : (found?.facts ?? null);
     // Reporting never syncs, so treat everything as confirmed and map a

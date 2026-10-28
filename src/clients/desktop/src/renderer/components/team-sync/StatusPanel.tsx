@@ -2,12 +2,14 @@ import { useAtomValue } from "jotai";
 import { currentWorkspaceAtom } from "../../../common/state/workspace";
 import {
   teamSyncJobAtom,
+  teamSyncLinksAtom,
   teamSyncModeAtom,
   teamSyncStatusAtom,
   getWsRecord,
 } from "../../../common/state/team-sync";
 import { ipc } from "../../pages/ipc";
 import { Badge, Button } from "../ui";
+import { describeLink, linkBadge } from "./links";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCodeBranch } from "@fortawesome/free-solid-svg-icons/faCodeBranch";
 import { faGear } from "@fortawesome/free-solid-svg-icons/faGear";
@@ -18,23 +20,31 @@ export interface StatusPanelProps {
   onOpenSettings?: () => void;
   onOpenClean?: () => void;
   onToggleBisect?: () => void;
+  /** Open settings on the Linked Repos tab. */
+  onOpenLinks?: () => void;
 }
 
 export default function StatusPanel({
   onOpenSettings,
   onOpenClean,
   onToggleBisect,
+  onOpenLinks,
 }: StatusPanelProps): React.ReactElement | null {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const modeRecord = useAtomValue(teamSyncModeAtom);
   const statusRecord = useAtomValue(teamSyncStatusAtom);
   const jobRecord = useAtomValue(teamSyncJobAtom);
+  const linksRecord = useAtomValue(teamSyncLinksAtom);
 
   if (!currentWorkspace) return null;
 
   const mode = getWsRecord(modeRecord, currentWorkspace.id);
   const status = getWsRecord(statusRecord, currentWorkspace.id);
   const job = getWsRecord(jobRecord, currentWorkspace.id);
+  // Ignored links are the user's choice; they'd only be noise here.
+  const links = (
+    getWsRecord(linksRecord, currentWorkspace.id)?.links ?? []
+  ).filter((l) => l.status !== "ignored");
 
   const projectName = mode?.projectName || currentWorkspace.name || "Team Sync";
   const busy = job != null;
@@ -105,6 +115,23 @@ export default function StatusPanel({
             {status.appliedBinaries.length === 1 ? "" : "s"}
           </Badge>
         )}
+
+        {links.map((link) => {
+          const badge = linkBadge(link);
+          return (
+            <button
+              key={link.repo}
+              type="button"
+              onClick={onOpenLinks}
+              title={`${link.repo}: ${describeLink(link)}`}
+              className="cursor-pointer border-0 bg-transparent p-0"
+            >
+              <Badge variant={badge.tone}>
+                {link.repo}: {badge.label}
+              </Badge>
+            </button>
+          );
+        })}
 
         <div className="ml-auto flex items-center gap-2">
           <Button

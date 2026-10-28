@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAtomValue } from "jotai";
 import { currentWorkspaceAtom } from "../../../../common/state/workspace";
 import {
@@ -9,6 +9,7 @@ import {
 } from "../../../../common/state/team-sync";
 import { ipc } from "../../../pages/ipc";
 import { Button } from "../../ui";
+import { describePinChange } from "../links";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faMagnifyingGlass } from "@fortawesome/free-solid-svg-icons/faMagnifyingGlass";
 import { faXmark } from "@fortawesome/free-solid-svg-icons/faXmark";
@@ -34,6 +35,9 @@ export default function BisectPanel({
   const statusRecord = useAtomValue(teamSyncStatusAtom);
   const jobRecord = useAtomValue(teamSyncJobAtom);
   const workspaceId = currentWorkspace?.id ?? null;
+  // Hold linked repos where they are while stepping, instead of following
+  // each changelist's pins. Faster, but a step may not build.
+  const [holdLinks, setHoldLinks] = useState(false);
 
   // Pull the current bisect state on mount so a bisect started elsewhere (or in
   // a previous session) is reflected without needing a user action.
@@ -60,10 +64,15 @@ export default function BisectPanel({
   const syncedCl = status?.syncedCl ?? null;
 
   const bounded = next.low != null && next.high != null;
+  const pinChanges = bounded ? (bisect?.pinChanges ?? []) : [];
 
   const handleSyncNext = (): void => {
     if (next.nextCl == null) return;
-    ipc.sendMessage("team-sync:sync", { changelistNumber: next.nextCl });
+    ipc.sendMessage("team-sync:sync", {
+      changelistNumber: next.nextCl,
+      // Only meaningful while the range moves a pin.
+      ...(holdLinks && pinChanges.length > 0 && { skipLinks: true }),
+    });
   };
 
   const handleMark = (verdict: "pass" | "fail"): void => {
@@ -157,6 +166,25 @@ export default function BisectPanel({
           </button>
         )}
       </div>
+
+      {pinChanges.length > 0 && (
+        <div className="flex w-full flex-wrap items-center gap-3 text-xs text-[var(--color-text-secondary)]">
+          <span>
+            This range moves linked repo pins (
+            {pinChanges.map(describePinChange).join("; ")}), so a step may sync
+            them too, and an engine change usually means a rebuild.
+          </span>
+          <label className="flex cursor-pointer items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={holdLinks}
+              onChange={() => setHoldLinks((prev) => !prev)}
+              className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+            />
+            Hold linked repos where they are (faster; a step may not build)
+          </label>
+        </div>
+      )}
     </div>
   );
 }

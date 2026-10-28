@@ -7,6 +7,7 @@ import path from "path";
 import { checkConflicts, readFileFromChangelist } from "../../../util/index.js";
 import { runSyncPipeline } from "../../../util/team-sync/sync-pipeline.js";
 import {
+  LinkConfirmationRequiredError,
   syncLinkedRepos,
   stalePinsAfterSync,
   type SyncLinkedReposResult,
@@ -149,7 +150,14 @@ export const syncRouter = router({
             Logger.error(
               `Pull for workspace ${workspace.name} stopped at its linked repos: ${e.message}`,
             );
-            jobManager.failJob(job.id, e.message ?? String(e));
+            // Clients that can ask the user resend with confirmLinks.
+            jobManager.failJob(
+              job.id,
+              e.message ?? String(e),
+              e instanceof LinkConfirmationRequiredError
+                ? { linkConfirmations: e.links }
+                : null,
+            );
             return;
           }
         }

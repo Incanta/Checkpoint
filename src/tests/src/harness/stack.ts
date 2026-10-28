@@ -700,7 +700,12 @@ async function waitForJob(jobId: string): Promise<unknown> {
     const job = jobs.getJob(jobId);
     if (job?.status === "completed") return job.result;
     if (job?.status === "failed" || job?.status === "cancelled") {
-      throw new Error(`${job.type} failed: ${job.error ?? job.status}`);
+      // The job's result rides along: a failed job can carry detail, such
+      // as the linked repos a pull needs confirmation for.
+      throw Object.assign(
+        new Error(`${job.type} failed: ${job.error ?? job.status}`),
+        { jobResult: job.result },
+      );
     }
     if (Date.now() > deadline) throw new Error(`job ${jobId} did not finish`);
     await new Promise((resolve) => setTimeout(resolve, 10));

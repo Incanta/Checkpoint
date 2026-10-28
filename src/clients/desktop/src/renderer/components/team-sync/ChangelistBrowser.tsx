@@ -14,6 +14,7 @@ import {
 import { ipc } from "../../pages/ipc";
 import { EmptyState } from "../ui";
 import CommentDialog from "./dialogs/CommentDialog";
+import { describePinChange } from "./links";
 
 interface DayGroup {
   day: string;
@@ -58,6 +59,32 @@ function BadgeChips({
         </span>
       ))}
     </div>
+  );
+}
+
+/**
+ * Marks a changelist that moves a linked repo pin: syncing across it also
+ * syncs that repo and, for an engine, usually means a rebuild.
+ */
+function PinChangeChips({
+  meta,
+}: {
+  meta: TeamSyncChangelistMeta | undefined;
+}): React.ReactElement | null {
+  const changes = meta?.pinChanges ?? [];
+  if (changes.length === 0) return null;
+  return (
+    <>
+      {changes.map((change) => (
+        <span
+          key={change.repo}
+          title={`Moves linked repo pin: ${describePinChange(change)}. Syncing across this changelist also syncs ${change.repo}.`}
+          className="inline-flex shrink-0 items-center rounded bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-[0.65rem] font-medium text-[var(--color-warning)]"
+        >
+          {change.repo} update
+        </span>
+      ))}
+    </>
   );
 }
 
@@ -291,7 +318,10 @@ export default function ChangelistBrowser(): React.ReactElement | null {
                   <span className="truncate text-[var(--color-text-secondary)]">
                     {authorLabel(entry)}
                   </span>
-                  <span className="truncate">{entry.message}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <PinChangeChips meta={meta} />
+                    <span className="truncate">{entry.message}</span>
+                  </span>
                   <span className="flex items-center gap-2 overflow-hidden">
                     <BadgeChips meta={meta} />
                     {syncedUsers.length > 0 ? (

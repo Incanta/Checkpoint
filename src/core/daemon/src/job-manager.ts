@@ -222,11 +222,16 @@ export class JobManager {
     this.cancelCallbacks.delete(jobId);
   }
 
-  failJob(jobId: string, error: string): void {
+  /**
+   * Marks a job failed. `result` carries structured detail a client can act
+   * on, such as the linked repos a pull needs confirmation for.
+   */
+  failJob(jobId: string, error: string, result: unknown = null): void {
     const job = this.jobs.get(jobId);
     if (!job) return;
     job.status = "failed";
     job.error = error;
+    job.result = result;
     job.updatedAt = new Date();
     this.cancelCallbacks.delete(jobId);
   }

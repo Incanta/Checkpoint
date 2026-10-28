@@ -166,7 +166,7 @@ inline void renderProgressBar(
 
 struct JobResult {
   std::string status;     // "completed" or "failed"
-  nlohmann::json result;  // present when completed
+  nlohmann::json result;  // the job's result; may be set when failed too
   std::string error;      // present when failed
 };
 
@@ -249,7 +249,9 @@ inline JobResult pollJob(DaemonClient& client, const std::string& jobId,
       std::string errMsg = (job.contains("error") && job["error"].is_string())
                                ? job["error"].get<std::string>()
                                : "Unknown error";
-      return {status, nullptr, errMsg};
+      // A failed job can still carry detail, such as the linked repos a pull
+      // needs confirmation for.
+      return {status, job.value("result", nlohmann::json(nullptr)), errMsg};
     }
 
     // Poll less aggressively when not rendering a progress bar.
@@ -1149,8 +1151,56 @@ inline int cmdSubmit(std::string message, bool noProgress = false,
 //  COMMAND: pull (sync changes down)
 // ═════════════════════════════════════════════════════════════════
 
+inline std::string joinNames(const std::vector<std::string>& names) {
+  std::string out;
+  for (const auto& name : names) {
+    if (!out.empty()) out += ", ";
+    out += name;
+  }
+  return out;
+}
+
+/**
+ * Team Sync linked repos that a pull of this workspace would move: links in
+ * follow-pin mode whose workspace is not at the pin (or is busy, which the
+ * pull then reports). Links in manual mode are only mentioned. Empty when the
+ * repo has no links, or the daemon can't say (an older daemon, no config).
+ */
+inline std::vector<std::string> linkedReposBehindPin(
+    const DaemonClient& client, const WorkspaceConfig& ws) {
+  std::vector<std::string> behind;
+  nlohmann::json report;
+  try {
+    report = client.query("workspaces.teamSync.getLinkedRepos",
+                          {{"daemonId", ws.daemonId}, {"workspaceId", ws.id}});
+  } catch (...) {
+    return behind;
+  }
+  if (!report.is_object() || !report.contains("links") ||
+      !report["links"].is_array()) {
+    return behind;
+  }
+  for (auto& link : report["links"]) {
+    std::string repo = link.value("repo", "");
+    std::string status = link.value("status", "");
+    std::string mode = link.value("mode", "");
+    if (repo.empty() || (status != "out-of-date" && status != "busy")) continue;
+    if (mode == "manual") {
+      std::cout << "Linked repo " << repo << " is not at its pin (changelist "
+                << link.value("pin", 0)
+                << "); it is in manual mode, so pull leaves it alone."
+                << std::endl;
+      continue;
+    }
+    behind.push_back(repo);
+  }
+  return behind;
+}
+
 inline int cmdPull(bool noProgress = false,
-                   std::optional<int> changelist = std::nullopt) {
+                   std::optional<int> changelist = std::nullopt,
+                   std::vector<std::string> confirmLinks = {},
+                   bool skipLinks = false) {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
@@ -1168,24 +1218,43 @@ inline int cmdPull(bool noProgress = false,
     from_json(syncResult, syncStatus);
   }
 
+  // Linked repos only sync as part of a pull, so a workspace that is already
+  // where it should be still pulls when a linked repo is behind its pin.
+  auto linksToSync = [&]() -> std::vector<std::string> {
+    return skipLinks ? std::vector<std::string>{}
+                     : linkedReposBehindPin(client, ws);
+  };
+
   if (changelist.has_value()) {
     // Targeted sync: only skip the pull when we're already exactly at the
     // requested changelist (upToDate refers to the branch head, not the target)
     if (syncStatus.localChangelistNumber == changelist.value()) {
-      std::cout << "Already at changelist #" << changelist.value() << "."
+      auto behind = linksToSync();
+      if (behind.empty()) {
+        std::cout << "Already at changelist #" << changelist.value() << "."
+                  << std::endl;
+        return 0;
+      }
+      std::cout << "Already at changelist #" << changelist.value()
+                << ", but linked repos are behind their pins: "
+                << joinNames(behind) << ". Syncing them..." << std::endl;
+    } else {
+      std::cout << "Syncing to changelist #" << changelist.value() << "..."
                 << std::endl;
-      return 0;
     }
-    std::cout << "Syncing to changelist #" << changelist.value() << "..."
-              << std::endl;
   } else {
     if (syncStatus.upToDate) {
-      std::cout << "Already up to date." << std::endl;
-      return 0;
+      auto behind = linksToSync();
+      if (behind.empty()) {
+        std::cout << "Already up to date." << std::endl;
+        return 0;
+      }
+      std::cout << "Up to date, but linked repos are behind their pins: "
+                << joinNames(behind) << ". Syncing them..." << std::endl;
+    } else {
+      std::cout << "Pulling " << syncStatus.changelistsBehind
+                << " changelist(s) from remote..." << std::endl;
     }
-
-    std::cout << "Pulling " << syncStatus.changelistsBehind
-              << " changelist(s) from remote..." << std::endl;
   }
 
   // Pull changes (null changelistId = pull to head, null filePaths = all files)
@@ -1198,6 +1267,10 @@ inline int cmdPull(bool noProgress = false,
       {"filePaths", nullptr},
       {"noProgress", noProgress},
   };
+  // Team Sync linked repos: names the user agreed to move despite local
+  // changes, being ahead of the pin, or another workspace holding them.
+  if (!confirmLinks.empty()) pullInput["confirmLinks"] = confirmLinks;
+  if (skipLinks) pullInput["skipLinks"] = true;
 
   auto pullResult = client.mutate("workspaces.sync.pull", pullInput);
 
@@ -1212,11 +1285,49 @@ inline int cmdPull(bool noProgress = false,
   if (jobResult.status == "failed") {
     std::cerr << color::red() << "error: " << jobResult.error
               << color::reset() << std::endl;
+    // Say how to go ahead when the pull stopped at linked repos.
+    if (jobResult.result.is_object() &&
+        jobResult.result.contains("linkConfirmations") &&
+        jobResult.result["linkConfirmations"].is_array()) {
+      std::string repos;
+      for (auto& link : jobResult.result["linkConfirmations"]) {
+        if (!link.contains("repo") || !link["repo"].is_string()) continue;
+        if (!repos.empty()) repos += " ";
+        repos += link["repo"].get<std::string>();
+      }
+      if (!repos.empty()) {
+        std::cerr << "To move them and sync, run again with --confirm-links "
+                  << repos
+                  << ". To sync without them, run again with --skip-links."
+                  << std::endl;
+      }
+    }
     return 1;
   }
 
   std::cout << color::green() << color::bold()
             << "Pull complete." << color::reset() << std::endl;
+
+  // Report linked repos the pull moved, and pins that moved under it.
+  if (jobResult.result.is_object() && jobResult.result.contains("linkedRepos") &&
+      jobResult.result["linkedRepos"].is_array()) {
+    for (auto& link : jobResult.result["linkedRepos"]) {
+      if (link.value("status", "") != "synced") continue;
+      std::cout << "Linked repo " << link.value("repo", "") << " synced to changelist #"
+                << link.value("pin", 0) << "." << std::endl;
+    }
+  }
+  if (jobResult.result.is_object() && jobResult.result.contains("stalePins") &&
+      jobResult.result["stalePins"].is_array() &&
+      !jobResult.result["stalePins"].empty()) {
+    std::vector<std::string> stale;
+    for (auto& repo : jobResult.result["stalePins"]) {
+      if (repo.is_string()) stale.push_back(repo.get<std::string>());
+    }
+    std::cout << color::yellow() << "A pin moved during the pull for: "
+              << joinNames(stale) << ". Run pull again to bring them along."
+              << color::reset() << std::endl;
+  }
 
   // Report merge results if any
   if (!jobResult.result.is_null()) {

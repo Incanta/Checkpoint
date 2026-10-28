@@ -179,6 +179,15 @@ int main(int argc, char** argv) {
       .help("Disable the progress bar (also skips progress callbacks entirely)")
       .default_value(false)
       .implicit_value(true);
+  pullCmd.add_argument("--confirm-links")
+      .help("Team Sync linked repos to move even though they have local "
+            "changes, are ahead of the pin, or another workspace moved them")
+      .nargs(argparse::nargs_pattern::at_least_one);
+  pullCmd.add_argument("--skip-links")
+      .help("Sync only this workspace and leave its Team Sync linked repos "
+            "where they are")
+      .default_value(false)
+      .implicit_value(true);
 
   // clean
   argparse::ArgumentParser cleanCmd("clean");
@@ -650,8 +659,12 @@ int main(int argc, char** argv) {
 
     if (program.is_subcommand_used(pullCmd)) {
       auto changelist = pullCmd.present<int>("--changelist");
+      auto confirmLinks =
+          pullCmd.present<std::vector<std::string>>("--confirm-links")
+              .value_or(std::vector<std::string>{});
       return checkpoint::cmdPull(pullCmd.get<bool>("--no-progress"),
-                                 changelist);
+                                 changelist, confirmLinks,
+                                 pullCmd.get<bool>("--skip-links"));
     }
 
     if (program.is_subcommand_used(cleanCmd)) {

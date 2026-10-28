@@ -1,4 +1,9 @@
-import { Notification, type BrowserWindow, type IpcMain } from "electron";
+import {
+  Notification,
+  dialog,
+  type BrowserWindow,
+  type IpcMain,
+} from "electron";
 import { CreateDaemonClient } from "@checkpointvcs/daemon";
 import type { Workspace } from "@checkpointvcs/daemon";
 import { spawn } from "child_process";
@@ -12,6 +17,8 @@ import {
   teamSyncConfigAtom,
   teamSyncFilterPreviewAtom,
   teamSyncJobAtom,
+  teamSyncLinkConfirmAtom,
+  teamSyncLinksAtom,
   teamSyncMetadataAtom,
   teamSyncModeAtom,
   teamSyncSettingsAtom,
@@ -19,6 +26,9 @@ import {
   getWsRecord,
   setWsRecord,
   type TeamSyncBisectState,
+  type TeamSyncLinkCandidate,
+  type TeamSyncLinkReport,
+  type TeamSyncLinks,
   type TeamSyncSettings,
 } from "../common/state/team-sync";
 import { Channels, ipcOn, ipcSend } from "./channels";
@@ -135,6 +145,168 @@ export default class TeamSyncHandler {
     ipcOn(this.ipcMain, "team-sync:filter:preview", async (_event, data) => {
       await this.filterPreview(data);
     });
+
+    ipcOn(this.ipcMain, "team-sync:links:refresh", async () => {
+      await this.withClient((client, workspace) =>
+        this.refreshLinks(client, workspace),
+      );
+    });
+
+    ipcOn(this.ipcMain, "team-sync:links:set", async (_event, data) => {
+      await this.runLinkAction((client, workspace) =>
+        client.workspaces.teamSync.setLinkedWorkspace.mutate({
+          daemonId: workspace.daemonId,
+          workspaceId: workspace.id,
+          repo: data.repo,
+          mode: data.mode,
+          linkedWorkspaceId: data.linkedWorkspaceId,
+        }),
+      );
+    });
+
+    ipcOn(this.ipcMain, "team-sync:links:clear", async (_event, data) => {
+      await this.runLinkAction((client, workspace) =>
+        client.workspaces.teamSync.clearLinkedWorkspace.mutate({
+          daemonId: workspace.daemonId,
+          workspaceId: workspace.id,
+          repo: data.repo,
+        }),
+      );
+    });
+
+    ipcOn(this.ipcMain, "team-sync:links:create", async (_event, data) => {
+      await this.runLinkAction((client, workspace) =>
+        client.workspaces.teamSync.createLinkedWorkspace.mutate({
+          daemonId: workspace.daemonId,
+          workspaceId: workspace.id,
+          repo: data.repo,
+          path: data.path,
+          name: data.name,
+          mode: data.mode,
+        }),
+      );
+    });
+
+    ipcOn(this.ipcMain, "team-sync:links:pick-folder", async (_event, data) => {
+      if (this.isMocked) return;
+      const result = await dialog.showOpenDialog({
+        title: `Folder for ${data.repo}`,
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (!result.canceled && result.filePaths.length > 0 && this.webContents) {
+        ipcSend(this.webContents, "team-sync:links:pick-folder:data", {
+          repo: data.repo,
+          path: result.filePaths[0],
+        });
+      }
+    });
+
+    ipcOn(this.ipcMain, "team-sync:link-confirm:dismiss", async () => {
+      const workspace = store.get(currentWorkspaceAtom);
+      if (workspace) setWsRecord(teamSyncLinkConfirmAtom, workspace.id, null);
+    });
+  }
+
+  // ─── Linked repos ────────────────────────────────────────────────
+
+  /** Runs `fn` with a daemon client for the current workspace. */
+  private async withClient(
+    fn: (client: DaemonClient, workspace: Workspace) => Promise<void>,
+  ): Promise<void> {
+    if (this.isMocked) return;
+    const workspace = store.get(currentWorkspaceAtom);
+    if (!workspace) return;
+    try {
+      await fn(await CreateDaemonClient(), workspace);
+    } catch (error) {
+      console.error("Team Sync linked repos request failed:", error);
+    }
+  }
+
+  /**
+   * Fetches every link's status at the workspace's current changelist, and
+   * the workspaces that could satisfy each, into teamSyncLinksAtom. Keeps the
+   * previous value on failure so the UI doesn't flicker empty.
+   */
+  private async refreshLinks(
+    client: DaemonClient,
+    workspace: Workspace,
+  ): Promise<void> {
+    const previous = getWsRecord(store.get(teamSyncLinksAtom), workspace.id);
+    try {
+      const report = await client.workspaces.teamSync.getLinkedRepos.query({
+        daemonId: workspace.daemonId,
+        workspaceId: workspace.id,
+      });
+      const candidates: Record<string, TeamSyncLinkCandidate[]> = {};
+      for (const link of report.links) {
+        if (link.path !== undefined) continue;
+        candidates[link.repo.toLowerCase()] =
+          await client.workspaces.teamSync.listLinkCandidates
+            .query({
+              daemonId: workspace.daemonId,
+              workspaceId: workspace.id,
+              repo: link.repo,
+              branch: link.branch,
+            })
+            .catch(() => []);
+      }
+      const value: TeamSyncLinks = {
+        configChangelist: report.configChangelist,
+        links: report.links as TeamSyncLinkReport[],
+        candidates,
+        error: null,
+        busy: false,
+      };
+      setWsRecord(teamSyncLinksAtom, workspace.id, value);
+    } catch (error) {
+      console.error("Failed to fetch Team Sync linked repos:", error);
+      setWsRecord(teamSyncLinksAtom, workspace.id, {
+        configChangelist: previous?.configChangelist ?? null,
+        links: previous?.links ?? [],
+        candidates: previous?.candidates ?? {},
+        error: (error as Error)?.message ?? "Could not read linked repos",
+        busy: false,
+      });
+    }
+  }
+
+  /**
+   * Runs a link mutation, then refreshes the links. A failure is shown in
+   * the settings dialog through the atom's `error`.
+   */
+  private async runLinkAction(
+    mutate: (client: DaemonClient, workspace: Workspace) => Promise<unknown>,
+  ): Promise<void> {
+    if (this.isMocked) return;
+    const workspace = store.get(currentWorkspaceAtom);
+    if (!workspace) return;
+
+    const setLinks = (patch: Partial<TeamSyncLinks>): void => {
+      const current = getWsRecord(store.get(teamSyncLinksAtom), workspace.id);
+      setWsRecord(teamSyncLinksAtom, workspace.id, {
+        configChangelist: current?.configChangelist ?? null,
+        links: current?.links ?? [],
+        candidates: current?.candidates ?? {},
+        error: current?.error ?? null,
+        busy: current?.busy ?? false,
+        ...patch,
+      });
+    };
+
+    setLinks({ busy: true, error: null });
+    let client: DaemonClient;
+    try {
+      client = await CreateDaemonClient();
+      await mutate(client, workspace);
+    } catch (error) {
+      setLinks({
+        busy: false,
+        error: (error as Error)?.message ?? "The linked repo change failed",
+      });
+      return;
+    }
+    await this.refreshLinks(client, workspace);
   }
 
   // ─── Clean (Phase 2/3) ───────────────────────────────────────────
@@ -204,7 +376,26 @@ export default class TeamSyncHandler {
       bisect[cl] = verdict;
     }
 
-    const value: TeamSyncBisectState = { bisect, next: state.next };
+    // Each bisect step syncs linked repos to that changelist's pins, so warn
+    // when the range moves a pin (often an engine rebuild per step).
+    const { low, high } = state.next;
+    let pinChanges: TeamSyncBisectState["pinChanges"] = null;
+    if (low != null && high != null) {
+      pinChanges = await client.workspaces.teamSync.comparePins
+        .query({
+          daemonId: workspace.daemonId,
+          workspaceId: workspace.id,
+          fromChangelist: Math.min(low, high),
+          toChangelist: Math.max(low, high),
+        })
+        .catch(() => null);
+    }
+
+    const value: TeamSyncBisectState = {
+      bisect,
+      next: state.next,
+      pinChanges,
+    };
     setWsRecord(teamSyncBisectAtom, workspace.id, value);
     if (this.webContents) {
       ipcSend(this.webContents, "team-sync:bisect:data", value);
@@ -436,6 +627,7 @@ export default class TeamSyncHandler {
       await this.refreshSettings(client, workspace);
       await this.refreshStatus(client, workspace);
       await this.refreshHistory(client, workspace);
+      await this.refreshLinksIfAny(client, workspace);
 
       this.startHeadPoll();
     } catch (error) {
@@ -462,9 +654,30 @@ export default class TeamSyncHandler {
       await this.refreshSettings(client, workspace);
       await this.refreshStatus(client, workspace);
       await this.refreshHistory(client, workspace);
+      await this.refreshLinksIfAny(client, workspace);
     } catch (error) {
       console.error("Failed to refresh Team Sync:", error);
     }
+  }
+
+  /**
+   * Refreshes links only for a repo whose head config declares some, so a
+   * workspace without links costs no extra round trips. Reads the config
+   * atom, so it runs after `refreshConfig`.
+   */
+  private async refreshLinksIfAny(
+    client: DaemonClient,
+    workspace: Workspace,
+  ): Promise<void> {
+    const config = getWsRecord(store.get(teamSyncConfigAtom), workspace.id);
+    const known = getWsRecord(store.get(teamSyncLinksAtom), workspace.id);
+    // The head config may have dropped links the synced changelist still
+    // has, so keep refreshing while any are shown.
+    if ((config?.linkedRepos?.length ?? 0) === 0 && !known?.links.length) {
+      setWsRecord(teamSyncLinksAtom, workspace.id, null);
+      return;
+    }
+    await this.refreshLinks(client, workspace);
   }
 
   private startHeadPoll(): void {
@@ -677,6 +890,8 @@ export default class TeamSyncHandler {
     const workspace = store.get(currentWorkspaceAtom);
     if (!workspace) return;
 
+    setWsRecord(teamSyncLinkConfirmAtom, workspace.id, null);
+
     try {
       const client = await CreateDaemonClient();
       const { jobId } = await client.workspaces.sync.pull.mutate({
@@ -685,6 +900,8 @@ export default class TeamSyncHandler {
         changelistId: data.changelistNumber,
         filePaths: null,
         noProgress: true,
+        ...(data.confirmLinks?.length && { confirmLinks: data.confirmLinks }),
+        ...(data.skipLinks && { skipLinks: true }),
       });
 
       const startedAt = new Date().toISOString();
@@ -696,7 +913,9 @@ export default class TeamSyncHandler {
         startedAt,
       });
 
-      await this.pollJob(client, workspace, jobId, startedAt, "sync");
+      await this.pollJob(client, workspace, jobId, startedAt, "sync", {
+        changelistNumber: data.changelistNumber,
+      });
     } catch (error) {
       const message =
         (error as Error)?.message ?? "An unknown error occurred during sync";
@@ -781,6 +1000,7 @@ export default class TeamSyncHandler {
     jobId: string,
     startedAt: string,
     kind: "sync" | "build",
+    syncTarget?: { changelistNumber: number | null },
   ): Promise<void> {
     let nextSeq = -1;
 
@@ -818,7 +1038,18 @@ export default class TeamSyncHandler {
         this.window?.setProgressBar(-1);
 
         const label = kind === "build" ? "Build" : "Sync";
-        if (job.status === "failed") {
+        const confirmations = linkConfirmationsOf(job.result);
+        if (job.status === "failed" && syncTarget && confirmations) {
+          // Not an error: the user decides in the confirmation prompt.
+          setWsRecord(teamSyncLinkConfirmAtom, workspace.id, {
+            changelistNumber: syncTarget.changelistNumber,
+            links: confirmations,
+          });
+          this.notify(
+            "Sync needs confirmation",
+            `Linked repos ${confirmations.map((l) => l.repo).join(", ")} need your go-ahead before ${workspace.name} syncs.`,
+          );
+        } else if (job.status === "failed") {
           if (this.webContents) {
             ipcSend(this.webContents, "team-sync:sync:error", {
               message: job.error ?? `${label} failed`,
@@ -839,6 +1070,7 @@ export default class TeamSyncHandler {
 
         await this.refreshStatus(client, workspace);
         await this.refreshHistory(client, workspace);
+        if (kind === "sync") await this.refreshLinksIfAny(client, workspace);
         return;
       }
 
@@ -1004,6 +1236,18 @@ export default class TeamSyncHandler {
     );
     return current;
   }
+}
+
+/**
+ * The linked repos a failed pull needs confirmation for, from the job's
+ * result (the daemon sets `linkConfirmations`), or null.
+ */
+function linkConfirmationsOf(result: unknown): TeamSyncLinkReport[] | null {
+  const links = (result as { linkConfirmations?: unknown } | null)
+    ?.linkConfirmations;
+  return Array.isArray(links) && links.length > 0
+    ? (links as TeamSyncLinkReport[])
+    : null;
 }
 
 /** Resolve the platform-specific UnrealEditor executable under an engine dir. */

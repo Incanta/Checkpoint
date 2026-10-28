@@ -3,9 +3,13 @@ import { store, syncAtom } from "./store";
 import type {
   TeamSyncConfig,
   TeamSyncChangelistMeta,
+  TeamSyncPinChange,
 } from "@checkpointvcs/common";
 
-export type { TeamSyncChangelistMeta } from "@checkpointvcs/common";
+export type {
+  TeamSyncChangelistMeta,
+  TeamSyncPinChange,
+} from "@checkpointvcs/common";
 
 // All Team Sync atoms are keyed by workspace id so multiple workspaces can hold
 // independent Team Sync state at once. Read a workspace's slice with
@@ -128,6 +132,85 @@ export interface TeamSyncBisectNext {
 export interface TeamSyncBisectState {
   bisect: Record<string, string>;
   next: TeamSyncBisectNext;
+  /**
+   * Linked repo pins that differ between the good and bad bounds, so each
+   * step may move linked repos too. Empty when none differ; null when unknown
+   * or the range is not bounded yet.
+   */
+  pinChanges?: TeamSyncPinChange[] | null;
+}
+
+export type TeamSyncLinkMode = "follow-pin" | "manual" | "ignore";
+
+/** How a link looks from this machine (mirrors the daemon's LinkStatus). */
+export type TeamSyncLinkStatus =
+  | "unsupported"
+  | "ignored"
+  | "not-set-up"
+  | "missing-workspace"
+  | "wrong-repo"
+  | "wrong-branch"
+  | "overlay-active"
+  | "busy"
+  | "up-to-date"
+  | "out-of-date"
+  | "synced"
+  | "needs-confirmation";
+
+export type TeamSyncLinkConfirmReason =
+  | "local-changes"
+  | "ahead-of-pin"
+  | "held-by-other";
+
+/** One link, as the daemon reports it (mirrors LinkStatusReport). */
+export interface TeamSyncLinkReport {
+  repo: string;
+  branch: string;
+  pin: number;
+  mode: TeamSyncLinkMode;
+  /** Where the mode came from: this workspace, its preset, or the default. */
+  source: "workspace" | "preset" | "default";
+  status: TeamSyncLinkStatus;
+  path?: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  localPath?: string;
+  /** The linked workspace's changelist. */
+  fromChangelist?: number;
+  reasons?: TeamSyncLinkConfirmReason[];
+  holder?: {
+    workspaceId: string;
+    workspaceName: string;
+    localPath: string;
+    changelist: number;
+  };
+}
+
+/** A workspace on this machine that can satisfy a link. */
+export interface TeamSyncLinkCandidate {
+  id: string;
+  name: string;
+  localPath: string;
+  domainBranchName: string;
+}
+
+/** Links for the workspace's current changelist, plus candidates per link. */
+export interface TeamSyncLinks {
+  configChangelist: number | null;
+  links: TeamSyncLinkReport[];
+  /** Keyed by lowercased repo name. */
+  candidates: Record<string, TeamSyncLinkCandidate[]>;
+  /** The last failed link action or refresh, shown in settings. */
+  error: string | null;
+  /** A link action is running. */
+  busy: boolean;
+}
+
+/** A sync that stopped because linked repos need the user's go-ahead. */
+export interface TeamSyncLinkConfirm {
+  /** The sync's target, so confirming resends the same sync. */
+  changelistNumber: number | null;
+  links: TeamSyncLinkReport[];
 }
 
 /** Result of a destructive-filter preview: files removed on the next sync. */
@@ -183,6 +266,16 @@ export const teamSyncFilterPreviewAtom = atom<
   Record<string, TeamSyncFilterPreview>
 >({});
 syncAtom(teamSyncFilterPreviewAtom, "teamSyncFilterPreview");
+
+// Linked repo statuses and candidate workspaces per workspace.
+export const teamSyncLinksAtom = atom<Record<string, TeamSyncLinks | null>>({});
+syncAtom(teamSyncLinksAtom, "teamSyncLinks");
+
+// A sync waiting on the user to confirm moving linked repos, per workspace.
+export const teamSyncLinkConfirmAtom = atom<
+  Record<string, TeamSyncLinkConfirm | null>
+>({});
+syncAtom(teamSyncLinkConfirmAtom, "teamSyncLinkConfirm");
 
 /** Read a single workspace's slice out of a Team Sync record atom's value. */
 export function getWsRecord<T>(

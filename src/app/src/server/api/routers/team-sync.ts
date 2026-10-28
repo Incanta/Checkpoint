@@ -6,7 +6,15 @@ import { RepoAccess, type BuildBadgeState } from "@prisma/client";
 import { getUserAndRepoWithAccess } from "../auth-utils";
 import { assertFeature } from "~/server/license-client";
 import { getTeamSyncConfig } from "~/server/team-sync/config";
+import { TEAM_SYNC_CONFIG_PATH } from "~/server/team-sync/config-schema";
 import { classifyPaths } from "~/server/team-sync/classify";
+import {
+  comparePinsBetween,
+  pinChangesForChangelists,
+  type LinkPinChange,
+} from "~/server/team-sync/pin-changes";
+
+export type { LinkPin, LinkPinChange } from "~/server/team-sync/pin-changes";
 
 export type ChangelistVerdict = "good" | "bad" | "mixed" | null;
 
@@ -53,6 +61,8 @@ export interface ChangelistMeta {
   artifactTypes: string[];
   hasCodeChanges: boolean;
   hasContentChanges: boolean;
+  /** Linked repo pins this changelist moves (teamsync.yaml `linkedRepos`). */
+  pinChanges: LinkPinChange[];
 }
 
 function emptyReviewSummary(): ChangelistReviewSummary {
@@ -187,6 +197,12 @@ export const teamSyncRouter = createTRPCRouter({
         input.repoId,
         numbers,
       );
+      const pinChanges = await changelistPinChanges(
+        ctx,
+        repo,
+        input.repoId,
+        numbers,
+      );
 
       const result: Record<string, ChangelistMeta> = {};
       for (const number of numbers) {
@@ -198,6 +214,7 @@ export const teamSyncRouter = createTRPCRouter({
           hasCodeChanges: classification.get(number)?.hasCodeChanges ?? false,
           hasContentChanges:
             classification.get(number)?.hasContentChanges ?? false,
+          pinChanges: pinChanges.get(number) ?? [],
         };
       }
 
@@ -297,11 +314,71 @@ export const teamSyncRouter = createTRPCRouter({
 
       return result;
     }),
+
+  // The linked repo pins that differ between the configs at two changelists,
+  // so bisect can warn that its range moves them. Null when either config is
+  // invalid. A pin moved and moved back in between does not show.
+  comparePins: protectedProcedure
+    .input(
+      z.object({
+        repoId: z.string(),
+        fromChangelist: z.number().int().min(0),
+        toChangelist: z.number().int().min(0),
+      }),
+    )
+    .query(async ({ ctx, input }): Promise<LinkPinChange[] | null> => {
+      const { repo } = await getUserAndRepoWithAccess(
+        ctx,
+        input.repoId,
+        RepoAccess.READ,
+      );
+      return comparePinsBetween(
+        input.fromChangelist,
+        input.toChangelist,
+        (n) => getTeamSyncConfig(ctx.db, ctx.session.user.id, repo, n),
+      );
+    }),
 });
 
 type TeamSyncContext = Parameters<
   Parameters<typeof protectedProcedure.query>[0]
 >[0]["ctx"];
+
+/**
+ * Pin changes for the changelists in a page that touched teamsync.yaml.
+ * Config edits are rare, so this is usually one cheap query; each edit then
+ * reads the config at it and at its parent. Failures leave the badge off.
+ */
+async function changelistPinChanges(
+  ctx: TeamSyncContext,
+  repo: { id: string; orgId: string; r2BucketName: string | null },
+  repoId: string,
+  numbers: number[],
+): Promise<Map<number, LinkPinChange[]>> {
+  try {
+    const touched = await ctx.db.fileChange.findMany({
+      where: {
+        repoId,
+        changelistNumber: { in: numbers },
+        file: { path: TEAM_SYNC_CONFIG_PATH },
+      },
+      select: {
+        changelistNumber: true,
+        changelist: { select: { parentNumber: true } },
+      },
+    });
+    if (touched.length === 0) return new Map();
+    return await pinChangesForChangelists(
+      touched.map((t) => ({
+        number: t.changelistNumber,
+        parentNumber: t.changelist?.parentNumber ?? null,
+      })),
+      (n) => getTeamSyncConfig(ctx.db, ctx.session.user.id, repo, n),
+    );
+  } catch {
+    return new Map();
+  }
+}
 
 async function classifyChangelists(
   ctx: TeamSyncContext,

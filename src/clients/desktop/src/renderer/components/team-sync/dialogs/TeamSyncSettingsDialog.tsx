@@ -5,6 +5,7 @@ import { currentWorkspaceAtom } from "../../../../common/state/workspace";
 import {
   teamSyncConfigAtom,
   teamSyncFilterPreviewAtom,
+  teamSyncLinksAtom,
   teamSyncSettingsAtom,
   getWsRecord,
   type TeamSyncScheduledSync,
@@ -20,16 +21,27 @@ import {
   selectClass,
   textareaClass,
 } from "./shared";
+import LinkedReposSection from "./LinkedReposSection";
+
+export type TeamSyncSettingsTab =
+  | "filters"
+  | "links"
+  | "build"
+  | "after"
+  | "scheduled";
 
 export interface TeamSyncSettingsDialogProps {
   visible: boolean;
   onHide: () => void;
+  /** The tab to open on; defaults to Sync Filters. */
+  initialTab?: TeamSyncSettingsTab;
 }
 
-type TabId = "filters" | "build" | "after" | "scheduled";
+type TabId = TeamSyncSettingsTab;
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "filters", label: "Sync Filters" },
+  { id: "links", label: "Linked Repos" },
   { id: "build", label: "Build Steps" },
   { id: "after", label: "After Sync" },
   { id: "scheduled", label: "Scheduled Sync" },
@@ -84,16 +96,23 @@ function SectionTitle({ children }: { children: string }): React.ReactElement {
 export default function TeamSyncSettingsDialog({
   visible,
   onHide,
+  initialTab = "filters",
 }: TeamSyncSettingsDialogProps): React.ReactElement {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const configRecord = useAtomValue(teamSyncConfigAtom);
   const settingsRecord = useAtomValue(teamSyncSettingsAtom);
   const filterPreviewRecord = useAtomValue(teamSyncFilterPreviewAtom);
+  const linksRecord = useAtomValue(teamSyncLinksAtom);
 
   const workspaceId = currentWorkspace?.id ?? null;
   const config = getWsRecord(configRecord, workspaceId) ?? null;
   const savedSettings = getWsRecord(settingsRecord, workspaceId) ?? null;
   const filterPreview = getWsRecord(filterPreviewRecord, workspaceId);
+  // The tab shows while the head config or the synced changelist has links.
+  const hasLinks =
+    (config?.linkedRepos?.length ?? 0) > 0 ||
+    (getWsRecord(linksRecord, workspaceId)?.links.length ?? 0) > 0;
+  const tabs = TABS.filter((t) => t.id !== "links" || hasLinks);
 
   const [tab, setTab] = useState<TabId>("filters");
   const [pending, setPending] = useState<TeamSyncSettings>({});
@@ -107,8 +126,12 @@ export default function TeamSyncSettingsDialog({
     setPending(base);
     setIncludeText((base.customIncludeRules ?? []).join("\n"));
     setExcludeText((base.customExcludeRules ?? []).join("\n"));
-    setTab("filters");
   }, [visible, savedSettings]);
+
+  // Pick the tab on open only, so a settings refresh doesn't move the user.
+  useEffect(() => {
+    if (visible) setTab(initialTab);
+  }, [visible, initialTab]);
 
   const editorConfigs: string[] =
     config?.unreal?.editorConfigurations ?? DEFAULT_EDITOR_CONFIGS;
@@ -120,15 +143,18 @@ export default function TeamSyncSettingsDialog({
 
   // Assemble the full settings object the daemon should persist (shallow merge
   // over what is already saved).
-  const buildSettings = useCallback(
-    (): TeamSyncSettings => ({
-      ...pending,
+  const buildSettings = useCallback((): TeamSyncSettings => {
+    // Link choices save on their own as they change; leaving them out keeps
+    // the copy loaded when the dialog opened from undoing those changes.
+    const rest: TeamSyncSettings = { ...pending };
+    delete rest.linkedWorkspaces;
+    return {
+      ...rest,
       customIncludeRules: parseLines(includeText),
       customExcludeRules: parseLines(excludeText),
       preset: pending.preset ?? null,
-    }),
-    [pending, includeText, excludeText],
-  );
+    };
+  }, [pending, includeText, excludeText]);
 
   const setCategory = (id: string, enabled: boolean): void => {
     setPending((prev) => ({
@@ -204,7 +230,7 @@ export default function TeamSyncSettingsDialog({
       <div className="flex min-h-[24rem]">
         {/* Left tab rail */}
         <nav className="flex w-44 shrink-0 flex-col gap-0.5 border-r border-[var(--color-border-default)] bg-[var(--color-bg-primary)] p-2">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               type="button"
@@ -321,6 +347,8 @@ export default function TeamSyncSettingsDialog({
               </div>
             </div>
           )}
+
+          {tab === "links" && hasLinks && <LinkedReposSection />}
 
           {config && tab === "build" && (
             <div className="flex flex-col gap-4">

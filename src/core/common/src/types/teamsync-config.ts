@@ -260,6 +260,23 @@ export interface TeamSyncChangelistMeta {
   artifactTypes: string[];
   hasCodeChanges: boolean;
   hasContentChanges: boolean;
+  /** Linked repo pins this changelist moves; absent from older app servers. */
+  pinChanges?: TeamSyncPinChange[];
+}
+
+/** Where a link points (mirrors the app's `LinkPin`). */
+export interface TeamSyncLinkPin {
+  branch: string;
+  changelist: number;
+}
+
+/** A linked repo pin that differs between two configs (mirrors `LinkPinChange`). */
+export interface TeamSyncPinChange {
+  repo: string;
+  /** Null when the link was added. */
+  from: TeamSyncLinkPin | null;
+  /** Null when the link was removed. */
+  to: TeamSyncLinkPin | null;
 }
 
 /** Result of the app server's `teamSync.getChangelistMeta` (keyed by CL number). */
