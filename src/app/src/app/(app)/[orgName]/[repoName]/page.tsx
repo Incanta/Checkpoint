@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect } from "react";
+import { Suspense, useCallback, type MouseEvent } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "~/trpc/react";
@@ -35,20 +35,36 @@ function FileIcon() {
   );
 }
 
+// Folder entries are real links so ctrl/middle-click and "copy link" work.
+// A plain left click is handled in-page instead of following the href.
+function handleFolderClick(
+  e: MouseEvent<HTMLAnchorElement>,
+  path: string,
+  onNavigate: (path: string) => void,
+) {
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+    return;
+  }
+  e.preventDefault();
+  onNavigate(path);
+}
+
 function Breadcrumb({
   folderPath,
+  hrefFor,
   onNavigate,
 }: {
   folderPath: string;
+  hrefFor: (path: string) => string;
   onNavigate: (path: string) => void;
 }) {
   const parts = folderPath === "" ? [] : folderPath.split("/");
 
   return (
     <div className="flex items-center gap-1 text-sm">
-      <button
-        type="button"
-        onClick={() => onNavigate("")}
+      <a
+        href={hrefFor("")}
+        onClick={(e) => handleFolderClick(e, "", onNavigate)}
         className={`rounded px-1.5 py-0.5 transition-colors hover:bg-[var(--color-bg-surface)] ${
           parts.length === 0
             ? "font-medium text-[var(--color-text-primary)]"
@@ -56,16 +72,16 @@ function Breadcrumb({
         }`}
       >
         /
-      </button>
+      </a>
       {parts.map((part, i) => {
         const path = parts.slice(0, i + 1).join("/");
         const isLast = i === parts.length - 1;
         return (
           <span key={path} className="flex items-center gap-1">
             <span className="text-[var(--color-text-muted)]">/</span>
-            <button
-              type="button"
-              onClick={() => onNavigate(path)}
+            <a
+              href={hrefFor(path)}
+              onClick={(e) => handleFolderClick(e, path, onNavigate)}
               className={`rounded px-1.5 py-0.5 transition-colors hover:bg-[var(--color-bg-surface)] ${
                 isLast
                   ? "font-medium text-[var(--color-text-primary)]"
@@ -73,7 +89,7 @@ function Breadcrumb({
               }`}
             >
               {part}
-            </button>
+            </a>
           </span>
         );
       })}
@@ -96,14 +112,34 @@ function RepoFilesPageContent() {
   const repoName = decodeURIComponent(params.repoName);
   const basePath = `/${orgName}/${repoName}`;
 
-  const [folderPath, setFolderPath] = useState(
-    searchParams.get("folder") ?? "",
+  // The URL is the source of truth for the open folder, so a copied link
+  // reopens the same folder and back/forward steps through folders.
+  const folderPath = searchParams.get("folder") ?? "";
+
+  const folderHref = useCallback(
+    (path: string) => {
+      const next = new URLSearchParams(searchParams.toString());
+      if (path === "") {
+        next.delete("folder");
+      } else {
+        next.set("folder", path);
+      }
+      const query = next.toString();
+      return query ? `${basePath}?${query}` : basePath;
+    },
+    [searchParams, basePath],
   );
 
-  // Sync with URL search params when they change (e.g. back navigation)
-  useEffect(() => {
-    setFolderPath(searchParams.get("folder") ?? "");
-  }, [searchParams]);
+  // Native pushState is synced with the Next router (it updates
+  // useSearchParams), so this changes folders without a page load or
+  // server round trip, and adds a history entry for back/forward.
+  const navigateToFolder = useCallback(
+    (path: string) => {
+      if (path === folderPath) return;
+      window.history.pushState(null, "", folderHref(path));
+    },
+    [folderPath, folderHref],
+  );
 
   const { data: org } = api.org.getOrg.useQuery({
     id: orgName,
@@ -165,7 +201,11 @@ function RepoFilesPageContent() {
 
       {defaultBranch && (
         <div className="mb-3">
-          <Breadcrumb folderPath={folderPath} onNavigate={setFolderPath} />
+          <Breadcrumb
+            folderPath={folderPath}
+            hrefFor={folderHref}
+            onNavigate={navigateToFolder}
+          />
         </div>
       )}
 
@@ -176,23 +216,22 @@ function RepoFilesPageContent() {
       ) : hasContent ? (
         <Card padding={false}>
           <div className="divide-y divide-[var(--color-border-muted)]">
-            {folder.folders.map((name) => (
-              <button
-                key={name}
-                type="button"
-                onClick={() =>
-                  setFolderPath(
-                    folderPath === "" ? name : `${folderPath}/${name}`,
-                  )
-                }
-                className="flex w-full items-center gap-2 px-4 py-1.5 text-left transition-colors hover:bg-[var(--color-bg-surface)]"
-              >
-                <FolderIcon />
-                <span className="min-w-0 truncate text-sm text-[var(--color-text-primary)]">
-                  {name}
-                </span>
-              </button>
-            ))}
+            {folder.folders.map((name) => {
+              const path = folderPath === "" ? name : `${folderPath}/${name}`;
+              return (
+                <a
+                  key={name}
+                  href={folderHref(path)}
+                  onClick={(e) => handleFolderClick(e, path, navigateToFolder)}
+                  className="flex w-full items-center gap-2 px-4 py-1.5 text-left transition-colors hover:bg-[var(--color-bg-surface)]"
+                >
+                  <FolderIcon />
+                  <span className="min-w-0 truncate text-sm text-[var(--color-text-primary)]">
+                    {name}
+                  </span>
+                </a>
+              );
+            })}
             {folder.files.map((file) => (
               <Link
                 key={file.path}
