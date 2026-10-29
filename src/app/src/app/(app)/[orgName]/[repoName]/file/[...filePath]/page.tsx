@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 import { api } from "~/trpc/react";
 import { Card, EmptyState } from "~/app/_components/ui";
-import { codeToHtml } from "shiki/bundle/full";
+import { highlightToHtml } from "~/lib/syntax/highlight";
 import { useDocumentTitle } from "~/app/_hooks/useDocumentTitle";
 
 function getLanguageFromPath(filePath: string): string {
@@ -58,6 +58,7 @@ function getLanguageFromPath(filePath: string): string {
     csv: "csv",
     uplugin: "jsonc",
     uproject: "jsonc",
+    as: "angelscript",
   };
   return map[ext] ?? "text";
 }
@@ -216,7 +217,7 @@ function CodeBlock({
     let cancelled = false;
     const lang = getLanguageFromPath(filePath);
 
-    codeToHtml(content, { lang, theme: "github-dark-default" })
+    highlightToHtml(content, lang)
       .then((result) => {
         if (!cancelled) {
           let processed = result;

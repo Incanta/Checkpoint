@@ -4,6 +4,11 @@ import { Splitter, SplitterPanel } from "primereact/splitter";
 // @ts-ignore
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
 import {
+  getLanguageFromPath,
+  MONACO_THEME,
+  prepareMonacoHighlighting,
+} from "../syntax/monaco-highlighting";
+import {
   fileHistoryAtom,
   FileHistoryEntry,
   FileHistoryState,
@@ -30,7 +35,9 @@ function ChangelistItem({ entry, isSelected, onSelect }: ChangelistItemProps) {
         padding: "0.5rem",
         cursor: "pointer",
         borderBottom: "1px solid var(--color-border-muted)",
-        backgroundColor: isSelected ? "var(--color-accent-muted)" : "transparent",
+        backgroundColor: isSelected
+          ? "var(--color-accent-muted)"
+          : "transparent",
       }}
       onMouseEnter={(e) => {
         if (!isSelected)
@@ -61,8 +68,7 @@ function ChangelistItem({ entry, isSelected, onSelect }: ChangelistItemProps) {
               paddingBottom: "0.125rem",
               borderRadius: "0.25rem",
               backgroundColor:
-                changeTypeColors[entry.changeType] ||
-                "var(--color-text-muted)",
+                changeTypeColors[entry.changeType] || "var(--color-text-muted)",
             }}
           >
             {entry.changeType}
@@ -179,8 +185,10 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
           currentEditor.dispose();
           monacoEl.current!.innerHTML = "";
         }
+        const language = getLanguageFromPath(fileHistory.filePath || "");
+        void prepareMonacoHighlighting();
         const newEditor = monaco.editor.createDiffEditor(monacoEl.current!, {
-          theme: "vs-dark",
+          theme: MONACO_THEME,
           automaticLayout: true,
           readOnly: true,
           renderSideBySide: true,
@@ -189,11 +197,11 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
         newEditor.setModel({
           original: monaco.editor.createModel(
             fileHistory.diffContent!.left,
-            "text/plain",
+            language,
           ),
           modified: monaco.editor.createModel(
             fileHistory.diffContent!.right,
-            "text/plain",
+            language,
           ),
         });
 

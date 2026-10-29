@@ -4,6 +4,11 @@ import { Splitter, SplitterPanel } from "primereact/splitter";
 // @ts-ignore
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
 import {
+  getLanguageFromPath,
+  MONACO_THEME,
+  prepareMonacoHighlighting,
+} from "../syntax/monaco-highlighting";
+import {
   changelistChangesAtom,
   ChangelistChangesState,
   ChangelistFileChange,
@@ -165,35 +170,13 @@ export default function ChangelistChanges({
           monacoEl.current!.innerHTML = "";
         }
 
-        const filePath = changelistChanges.selectedFilePath || "";
-        const extension = filePath.split(".").pop() || "";
-        const languageMap: Record<string, string> = {
-          ts: "typescript",
-          tsx: "typescript",
-          js: "javascript",
-          jsx: "javascript",
-          json: "json",
-          css: "css",
-          html: "html",
-          md: "markdown",
-          py: "python",
-          rs: "rust",
-          go: "go",
-          cpp: "cpp",
-          c: "c",
-          h: "cpp",
-          hpp: "cpp",
-          yaml: "yaml",
-          yml: "yaml",
-          xml: "xml",
-          sql: "sql",
-          sh: "shell",
-          bat: "bat",
-        };
-        const language = languageMap[extension] || "text/plain";
+        const language = getLanguageFromPath(
+          changelistChanges.selectedFilePath || "",
+        );
+        void prepareMonacoHighlighting();
 
         const newEditor = monaco.editor.createDiffEditor(monacoEl.current!, {
-          theme: "vs-dark",
+          theme: MONACO_THEME,
           automaticLayout: true,
           readOnly: true,
           renderSideBySide: true,

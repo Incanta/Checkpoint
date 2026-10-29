@@ -1676,6 +1676,7 @@ __metadata:
     "@checkpointvcs/daemon": "workspace:*"
     "@checkpointvcs/longtail-addon": "npm:3.1.0"
     "@types/node": "npm:^25.3.3"
+    shiki: "npm:^3.0.0"
     stripe: "npm:22.1.0-beta.2"
     typescript: "npm:^7.0.2"
     uuid: "npm:^14.0.3"
@@ -3714,6 +3715,17 @@ __metadata:
   dependencies:
     "@shikijs/types": "npm:3.23.0"
   checksum: 10c0/513b90cfee0fa167d2063b7fbc2318b303a604f2e1fa156aa8b4659b49792401531a74acf68de622ecfff15738e1947a46cfe92a32fcd6a4ee5e70bcf1d06c66
+  languageName: node
+  linkType: hard
+
+"@shikijs/monaco@npm:^3.23.0":
+  version: 3.23.0
+  resolution: "@shikijs/monaco@npm:3.23.0"
+  dependencies:
+    "@shikijs/core": "npm:3.23.0"
+    "@shikijs/types": "npm:3.23.0"
+    "@shikijs/vscode-textmate": "npm:^10.0.2"
+  checksum: 10c0/18ca966c992bc1121266c05bb38df678587e1a93fd826052fd72bb1dc6ec82f4f037a2b5b33dec7b80aafd0746a7ddc4839e8635782c2946ece3db66732b8413
   languageName: node
   linkType: hard
 
@@ -7018,6 +7030,7 @@ __metadata:
     "@fortawesome/free-regular-svg-icons": "npm:^7.1.0"
     "@fortawesome/free-solid-svg-icons": "npm:^7.1.0"
     "@fortawesome/react-fontawesome": "npm:^3.1.0"
+    "@shikijs/monaco": "npm:^3.23.0"
     "@tailwindcss/vite": "npm:^4.1.18"
     "@types/path-browserify": "npm:^1.0.3"
     "@vitejs/plugin-react": "npm:^4.2.1"
@@ -7035,6 +7048,7 @@ __metadata:
     path-browserify: "npm:^1.0.1"
     primereact: "npm:^10.9.7"
     react-router: "npm:^8.3.0"
+    shiki: "npm:^3.0.0"
     tailwindcss: "npm:^4.1.18"
     typescript: "npm:^7.0.2"
     vite: "npm:^7.3.7"

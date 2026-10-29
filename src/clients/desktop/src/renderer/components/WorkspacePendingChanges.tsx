@@ -23,6 +23,11 @@ import DropdownButton from "./DropdownButton";
 import styles from "./Editor.module.css";
 // @ts-ignore
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
+import {
+  getLanguageFromPath,
+  MONACO_THEME,
+  prepareMonacoHighlighting,
+} from "../syntax/monaco-highlighting";
 import { FileStatus } from "@checkpointvcs/daemon/types";
 import type {
   File as PendingFile,
@@ -272,10 +277,16 @@ export default function WorkspacePendingChanges() {
   const [editor, setEditor] =
     useState<monaco.editor.IStandaloneDiffEditor | null>(null);
 
+  // The diff for a new selection arrives after diffPath changes, so read the
+  // path when the diff lands instead of rebuilding the models on each click.
+  const diffPathRef = useRef(diffPath);
+  diffPathRef.current = diffPath;
+
   useEffect(() => {
     if (!monacoHost) return;
+    void prepareMonacoHighlighting();
     const created = monaco.editor.createDiffEditor(monacoHost, {
-      theme: "vs-dark",
+      theme: MONACO_THEME,
       automaticLayout: true,
       readOnly: true,
       originalEditable: false,
@@ -293,9 +304,10 @@ export default function WorkspacePendingChanges() {
   useEffect(() => {
     if (!editor || !workspaceDiff) return;
     const previous = editor.getModel();
+    const language = getLanguageFromPath(diffPathRef.current ?? "");
     editor.setModel({
-      original: monaco.editor.createModel(workspaceDiff.left, "text/plain"),
-      modified: monaco.editor.createModel(workspaceDiff.right, "text/plain"),
+      original: monaco.editor.createModel(workspaceDiff.left, language),
+      modified: monaco.editor.createModel(workspaceDiff.right, language),
     });
     previous?.original.dispose();
     previous?.modified.dispose();
