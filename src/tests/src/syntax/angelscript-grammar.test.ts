@@ -7,17 +7,21 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { createHighlighter, type Highlighter } from "shiki";
+import { createHighlighter, type HighlighterGeneric } from "shiki";
 
 const repoRoot = path.resolve(__dirname, "../../../..");
 const APP_COPY = path.join(repoRoot, "src/app/src/lib/syntax/angelscript.tmLanguage.json");
 const DESKTOP_COPY = path.join(repoRoot, "src/clients/desktop/src/renderer/syntax/angelscript.tmLanguage.json");
 
-let highlighter: Highlighter;
+// Typed with string ids: "angelscript" is a custom grammar, not a bundled one.
+let highlighter: HighlighterGeneric<string, string>;
 
 beforeAll(async () => {
   const grammar = JSON.parse(fs.readFileSync(APP_COPY, "utf-8"));
-  highlighter = await createHighlighter({ themes: ["github-dark-default"], langs: [grammar] });
+  highlighter = (await createHighlighter({
+    themes: ["github-dark-default"],
+    langs: [grammar],
+  })) as unknown as HighlighterGeneric<string, string>;
 });
 
 /** Returns the innermost scope of every non-whitespace token on one line. */
