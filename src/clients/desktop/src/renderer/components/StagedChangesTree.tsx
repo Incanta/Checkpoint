@@ -198,6 +198,28 @@ function canExpand(node: PendingTreeNode): boolean {
   return node.isDirectory && (node.lazy || node.children.length > 0);
 }
 
+/**
+ * Folders that only hold the changes reported beneath them start open, so the
+ * changed files are visible at a glance. A collapsed folder (a whole untracked
+ * subtree the daemon sent as one row, or one listed from inside it) starts
+ * closed, since opening it means asking the daemon for what is inside.
+ */
+function openByDefault(node: PendingTreeNode): boolean {
+  return !node.lazy;
+}
+
+/**
+ * Whether a row is open. `toggled` holds the keys of rows the user flipped
+ * away from their default, so new folders follow the default as they appear.
+ */
+function isOpenIn(
+  toggled: Set<string>,
+  key: string,
+  node: PendingTreeNode,
+): boolean {
+  return canExpand(node) && openByDefault(node) !== toggled.has(key);
+}
+
 /** Every node of a tree, by path. */
 function indexNodes(
   nodes: PendingTreeNode[],
@@ -213,12 +235,12 @@ function indexNodes(
 /** Row paths in the order they show, for shift-click ranges. */
 function visibleOrder(
   nodes: PendingTreeNode[],
-  isOpen: (path: string) => boolean,
+  isOpen: (node: PendingTreeNode) => boolean,
   into: string[] = [],
 ): string[] {
   for (const node of nodes) {
     into.push(node.path);
-    if (canExpand(node) && isOpen(node.path)) {
+    if (isOpen(node)) {
       visibleOrder(node.children, isOpen, into);
     }
   }
@@ -278,7 +300,7 @@ const DRAG_TYPE = "application/checkpoint-path";
 interface RowProps {
   node: PendingTreeNode;
   depth: number;
-  isOpen: (path: string) => boolean;
+  isOpen: (node: PendingTreeNode) => boolean;
   onToggle: (path: string) => void;
   isSelected: (path: string) => boolean;
   onRowClick?: (event: React.MouseEvent, node: PendingTreeNode) => void;
@@ -297,7 +319,7 @@ function Row(props: RowProps) {
     onRowContextMenu,
     onRowDragStart,
   } = props;
-  const open = isOpen(node.path);
+  const open = isOpen(node);
   const claim = node.file?.claims?.[0];
   // Directories are containers, not changes: no status, however the daemon
   // labelled the row.
@@ -464,7 +486,7 @@ export function PendingFileTree({
   onRowContextMenu,
   onRowDragStart,
   expandKeyPrefix = "",
-  expanded,
+  toggled,
   onToggle,
   onNodes,
 }: {
@@ -475,22 +497,23 @@ export function PendingFileTree({
   onRowClick?: RowProps["onRowClick"];
   onRowContextMenu?: RowProps["onRowContextMenu"];
   onRowDragStart?: RowProps["onRowDragStart"];
-  /** Scopes expand state when several trees share one `expanded` set. */
+  /** Scopes expand state when several trees share one `toggled` set. */
   expandKeyPrefix?: string;
-  expanded?: Set<string>;
+  /** Rows flipped away from their default open state (see isOpenIn). */
+  toggled?: Set<string>;
   onToggle?: (key: string) => void;
   /** Receives the tree as shown, for selection bookkeeping. */
   onNodes?: (nodes: PendingTreeNode[]) => void;
 }) {
-  const [ownExpanded, setOwnExpanded] = useState<Set<string>>(new Set());
-  const expandedSet = expanded ?? ownExpanded;
+  const [ownToggled, setOwnToggled] = useState<Set<string>>(new Set());
+  const toggledSet = toggled ?? ownToggled;
   const toggleKey = useCallback(
     (key: string) => {
       if (onToggle) {
         onToggle(key);
         return;
       }
-      setOwnExpanded((prev) => {
+      setOwnToggled((prev) => {
         const next = new Set(prev);
         if (next.has(key)) next.delete(key);
         else next.add(key);
@@ -507,8 +530,9 @@ export function PendingFileTree({
   );
 
   const isOpen = useCallback(
-    (path: string) => expandedSet.has(expandKeyPrefix + path),
-    [expandedSet, expandKeyPrefix],
+    (node: PendingTreeNode) =>
+      isOpenIn(toggledSet, expandKeyPrefix + node.path, node),
+    [toggledSet, expandKeyPrefix],
   );
 
   // An open collapsed folder with no listing yet (just expanded, or its
@@ -516,7 +540,7 @@ export function PendingFileTree({
   useEffect(() => {
     const walk = (list: PendingTreeNode[]) => {
       for (const node of list) {
-        if (!isOpen(node.path)) continue;
+        if (!isOpen(node)) continue;
         if (node.lazy && !listings[node.path]) request(node.path);
         walk(node.children);
       }
@@ -607,7 +631,7 @@ export default function StagedChangesTree({
   onDelete,
   disabled,
 }: StagedChangesTreeProps) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [toggled, setToggled] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState<string | null>(null);
   // Each section's tree as shown, kept for selection ranges and paths.
   const [nodesByBucket, setNodesByBucket] = useState<
@@ -615,7 +639,7 @@ export default function StagedChangesTree({
   >({});
 
   const onToggle = useCallback((key: string) => {
-    setExpanded((prev) => {
+    setToggled((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -693,8 +717,8 @@ export default function StagedChangesTree({
     let anchor = node.path;
 
     if (event.shiftKey && sameSection && selection) {
-      const order = visibleOrder(nodesByBucket[bucket.id] ?? [], (p) =>
-        expanded.has(bucket.id + ":" + p),
+      const order = visibleOrder(nodesByBucket[bucket.id] ?? [], (n) =>
+        isOpenIn(toggled, bucket.id + ":" + n.path, n),
       );
       const from = order.indexOf(selection.anchor);
       const to = order.indexOf(node.path);
@@ -865,7 +889,7 @@ export default function StagedChangesTree({
               files={bucket.files}
               ownRows={ownRows}
               expandKeyPrefix={bucket.id + ":"}
-              expanded={expanded}
+              toggled={toggled}
               onToggle={onToggle}
               onNodes={nodeSetters[bucket.id]}
               isSelected={(p) =>
