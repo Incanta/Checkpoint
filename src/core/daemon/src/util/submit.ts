@@ -56,6 +56,8 @@ export async function submit(
    * which is where work goes when no feature branch is overlaid.
    */
   targetBranchName?: string,
+  /** For an artifact upload: the set it attaches to, and whether it replaces it. */
+  artifact?: { type?: string; replace?: boolean },
 ): Promise<void> {
   const daemonConfig = await DaemonConfig.Get();
   const resolvedLogLevel =
@@ -186,7 +188,17 @@ export async function submit(
   // changelists chunk and hash alike; servers before that leave them to
   // this daemon's config.
   const format = storageTokenResponse.longtail ?? daemonConfig.longtail;
+  // Read by addons released after 3.1.0; an older addon drops them, and the
+  // server refuses an artifact upload without a type (the upload checks).
+  const artifactOptions: { artifactType?: string; artifactReplace?: boolean } =
+    isArtifactSubmit
+      ? {
+          ...(artifact?.type && { artifactType: artifact.type }),
+          ...(artifact?.replace && { artifactReplace: true }),
+        }
+      : {};
   const submitOptions: SubmitAsyncOptions = {
+    ...artifactOptions,
     branchName,
     message,
     targetChunkSize: format.targetChunkSize,

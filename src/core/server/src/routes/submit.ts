@@ -89,6 +89,10 @@ const RequestSchema = object({
   apiToken: string().required(),
   branchName: string().required(),
   artifactForChangelistNum: number().optional(),
+  /** The artifact set an artifact upload attaches to; required for one. */
+  artifactType: string().optional(),
+  /** The upload replaces that set's files at the changelist. */
+  artifactReplace: boolean().optional(),
   message: string().required(),
   versionIndex: string().defined(),
   modifications: array(
@@ -169,6 +173,19 @@ export function routeSubmit(): Router {
             : "Invalid payload";
         Logger.error(`[Submit] Invalid request shape: ${reason}`);
         res.status(400).send(reason);
+        return;
+      }
+
+      const artifactUpload =
+        payload.artifactForChangelistNum != null &&
+        payload.artifactForChangelistNum >= 0;
+      if (artifactUpload && !payload.artifactType) {
+        // A client from before artifact types; there is no default set.
+        res
+          .status(400)
+          .send(
+            "An artifact upload must name its artifact type. Update Checkpoint.",
+          );
         return;
       }
 
@@ -339,10 +356,7 @@ export function routeSubmit(): Router {
       try {
         let responseMessage: RequestResponse;
 
-        if (
-          payload.artifactForChangelistNum != null &&
-          payload.artifactForChangelistNum >= 0
-        ) {
+        if (artifactUpload) {
           Logger.debug(
             `[Submit] Routing to artifact attachment for changelist ${payload.artifactForChangelistNum}`,
           );
@@ -351,9 +365,11 @@ export function routeSubmit(): Router {
           const artifactResponse =
             await client.artifact.attachToChangelist.mutate({
               repoId: claims.repoId,
-              changelistNumber: payload.artifactForChangelistNum,
+              changelistNumber: payload.artifactForChangelistNum!,
               versionIndex: payload.versionIndex,
               modifications: payload.modifications,
+              type: payload.artifactType!,
+              ...(payload.artifactReplace && { replace: true }),
             });
 
           responseMessage = {

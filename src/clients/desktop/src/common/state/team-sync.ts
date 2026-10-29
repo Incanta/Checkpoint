@@ -95,7 +95,7 @@ export interface TeamSyncSettings {
   customIncludeRules?: string[];
   customExcludeRules?: string[];
   preset?: string | null;
-  usePrecompiledBinaries?: boolean;
+  /** Artifact types applied on sync; none by default. */
   artifactTypes?: string[];
   editorConfiguration?: string;
   selectedProject?: string;

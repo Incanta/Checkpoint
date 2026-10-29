@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-// Include the wrapper's main header — gives us struct definitions
+// Include the wrapper's main header, which gives us struct definitions
 // (WrapperAsyncHandle, ReadFileAsyncHandle, Checkpoint::Modification)
 // plus DLL_EXPORT macro and utility function declarations.
 #include "main.h"
@@ -24,6 +24,8 @@ WrapperAsyncHandle* SubmitAsync(
     const char* BranchName,
     const char* ShelfName,
     int32_t ArtifactForChangelistNum,
+    const char* ArtifactType,
+    bool ArtifactReplace,
     const char* Message,
     uint32_t TargetChunkSize,
     uint32_t TargetBlockSize,
@@ -156,7 +158,7 @@ struct HandleContext {
   bool isReadFileHandle = false;
   bool freed = false;
 
-  // String storage — keeps c_str() pointers valid for the lifetime of the
+  // String storage: keeps c_str() pointers valid for the lifetime of the
   // detached thread inside the wrapper's *Async functions.
   // Uses deque instead of vector because deque::push_back does NOT
   // invalidate references to existing elements (vector would reallocate
@@ -241,6 +243,12 @@ static Napi::Value NapiSubmitAsync(const Napi::CallbackInfo& info) {
       artifactForChangelistNum = val.As<Napi::Number>().Int32Value();
     }
   }
+  const char* artifactType = OptStr(ctx, opts, "artifactType", nullptr);
+  bool artifactReplace = false;
+  {
+    Napi::Value val = opts.Get("artifactReplace");
+    artifactReplace = val.IsBoolean() && val.As<Napi::Boolean>().Value();
+  }
   const char* message = StoreString(ctx, opts.Get("message").As<Napi::String>().Utf8Value());
   uint32_t targetChunkSize = opts.Get("targetChunkSize").As<Napi::Number>().Uint32Value();
   uint32_t targetBlockSize = opts.Get("targetBlockSize").As<Napi::Number>().Uint32Value();
@@ -310,7 +318,8 @@ static Napi::Value NapiSubmitAsync(const Napi::CallbackInfo& info) {
   }
 
   WrapperAsyncHandle* handle = ::SubmitAsync(
-      branchName, shelfName, artifactForChangelistNum, message,
+      branchName, shelfName, artifactForChangelistNum, artifactType,
+      artifactReplace, message,
       targetChunkSize, targetBlockSize, maxChunksPerBlock, minBlockUsagePercent,
       hashingAlgo, compressionAlgo,
       enableMmapIndexing, enableMmapBlockStore,
@@ -960,7 +969,7 @@ static Napi::Value NapiGetReadFileSize(const Napi::CallbackInfo& info) {
 }
 
 // --------------------------------------------------------------------------
-// freeReadFileHandle(handle): void — alias for freeHandle
+// freeReadFileHandle(handle): void, an alias for freeHandle
 // --------------------------------------------------------------------------
 static Napi::Value NapiFreeReadFileHandle(const Napi::CallbackInfo& info) {
   return NapiFreeHandle(info);

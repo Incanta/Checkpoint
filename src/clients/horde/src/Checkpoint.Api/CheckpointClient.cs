@@ -230,7 +230,7 @@ public class CheckpointClient
 	}
 
 	/// <summary>
-	/// Changelist numbers (of the given set) that have artifacts attached.
+	/// Changelist numbers (of the given set) that have artifacts of any type attached exactly there.
 	/// </summary>
 	public async Task<List<int>> GetArtifactChangelistsAsync(string repoId, IEnumerable<int> changelistNumbers, CancellationToken cancellationToken = default)
 	{
@@ -245,8 +245,8 @@ public class CheckpointClient
 
 	/// <summary>
 	/// Merges an artifact set (additive overwrite) into a changelist for the given channel
-	/// <paramref name="type"/> (defaults to "editor"). Each modification either adds/overwrites
-	/// a path or deletes it.
+	/// <paramref name="type"/>, which is required (there is no default type). Each modification
+	/// either adds/overwrites a path or deletes it.
 	/// </summary>
 	public async Task AttachArtifactSetAsync(string repoId, int changelistNumber, string versionIndex, string type, IEnumerable<ArtifactModification> modifications, CancellationToken cancellationToken = default)
 	{

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "primereact/dialog";
 import { useAtomValue } from "jotai";
 import { currentWorkspaceAtom } from "../../../../common/state/workspace";
@@ -22,6 +22,7 @@ import {
   textareaClass,
 } from "./shared";
 import LinkedReposSection from "./LinkedReposSection";
+import SyncArtifactsDialog from "./SyncArtifactsDialog";
 
 export type TeamSyncSettingsTab =
   | "filters"
@@ -118,10 +119,24 @@ export default function TeamSyncSettingsDialog({
   const [pending, setPending] = useState<TeamSyncSettings>({});
   const [includeText, setIncludeText] = useState("");
   const [excludeText, setExcludeText] = useState("");
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
+  // Read from the saved settings, since the artifacts dialog saves itself.
+  const syncedArtifactTypes = useMemo(
+    () => savedSettings?.artifactTypes ?? [],
+    [savedSettings],
+  );
 
-  // Load the current settings into local editable state each time we open.
+  // Load the current settings into local editable state each time we open,
+  // and once more if they arrive after that. Not on later saves (the
+  // artifacts dialog saves on its own), which would drop unsaved edits here.
+  const loaded = useRef(false);
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      loaded.current = false;
+      return;
+    }
+    if (loaded.current) return;
+    loaded.current = savedSettings != null;
     const base: TeamSyncSettings = savedSettings ? { ...savedSettings } : {};
     setPending(base);
     setIncludeText((base.customIncludeRules ?? []).join("\n"));
@@ -144,10 +159,12 @@ export default function TeamSyncSettingsDialog({
   // Assemble the full settings object the daemon should persist (shallow merge
   // over what is already saved).
   const buildSettings = useCallback((): TeamSyncSettings => {
-    // Link choices save on their own as they change; leaving them out keeps
-    // the copy loaded when the dialog opened from undoing those changes.
+    // Link and artifact choices save on their own as they change; leaving
+    // them out keeps the copy loaded when the dialog opened from undoing
+    // those changes.
     const rest: TeamSyncSettings = { ...pending };
     delete rest.linkedWorkspaces;
+    delete rest.artifactTypes;
     return {
       ...rest,
       customIncludeRules: parseLines(includeText),
@@ -466,20 +483,20 @@ export default function TeamSyncSettingsDialog({
                     </FieldRow>
                   )}
                   <FieldRow
-                    label="Use precompiled binaries"
-                    hint="Download editor binaries instead of building locally"
+                    label="Artifacts"
+                    hint={
+                      syncedArtifactTypes.length > 0
+                        ? `Applied on sync: ${syncedArtifactTypes.join(", ")}`
+                        : "Download build outputs instead of building them"
+                    }
                   >
-                    <Switch
-                      checked={pending.usePrecompiledBinaries ?? false}
-                      onChange={() =>
-                        setPending((prev) => ({
-                          ...prev,
-                          usePrecompiledBinaries: !(
-                            prev.usePrecompiledBinaries ?? false
-                          ),
-                        }))
-                      }
-                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setArtifactsOpen(true)}
+                    >
+                      Sync artifacts...
+                    </Button>
                   </FieldRow>
                   {unrealEnabled && (
                     <FieldRow
@@ -558,6 +575,12 @@ export default function TeamSyncSettingsDialog({
           )}
         </div>
       </div>
+      <SyncArtifactsDialog
+        visible={artifactsOpen}
+        onHide={() => setArtifactsOpen(false)}
+        channels={config?.artifacts ?? []}
+        selected={syncedArtifactTypes}
+      />
     </Dialog>
   );
 }

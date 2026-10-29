@@ -35,21 +35,6 @@ function FileIcon() {
   );
 }
 
-function ArtifactBadge() {
-  return (
-    <span
-      className="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] leading-none font-medium"
-      style={{
-        backgroundColor: "var(--color-warning-bg, #332b00)",
-        color: "var(--color-warning, #f0c000)",
-      }}
-      title="Artifact file (uploaded by CI)"
-    >
-      Artifact
-    </span>
-  );
-}
-
 function Breadcrumb({
   folderPath,
   onNavigate,
@@ -218,7 +203,6 @@ function RepoFilesPageContent() {
                 <span className="min-w-0 truncate text-sm text-[var(--color-text-primary)]">
                   {file.name}
                 </span>
-                {file.isArtifact && <ArtifactBadge />}
                 <span className="ml-auto shrink-0 text-xs text-[var(--color-text-muted)]">
                   CL #{file.lastCl}
                 </span>

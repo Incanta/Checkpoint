@@ -394,10 +394,6 @@ model Changelist {
   // Null for changelists from before it existed; filled in lazily.
   fileCount Int?
 
-  // Artifact overlay (populated by CI after submit)
-  artifactVersionIndex String?
-  artifactStateTree    Json?
-
   repo   Repo   @relation(fields: [repoId], references: [id])
   repoId String
 
@@ -513,17 +509,17 @@ model ArtifactFile {
 
   size BigInt
 
-  // Artifact channel this file belongs to (e.g. "editor", "game-win64").
-  type String @default("editor")
+  // Artifact channel (set type) this file belongs to, e.g. "editor-win64".
+  type String
 
   @@unique([repoId, changelistNumber, type, fileId])
   @@index([repoId, changelistNumber])
 }
 
-// One row per (changelist, type) where CI attached artifacts EXACTLY at that
-// changelist. The legacy Changelist.artifactVersionIndex/artifactStateTree
-// overlay remains the "editor"-typed compatibility view; this model is the
-// authoritative typed source for nearest-at-or-before artifact lookups.
+// One row per (changelist, type) where artifacts were attached exactly at
+// that changelist. Workspaces apply the newest set of each type they chose
+// at or before the changelist they synced. Types have no default; each one is
+// a channel named in the repo's teamsync.yaml.
 model ArtifactSet {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -533,7 +529,7 @@ model ArtifactSet {
   repoId           String
   changelistNumber Int
 
-  type         String @default("editor")
+  type         String
   versionIndex String
   stateTree    Json // fileId -> sourceChangelistNumber
 

@@ -88,7 +88,7 @@ public class CheckpointClientTests
 			{
 				"id":"cl_1","createdAt":"2026-07-19T01:02:03.000Z","updatedAt":"2026-07-19T01:02:04.000Z",
 				"number":42,"message":"Fix things","versionIndex":"vi",
-				"stateRootHash":null,"artifactVersionIndex":null,"artifactStateTree":null,
+				"stateRootHash":null,
 				"repoId":"repo1","userId":"user1","parentNumber":41,
 				"user":{"id":"user1","email":"dev@example.com","name":"Dev","username":null}
 			}

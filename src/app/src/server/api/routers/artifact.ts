@@ -15,20 +15,22 @@ const artifactTypeSchema = z
   .string()
   .min(1)
   .max(100)
-  .regex(/^[a-zA-Z0-9_-]+$/)
-  .default("editor");
+  .regex(/^[a-zA-Z0-9_-]+$/);
 
 export const artifactRouter = createTRPCRouter({
-  // Called by the backend server when CI uploads artifacts for an existing CL.
-  // Merges new artifact files into the CL's artifactStateTree (additive overwrite).
+  // Called by the backend server when artifacts are uploaded for an existing
+  // CL. Merges the files into that CL's set of the type (additive overwrite).
   attachToChangelist: protectedProcedure
     .input(
       z.object({
         repoId: z.string(),
         changelistNumber: z.number(),
         versionIndex: z.string(),
-        // Artifact channel; existing callers omit it and get "editor".
+        // The artifact set (channel) to attach to. There is no default.
         type: artifactTypeSchema,
+        // Replace the set's files at this changelist rather than add to them,
+        // so files a rebuild no longer produces stop being applied.
+        replace: z.boolean().default(false),
         modifications: z.array(
           z.object({
             delete: z.boolean(),
@@ -132,9 +134,7 @@ export const artifactRouter = createTRPCRouter({
         fileIdsForPaths[mod.path] = existingFile?.id;
       }
 
-      // Merge into the typed ArtifactSet for this (CL, type). Base is the
-      // existing set at this exact CL; for "editor" we fall back to the CL's
-      // (possibly inherited) legacy overlay so repeat attaches stay cumulative.
+      // Merge into the set for this (CL, type), or start it over.
       const existingSet = await ctx.db.artifactSet.findUnique({
         where: {
           repoId_changelistNumber_type: {
@@ -145,12 +145,9 @@ export const artifactRouter = createTRPCRouter({
         },
       });
 
-      const baseStateTree =
-        (existingSet?.stateTree as Record<string, number> | null) ??
-        (input.type === "editor"
-          ? ((changelist.artifactStateTree as Record<string, number> | null) ??
-            {})
-          : {});
+      const baseStateTree: Record<string, number> = input.replace
+        ? {}
+        : ((existingSet?.stateTree as Record<string, number> | null) ?? {});
 
       const artifactStateTree: Record<string, number> = { ...baseStateTree };
 
@@ -185,14 +182,13 @@ export const artifactRouter = createTRPCRouter({
         },
       });
 
-      // Keep writing the legacy overlay for the "editor" channel so existing
-      // daemon pull flows and CL-inheritance keep working unchanged.
-      if (input.type === "editor") {
-        await ctx.db.changelist.update({
-          where: { id: changelist.id },
-          data: {
-            artifactVersionIndex: input.versionIndex,
-            artifactStateTree,
+      // A replacing upload drops every file record of the set first.
+      if (input.replace) {
+        await ctx.db.artifactFile.deleteMany({
+          where: {
+            repoId: input.repoId,
+            changelistNumber: input.changelistNumber,
+            type: input.type,
           },
         });
       }
@@ -285,7 +281,8 @@ export const artifactRouter = createTRPCRouter({
         .sort((a, b) => compareTreePaths(a.path, b.path));
     }),
 
-  // Batch query: which of the given CL numbers have artifacts?
+  // Batch query: which of the given CL numbers have artifacts of any type
+  // attached exactly there?
   getForChangelists: protectedProcedure
     .input(
       z.object({
@@ -297,22 +294,20 @@ export const artifactRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       await getUserAndRepoWithAccess(ctx, input.repoId, RepoAccess.READ);
 
-      const changelists = await ctx.db.changelist.findMany({
+      const sets = await ctx.db.artifactSet.findMany({
         where: {
           repoId: input.repoId,
-          number: { in: input.changelistNumbers },
-          artifactVersionIndex: { not: null },
+          changelistNumber: { in: input.changelistNumbers },
         },
-        select: { number: true },
+        select: { changelistNumber: true },
+        distinct: ["changelistNumber"],
       });
 
-      return changelists.map((cl) => cl.number);
+      return sets.map((set) => set.changelistNumber).sort((a, b) => a - b);
     }),
 
-  // Batch query: which artifact set types are EXACTLY attached at each of the
-  // given CLs? Unlike getForChangelists this does not report inherited
-  // overlays, so it is the right source for browser "binaries built here"
-  // indicators.
+  // Batch query: which artifact set types are attached exactly at each of
+  // the given CLs?
   getSetsForChangelists: protectedProcedure
     .input(
       z.object({

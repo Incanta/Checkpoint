@@ -121,7 +121,7 @@ describe("state tree reads and writes through the routers", () => {
       const prefix = folder === "" ? "" : folder.endsWith("/") ? folder : `${folder}/`;
       const expectedFiles = [...state]
         .filter(([p]) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/"))
-        .map(([p, lastCl]) => ({ name: p.slice(prefix.length), path: p, lastCl, isArtifact: false }))
+        .map(([p, lastCl]) => ({ name: p.slice(prefix.length), path: p, lastCl }))
         .sort((a, b) => a.name.localeCompare(b.name));
       const expectedFolders = [
         ...new Set(

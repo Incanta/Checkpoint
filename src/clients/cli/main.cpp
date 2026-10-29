@@ -27,7 +27,7 @@
  *   accounts                      List authenticated accounts
  *   login [--endpoint URL]        Authenticate with a Checkpoint server
  *   logout                        Remove authentication for a Checkpoint server
- *   artifact upload <cl> <files>  Upload artifacts for a changelist
+ *   artifact upload <cl> -t <type> [files]  Upload artifacts for a changelist
  *   mcp [status|enable|disable]   Manage the daemon's MCP server
  *   bug-report                    Collect a redacted log bundle for a bug report
  *   redact <file> [-o out]        Write a redacted copy of a log file
@@ -301,8 +301,19 @@ int main(int argc, char** argv) {
       .default_value(std::string(""))
       .nargs(argparse::nargs_pattern::optional);
   artifactCmd.add_argument("files")
-      .help("Files to upload as artifacts")
-      .remaining();
+      .help("Files or folders to upload; leave out to collect the files "
+            "teamsync.yaml's include and exclude patterns for --type select")
+      .nargs(argparse::nargs_pattern::any)
+      .default_value(std::vector<std::string>{});
+  artifactCmd.add_argument("--type", "-t")
+      .help("Artifact type (the set workspaces apply), as in teamsync.yaml. "
+            "Required.")
+      .default_value(std::string(""));
+  artifactCmd.add_argument("--replace")
+      .help("Replace the type's set at the changelist instead of adding to "
+            "it (the default when no files are named)")
+      .default_value(false)
+      .implicit_value(true);
   artifactCmd.add_argument("--message", "-m")
       .help("Upload message")
       .default_value(std::string(""));
@@ -748,10 +759,18 @@ int main(int argc, char** argv) {
     if (program.is_subcommand_used(artifactCmd)) {
       auto action = artifactCmd.get<std::string>("action");
       if (action == "upload") {
+        const char* usage =
+            "  Usage: chk artifact upload <cl-number> --type <type> [files...] [--replace]";
         auto clStr = artifactCmd.get<std::string>("cl_number");
         if (clStr.empty()) {
           std::cerr << "error: artifact upload requires a changelist number." << std::endl;
-          std::cerr << "  Usage: chk artifact upload <cl-number> <file1> [file2] ..." << std::endl;
+          std::cerr << usage << std::endl;
+          return 1;
+        }
+        auto type = artifactCmd.get<std::string>("--type");
+        if (type.empty()) {
+          std::cerr << "error: artifact upload requires --type, the artifact type from teamsync.yaml." << std::endl;
+          std::cerr << usage << std::endl;
           return 1;
         }
         int clNum;
@@ -765,10 +784,11 @@ int main(int argc, char** argv) {
         try {
           files = artifactCmd.get<std::vector<std::string>>("files");
         } catch (...) {
-          // no remaining files
+          // no files named
         }
         auto msg = artifactCmd.get<std::string>("--message");
-        return checkpoint::cmdArtifactUpload(clNum, files, msg);
+        return checkpoint::cmdArtifactUpload(
+            clNum, files, msg, type, artifactCmd.get<bool>("--replace"));
       } else {
         std::cerr << "error: unknown artifact action '" << action << "'. Use 'upload'." << std::endl;
         return 1;

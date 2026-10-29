@@ -351,6 +351,9 @@ interface SubmitOptions {
   workspaceId: string;
   targetChunkSize: number;
   hashingAlgo: string;
+  artifactForChangelistNum?: number;
+  artifactType?: string;
+  artifactReplace?: boolean;
   modifications: {
     path: string;
     delete: boolean;
@@ -370,6 +373,7 @@ export const lastSubmit: {
 };
 
 export const fakeAddon = {
+  SUPPORTS_ARTIFACT_TYPES: true,
   GetLogLevel: () => 0,
   freeHandle: () => undefined,
   freeReadFileHandle: () => undefined,
@@ -411,6 +415,29 @@ export const fakeAddon = {
           hashingAlgo: options.hashingAlgo,
         };
         try {
+          // An artifact upload attaches to an existing changelist, as the
+          // core server's submit route does, and must name its type.
+          if (
+            options.artifactForChangelistNum != null &&
+            options.artifactForChangelistNum >= 0
+          ) {
+            if (!options.artifactType) {
+              throw new Error(
+                "An artifact upload must name its artifact type. Update Checkpoint.",
+              );
+            }
+            const attached = await identity.caller.artifact.attachToChangelist(
+              {
+                repoId: options.remoteBasePath.split("/")[2]!,
+                changelistNumber: options.artifactForChangelistNum,
+                versionIndex,
+                modifications: options.modifications,
+                type: options.artifactType,
+                ...(options.artifactReplace && { replace: true }),
+              },
+            );
+            return ok({ changelistNumber: attached.changelistNumber });
+          }
           const created = await identity.caller.changelist.createChangelist({
             message: options.message,
             repoId: options.remoteBasePath.split("/")[2]!,
@@ -798,6 +825,31 @@ export async function syncLatest(
     filePaths: null,
     noProgress: true,
     ...opts,
+  });
+  return waitForJob(jobId);
+}
+
+/**
+ * `chk artifact upload`: attaches build outputs in the seat's folder to an
+ * existing changelist as the `type` set. With no `files`, the daemon
+ * collects them by the repo config's rules for the type.
+ */
+export async function uploadArtifacts(
+  seat: Seat,
+  opts: {
+    changelistNumber: number;
+    type: string;
+    files?: string[];
+    replace?: boolean;
+  },
+): Promise<unknown> {
+  const { daemon } = await daemonModules();
+  const { jobId } = await daemon.workspaces.artifacts.upload({
+    ...ids(seat),
+    changelistNumber: opts.changelistNumber,
+    modifications: (opts.files ?? []).map((path) => ({ delete: false, path })),
+    type: opts.type,
+    ...(opts.replace !== undefined && { replace: opts.replace }),
   });
   return waitForJob(jobId);
 }

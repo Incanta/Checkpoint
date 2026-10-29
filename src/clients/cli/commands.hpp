@@ -2378,17 +2378,21 @@ inline int cmdLogout() {
 //  COMMAND: artifact upload
 // ═════════════════════════════════════════════════════════════════
 
-inline int cmdArtifactUpload(int changelistNumber, const std::vector<std::string>& files, const std::string& message) {
+/**
+ * chk artifact upload: attaches build outputs to an existing changelist as
+ * the `type` artifact set. With no files named, the daemon collects the files
+ * teamsync.yaml's include and exclude patterns for the type select, and the
+ * upload replaces the set. Named files and folders are added to the set
+ * unless `replace` is set. .chkignore never applies.
+ */
+inline int cmdArtifactUpload(int changelistNumber,
+                             const std::vector<std::string>& files,
+                             const std::string& message,
+                             const std::string& type,
+                             bool replace = false) {
   auto ctx = getWorkspaceContext();
   auto& client = ctx.client;
   auto& ws = ctx.workspace;
-
-  if (files.empty()) {
-    std::cerr << "No files specified for artifact upload." << std::endl;
-    std::cerr << color::dim() << "  Usage: chk artifact upload <cl-number> <file1> [file2] ..."
-              << color::reset() << std::endl;
-    return 1;
-  }
 
   nlohmann::json modifications = nlohmann::json::array();
   for (const auto& filePath : files) {
@@ -2418,8 +2422,11 @@ inline int cmdArtifactUpload(int changelistNumber, const std::vector<std::string
       {"workspaceId", ws.id},
       {"changelistNumber", changelistNumber},
       {"modifications", modifications},
+      {"type", type},
       {"message", submitMessage},
   };
+  // Left out, the daemon replaces only when it collects the files itself.
+  if (replace) input["replace"] = true;
 
   auto result = client.mutate("workspaces.artifacts.upload", input);
 
@@ -2429,8 +2436,9 @@ inline int cmdArtifactUpload(int changelistNumber, const std::vector<std::string
     return 1;
   }
 
-  std::cout << "Uploading " << files.size() << " artifact(s) for CL #"
-            << changelistNumber << "..." << std::endl;
+  std::cout << "Uploading " << type << " artifacts for CL #" << changelistNumber
+            << (files.empty() ? " (files from teamsync.yaml)" : "") << "..."
+            << std::endl;
 
   auto jobResult = pollJob(client, jobId);
 
@@ -2440,9 +2448,15 @@ inline int cmdArtifactUpload(int changelistNumber, const std::vector<std::string
     return 1;
   }
 
-  std::cout << color::green() << color::bold()
-            << "Successfully uploaded " << files.size() << " artifact(s) for CL #"
-            << changelistNumber << "."
+  int count = jobResult.result.is_object()
+                  ? jobResult.result.value("fileCount", 0)
+                  : 0;
+  bool replaced = jobResult.result.is_object() &&
+                  jobResult.result.value("replaced", false);
+  std::cout << color::green() << color::bold() << "Uploaded " << count
+            << " file(s) as the " << type << " artifacts of CL #"
+            << changelistNumber
+            << (replaced ? ", replacing the earlier set." : ".")
             << color::reset() << std::endl;
 
   return 0;

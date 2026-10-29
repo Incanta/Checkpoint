@@ -111,12 +111,12 @@ export async function runSyncPipeline(
     Object.keys(state.artifactFiles ?? {}).length > 0 ||
     Object.keys(state.teamSync?.appliedArtifacts ?? {}).length > 0;
 
-  if (settings && (settings.usePrecompiledBinaries || hasExistingArtifacts)) {
+  if ((settings?.artifactTypes?.length ?? 0) > 0 || hasExistingArtifacts) {
     const result = await applyArtifacts(
       workspace,
       orgId,
       syncedChangelistNumber,
-      settings,
+      settings ?? {},
       onStep,
       onProgress,
     );

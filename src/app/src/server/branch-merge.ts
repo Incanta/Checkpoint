@@ -26,7 +26,6 @@
 
 import { FileChangeType, type Prisma, type PrismaClient } from "@prisma/client";
 import { TRPCError } from "@trpc/server";
-import type { InputJsonValue } from "@prisma/client/runtime/library";
 
 import {
   MAX_SUBMIT_ATTEMPTS,
@@ -517,18 +516,6 @@ export async function mergeBranch(
       .join("\n");
     const mergeMessage = `${firstLine}\n\n${clMessages}`;
 
-    // Merge artifact state trees: incoming overwrites target. Artifacts are
-    // build outputs keyed to the source they were built from, so the branch's
-    // builds are the ones that match what was just merged.
-    const targetArtifactState: Record<string, number> = {
-      ...((targetHead.artifactStateTree as Record<string, number>) ?? {}),
-    };
-    const incomingArtifactState: Record<string, number> =
-      (incomingHead.artifactStateTree as Record<string, number>) ?? {};
-    for (const [fileId, clNum] of Object.entries(incomingArtifactState)) {
-      targetArtifactState[fileId] = clNum;
-    }
-
     // The branch's own file changes say which File row each path uses and
     // carry rename information. Newest wins.
     const incomingFileChanges = await db.fileChange.findMany({
@@ -625,11 +612,6 @@ export async function mergeBranch(
               mergedFromNumber: incomingBranch.headNumber,
               stateRootHash,
               fileCount,
-              artifactVersionIndex: incomingHead.artifactVersionIndex,
-              artifactStateTree:
-                Object.keys(targetArtifactState).length > 0
-                  ? (targetArtifactState as InputJsonValue)
-                  : undefined,
               repoId,
               userId,
             },
@@ -1014,10 +996,6 @@ export async function updateBranchFromParent(
             mergedFromNumber: parent.headNumber,
             stateRootHash,
             fileCount,
-            artifactVersionIndex: branchHead.artifactVersionIndex,
-            artifactStateTree:
-              (branchHead.artifactStateTree as InputJsonValue | null) ??
-              undefined,
             repoId,
             userId,
           },

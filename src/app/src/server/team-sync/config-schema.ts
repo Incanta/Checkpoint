@@ -69,8 +69,8 @@ const linkedRepoSchema = z.object({
   branch: z.string().min(1).max(200),
   changelist: z.number().int().nonnegative(),
   /**
-   * Repo-relative mount path for a nested link. Accepted so configs written
-   * for nested links validate, but nested links are not synced yet.
+   * Repo-relative mount path for a nested link: syncing creates the linked
+   * repo's workspace in this folder.
    */
   path: z
     .string()
@@ -94,6 +94,14 @@ const linkedRepoSchema = z.object({
   /** Nested links only: create the child for workspaces with no entry. */
   enabledByDefault: z.boolean().default(true),
 });
+
+// An artifact include or exclude pattern, in .chkignore syntax. A backslash
+// there escapes the next character, so a Windows-style separator would
+// silently match nothing.
+const artifactPatternSchema = z
+  .string()
+  .min(1)
+  .refine((p) => !p.includes("\\"), "use / in patterns, not \\");
 
 export const TeamSyncConfigSchema = z.object({
   version: z.literal(1),
@@ -206,6 +214,10 @@ export const TeamSyncConfigSchema = z.object({
         type: idSchema,
         name: z.string().optional(),
         requiredBadges: z.array(z.string().min(1)).default([]),
+        // The files an upload of this type collects, as .chkignore-style
+        // patterns: everything matching `include` and not `exclude`.
+        include: z.array(artifactPatternSchema).default([]),
+        exclude: z.array(artifactPatternSchema).default([]),
       }),
     )
     .default([]),

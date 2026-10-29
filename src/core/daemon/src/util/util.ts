@@ -131,7 +131,10 @@ export interface WorkspaceTeamSyncState {
 }
 
 export type ArtifactStateFile = WorkspaceStateFile & {
-  /** Artifact channel the file came from (absent on legacy state: "editor"). */
+  /**
+   * Artifact channel the file came from. Absent only on state from before
+   * artifact types; the next apply removes such files.
+   */
   artifactType?: string;
 };
 
@@ -289,8 +292,10 @@ export interface WorkspaceTeamSyncSettings {
   customExcludeRules?: string[];
   /** Preset name from repo config, if one is applied. */
   preset?: string | null;
-  usePrecompiledBinaries?: boolean;
-  /** Artifact channels to apply when usePrecompiledBinaries is on. */
+  /**
+   * Artifact channels (repo config `artifacts` types) to apply on sync. None
+   * by default; empty removes whatever was applied.
+   */
   artifactTypes?: string[];
   /** Repo-relative .uproject path when the workspace holds several. */
   selectedProject?: string;

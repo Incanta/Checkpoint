@@ -48,6 +48,8 @@ int32_t SubmitSync(
     const char* BranchName,
     const char* ShelfName,
     int32_t ArtifactForChangelistNum,
+    const char* ArtifactType,
+    bool ArtifactReplace,
     const char* Message,
     uint32_t TargetChunkSize,
     uint32_t TargetBlockSize,

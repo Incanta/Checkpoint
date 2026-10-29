@@ -29,8 +29,6 @@ import { isSafeWorkspacePath, resolveInWorkspace } from "../workspace-path.js";
 
 type StateBackend = DaemonConfigType["stateBackend"];
 
-const DEFAULT_ARTIFACT_TYPES = ["editor"];
-
 export interface AppliedArtifactSummary {
   type: string;
   changelistNumber: number;
@@ -50,14 +48,14 @@ function normalizeArtifactPath(p: string): string {
 }
 
 /**
- * Apply (or remove) precompiled-binary artifact overlays for a workspace,
- * decoupled from the source changelist. For each configured artifact type we
- * ask the server for the newest set at or before the source CL (gated on the
- * repo config's required badges), remove any stale files from the previously
- * applied set, longtail-pull the chosen set, and record what was applied.
+ * Apply (or remove) artifact sets for a workspace, decoupled from the source
+ * changelist. For each artifact type the workspace syncs we ask the server
+ * for the newest set at or before the source CL (gated on the repo config's
+ * required badges), remove any stale files from the previously applied set,
+ * longtail-pull the chosen set, and record what was applied.
  *
- * When precompiled binaries are disabled, every previously applied artifact
- * file is removed from disk.
+ * Files of a type the workspace no longer syncs are removed from disk, and
+ * with no types chosen every applied artifact file is.
  */
 export async function applyArtifacts(
   workspace: Workspace,
@@ -74,15 +72,22 @@ export async function applyArtifacts(
     logLevel ?? (daemonConfig.longtail.logLevel as LongtailLogLevel);
 
   const state = await getWorkspaceState(workspace.localPath, stateBackend);
-  const existingArtifacts = state.artifactFiles ?? {};
+  const previousArtifacts = state.artifactFiles ?? {};
+  const types = [...new Set(settings.artifactTypes ?? [])];
 
-  // Toggle off: remove every applied artifact file and clear tracking.
-  if (!settings.usePrecompiledBinaries) {
-    await removeArtifactPaths(
-      workspace,
-      Object.keys(existingArtifacts),
-      onStep,
-    );
+  // Files of types no longer synced (or recorded without a type) go first.
+  const unselected = Object.entries(previousArtifacts)
+    .filter(([, f]) => !f.artifactType || !types.includes(f.artifactType))
+    .map(([p]) => p);
+  await removeArtifactPaths(workspace, unselected, onStep);
+  const existingArtifacts = Object.fromEntries(
+    Object.entries(previousArtifacts).filter(
+      ([, f]) => f.artifactType && types.includes(f.artifactType),
+    ),
+  );
+
+  // None chosen: nothing left to apply, so clear the tracking.
+  if (types.length === 0) {
     await persistArtifactState(workspace, {}, {}, stateBackend);
     return {
       artifactFiles: {},
@@ -105,11 +110,6 @@ export async function applyArtifacts(
   for (const channel of configResult?.config?.artifacts ?? []) {
     requiredBadgesByType.set(channel.type, channel.requiredBadges);
   }
-
-  const types =
-    settings.artifactTypes && settings.artifactTypes.length > 0
-      ? settings.artifactTypes
-      : DEFAULT_ARTIFACT_TYPES;
 
   // Storage plumbing (shared across the per-type pulls).
   const rawStorageTokenResponse = await client.storage.getToken.query({
@@ -153,7 +153,7 @@ export async function applyArtifacts(
 
   for (const type of types) {
     const oldEntriesForType = Object.entries(existingArtifacts).filter(
-      ([, f]) => (f.artifactType ?? "editor") === type,
+      ([, f]) => f.artifactType === type,
     );
     const prevApplied = state.teamSync?.appliedArtifacts?.[type];
 

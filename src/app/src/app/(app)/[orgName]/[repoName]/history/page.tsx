@@ -142,6 +142,13 @@ export default function RepoHistoryPage() {
     { enabled: !!repoData?.id && !!activeBranch },
   );
 
+  // Artifact types uploaded exactly at each listed changelist.
+  const changelistNumbers = changelists?.map((cl) => cl.number) ?? [];
+  const { data: artifactSets } = api.artifact.getSetsForChangelists.useQuery(
+    { repoId: repoData?.id ?? "", changelistNumbers },
+    { enabled: !!repoData?.id && changelistNumbers.length > 0 },
+  );
+
   const [expandedCl, setExpandedCl] = useState<number | null>(null);
 
   const { data: clFiles } = api.changelist.getChangelistFiles.useQuery(
@@ -199,9 +206,9 @@ export default function RepoHistoryPage() {
                   <div className="shrink-0 pt-0.5">
                     <div className="flex items-center gap-1">
                       <Badge variant="accent">#{cl.number}</Badge>
-                      {cl.artifactVersionIndex && (
+                      {artifactSets?.[String(cl.number)] && (
                         <Badge variant="warning" className="text-[10px]">
-                          📦 Artifacts
+                          📦 {artifactSets[String(cl.number)]!.join(", ")}
                         </Badge>
                       )}
                     </div>

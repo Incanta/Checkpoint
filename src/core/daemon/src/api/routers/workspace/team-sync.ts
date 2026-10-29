@@ -126,8 +126,15 @@ const settingsInput = z.object({
   customIncludeRules: z.array(z.string()).optional(),
   customExcludeRules: z.array(z.string()).optional(),
   preset: z.string().nullable().optional(),
-  usePrecompiledBinaries: z.boolean().optional(),
-  artifactTypes: z.array(z.string()).optional(),
+  artifactTypes: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .max(100)
+        .regex(/^[a-zA-Z0-9_-]+$/),
+    )
+    .optional(),
   selectedProject: z.string().optional(),
   editorConfiguration: z.string().optional(),
   writeVersionFiles: z.boolean().optional(),

@@ -20,11 +20,7 @@ import {
   resolveBinaryExtensions,
   isBinaryFile,
 } from "~/server/binary-extensions";
-import {
-  listStateTreeDir,
-  lookupStateTreePaths,
-  stateTreeFileCount,
-} from "~/server/state-tree";
+import { listStateTreeDir, stateTreeFileCount } from "~/server/state-tree";
 import { buildAddonStorageOptions } from "~/server/storage-options";
 import {
   acquireClaim,
@@ -541,7 +537,6 @@ export const fileRouter = createTRPCRouter({
         repoId: z.string(),
         changelistNumber: z.number(),
         folderPath: z.string().default(""),
-        includeArtifacts: z.boolean().default(false),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -554,7 +549,7 @@ export const fileRouter = createTRPCRouter({
             number: input.changelistNumber,
           },
         },
-        select: { artifactStateTree: true, stateRootHash: true },
+        select: { stateRootHash: true },
       });
 
       if (!changelist) {
@@ -576,66 +571,17 @@ export const fileRouter = createTRPCRouter({
         folderPath,
       );
       const folders = new Set<string>(listing?.dirs ?? []);
-      const files: {
-        name: string;
-        path: string;
-        lastCl: number;
-        isArtifact: boolean;
-      }[] = (listing?.files ?? []).map((f) => ({
+      const files = (listing?.files ?? []).map((f) => ({
         name: f.name,
         path: prefix + f.name,
         lastCl: f.cl,
-        isArtifact: false,
       }));
 
-      // The artifact overlay is still a fileId-keyed blob; convert it to paths
-      // via the File table (only when artifacts are requested), loading just
-      // the rows it names.
-      const artifactRaw = input.includeArtifacts
-        ? ((changelist.artifactStateTree as Record<string, number> | null) ??
-          {})
-        : {};
-      const artifactPaths = new Map<string, number>();
-      const artifactIds = Object.keys(artifactRaw);
-      for (let i = 0; i < artifactIds.length; i += 500) {
-        const rows = await ctx.db.file.findMany({
-          where: { repoId: input.repoId, id: { in: artifactIds.slice(i, i + 500) } },
-          select: { id: true, path: true },
-        });
-        for (const row of rows) artifactPaths.set(row.path, artifactRaw[row.id]!);
-      }
-
-      // Artifact paths that main does not also have add to the listing and
-      // to the total; main's own entries win where both exist.
-      const mainHasArtifactPath = await lookupStateTreePaths(
+      const totalFileCount = await stateTreeFileCount(
         ctx.db,
         input.repoId,
-        changelist.stateRootHash,
-        artifactPaths.keys(),
+        input.changelistNumber,
       );
-      let artifactOnly = 0;
-      const listed = new Set(files.map((f) => f.path));
-      for (const [filePath, cl] of artifactPaths) {
-        if (mainHasArtifactPath.has(filePath)) continue;
-        artifactOnly++;
-        if (!filePath.startsWith(prefix)) continue;
-        const remainder = filePath.slice(prefix.length);
-        const slashIndex = remainder.indexOf("/");
-        if (slashIndex === -1) {
-          if (!listed.has(filePath)) {
-            files.push({ name: remainder, path: filePath, lastCl: cl, isArtifact: true });
-          }
-        } else {
-          folders.add(remainder.slice(0, slashIndex));
-        }
-      }
-      for (const f of files) {
-        if (artifactPaths.has(f.path)) f.isArtifact = true;
-      }
-
-      const totalFileCount =
-        (await stateTreeFileCount(ctx.db, input.repoId, input.changelistNumber)) +
-        artifactOnly;
 
       // Folders and files are returned as separate lists, so the browse UI
       // already renders directories first; this only settles name order.

@@ -148,6 +148,13 @@ export interface TeamSyncArtifactChannel {
   name?: string;
   /** Badge names that must all be SUCCESS at a CL before its artifacts are used. */
   requiredBadges: string[];
+  /**
+   * The files `checkpoint artifact upload --type <type>` collects, as
+   * .chkignore-style patterns: everything matching `include` and not
+   * `exclude`. Absent on configs served by older app servers.
+   */
+  include?: string[];
+  exclude?: string[];
 }
 
 export interface TeamSyncBadgeColumn {

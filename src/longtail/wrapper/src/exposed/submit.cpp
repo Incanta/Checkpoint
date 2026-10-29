@@ -113,6 +113,8 @@ int32_t SubmitSync(
     const char* BranchName,
     const char* ShelfName,
     int32_t ArtifactForChangelistNum,
+    const char* ArtifactType,
+    bool ArtifactReplace,
     const char* Message,
     uint32_t TargetChunkSize,
     uint32_t TargetBlockSize,
@@ -930,6 +932,14 @@ int32_t SubmitSync(
 
   if (ArtifactForChangelistNum >= 0) {
     payload["artifactForChangelistNum"] = ArtifactForChangelistNum;
+    // Which artifact set to attach to (the server requires one), and
+    // whether this upload replaces that set rather than adding to it.
+    if (ArtifactType != nullptr && ArtifactType[0] != '\0') {
+      payload["artifactType"] = std::string(ArtifactType);
+    }
+    if (ArtifactReplace) {
+      payload["artifactReplace"] = true;
+    }
   }
 
   for (uint32_t i = 0; i < NumModifications; ++i) {
@@ -1104,6 +1114,8 @@ SubmitAsync(
     const char* BranchName,
     const char* ShelfName,
     int32_t ArtifactForChangelistNum,
+    const char* ArtifactType,
+    bool ArtifactReplace,
     const char* Message,
     uint32_t TargetChunkSize,
     uint32_t TargetBlockSize,
@@ -1148,6 +1160,8 @@ SubmitAsync(
         BranchName,
         ShelfName,
         ArtifactForChangelistNum,
+        ArtifactType,
+        ArtifactReplace,
         Message,
         TargetChunkSize,
         TargetBlockSize,

@@ -96,7 +96,6 @@ public sealed record ChangelistInfo
 	public string Message { get; init; } = String.Empty;
 	public string VersionIndex { get; init; } = String.Empty;
 	public string? StateRootHash { get; init; }
-	public string? ArtifactVersionIndex { get; init; }
 	public string RepoId { get; init; } = String.Empty;
 	public string? UserId { get; init; }
 	public int? ParentNumber { get; init; }

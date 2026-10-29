@@ -5,7 +5,7 @@ import * as path from "path";
 import * as os from "os";
 
 // --------------------------------------------------------------------------
-// Native addon loader — tries prebuilt binaries first (npm package),
+// Native addon loader: tries prebuilt binaries first (npm package),
 // then falls back to local build output (development).
 // --------------------------------------------------------------------------
 
@@ -72,7 +72,7 @@ interface HandleStatus {
   needsTokenRefresh: boolean;
 }
 
-/** Opaque native handle — do not inspect directly */
+/** Opaque native handle; do not inspect directly */
 type NativeHandle = object;
 
 interface LongtailAddonNative {
@@ -162,6 +162,10 @@ export interface SubmitAsyncOptions extends StorageOptions {
   branchName: string;
   shelfName?: string;
   artifactForChangelistNum?: number;
+  /** The artifact set to attach to; required with artifactForChangelistNum. */
+  artifactType?: string;
+  /** Replace the set's files at that changelist instead of adding to them. */
+  artifactReplace?: boolean;
   message: string;
   targetChunkSize: number;
   targetBlockSize: number;
@@ -301,6 +305,13 @@ export function GetLogLevel(value: LongtailLogLevel): number {
 // --------------------------------------------------------------------------
 // Async operation wrappers
 // --------------------------------------------------------------------------
+
+/**
+ * This addon sends `artifactType` and `artifactReplace` with an artifact
+ * upload. Older addons drop them, and the server refuses an artifact upload
+ * without a type, so callers check this before uploading artifacts.
+ */
+export const SUPPORTS_ARTIFACT_TYPES = true;
 
 export function submitAsync(options: SubmitAsyncOptions): NativeHandle {
   return addon.submitAsync(options);
@@ -493,7 +504,7 @@ export async function pollHandle(
       );
     }
 
-    // C++ is requesting a token refresh — fetch new credentials and write them back
+    // C++ is requesting a token refresh: fetch new credentials and write them back
     if (status.needsTokenRefresh && options.onTokenRefresh) {
       try {
         const refreshed = await options.onTokenRefresh();
@@ -506,7 +517,7 @@ export async function pollHandle(
         });
       } catch (err) {
         console.error("[pollHandle] Token refresh failed:", err);
-        // Let C++ time out — it will return ETIMEDOUT
+        // Let C++ time out; it will return ETIMEDOUT
       }
     }
 

@@ -22,7 +22,6 @@ import {
   toRepoPath,
 } from "~/server/repo-path";
 import { versionIndexProblem } from "~/server/version-index";
-import type { InputJsonValue } from "@prisma/client/runtime/library";
 import { walkChangelistAncestry } from "~/server/changelist-walk";
 import { compareTreePaths } from "~/lib/file-tree-sort";
 import { classifyPaths } from "~/server/team-sync/classify";
@@ -711,7 +710,6 @@ export const changelistRouter = createTRPCRouter({
         try {
           const created = await ctx.db.$transaction(
             async (tx) => {
-              // Create the changelist (inherit artifact state from parent)
               const changelist = await tx.changelist.create({
                 data: {
                   number: nextNumber,
@@ -720,9 +718,6 @@ export const changelistRouter = createTRPCRouter({
                   parentNumber: branch.headNumber,
                   stateRootHash,
                   fileCount,
-                  artifactVersionIndex: parentChangelist.artifactVersionIndex,
-                  artifactStateTree:
-                    parentChangelist.artifactStateTree as InputJsonValue,
                   repoId: input.repoId,
                   userId: ctx.session.user.id,
                   hasCodeChanges,
