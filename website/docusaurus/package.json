@@ -2,7 +2,7 @@
   "name": "checkpoint-docs",
   "version": "0.0.0",
   "private": true,
-  "packageManager": "yarn@4.13.0",
+  "packageManager": "yarn@4.18.0",
   "scripts": {
     "docusaurus": "docusaurus",
     "start": "docusaurus start --port 6426",
