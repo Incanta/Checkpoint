@@ -34,14 +34,14 @@ const config: Config = {
         docs: {
           sidebarPath: require.resolve("./sidebars.js"),
           editUrl:
-            "https://github.com/Incanta/CheckpointWebsite/tree/main/docusaurus/",
+            "https://github.com/Incanta/Checkpoint/tree/main/website/docusaurus/",
           sidebarCollapsed: true,
           sidebarCollapsible: true,
         },
         blog: {
           showReadingTime: true,
           editUrl:
-            "https://github.com/Incanta/CheckpointWebsite/tree/main/docusaurus/",
+            "https://github.com/Incanta/Checkpoint/tree/main/website/docusaurus/",
           blogSidebarCount: "ALL",
         },
         theme: {
@@ -56,6 +56,12 @@ const config: Config = {
 
   themeConfig: {
     image: "img/checkpoint-social-card.png",
+    announcementBar: {
+      id: "public-beta",
+      content:
+        'Checkpoint is in public beta. Keep backups of your server, and <a href="/docs/getting-started/beta">tell us what you find</a>.',
+      isCloseable: true,
+    },
     navbar: {
       title: "Checkpoint",
       logo: {
@@ -92,6 +98,18 @@ const config: Config = {
               label: "Getting Started",
               to: "/docs/",
             },
+            {
+              label: "Quickstart",
+              to: "/docs/quickstart",
+            },
+            {
+              label: "Public Beta",
+              to: "/docs/getting-started/beta",
+            },
+            {
+              label: "Troubleshooting",
+              to: "/docs/troubleshooting",
+            },
           ],
         },
         {
@@ -104,6 +122,10 @@ const config: Config = {
             {
               label: "GitHub Discussions",
               href: "https://github.com/Incanta/Checkpoint/discussions",
+            },
+            {
+              label: "Report a Bug",
+              href: "https://github.com/Incanta/Checkpoint/issues",
             },
           ],
         },

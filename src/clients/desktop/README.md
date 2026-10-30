@@ -1,30 +1,32 @@
-# React + TypeScript + Vite
+# Checkpoint Desktop
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The Checkpoint desktop app: an Electron application with a React renderer. It talks to the local daemon (`src/core/daemon`) and manages workspaces, pending changes and pending changelists, history, branches, and Team Sync.
 
-Currently, two official plugins are available:
+User documentation: [Desktop App](https://checkpointvcs.com/docs/clients/desktop-app) (source in [`website/docusaurus/docs/clients/desktop-app.md`](../../../website/docusaurus/docs/clients/desktop-app.md)).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Development
 
-## Expanding the ESLint configuration
+From the repo root, start the backend services and daemon, then the app:
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
-
-- Configure the top-level `parserOptions` property like this:
-
-```js
-export default {
-  // other rules...
-  parserOptions: {
-    ecmaVersion: 'latest',
-    sourceType: 'module',
-    project: ['./tsconfig.json', './tsconfig.node.json'],
-    tsconfigRootDir: __dirname,
-  },
-}
+```bash
+yarn dev       # app, storage server, and daemon
+yarn desktop   # this Electron app, with hot reload
 ```
 
-- Replace `plugin:@typescript-eslint/recommended` to `plugin:@typescript-eslint/recommended-type-checked` or `plugin:@typescript-eslint/strict-type-checked`
-- Optionally add `plugin:@typescript-eslint/stylistic-type-checked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and add `plugin:react/recommended` & `plugin:react/jsx-runtime` to the `extends` list
+Or from this directory:
+
+| Script | What it does |
+| --- | --- |
+| `yarn dev` | Run the app with Vite and hot reload |
+| `yarn dev:mock` | Run with mock data, no daemon needed |
+| `yarn typecheck` | Type-check without emitting |
+| `yarn build` | Type-check, build, and package installers with electron-builder |
+
+## Layout
+
+- `src/main/`: Electron main process (window, menus, IPC to the daemon)
+- `src/common/`: types shared by both processes
+- `src/renderer/`: React UI (`pages/` for routes, `components/ui/` for shared primitives)
+- `electron-builder.json`: installer targets and artifact names (the website's download page matches on these names)
+
+The renderer shares the web app's design tokens (light and dark). Tailwind v4 is configured CSS-first, without Tailwind's preflight reset, so set margins and `box-sizing` explicitly.

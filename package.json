@@ -1,6 +1,9 @@
 {
   "name": "@checkpointvcs/root",
   "packageManager": "yarn@4.18.0",
+  "engines": {
+    "node": ">=22"
+  },
   "workspaces": [
     "src/app",
     "src/metrics",

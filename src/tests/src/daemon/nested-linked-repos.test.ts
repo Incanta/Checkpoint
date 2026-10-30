@@ -4,7 +4,7 @@
  * creates the plugins workspace in that folder (when the link is enabled),
  * brings it to the pin, and keeps its files out of the game's pending
  * changes while reporting its own (src/core/daemon/src/util/team-sync/
- * linked-repos.ts, docs/linked-repos-plan.md).
+ * linked-repos.ts, plans/linked-repos-plan.md).
  *
  * Driven through the daemon's endpoints against the real app routers, with
  * only the native addon faked (src/harness/stack.ts). The repo config is

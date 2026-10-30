@@ -6,25 +6,25 @@ services:
   # development defaults: change POSTGRES_PASSWORD before any real use, and
   # keep it in sync with `database_url` in ./config/.secrets.
   #
-  # Switching to Postgres also means setting CHECKPOINT_DB_PROVIDER=postgresql
-  # on the app service below, which selects the matching bundle.
-  # postgres:
-  #   container_name: checkpoint-postgres
-  #   image: postgres:17-alpine
-  #   restart: unless-stopped
-  #   networks:
-  #     - checkpoint
-  #   environment:
-  #     POSTGRES_USER: checkpoint
-  #     POSTGRES_PASSWORD: checkpoint
-  #     POSTGRES_DB: checkpoint
-  #   volumes:
-  #     - postgres-data:/var/lib/postgresql/data
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U checkpoint -d checkpoint"]
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 10
+  # The default. To run on SQLite instead (lighter, single-writer; see the
+  # README), remove this service and depends_on, and set CHECKPOINT_DB_PROVIDER=sqlite.
+  postgres:
+    container_name: checkpoint-postgres
+    image: postgres:17-alpine
+    restart: unless-stopped
+    networks:
+      - checkpoint
+    environment:
+      POSTGRES_USER: checkpoint
+      POSTGRES_PASSWORD: checkpoint
+      POSTGRES_DB: checkpoint
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U checkpoint -d checkpoint"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # ----------------------------------------------------------------
   # App: Next.js application (UI + API)
@@ -47,17 +47,17 @@ services:
       CHECKPOINT_COMPONENT: app
       # release = published versions, nightly = automated builds off main.
       CHECKPOINT_BUNDLE_CHANNEL: release
-      CHECKPOINT_DB_PROVIDER: sqlite
+      CHECKPOINT_DB_PROVIDER: postgresql
       # To pin instead of following the channel, set CHECKPOINT_BUNDLE_VERSION
       # and the in-app update button turns itself off:
       # CHECKPOINT_BUNDLE_VERSION: 0.5.0
       #
       # Air-gapped: mount a bundle plus its .sig.json and point at it. Nothing
       # is fetched over the network.
-      # CHECKPOINT_BUNDLE_PATH: /bundles/checkpoint-bundle-app-0.5.0-sqlite.tar.zst
-    # depends_on:
-    #   postgres:
-    #     condition: service_healthy
+      # CHECKPOINT_BUNDLE_PATH: /bundles/checkpoint-bundle-app-0.5.0-postgres.tar.zst
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - app-data:/app/data
       - ./config/app:/app/config
@@ -82,15 +82,15 @@ services:
       CHECKPOINT_BUNDLE_CHANNEL: release
       # CHECKPOINT_BUNDLE_VERSION: 0.5.0
     volumes:
-      # `storage-data` volume is only used by the SeaweedFS "stub" storage mode (the default).
-      # Harmless for the R2 and full-SeaweedFS modes.
+      # Block storage for the default "local" storage mode.
+      # Unused (but harmless) in the s3 and r2 modes.
       - storage-data:/app/data
       - ./config/server:/app/config
       - ./config/.secrets:/app/.secrets:ro
       - bundles:/var/lib/checkpoint
 
 volumes:
-  # postgres-data:
+  postgres-data:
   app-data:
   storage-data:
   bundles:

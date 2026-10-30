@@ -76,13 +76,61 @@ const faqs: {
     ),
   },
   {
-    question: "Can I use any S3-compatible storage provider?",
+    question: "Where are my files stored? Can I use S3?",
     answer: () => (
       <span>
-        Currently we only support Cloudflare R2. While the underlying storage
-        library may support other S3-compatible APIs, the server application
-        uses R2-specific API&apos;s for creating buckets and temporary auth
-        tokens for security.
+        Wherever you choose. The server can keep file content on its own disk
+        (the default, with no extra services), in a bucket on any
+        S3-compatible store such as MinIO, AWS S3, or DigitalOcean Spaces, or
+        in Cloudflare R2. With local disk or S3, clients go through your
+        Checkpoint server; with R2, they talk to R2 directly. See the{" "}
+        <a
+          href="/docs/self-hosting/storage"
+          className="text-primary-light hover:underline"
+        >
+          storage guide
+        </a>
+        .
+      </span>
+    ),
+  },
+  {
+    question: "Is Checkpoint ready for my team?",
+    answer: () => (
+      <span>
+        Checkpoint is in public beta. It&apos;s aimed at small teams (roughly 5
+        to 20 people) who host their own server, and we use it for our own
+        game development. Expect rough edges, keep regular backups
+        of your server, and please{" "}
+        <a
+          href="https://github.com/Incanta/Checkpoint/issues"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary-light hover:underline"
+        >
+          report bugs on GitHub
+        </a>
+        ; the desktop app and CLI can collect a redacted log bundle to attach.
+        The{" "}
+        <a
+          href="/docs/getting-started/beta"
+          className="text-primary-light hover:underline"
+        >
+          beta guide
+        </a>{" "}
+        covers what to expect.
+      </span>
+    ),
+  },
+  {
+    question: "Which platforms are supported?",
+    answer: () => (
+      <span>
+        The desktop app and CLI run on Windows (x64), macOS (Apple Silicon and
+        Intel), and Linux (.deb and .rpm packages for x64). Standalone CLI
+        packages are available for build machines and CI. The server runs
+        anywhere Docker does, using the Docker Compose bundle from each
+        release.
       </span>
     ),
   },

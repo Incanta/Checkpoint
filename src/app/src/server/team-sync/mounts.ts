@@ -4,7 +4,7 @@
 // has is rejected when the config is read, and a submit that adds files under
 // a mount path is refused. Folder names compare without case, since Windows
 // and macOS would put both spellings in one folder. See
-// docs/linked-repos-plan.md.
+// plans/linked-repos-plan.md.
 
 type Links = { repo: string; path?: string }[] | undefined;
 

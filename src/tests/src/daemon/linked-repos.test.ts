@@ -2,7 +2,7 @@
  * Team Sync linked repos, end to end: a game repo's teamsync.yaml pins an
  * engine repo, and syncing a game workspace first brings the chosen engine
  * workspace to the pin (src/core/daemon/src/util/team-sync/linked-repos.ts,
- * docs/linked-repos-plan.md).
+ * plans/linked-repos-plan.md).
  *
  * Driven through the daemon's own endpoints against the real app routers,
  * with only the native addon faked (src/harness/stack.ts). The repo config

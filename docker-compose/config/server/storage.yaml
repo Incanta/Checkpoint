@@ -1,5 +1,5 @@
 # ============================================================================
-# Storage mode for the core server. Pick ONE. See src/core/server/STORAGE.md.
+# Storage mode for the core server. Pick ONE. See https://checkpointvcs.com/docs/self-hosting/storage
 #
 #   local : the server stores files on a local volume, served through the
 #           gateway. No extra services. Easiest; good for trying Checkpoint out

@@ -2,7 +2,7 @@
  * Folders inside a workspace that belong to another workspace: a Team Sync
  * nested linked repo's mount path (from the repo config at the synced
  * changelist), or any folder holding its own `.checkpoint`. The parent never
- * lists, stages, submits, or cleans them (docs/linked-repos-plan.md, "Nested
+ * lists, stages, submits, or cleans them (plans/linked-repos-plan.md, "Nested
  * link groundwork").
  *
  * Driven through the daemon's endpoints against the real app routers, with

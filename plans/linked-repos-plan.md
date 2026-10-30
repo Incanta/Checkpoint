@@ -2,7 +2,7 @@
 
 Plan for letting a Team Sync repo pin other repos at a changelist and keep local workspaces of them in sync. The motivating case is a custom Unreal Engine kept in its own repo and synced once per machine, shared by every game, instead of the Perforce convention of committing `Engine/` next to (or around) each game. Written 2026-10-27 on `1b2757a`.
 
-**Progress (2026-10-28): all five phases are implemented** (phases 3 through 5 uncommitted). See [Phase 1 as built](#phase-1-as-built), [Phase 2 as built](#phase-2-as-built), [Phase 3 as built](#phase-3-as-built), [Phase 4 as built](#phase-4-as-built), and [Phase 5 as built](#phase-5-as-built) for where they live and where they differ from this plan. Earlier "as built" sections describe each phase when it landed; later phases supersede them where they overlap (for example, nested links are no longer "unsupported").
+**Progress (2026-10-28): all five phases are implemented and committed** (phase 5 is 48dc804). See [Phase 1 as built](#phase-1-as-built), [Phase 2 as built](#phase-2-as-built), [Phase 3 as built](#phase-3-as-built), [Phase 4 as built](#phase-4-as-built), and [Phase 5 as built](#phase-5-as-built) for where they live and where they differ from this plan. Earlier "as built" sections describe each phase when it landed; later phases supersede them where they overlap (for example, nested links are no longer "unsupported").
 
 ## Goals
 

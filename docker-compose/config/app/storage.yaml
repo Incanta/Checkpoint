@@ -1,6 +1,6 @@
 # Storage mode for the app. MUST match ./config/server/storage.yaml (`mode`).
 # The app only distinguishes "r2" (clients talk to R2 directly) from the gateway
-# modes "local"/"s3" (clients go through the core server). See STORAGE.md.
+# modes "local"/"s3" (clients go through the core server). See https://checkpointvcs.com/docs/self-hosting/storage
 mode: "local" # local | s3 | r2
 
 jwt:

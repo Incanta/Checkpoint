@@ -37,7 +37,7 @@ export default function Hero() {
             className="inline-flex items-center gap-2 glass rounded-full px-4 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
           >
             <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
-            Open Source on GitHub
+            Now in public beta · Open source on GitHub
             <svg
               className="w-3 h-3"
               fill="none"
@@ -96,8 +96,8 @@ export default function Hero() {
         {/* Subtitle */}
         <p className="mx-auto max-w-2xl text-lg sm:text-xl text-muted leading-relaxed mb-10">
           Checkpoint is a modern VCS built for media-heavy projects: games,
-          film, product design, architecture, and more. Fast checkouts, file
-          locking, and massive file support, out of the box.
+          film, product design, architecture, and more. Fast syncs, file
+          locking, and massive file support, self-hosted on your own server.
         </p>
 
         {/* CTA Buttons */}

@@ -2,7 +2,7 @@
 
 Version control integration for Epic's [Unreal Horde](https://dev.epicgames.com/documentation/en-us/unreal-engine/horde-in-unreal-engine) build server: commit ingestion, build triggering, config-from-repo, and agent workspace sync backed by Checkpoint.
 
-End-user setup docs live at `website/docusaurus/docs/horde.md`. This README covers development.
+End-user setup docs live at `website/docusaurus/docs/integrations/horde.md`. This README covers development.
 
 ## Layout
 
@@ -55,7 +55,7 @@ docker run ... \
   <horde-server-image>
 ```
 
-Then enable the plugin in the server config and set `CHECKPOINT_API_TOKEN` in the container environment (see `website/docusaurus/docs/horde.md`), and recreate the container. The plugin binds Horde's assemblies exactly, so when you upgrade the Horde image, rebuild the DLLs against the matching engine checkout and replace the files on the host before restarting.
+Then enable the plugin in the server config and set `CHECKPOINT_API_TOKEN` in the container environment (see `website/docusaurus/docs/integrations/horde.md`), and recreate the container. The plugin binds Horde's assemblies exactly, so when you upgrade the Horde image, rebuild the DLLs against the matching engine checkout and replace the files on the host before restarting.
 
 ## Integration tests
 

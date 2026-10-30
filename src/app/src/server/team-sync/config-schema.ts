@@ -62,7 +62,7 @@ export const LINK_MODES = ["follow-pin", "manual", "ignore"] as const;
 
 // A linked repo: another repo in the same org, pinned at a changelist, that a
 // workspace of this repo keeps a workspace of in sync (see
-// docs/linked-repos-plan.md). Linking is engine-agnostic: it only syncs.
+// plans/linked-repos-plan.md). Linking is engine-agnostic: it only syncs.
 const linkedRepoSchema = z.object({
   /** Repo name in the same org; also the key workspaces and presets use. */
   repo: z.string().min(1).max(200),

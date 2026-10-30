@@ -6,7 +6,7 @@
  * correct only while every change reaches the dirty set, so whenever the
  * watcher may have missed some (an overflowed change buffer, a failed
  * watcher, no watcher at all) the cache has to go and the next refresh has
- * to rescan (R20 in docs/data-loss-fix-plan.md, "Watcher gaps").
+ * to rescan (R20 in plans/data-loss-fix-plan.md, "Watcher gaps").
  *
  * The overflow and the failure cannot be produced on demand, so most tests
  * install a stand-in watcher that reports nothing and feed the manager's

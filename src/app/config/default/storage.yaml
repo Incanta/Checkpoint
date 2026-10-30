@@ -1,6 +1,6 @@
 # Must match the core server's storage.mode. The app only distinguishes "r2"
 # (clients go direct) from the gateway modes "local"/"s3" (clients go through
-# the core server). See src/core/server/STORAGE.md.
+# the core server). See https://checkpointvcs.com/docs/self-hosting/storage
 mode: "local" # local | s3 | r2
 
 jwt:

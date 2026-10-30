@@ -1,4 +1,4 @@
-# Storage backend for the core server. See src/core/server/STORAGE.md.
+# Storage backend for the core server. See https://checkpointvcs.com/docs/self-hosting/storage
 #   local - the core server's own disk, served through the gateway.
 #   s3    - any S3-compatible store (SeaweedFS S3, MinIO, AWS, Spaces),
 #           proxied through the gateway; one shared bucket, /{org}/{repo}/ keys.

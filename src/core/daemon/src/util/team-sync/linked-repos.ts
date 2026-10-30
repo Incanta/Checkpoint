@@ -27,7 +27,7 @@ import { Logger } from "../../logging.js";
 
 // Linked repos: a repo's teamsync.yaml pins other repos at a changelist, and
 // a workspace of it keeps a local workspace of each linked repo synced to the
-// pin before syncing itself. See docs/linked-repos-plan.md.
+// pin before syncing itself. See plans/linked-repos-plan.md.
 //
 // Linking only syncs. It never looks inside the linked repo, so the same
 // mechanism serves an engine, an SDK, or a tools repo.

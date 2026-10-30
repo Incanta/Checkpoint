@@ -9,7 +9,7 @@ const SLOW_CONNECT_THRESHOLD_MS = 5000;
 
 // Docs page explaining how to start the daemon from the system tray.
 // NOTE: this page does not exist yet and needs to be authored.
-const DAEMON_DOCS_URL = "https://checkpointvcs.com/docs/desktop/start-daemon";
+const DAEMON_DOCS_URL = "https://checkpointvcs.com/docs/troubleshooting";
 
 export default function ConnectingScreen(): React.ReactElement {
   const connection = useAtomValue(daemonConnectionAtom);

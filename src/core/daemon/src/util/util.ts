@@ -125,7 +125,7 @@ export interface WorkspaceTeamSyncState {
   /**
    * Folders inside this workspace that belong to a nested linked repo (the
    * `path` of each link in the repo config at the synced changelist). Never
-   * scanned, submitted, or cleaned here. See docs/linked-repos-plan.md.
+   * scanned, submitted, or cleaned here. See plans/linked-repos-plan.md.
    */
   mountPaths?: string[];
 }

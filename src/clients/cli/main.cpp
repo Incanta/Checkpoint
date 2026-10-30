@@ -289,7 +289,7 @@ int main(int argc, char** argv) {
       .default_value(std::string(""));
   loginCmd.add_argument("--token", "-t")
       .help("API token for non-interactive login (headless/CI). "
-            "Mint one in the web UI under Settings > Devices.")
+            "Mint one in the web UI under Settings > Devices & Tokens.")
       .default_value(std::string(""));
 
   // logout

@@ -3,7 +3,7 @@ import type { TeamSyncConfigResult } from "./config-schema";
 // Which linked repo pins a changelist moves, for the changelist browser's
 // "update" badge and bisect's warning. Syncing across a pin change costs a
 // linked sync and, for an engine, usually a rebuild. See
-// docs/linked-repos-plan.md.
+// plans/linked-repos-plan.md.
 
 /** Where a link points: the linked repo's branch and changelist. */
 export interface LinkPin {

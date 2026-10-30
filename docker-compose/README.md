@@ -1,6 +1,6 @@
 # Checkpoint quickstart (Docker Compose)
 
-A self-hosted Checkpoint instance: the **app** (UI + API), the **server** (core storage), and **Postgres**. Self-hosted instances are fully featured with no license required.
+A self-hosted Checkpoint instance: the **app** (UI + API), the **server** (core storage), and **Postgres**. Self-hosted instances are fully featured with no license required. The full self-hosting guide (HTTPS, sign-in and identity providers, members, storage, configuration reference) is at [checkpointvcs.com/docs](https://checkpointvcs.com/docs/self-hosting/deploy-docker-compose).
 
 ## Services
 
@@ -102,14 +102,13 @@ Both services run the same version-independent runtime image and download the Ch
 The panel tells you when an update appears without any configuration. To also be emailed about it, add `config/app/updates.yaml` (email itself needs `config/app/email.yaml` configured; with no recipients listed it mails whoever completed setup):
 
 ```yaml
-channel: release # or nightly, for automated builds off main
 notify-emails:
   - ops@example.com
 ```
 
 To opt out of update checks altogether, set `enabled: false` there. That also disables the update panel, so nothing can be installed from the UI.
 
-To follow nightly builds instead, set `CHECKPOINT_BUNDLE_CHANNEL: nightly` on **both** services.
+To follow nightly builds instead, set `CHECKPOINT_BUNDLE_CHANNEL: nightly` on **both** services. That variable decides the channel; a `channel` key in `updates.yaml` does not override it.
 
 To hold a fixed version, set `CHECKPOINT_BUNDLE_VERSION` on both services. The in-app update button turns itself off, because the version then belongs to this file rather than to the UI.
 
@@ -119,17 +118,17 @@ A Checkpoint instance keeps its state in three places. Back up all of them:
 
 | What | Where | Holds |
 | --- | --- | --- |
-| Database | the `app-data` volume (SQLite, the default), or your Postgres database | users, repos, branches, changelists, file history, claims |
+| Database | your Postgres database (the `postgres-data` volume), or the `app-data` volume if you switched to SQLite | users, repos, branches, changelists, file history, claims |
 | Storage | the `storage-data` volume in **local** mode, or your bucket in **s3** and **r2** modes | file content (blocks and version indexes) |
 | Configuration | `config/` and `config/.secrets` | addresses, storage settings, and the signing secrets |
 
 **Back up the database first, then storage.** File content is only ever added to storage, never changed or removed (except when a repo is deleted), so a storage copy taken after the database copy holds everything that database refers to. The other order can miss content: a changelist submitted between the two copies would be in the database but not in storage, and pulling it after a restore would fail.
 
-- **SQLite:** stop the app (`docker compose stop app`) and copy the `app-data` volume, or copy it while running with `sqlite3 /app/data/<db file> ".backup /app/data/backup.db"` inside the container. A plain file copy of a live SQLite database can be torn.
+- **SQLite:** stop the app (`docker compose stop app`), copy the `app-data` volume, and start it again. A plain file copy of a live SQLite database can be torn, and the runtime image does not include the `sqlite3` tool for an online backup.
 - **Postgres:** `pg_dump` (for example `docker compose exec postgres pg_dump -U checkpoint checkpoint > checkpoint.sql`).
-- **Local storage:** copy the `storage-data` volume, for example with `docker run --rm -v checkpoint_storage-data:/data -v "$PWD":/backup alpine tar czf /backup/storage.tgz -C /data .` (the volume name is prefixed with your Compose project name).
+- **Local storage:** copy the `storage-data` volume, for example with `docker run --rm -v docker-compose_storage-data:/data -v "$PWD":/backup alpine tar czf /backup/storage.tgz -C /data .` (Compose prefixes volume names with the project name, which is the folder name, `docker-compose`, unless you set one; `docker volume ls` shows it).
 - **S3 and R2:** turn on the provider's versioning or replication, or sync the bucket to another one, after the database backup.
-- **Secrets:** keep `config/.secrets` with the backups. Without the same `betterauth_secret` and `storage_signing_key`, sessions, device tokens, and storage tokens issued before the restore stop working.
+- **Secrets:** keep `config/.secrets` with the backups. Without the same `betterauth_secret` and `storage_signing_key`, signed-in sessions and storage tokens issued before the restore stop working (API tokens are stored in the database and keep working).
 
 To restore, put back the configuration, then storage, then the database, and start the services. A workspace that synced changelists newer than the backup is ahead of the restored server, which the daemon does not expect. After restoring an older backup, have people copy out any unsubmitted work and make fresh workspaces.
 
@@ -151,9 +150,9 @@ It applies the same rules as the client bug-report bundle: bearer tokens, Author
 
 ## Notes
 
-- **Database:** Postgres is recommended and is the only documented setup here.
+- **Database:** Postgres is the default and recommended. SQLite is lighter (no database service) but allows one writer at a time and must be stopped to back up, so use it only if you understand those limits. To switch, remove the `postgres` service and the app's `depends_on`, set `CHECKPOINT_DB_PROVIDER: sqlite` on the app, set `provider: "sqlite"` in `config/app/db.yaml`, and set `database_url=file:///app/data/db.sqlite` in `config/.secrets`.
 - **Content chunking** (chunk and block sizes, hashing, and compression) is one setting for the whole instance, sent to every client, so teammates never need matching daemon configs. The defaults suit most teams. To tune it, add `config/app/longtail.yaml` with any of the keys from `src/app/config/default/longtail.yaml`. Each repo keeps the settings it was first used with, so a change applies to new repos only.
 - **Email** is disabled by default (`config/app/email.yaml`). Enable it and set `email_smtp_password` in `config/.secrets` to send invites/notifications.
 - **`restart: unless-stopped` is required.** Installing an update works by exiting so the container comes back on the new version; without a restart policy, Install stops the service instead of upgrading it.
 - **The `bundles` volume** holds downloaded versions and the record of which one should be running. Both services mount it, and deleting it forces a fresh download on next boot.
-- **Air-gapped installs** can mount a bundle and its `.sig.json` sidecar and set `CHECKPOINT_BUNDLE_PATH` instead, which never reaches the network. See `.github/RELEASING.md`.
+- **Air-gapped installs** can mount a bundle and its `.sig.json` sidecar and set `CHECKPOINT_BUNDLE_PATH` instead, which downloads nothing. Verifying the signature still looks up a DNS TXT record (`key.checkpointvcs.com`), so a host with no outside DNS needs that record served internally and `CHECKPOINT_BUNDLE_KEY_HOST` pointed at it. See `.github/RELEASING.md`.

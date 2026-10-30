@@ -89,7 +89,7 @@ export type TeamSyncLinkMode = "follow-pin" | "manual" | "ignore";
 /**
  * Another repo in the same org, pinned at a changelist. A workspace of this
  * repo keeps a workspace of the linked repo synced to the pin. Linking is
- * engine-agnostic: it only syncs. See docs/linked-repos-plan.md.
+ * engine-agnostic: it only syncs. See plans/linked-repos-plan.md.
  */
 export interface TeamSyncLinkedRepo {
   /** Repo name in the same org; also the key workspaces and presets use. */
@@ -98,8 +98,8 @@ export interface TeamSyncLinkedRepo {
   /** Exact pinned changelist. */
   changelist: number;
   /**
-   * Repo-relative mount path for a nested link. Nested links are not synced
-   * yet; a link with a path is reported as unsupported.
+   * Repo-relative mount path for a nested link (a child workspace inside the
+   * parent's folder). Omitted for a sibling link.
    */
   path?: string;
   /** Nested links only: create the child for workspaces with no entry. */
@@ -199,8 +199,8 @@ export interface TeamSyncConfig {
   unreal?: TeamSyncUnrealConfig;
   /**
    * Replaces the default code-CL classification extension set. When omitted,
-   * the default is a general-purpose source-file list, plus the Unreal-specific
-   * extensions when `unreal` is configured.
+   * the default is a general-purpose source-file list that always includes the
+   * Unreal-specific extensions (they never match in a non-Unreal repo).
    */
   codeExtensions?: string[];
   syncCategories: TeamSyncCategory[];

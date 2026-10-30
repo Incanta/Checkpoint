@@ -87,7 +87,7 @@ Every run publishes `checkpoint-<channel>.json` as a release asset:
 - release: <https://github.com/Incanta/Checkpoint/releases/latest/download/checkpoint-release.json>
 - nightly: <https://github.com/Incanta/Checkpoint/releases/download/nightly/checkpoint-nightly.json>
 
-It records the current version of each component on that channel, merged so a server-only run leaves the client entry alone. This exists because server builds are container images and have no release asset of their own to compare against, which is what the self-hosted app polls (see below).
+It records the current version of each component on that channel, merged so a server-only run leaves the client entry alone. The self-hosted app polls this manifest (see below) rather than comparing release assets itself.
 
 ## Subscribing to a stream
 
