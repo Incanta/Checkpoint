@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 
 // Runs `yarn npm audit --all --recursive` in every yarn project root in this
-// repo and aggregates the exit codes. We have two separate yarn installs:
+// repo and aggregates the exit codes. We have three separate yarn installs:
 //
 //   1. the repo root (which covers all `workspaces` entries)
 //   2. src/longtail/addon (its own `packageManager`, own yarn.lock)
+//   3. website (marketing site + docusaurus workspace, own yarn.lock)
 //
 // `yarn npm audit` exits non-zero when it finds vulnerabilities, so chaining
-// the two with `&&` would skip the second whenever the first has findings.
-// This script runs both regardless and exits with the worst status seen.
+// them with `&&` would skip the rest whenever one has findings.
+// This script runs all of them regardless and exits with the worst status seen.
 
 const { spawnSync } = require("child_process");
 const path = require("path");
@@ -21,6 +22,7 @@ const repoRoot = path.resolve(__dirname, "..");
 const projects = [
   { label: "root", dir: repoRoot },
   { label: "src/longtail/addon", dir: path.join(repoRoot, "src/longtail/addon") },
+  { label: "website", dir: path.join(repoRoot, "website") },
 ];
 
 let worstExit = 0;
