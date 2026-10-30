@@ -1830,6 +1830,12 @@ export class DaemonManager {
     )) {
       // Normalize key (strip leading slash for compatibility)
       const relativePath = stateKey.replace(/^\//, "");
+      // A path this workspace cannot hold (an older daemon recorded it) is
+      // missing because it cannot exist here, not because the user deleted
+      // it. Reporting it as deleted would let "submit everything" delete it
+      // for the team. Checked before the ignore rules, which cannot take a
+      // path like "../x".
+      if (!isSafeWorkspacePath(relativePath)) continue;
       if (
         !seenBaselineFiles.has(relativePath) &&
         isIgnoredOrHidden(ignoreCache, relativePath)
@@ -1837,11 +1843,6 @@ export class DaemonManager {
         excluded.push([relativePath, baselineFile]);
         continue;
       }
-      // A path this workspace cannot hold (an older daemon recorded it) is
-      // missing because it cannot exist here, not because the user deleted
-      // it. Reporting it as deleted would let "submit everything" delete it
-      // for the team.
-      if (!isSafeWorkspacePath(relativePath)) continue;
       // Another tracked spelling of this same file is on disk: the tree
       // holds both, and they are one file here. Not deleted.
       if (

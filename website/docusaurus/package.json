@@ -2,7 +2,7 @@
   "name": "checkpoint-docs",
   "version": "0.0.0",
   "private": true,
-  "packageManager": "yarn@4.13.0",
+  "packageManager": "yarn@4.18.0",
   "scripts": {
     "docusaurus": "docusaurus",
     "start": "docusaurus start --port 6426",
@@ -17,8 +17,8 @@
     "email": "node gen-email.js"
   },
   "dependencies": {
-    "@docusaurus/core": "^3.7.0",
-    "@docusaurus/preset-classic": "^3.7.0",
+    "@docusaurus/core": "^3.10.2",
+    "@docusaurus/preset-classic": "^3.10.2",
     "@mdx-js/react": "^3.0.0",
     "clsx": "^2.1.0",
     "prism-react-renderer": "^2.1.0",
@@ -26,8 +26,8 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
-    "@docusaurus/module-type-aliases": "^3.7.0",
-    "@docusaurus/tsconfig": "^3.7.0",
+    "@docusaurus/module-type-aliases": "^3.10.2",
+    "@docusaurus/tsconfig": "^3.10.2",
     "@types/jsdom": "^21.1.7",
     "fs-extra": "^11.2.0",
     "jsdom": "^26.0.0",
