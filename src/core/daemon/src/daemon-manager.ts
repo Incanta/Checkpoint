@@ -2491,10 +2491,14 @@ export class DaemonManager {
    * to compare" as changed, because it cannot prove otherwise. Anything that
    * rewrites a tracked file with the content it is tracked at has to say so
    * here, or the file goes on showing as modified.
+   *
+   * `md5s` records a content hash already known for a file, so later
+   * refreshes can prove it unchanged without fetching the head copy again.
    */
   public async markFilesPristine(
     workspace: Workspace,
     relativePaths: string[],
+    md5s: Record<string, string> = {},
   ): Promise<void> {
     const state = this.workspaceStates.get(workspace.id);
     if (!state || relativePaths.length === 0) return;
@@ -2511,7 +2515,7 @@ export class DaemonManager {
           ...entry,
           size: stat.size,
           mtime: stat.mtimeMs,
-          md5: "",
+          md5: md5s[relativePath] ?? "",
         };
       } catch {
         // Not on disk; nothing to record.

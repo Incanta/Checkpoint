@@ -936,6 +936,43 @@ bool FCheckpointDaemonClient::RevertFiles(
   );
 }
 
+bool FCheckpointDaemonClient::RevertUnchanged(
+  const FString &DaemonId,
+  const FString &WorkspaceId,
+  const TArray<FString> &RelPaths,
+  bool bAllPending,
+  TArray<FString> &OutReverted,
+  FString &OutError
+) {
+  TSharedPtr<FJsonObject> Input = MakeShareable(new FJsonObject());
+  Input->SetStringField(TEXT("daemonId"), DaemonId);
+  Input->SetStringField(TEXT("workspaceId"), WorkspaceId);
+
+  // Leaving filePaths out asks the daemon to consider every pending change.
+  if (!bAllPending) {
+    TArray<TSharedPtr<FJsonValue>> PathsArray;
+    for (const FString &RelPath : RelPaths) {
+      PathsArray.Add(MakeShareable(new FJsonValueString(RelPath)));
+    }
+    Input->SetArrayField(TEXT("filePaths"), PathsArray);
+  }
+
+  TSharedPtr<FJsonObject> Result;
+  if (!MutateProcedure(
+        TEXT("workspaces.pending.revertUnchanged"), Input, Result, OutError
+      )) {
+    return false;
+  }
+
+  const TArray<TSharedPtr<FJsonValue>> *Reverted = nullptr;
+  if (Result.IsValid() && Result->TryGetArrayField(TEXT("reverted"), Reverted)) {
+    for (const auto &Value : *Reverted) {
+      OutReverted.Add(Value->AsString());
+    }
+  }
+  return true;
+}
+
 // ---- Settings / Workspace-creation API ----
 
 bool FCheckpointDaemonClient::Login(

@@ -1840,6 +1840,57 @@ inline int cmdRevert(const std::vector<std::string>& files) {
 }
 
 // ═════════════════════════════════════════════════════════════════
+//  COMMAND: revert --unchanged (revert files identical to head)
+// ═════════════════════════════════════════════════════════════════
+
+/**
+ * Reverts the pending changes whose content is identical to their head
+ * version, as `p4 revert -a` does. With no files, considers every pending
+ * change. Files that differ are left alone.
+ */
+inline int cmdRevertUnchanged(const std::vector<std::string>& files) {
+  auto ctx = getWorkspaceContext();
+  auto& client = ctx.client;
+  auto& ws = ctx.workspace;
+
+  nlohmann::json input = {
+      {"daemonId", ws.daemonId},
+      {"workspaceId", ws.id},
+  };
+  if (!files.empty()) {
+    std::vector<std::string> resolvedPaths;
+    for (auto& file : files) {
+      resolvedPaths.push_back(resolveWorkspacePath(ctx.root, file));
+    }
+    input["filePaths"] = resolvedPaths;
+  }
+
+  auto result = client.mutate("workspaces.pending.revertUnchanged", input);
+
+  size_t reverted = 0;
+  if (result.contains("reverted") && result["reverted"].is_array()) {
+    for (auto& path : result["reverted"]) {
+      std::cout << color::yellow() << "  ~ " << path.get<std::string>()
+                << color::reset() << std::endl;
+      ++reverted;
+    }
+  }
+
+  // Only explain why a file was kept when it was asked for by name; with no
+  // files, every changed file would be listed.
+  if (!files.empty() && result.contains("kept") && result["kept"].is_array()) {
+    for (auto& kept : result["kept"]) {
+      std::cout << color::dim() << "  = " << kept.value("filePath", "")
+                << " (" << kept.value("reason", "") << ")" << color::reset()
+                << std::endl;
+    }
+  }
+
+  std::cout << reverted << " unchanged file(s) reverted." << std::endl;
+  return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════
 //  COMMAND: diff (show diff for a file)
 // ═════════════════════════════════════════════════════════════════
 

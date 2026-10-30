@@ -310,6 +310,21 @@ public:
     FString &OutError
   );
 
+  /**
+   * Revert the pending changes whose content is identical to their head
+   * version, leaving the rest alone. Considers every pending change when
+   * bAllPending is set, otherwise only RelPaths. OutReverted receives the
+   * workspace-relative paths that were reverted.
+   */
+  bool RevertUnchanged(
+    const FString &DaemonId,
+    const FString &WorkspaceId,
+    const TArray<FString> &RelPaths,
+    bool bAllPending,
+    TArray<FString> &OutReverted,
+    FString &OutError
+  );
+
   // ---- Settings / Workspace-creation API ----
 
   /**

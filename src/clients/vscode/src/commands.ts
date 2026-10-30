@@ -242,6 +242,24 @@ export function registerCommands(model: CheckpointModel): vscode.Disposable {
     await resources[0].repository.revert(resources);
   });
 
+  register("checkpoint.revertIfUnchanged", async (...args) => {
+    const resources = resolveResources(args);
+    if (resources.length === 0) {
+      return;
+    }
+    await resources[0].repository.revertUnchanged(
+      resources.map((r) => r.relPath),
+    );
+  });
+
+  register("checkpoint.revertUnchangedFiles", async (arg) => {
+    const repository = await resolveRepository(arg);
+    if (!repository) {
+      return;
+    }
+    await repository.revertUnchanged();
+  });
+
   // ── Line-range staging ────────────────────────────────────────────
   //
   // Mirrors the built-in git extension's Stage Change / Stage Selected Ranges

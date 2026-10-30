@@ -106,6 +106,8 @@ export type Channels = {
   "workspace:history:open-window": null;
   "workspace:pull": { changelistId: number | null; filePaths: string[] | null };
   "workspace:revert": { filePaths: string[] };
+  /** Reverts the files identical to their tracked version; null means all. */
+  "workspace:revert-unchanged": { filePaths: string[] | null };
   "workspace:submit": {
     message: string;
     /** Which branch's default changelist to submit. Defaults to the domain root. */

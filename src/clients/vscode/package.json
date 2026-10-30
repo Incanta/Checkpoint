@@ -104,6 +104,16 @@
         "icon": "$(discard)"
       },
       {
+        "command": "checkpoint.revertIfUnchanged",
+        "title": "Revert if Unchanged",
+        "category": "Checkpoint"
+      },
+      {
+        "command": "checkpoint.revertUnchangedFiles",
+        "title": "Revert Unchanged Files",
+        "category": "Checkpoint"
+      },
+      {
         "command": "checkpoint.stageChange",
         "title": "Stage Change",
         "category": "Checkpoint",
@@ -297,6 +307,10 @@
           "when": "false"
         },
         {
+          "command": "checkpoint.revertIfUnchanged",
+          "when": "false"
+        },
+        {
           "command": "checkpoint.stage",
           "when": "false"
         },
@@ -393,6 +407,11 @@
           "when": "scmProvider == checkpoint"
         },
         {
+          "command": "checkpoint.revertUnchangedFiles",
+          "group": "1_checkpoint@4",
+          "when": "scmProvider == checkpoint"
+        },
+        {
           "command": "checkpoint.newChangelist",
           "group": "2_changelists@1",
           "when": "scmProvider == checkpoint"
@@ -431,6 +450,11 @@
         },
         {
           "command": "checkpoint.revert",
+          "group": "1_modification",
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts"
+        },
+        {
+          "command": "checkpoint.revertIfUnchanged",
           "group": "1_modification",
           "when": "scmProvider == checkpoint && scmResourceGroup != conflicts"
         }
@@ -540,6 +564,11 @@
           "when": "scmProvider == checkpoint && scmResourceGroup =~ /^(unstaged$|branch:|changelist:)/ && scmResourceState =~ /checkedout/"
         },
         {
+          "command": "checkpoint.revertIfUnchanged",
+          "group": "1_modification@3",
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts && scmResourceState != untracked"
+        },
+        {
           "command": "checkpoint.resolveConflicts",
           "group": "1_modification@1",
           "when": "scmProvider == checkpoint && scmResourceGroup == conflicts"
@@ -564,6 +593,11 @@
         {
           "command": "checkpoint.revert",
           "group": "1_modification@2",
+          "when": "scmProvider == checkpoint && scmResourceGroup != conflicts"
+        },
+        {
+          "command": "checkpoint.revertIfUnchanged",
+          "group": "1_modification@3",
           "when": "scmProvider == checkpoint && scmResourceGroup != conflicts"
         },
         {

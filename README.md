@@ -69,6 +69,7 @@ chk log                 # Show version history
 chk branch              # List branches
 chk checkout file       # Check out a controlled file for editing
 chk revert file         # Revert files to head version
+chk revert -a           # Revert pending files identical to head version
 chk diff file           # Show diff for a file
 ```
 

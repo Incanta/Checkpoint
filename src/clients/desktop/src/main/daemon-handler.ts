@@ -2731,6 +2731,32 @@ export default class DaemonHandler {
       }
     });
 
+    // Revert only the files whose content matches their tracked version
+    ipcOn(this.ipcMain, "workspace:revert-unchanged", async (_event, data) => {
+      const currentWorkspace = store.get(currentWorkspaceAtom);
+      if (!currentWorkspace || this.isMocked) return;
+
+      const currentUser = store.get(currentUserAtom);
+      if (!currentUser) return;
+
+      try {
+        const client = await CreateDaemonClient();
+        await client.workspaces.pending.revertUnchanged.mutate({
+          daemonId: currentUser.daemonId,
+          workspaceId: currentWorkspace.id,
+          filePaths: data.filePaths ?? undefined,
+        });
+        this.workspaceRefresh();
+      } catch (error: any) {
+        console.error("Failed to revert unchanged files:", error);
+        if (this.webContents) {
+          ipcSend(this.webContents, "workspace:submit:error", {
+            message: error?.message || "Failed to revert unchanged files",
+          });
+        }
+      }
+    });
+
     // Add to ignored list
     ipcOn(this.ipcMain, "file:add-to-ignored", async (_event, data) => {
       const currentWorkspace = store.get(currentWorkspaceAtom);

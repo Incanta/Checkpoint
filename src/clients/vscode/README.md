@@ -10,7 +10,7 @@ A VS Code SCM extension for [Checkpoint](https://checkpointvcs.com). Like every 
 - Quick diff gutter and head-vs-working diffs backed by the daemon's Longtail storage
 - File decorations (badges and colors) in the explorer and editor tabs
 - Status bar items for the current branch (switch branches) and sync status (pull)
-- Stage files (including new ones) into pending changelists, check out and lock files, undo checkouts, revert changes
+- Stage files (including new ones) into pending changelists, check out and lock files, undo checkouts, revert changes, revert files whose content is unchanged
 - Changelist and per-file history browsing with diffs
 - Branch switching and creation
 - Sign in via device code or API token

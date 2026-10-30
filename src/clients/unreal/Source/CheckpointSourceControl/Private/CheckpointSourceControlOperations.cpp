@@ -683,6 +683,116 @@ bool FCheckpointRevertWorker::UpdateStates() {
   return RevertedFiles.Num() > 0;
 }
 
+// ---- RevertUnchanged ----
+
+bool FCheckpointRevertUnchangedWorker::Execute(
+  FCheckpointSourceControlCommand &InCommand
+) {
+  auto &SccProvider = GetProvider();
+  auto &Client = SccProvider.GetDaemonClient();
+  auto &Settings = SccProvider.AccessSettings();
+  const FString &DomainBranchName = Settings.GetDomainBranchName();
+
+  TArray<FString> RelPaths;
+  for (const FString &File : InCommand.Files) {
+    FString RelPath;
+    if (ToWorkspacePath(SccProvider, InCommand, File, TEXT("revert"), RelPath)) {
+      RelPaths.Add(RelPath);
+    }
+  }
+
+  FString Error;
+  bool bAllPending = false;
+
+  // The Changelists window passes a changelist and no files: only that
+  // changelist's files are considered, as `p4 revert -a -c` does.
+  if (InCommand.Files.Num() == 0) {
+    if (InCommand.Changelist.IsValid()) {
+      const FCheckpointSourceControlChangelist Changelist =
+        CommandChangelist(InCommand);
+
+      FCheckpointPendingChangelists Changelists;
+      if (!Client.ListChangelists(
+            Settings.GetDaemonId(),
+            Settings.GetWorkspaceId(),
+            Changelists,
+            Error
+          )) {
+        // An older daemon has no pending changelists; every file is then in
+        // its branch's default one.
+        UE_LOG(
+          LogCheckpointSourceControl,
+          Warning,
+          TEXT("ListChangelists failed: %s"),
+          *Error
+        );
+      }
+
+      TMap<FString, TSharedPtr<FJsonObject>> PendingFiles;
+      if (!Client.GetPendingFiles(
+            Settings.GetDaemonId(),
+            Settings.GetWorkspaceId(),
+            PendingFiles,
+            Error
+          )) {
+        ReportFailure(InCommand, TEXT("GetPendingFiles"), Error);
+        return false;
+      }
+
+      for (const auto &Pair : PendingFiles) {
+        if (ChangelistOf(Pair.Key, Pair.Value, Changelists, DomainBranchName) ==
+            Changelist) {
+          RelPaths.Add(Pair.Key);
+        }
+      }
+      if (RelPaths.Num() == 0) {
+        return true;
+      }
+    } else {
+      bAllPending = true;
+    }
+  } else if (RelPaths.Num() == 0) {
+    return false;
+  }
+
+  TArray<FString> Reverted;
+  if (!Client.RevertUnchanged(
+        Settings.GetDaemonId(),
+        Settings.GetWorkspaceId(),
+        RelPaths,
+        bAllPending,
+        Reverted,
+        Error
+      )) {
+    ReportFailure(InCommand, TEXT("RevertUnchanged"), Error);
+    return false;
+  }
+
+  for (const FString &RelPath : Reverted) {
+    RevertedFiles.Add(ToStateFilename(SccProvider, RelPath));
+  }
+
+  InCommand.ResultInfo.InfoMessages.Add(FText::FromString(FString::Printf(
+    TEXT("Reverted %d unchanged file(s)"), Reverted.Num()
+  )));
+  return true;
+}
+
+bool FCheckpointRevertUnchangedWorker::UpdateStates() {
+  auto &SccProvider = GetProvider();
+  for (const FString &File : RevertedFiles) {
+    auto State = SccProvider.GetStateInternal(File);
+    // Only tracked files are reverted here, so each is back to clean.
+    State->SetFileStatus(ECheckpointFileStatus::WritableControlled);
+    State->bStaged = false;
+  }
+  if (RevertedFiles.Num() > 0) {
+    SccProvider.RemoveFilesFromChangelists(RevertedFiles);
+    SccProvider.BroadcastStateChanged();
+  }
+  return RevertedFiles.Num() > 0;
+}
+
 // ---- Sync ----
 
 bool FCheckpointSyncWorker::Execute(
@@ -1712,6 +1822,13 @@ void CheckpointSourceControlWorkers::RegisterWorkers() {
     TEXT("Revert"),
     [](FCheckpointSourceControlProvider &P) -> FCheckpointWorkerRef {
       return MakeShareable(new FCheckpointRevertWorker(P));
+    }
+  );
+
+  Register(
+    TEXT("RevertUnchanged"),
+    [](FCheckpointSourceControlProvider &P) -> FCheckpointWorkerRef {
+      return MakeShareable(new FCheckpointRevertUnchangedWorker(P));
     }
   );
 

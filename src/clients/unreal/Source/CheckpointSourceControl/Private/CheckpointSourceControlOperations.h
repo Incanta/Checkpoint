@@ -137,6 +137,29 @@ public:
 };
 
 /**
+ * Worker for the RevertUnchanged operation.
+ * Reverts only the files whose content is identical to their head version,
+ * releasing their checkouts. With no files, works on the command's
+ * changelist, or every pending change when there is none.
+ */
+class FCheckpointRevertUnchangedWorker final
+  : public ICheckpointSourceControlWorker {
+public:
+  FCheckpointRevertUnchangedWorker(FCheckpointSourceControlProvider &InProvider) :
+    ICheckpointSourceControlWorker(InProvider) {}
+
+  virtual FName GetName() const override {
+    return TEXT("RevertUnchanged");
+  }
+
+  virtual bool Execute(FCheckpointSourceControlCommand &InCommand) override;
+
+  virtual bool UpdateStates() override;
+
+  TArray<FString> RevertedFiles;
+};
+
+/**
  * Worker for the Sync operation.
  * Pulls latest changes from the server.
  */

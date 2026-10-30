@@ -21,6 +21,7 @@
  *   merge <branch>                Merge a branch into the current branch
  *   checkout <file>               Check out a controlled file
  *   revert <file...>              Revert files to head version
+ *   revert -a [file...]           Revert files identical to head version
  *   diff <file>                   Show diff for a file
  *   init [orgName/repoName]       Initialize a workspace in the current directory
  *   unlink                        Unlink a workspace from the daemon
@@ -239,9 +240,14 @@ int main(int argc, char** argv) {
   // revert
   argparse::ArgumentParser revertCmd("revert");
   revertCmd.add_description("Revert files to their head version");
+  revertCmd.add_argument("-a", "--unchanged")
+      .help("Only revert files identical to their head version (all pending "
+            "changes when no files are given)")
+      .default_value(false)
+      .implicit_value(true);
   revertCmd.add_argument("files")
       .help("File(s) to revert")
-      .nargs(argparse::nargs_pattern::at_least_one);
+      .nargs(argparse::nargs_pattern::any);
 
   // diff
   argparse::ArgumentParser diffCmd("diff");
@@ -710,6 +716,16 @@ int main(int argc, char** argv) {
 
     if (program.is_subcommand_used(revertCmd)) {
       auto files = revertCmd.get<std::vector<std::string>>("files");
+      if (revertCmd.get<bool>("--unchanged")) {
+        return checkpoint::cmdRevertUnchanged(files);
+      }
+      if (files.empty()) {
+        std::cerr << "error: revert needs at least one file (or -a to revert "
+                     "unchanged files)"
+                  << std::endl;
+        std::cerr << revertCmd;
+        return 1;
+      }
       return checkpoint::cmdRevert(files);
     }
 

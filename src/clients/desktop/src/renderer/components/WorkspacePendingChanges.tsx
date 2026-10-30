@@ -429,7 +429,26 @@ export default function WorkspacePendingChanges() {
     if (!from) return [];
     const disabled = !sel.actionable || isSubmitting;
     const count = sel.paths.length > 1 ? ` ${sel.paths.length} items` : "";
+    return [
+      ...moveItems(sel, from, disabled, count),
+      {
+        label: "Revert if Unchanged",
+        disabled: isSubmitting || sel.paths.length === 0,
+        command: () =>
+          ipc.sendMessage("workspace:revert-unchanged", {
+            filePaths: sel.paths,
+          }),
+      },
+    ];
+  };
 
+  /** Stage/unstage/move for the selection. */
+  const moveItems = (
+    sel: PendingSelection,
+    from: (typeof buckets)[number],
+    disabled: boolean,
+    count: string,
+  ): MenuItem[] => {
     const targets: MenuItem[] = buckets
       .filter((b) => b.kind !== "unstaged" && b.id !== from.id)
       .map((b) => ({
@@ -564,6 +583,14 @@ export default function WorkspacePendingChanges() {
               label: "Refresh (Reload Ignore/Hidden)",
               onClick: () => {
                 ipc.sendMessage("workspace:refresh-ignores", null);
+              },
+            },
+            {
+              label: "Revert Unchanged Files",
+              onClick: () => {
+                ipc.sendMessage("workspace:revert-unchanged", {
+                  filePaths: null,
+                });
               },
             },
           ]}

@@ -1,5 +1,9 @@
 import { publicProcedure, router } from "../../trpc.js";
-import { CreateApiClientAuth } from "@checkpointvcs/common";
+import {
+  CreateApiClientAuth,
+  hashFileMD5,
+  type WorkspaceStateFile,
+} from "@checkpointvcs/common";
 import { z } from "zod";
 import fs from "fs/promises";
 import path from "path";
@@ -36,6 +40,7 @@ import {
   readStagedBlob,
   writeStagedBlob,
   clearStagedBlob,
+  hasStagedBlob,
 } from "../../../util/staged-blobs.js";
 import { prepareCompositeRoot } from "../../../util/composite-root.js";
 import {
@@ -122,6 +127,83 @@ async function readHeadAndWorktree(
       "utf-8",
     ),
   };
+}
+
+/**
+ * Why a pending change is not provably identical to the version it is
+ * tracked at, or null when it is. When it compared content, records the
+ * file's MD5 in `md5s`.
+ */
+async function whyNotUnchanged(
+  daemonId: string,
+  workspace: { repoId: string; localPath: string },
+  relPath: string,
+  pendingFile: File | undefined,
+  headInfo: WorkspaceStateFile | undefined,
+  md5s: Record<string, string>,
+): Promise<string | null> {
+  if (!pendingFile) {
+    return "Not a pending change";
+  }
+
+  switch (pendingFile.status) {
+    case FileStatus.NotChangedCheckedOut:
+      // Refresh already found the content unchanged; only the claim is left.
+      return null;
+    case FileStatus.ChangedNotCheckedOut:
+    case FileStatus.ChangedCheckedOut:
+      break;
+    case FileStatus.Local:
+      return "Not tracked";
+    case FileStatus.Deleted:
+      return "Deleted";
+    case FileStatus.Renamed:
+      return "Renamed";
+    case FileStatus.Conflicted:
+    case FileStatus.MergeConflict:
+      return "Has conflicts";
+    default:
+      return "Not a content change";
+  }
+
+  if (!headInfo || !headInfo.changelist) {
+    return "Not tracked";
+  }
+  if (pendingFile.executableChange !== undefined) {
+    return "Executable bit changed";
+  }
+  if (hasStagedBlob(workspace.localPath, relPath)) {
+    // Staged hunks differ from the head even if the worktree does not.
+    return "Partially staged";
+  }
+
+  const localPath = resolveInWorkspace(workspace.localPath, relPath);
+  const stat = await fs.stat(localPath);
+  if (stat.size !== headInfo.size) {
+    return "Content differs";
+  }
+
+  const localMd5 = await hashFileMD5(localPath);
+  let headMd5 = headInfo.md5;
+  if (headMd5 === "") {
+    // Pulls defer hashing, so compare with the head copy itself.
+    const head = await readFileFromChangelist({
+      workspace: {
+        daemonId,
+        repoId: workspace.repoId,
+        localPath: workspace.localPath,
+      },
+      filePath: relPath,
+      changelistNumber: headInfo.changelist,
+    });
+    headMd5 = await hashFileMD5(head.cachePath);
+  }
+
+  if (localMd5 !== headMd5) {
+    return "Content differs";
+  }
+  md5s[relPath] = localMd5;
+  return null;
 }
 
 export const pendingRouter = router({
@@ -1772,6 +1854,90 @@ export const pendingRouter = router({
       }
 
       return { results };
+    }),
+
+  /**
+   * Reverts the pending changes whose content is identical to the version
+   * they are tracked at, as Perforce's "Revert Unchanged Files" does: a file
+   * that was checked out, or rewritten with the same bytes, stops being a
+   * pending change and its claim is released. Files that differ are left
+   * alone, so this never discards work.
+   *
+   * Considers `filePaths` when given, otherwise every pending change.
+   */
+  revertUnchanged: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        workspaceId: z.string(),
+        filePaths: z.array(z.string()).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { manager, workspace } = resolveWorkspace(ctx, input);
+
+      const pending = await manager.refreshWorkspaceContents(workspace);
+      const workspaceState = manager.getWorkspaceState(workspace.id);
+      const candidates = input.filePaths
+        ? [...new Set(input.filePaths.map(normalizeRelPath))]
+        : Object.keys(pending?.files ?? {});
+
+      const unchanged: string[] = [];
+      /** Content hashes learned along the way, recorded as the baseline's. */
+      const md5s: Record<string, string> = {};
+      const kept: { filePath: string; reason: string }[] = [];
+
+      for (const relPath of candidates) {
+        try {
+          const reason = await whyNotUnchanged(
+            input.daemonId,
+            workspace,
+            relPath,
+            pending?.files[relPath],
+            workspaceState?.files[relPath],
+            md5s,
+          );
+          if (reason) {
+            kept.push({ filePath: relPath, reason });
+          } else {
+            unchanged.push(relPath);
+          }
+        } catch (error: any) {
+          kept.push({
+            filePath: relPath,
+            reason: error?.message || "Unknown error",
+          });
+        }
+      }
+
+      if (unchanged.length === 0) {
+        return { reverted: [] as string[], kept };
+      }
+
+      const client = await CreateApiClientAuth(input.daemonId);
+      for (const relPath of unchanged) {
+        try {
+          await client.file.releaseClaim.mutate({
+            repoId: workspace.repoId,
+            workspaceId: workspace.id,
+            filePath: relPath,
+          });
+        } catch {
+          // Not claimed, which is fine
+        }
+      }
+
+      // The content already matches, so nothing on disk is rewritten: record
+      // that it does (only for files this compared, since a checked-out file
+      // that refresh already found unchanged needs nothing recorded), take the
+      // files out of staging and any changelist, and forget any executable bit
+      // set for them.
+      await manager.markFilesPristine(workspace, Object.keys(md5s), md5s);
+      await manager.unstage(workspace, unchanged);
+      await assignToPendingChangelist(workspace.localPath, unchanged, null);
+      await manager.dropPendingModes(workspace, unchanged);
+
+      return { reverted: unchanged, kept };
     }),
 
   /**

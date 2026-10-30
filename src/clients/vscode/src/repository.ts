@@ -1684,6 +1684,35 @@ export class CheckpointRepository implements vscode.Disposable {
     await this.refresh();
   }
 
+  /**
+   * Reverts the files whose content is identical to their tracked version,
+   * or every such pending change when `relPaths` is omitted. Nothing is
+   * discarded, so there is no confirmation.
+   */
+  public async revertUnchanged(relPaths?: string[]): Promise<void> {
+    try {
+      const client = await this.model.getClient();
+      const { reverted } =
+        await client.workspaces.pending.revertUnchanged.mutate({
+          daemonId: this.daemonId,
+          workspaceId: this.workspaceId,
+          filePaths: relPaths,
+        });
+      void vscode.window.setStatusBarMessage(
+        reverted.length === 0
+          ? "Checkpoint: no unchanged files to revert"
+          : `Checkpoint: reverted ${reverted.length} unchanged file(s)`,
+        5000,
+      );
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Checkpoint: revert unchanged failed. ${errorMessage(error)}`,
+      );
+    }
+
+    await this.refresh();
+  }
+
   /** Stage files, optionally into a feature branch's bucket. */
   public async stage(relPaths: string[], branchName?: string): Promise<void> {
     try {
