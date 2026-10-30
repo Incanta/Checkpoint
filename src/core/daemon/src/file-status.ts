@@ -354,7 +354,9 @@ export function matchesPattern(
 ): boolean {
   const normalized = normalizeRelativePath(relativePath);
   // The workspace root itself is never ignorable, and `ignore` throws on "".
-  if (!normalized) return false;
+  // It also throws on a path outside the root ("../x"), which no rule here
+  // can cover anyway.
+  if (!normalized || !ignore.isPathValid(normalized)) return false;
 
   if (matcher.ignores(normalized)) return true;
   if (!isDirectory || normalized.endsWith("/")) return false;
