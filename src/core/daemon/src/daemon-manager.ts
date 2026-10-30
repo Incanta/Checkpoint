@@ -751,10 +751,13 @@ export class DaemonManager {
     relativePaths: string[],
   ): Promise<string[]> {
     const matcher = this.getIgnoreCache(workspace.id).ignore;
+    const tracked = this.workspaceStates.get(workspace.id)?.files ?? {};
 
     const results = await Promise.all(
       relativePaths.map(async (relativePath) => {
         try {
+          // As in git, ignore rules only apply to untracked files.
+          if (tracked[normalizeRelativePath(relativePath)]) return false;
           if (matchesPattern(matcher, relativePath)) return true;
           // Directory-only rules (`Saved/`) need to know the path is a
           // directory. Only stat when the directory form would match, so
@@ -1390,6 +1393,64 @@ export class DaemonManager {
     };
   }
 
+  /**
+   * The pending entry for a tracked file that `.chkignore` or `.chkhidden`
+   * covers. Both scans pass over such paths without looking at them (so a
+   * build into an ignored folder costs nothing), and settle the tracked files
+   * there here instead, so the full and incremental scans agree.
+   *
+   * - `.chkignore`: as in git, ignore rules apply only to untracked files. A
+   *   tracked file is checked like any other: it shows when edited, and as
+   *   deleted only when it is gone from disk. Leaving the repo is the user's
+   *   explicit delete, never a side effect of the rules.
+   * - `.chkhidden`: its changes are hidden, a delete included, even when
+   *   `.chkignore` covers it too.
+   * - Inside a nested workspace: that workspace's, never this one's to show.
+   *
+   * Only called for paths that one of the two covers.
+   */
+  private async excludedTrackedEntry(
+    workspace: Workspace,
+    relativePath: string,
+    baselineFile: WorkspaceStateFile,
+    ignoreCache: IgnoreCache,
+    checkedOutIds: Set<string>,
+  ): Promise<File | null> {
+    if (ownerOf(ignoreCache.owned, relativePath) !== null) return null;
+    // Hidden wins: ignore rules do nothing to a tracked file, hidden ones do.
+    if (matchesPattern(ignoreCache.hidden, relativePath)) return null;
+    if (!isSafeWorkspacePath(relativePath)) return null;
+
+    let stat: Stats | null = null;
+    try {
+      stat = await fs.lstat(path.join(workspace.localPath, relativePath));
+    } catch {
+      // Gone from disk.
+    }
+
+    if (stat && !stat.isDirectory()) {
+      return this.detectFileChange(
+        workspace,
+        relativePath,
+        stat,
+        baselineFile,
+        checkedOutIds,
+      );
+    }
+
+    return {
+      path: relativePath,
+      type: FileType.Unknown,
+      size: 0,
+      modifiedAt: 0,
+      status: FileStatus.Deleted,
+      id: baselineFile.fileId,
+      changelist: baselineFile.changelist,
+      claims: [],
+      staged: false,
+    };
+  }
+
   // ─── Checkout-Only Helpers ─────────────────────────────────────────
 
   /**
@@ -1761,12 +1822,21 @@ export class DaemonManager {
 
     await Promise.all(promises);
 
-    // Check for deleted files (in baseline but not on disk)
+    // Check for deleted files (in baseline but not on disk). Tracked files
+    // the walk skipped as ignored or hidden are settled separately below.
+    const excluded: Array<[string, WorkspaceStateFile]> = [];
     for (const [stateKey, baselineFile] of Object.entries(
       baselineState.files,
     )) {
       // Normalize key (strip leading slash for compatibility)
       const relativePath = stateKey.replace(/^\//, "");
+      if (
+        !seenBaselineFiles.has(relativePath) &&
+        isIgnoredOrHidden(ignoreCache, relativePath)
+      ) {
+        excluded.push([relativePath, baselineFile]);
+        continue;
+      }
       // A path this workspace cannot hold (an older daemon recorded it) is
       // missing because it cannot exist here, not because the user deleted
       // it. Reporting it as deleted would let "submit everything" delete it
@@ -1795,6 +1865,23 @@ export class DaemonManager {
         };
         result.numChanges++;
       }
+    }
+
+    const excludedEntries = await Promise.all(
+      excluded.map(([relativePath, baselineFile]) =>
+        this.excludedTrackedEntry(
+          workspace,
+          relativePath,
+          baselineFile,
+          ignoreCache,
+          checkedOutIds,
+        ),
+      ),
+    );
+    for (const entry of excludedEntries) {
+      if (!entry) continue;
+      result.files[entry.path] = entry;
+      result.numChanges++;
     }
 
     // Add unchanged but checked-out files
@@ -1868,12 +1955,31 @@ export class DaemonManager {
       // ".checkpointrc" is the user's.
       if (isCheckpointDirPath(relativePath)) continue;
 
+      const baselineFile = baselineState.files[relativePath];
+
       // Skip ignored / hidden paths. The dirty set has no type information,
-      // so probe both the file and the directory form of the path.
-      if (isIgnoredOrHidden(ignoreCache, relativePath, true)) {
+      // so probe both the file and the directory form of the path, except
+      // for a tracked path, which is a file. A tracked file shows as the full
+      // scan shows it (see excludedTrackedEntry).
+      if (
+        isIgnoredOrHidden(ignoreCache, relativePath, baselineFile === undefined)
+      ) {
         if (result.files[relativePath]) {
           delete result.files[relativePath];
           result.numChanges--;
+        }
+        const entry =
+          baselineFile &&
+          (await this.excludedTrackedEntry(
+            workspace,
+            relativePath,
+            baselineFile,
+            ignoreCache,
+            checkedOutIds,
+          ));
+        if (entry) {
+          result.files[relativePath] = entry;
+          result.numChanges++;
         }
         continue;
       }
@@ -1881,7 +1987,6 @@ export class DaemonManager {
       const fullPath = path
         .join(workspace.localPath, relativePath)
         .replace(/\\/g, "/");
-      const baselineFile = baselineState.files[relativePath];
 
       // Remove any previous pending-change entry for this file
       if (result.files[relativePath]) {
@@ -2181,10 +2286,17 @@ export class DaemonManager {
     // dirty set past the incremental threshold and force full rescans. A
     // change to the ignore rules drops the cache, so a path these rules
     // ignore but new ones would not is still picked up by the rescan.
-    if (
-      isIgnoredOrHidden(this.getIgnoreCache(workspace.id), relativePath, true)
-    ) {
-      return;
+    // A tracked file (or a folder holding some) still counts: deleting or
+    // restoring one that is now ignored changes how it shows.
+    const ignoreCache = this.getIgnoreCache(workspace.id);
+    if (isIgnoredOrHidden(ignoreCache, relativePath, true)) {
+      const index = this.getPathIndex(workspace.id);
+      const tracked =
+        this.workspaceStates.get(workspace.id)?.files[relativePath] !==
+          undefined || index.hasTrackedDir(relativePath);
+      if (!tracked || ownerOf(ignoreCache.owned, relativePath) !== null) {
+        return;
+      }
     }
 
     // Mark file as dirty for incremental refresh

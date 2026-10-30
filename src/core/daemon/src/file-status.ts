@@ -499,7 +499,13 @@ export async function getFileStatus(
 
   // Ignored paths are reported as such even when they're directories, so the
   // UI can grey out a whole excluded subtree instead of showing it as Unknown.
-  if (matchesPattern(ignoreCache.ignore, relativePath, isDirectory)) {
+  // As in git, ignore rules only apply to untracked files: a tracked file is
+  // still the repo's, whatever .chkignore says.
+  const tracked = !isDirectory && !!workspaceState?.files[relativePath];
+  if (
+    !tracked &&
+    matchesPattern(ignoreCache.ignore, relativePath, isDirectory)
+  ) {
     return { status: FileStatus.Ignored, fileId: null, changelist: null };
   }
 
