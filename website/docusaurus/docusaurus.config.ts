@@ -6,6 +6,9 @@ const config: Config = {
   title: "Checkpoint Documentation",
   tagline: "Version control for creative workflows",
   favicon: "favicon.ico",
+  // Share the Next.js site's public assets so /logo.svg resolves in dev too.
+  // In production move-build.js merges into the Next.js output, which already serves them.
+  staticDirectories: ["static", "../public"],
 
   url: "https://checkpointvcs.com",
   baseUrl: "/",
@@ -66,7 +69,7 @@ const config: Config = {
       title: "Checkpoint",
       logo: {
         alt: "Checkpoint Logo",
-        src: "img/logo.svg",
+        src: "logo.svg",
       },
       items: [
         {

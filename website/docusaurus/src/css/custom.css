@@ -26,3 +26,17 @@
   --ifm-color-primary-lightest: #D1A1FA;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
 }
+
+/* Docusaurus sets the announcement bar colors inline (white by default),
+   so override them with a brand tint that follows the theme. */
+.theme-announcement-bar {
+  background-color: #F3EBFF !important;
+  color: #2E1065 !important;
+  border-bottom-color: #E2D0FD;
+}
+
+[data-theme='dark'] .theme-announcement-bar {
+  background-color: #241339 !important;
+  color: #EDE4FB !important;
+  border-bottom-color: #3B1F5E;
+}
