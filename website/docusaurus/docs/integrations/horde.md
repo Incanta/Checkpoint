@@ -5,6 +5,10 @@ slug: /horde
 
 # Unreal Horde Integration
 
+:::danger
+The Horde integration is still work-in-progress and still contains bugs.
+:::
+
 Checkpoint ships a version control plugin for [Unreal Horde](https://dev.epicgames.com/documentation/en-us/unreal-engine/horde-in-unreal-engine), Epic's build automation and CI platform. It gives Horde the same core capabilities its built-in Perforce integration provides: commit ingestion, build scheduling on new changelists, config files versioned in your repository, and agent workspace sync, all backed by a Checkpoint server.
 
 The plugin binds to Horde's assemblies exactly, so each build targets one Horde release (for example Horde 5.8). You never need to recompile the Horde server itself.
@@ -19,10 +23,10 @@ Not yet supported: preflight builds (building shelved changes before submit), Au
 
 ## Components
 
-| Component | Deployed to | Purpose |
-|---|---|---|
-| `HordeServer.Checkpoint.dll` + `Checkpoint.Api.dll` | Horde server directory | Version control plugin (commits, scheduling, config source) |
-| Checkpoint JobDriver | Horde agents (via the agent tool zip) | Workspace materialization on build agents |
+| Component                                           | Deployed to                           | Purpose                                                     |
+| --------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
+| `HordeServer.Checkpoint.dll` + `Checkpoint.Api.dll` | Horde server directory                | Version control plugin (commits, scheduling, config source) |
+| Checkpoint JobDriver                                | Horde agents (via the agent tool zip) | Workspace materialization on build agents                   |
 
 The JobDriver piece exists because Horde's agent-side sync layer is compiled into the JobDriver process rather than loaded as a plugin. Checkpoint's JobDriver is a strict superset of the stock one (Perforce workspaces keep working), and a repack script injects it into the standard agent tool zip.
 
@@ -59,13 +63,13 @@ Set the `CHECKPOINT_API_TOKEN` environment variable for the Horde server process
 
 Connection fields:
 
-| Field | Default | Description |
-|---|---|---|
-| `Id` | `default` | Name used by cluster configs and `checkpoint://` URIs. |
-| `ServerUrl` | `CHECKPOINT_ENDPOINT` env var | Base URL of the Checkpoint web app. |
-| `Token` | none | API token. Prefer `TokenEnvVar` to keep secrets out of config files. |
-| `TokenEnvVar` | `CHECKPOINT_API_TOKEN` | Environment variable to read the token from when `Token` is unset. |
-| `ServiceAccount` | none | Service account name reported to agents (informational). |
+| Field            | Default                       | Description                                                          |
+| ---------------- | ----------------------------- | -------------------------------------------------------------------- |
+| `Id`             | `default`                     | Name used by cluster configs and `checkpoint://` URIs.               |
+| `ServerUrl`      | `CHECKPOINT_ENDPOINT` env var | Base URL of the Checkpoint web app.                                  |
+| `Token`          | none                          | API token. Prefer `TokenEnvVar` to keep secrets out of config files. |
+| `TokenEnvVar`    | `CHECKPOINT_API_TOKEN`        | Environment variable to read the token from when `Token` is unset.   |
+| `ServiceAccount` | none                          | Service account name reported to agents (informational).             |
 
 With no `Connections` at all, the plugin uses a `default` connection built from the `CHECKPOINT_ENDPOINT` and `CHECKPOINT_API_TOKEN` environment variables.
 
@@ -78,13 +82,23 @@ With no `Connections` at all, the plugin uses a `default` connection built from 
       "perforceClusters": [
         {
           "name": "Checkpoint",
-          "servers": [{ "serverAndPort": "127.0.0.1:1", "resolveDns": false, "healthCheck": false }]
+          "servers": [
+            {
+              "serverAndPort": "127.0.0.1:1",
+              "resolveDns": false,
+              "healthCheck": false
+            }
+          ]
         }
       ]
     },
     "checkpoint": {
       "clusters": [
-        { "name": "Checkpoint", "connection": "default", "pollIntervalSeconds": 15 }
+        {
+          "name": "Checkpoint",
+          "connection": "default",
+          "pollIntervalSeconds": 15
+        }
       ]
     }
   }
@@ -93,14 +107,14 @@ With no `Connections` at all, the plugin uses a `default` connection built from 
 
 Cluster fields under `plugins.checkpoint.clusters`:
 
-| Field | Default | Description |
-|---|---|---|
-| `name` | `Checkpoint` | Matched against a stream's `clusterName` and the placeholder Perforce cluster. |
-| `connection` | `default` | Connection profile from the server config. |
-| `serverUrl` | from the connection | Optional endpoint override for this cluster. |
-| `token` | from the connection | Optional token override. Can reference a secret with `horde:secret://`. |
-| `pollIntervalSeconds` | `15` | How often to poll for new changelists. |
-| `maxCommitsPerPoll` | `1000` | Most changelists fetched in one catch-up. A stream further behind skips older changelists. |
+| Field                 | Default             | Description                                                                                |
+| --------------------- | ------------------- | ------------------------------------------------------------------------------------------ |
+| `name`                | `Checkpoint`        | Matched against a stream's `clusterName` and the placeholder Perforce cluster.             |
+| `connection`          | `default`           | Connection profile from the server config.                                                 |
+| `serverUrl`           | from the connection | Optional endpoint override for this cluster.                                               |
+| `token`               | from the connection | Optional token override. Can reference a secret with `horde:secret://`.                    |
+| `pollIntervalSeconds` | `15`                | How often to poll for new changelists.                                                     |
+| `maxCommitsPerPoll`   | `1000`              | Most changelists fetched in one catch-up. A stream further behind skips older changelists. |
 
 5. Configure a stream to use Checkpoint. In the stream's config (`*.horde.json`):
 

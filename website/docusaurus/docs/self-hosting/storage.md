@@ -8,11 +8,11 @@ Checkpoint keeps file content (chunked, deduplicated, compressed blocks and the 
 
 ## Choosing a mode
 
-| Mode    | Where content lives                                   | How clients reach it                                        | Good for                                         |
-| ------- | ----------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------ |
-| `local` | The storage server's own disk (default)               | Through the storage server                                  | Trying Checkpoint out and small teams            |
-| `s3`    | One bucket on any S3-compatible store                 | Through the storage server, which proxies to the bucket     | Larger self-hosted setups, existing object storage |
-| `r2`    | Cloudflare R2, one bucket per repository              | Directly to R2, with short-lived scoped credentials         | Cloud storage with free egress                   |
+| Mode    | Where content lives                      | How clients reach it                                    | Good for                                      |
+| ------- | ---------------------------------------- | ------------------------------------------------------- | --------------------------------------------- |
+| `local` | The storage server's own disk (default)  | Through the storage server                              | Fast, local storage but needs a backup plan   |
+| `s3`    | One bucket on any S3-compatible store    | Through the storage server, which proxies to the bucket | Usually cheaper cloud storage with redundancy |
+| `r2`    | Cloudflare R2, one bucket per repository | Directly to R2, with short-lived scoped credentials     | S3-like cloud storage with free egress        |
 
 S3-compatible stores include MinIO, SeaweedFS's S3 gateway, AWS S3, and DigitalOcean Spaces.
 
@@ -27,9 +27,9 @@ Two files configure storage, and some values must agree between them:
 - `config/app/storage.yaml` (the app)
 - `config/server/storage.yaml` (the storage server)
 
-| Key               | App | Server | Notes                                                                                       |
-| ----------------- | --- | ------ | ------------------------------------------------------------------------------------------- |
-| `mode`            | yes | yes    | `local`, `s3`, or `r2`. Must be the same in both files.                                     |
+| Key               | App | Server | Notes                                                                                          |
+| ----------------- | --- | ------ | ---------------------------------------------------------------------------------------------- |
+| `mode`            | yes | yes    | `local`, `s3`, or `r2`. Must be the same in both files.                                        |
 | `jwt.signing-key` | yes | yes    | Must be the same value in both. The Compose bundle sets both to `secret\|storage_signing_key`. |
 
 The app signs a storage token for each client request and the storage server verifies it with the shared key. Tokens last `token-expiration-seconds` (3600 by default, set in the app's `storage.yaml`). The `CHECKPOINT_STORAGE_SIGNING_KEY` environment variable overrides `jwt.signing-key` if set; set it on both services if you use it.
@@ -66,10 +66,10 @@ The storage server keeps all content in one bucket, under a prefix per organizat
    # config/server/storage.yaml
    mode: "s3"
    s3:
-     endpoint: "http://minio:9000"   # or https://s3.<region>.amazonaws.com
+     endpoint: "http://minio:9000" # or https://s3.<region>.amazonaws.com
      region: "us-east-1"
      bucket: "checkpoint"
-     force-path-style: true          # MinIO and SeaweedFS usually need this
+     force-path-style: true # MinIO and SeaweedFS usually need this
      access-key-id: "secret|s3_access_key_id"
      secret-access-key: "secret|s3_secret_access_key"
    ```
@@ -82,13 +82,13 @@ The storage server keeps all content in one bucket, under a prefix per organizat
    s3_secret_access_key=...
    ```
 
-| Key                   | Meaning                                                                                  |
-| --------------------- | ---------------------------------------------------------------------------------------- |
-| `s3.endpoint`         | The S3 API endpoint.                                                                     |
-| `s3.region`           | The bucket's region. MinIO and SeaweedFS accept any value.                               |
-| `s3.bucket`           | The one bucket used for every repository.                                                |
-| `s3.force-path-style` | Use `endpoint/bucket/key` URLs instead of `bucket.endpoint/key`. Default `true`.         |
-| `s3.access-key-id`, `s3.secret-access-key` | Server-side credentials with full access to the bucket.         |
+| Key                                        | Meaning                                                                          |
+| ------------------------------------------ | -------------------------------------------------------------------------------- |
+| `s3.endpoint`                              | The S3 API endpoint.                                                             |
+| `s3.region`                                | The bucket's region. MinIO and SeaweedFS accept any value.                       |
+| `s3.bucket`                                | The one bucket used for every repository.                                        |
+| `s3.force-path-style`                      | Use `endpoint/bucket/key` URLs instead of `bucket.endpoint/key`. Default `true`. |
+| `s3.access-key-id`, `s3.secret-access-key` | Server-side credentials with full access to the bucket.                          |
 
 Run the S3 store yourself, outside this Compose file (for example a MinIO container on the same Docker network). The storage server must be able to reach `s3.endpoint`. Clients do not need to.
 
@@ -110,7 +110,7 @@ Set `mode: "r2"` and the `r2` block in **both** storage files:
 # config/app/storage.yaml and config/server/storage.yaml
 mode: "r2"
 r2:
-  account-id: "0123456789abcdef0123456789abcdef"   # a literal, not a secret
+  account-id: "0123456789abcdef0123456789abcdef" # a literal, not a secret
   access-key-id: "secret|r2_access_key_id"
   secret-access-key: "secret|r2_secret_access_key"
   api-token: "secret|r2_api_token"
@@ -137,10 +137,10 @@ index:
   cache-bytes: 1073741824
 ```
 
-| Key                 | Default        | Meaning                                                                                                                                                       |
-| ------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `index.signing-key` | empty          | Key for the MACs on index object names. Empty means the storage signing key is used. `CHECKPOINT_STORAGE_INDEX_KEY` overrides it. A `secret\|name` reference works. |
-| `index.cache-bytes` | 1 GiB          | Upper bound on memory used for in-memory repository indexes. Least recently used repositories are dropped past it.                                            |
+| Key                 | Default | Meaning                                                                                                                                                             |
+| ------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `index.signing-key` | empty   | Key for the MACs on index object names. Empty means the storage signing key is used. `CHECKPOINT_STORAGE_INDEX_KEY` overrides it. A `secret\|name` reference works. |
+| `index.cache-bytes` | 1 GiB   | Upper bound on memory used for in-memory repository indexes. Least recently used repositories are dropped past it.                                                  |
 
 Set `index.signing-key` to its own random value (`openssl rand -hex 32`) if you might ever rotate the storage signing key. Otherwise, changing the signing key invalidates every existing index segment, which costs re-uploads of content that was already stored.
 
@@ -148,13 +148,13 @@ Set `index.signing-key` to its own random value (`openssl rand -hex 32`) if you 
 
 How content is chunked, hashed, and compressed is one setting for the whole instance, sent to every client with its storage token, so teammates never need matching client configs. The defaults suit most teams:
 
-| Key                       | Default             |
-| ------------------------- | ------------------- |
-| `target-chunk-size`       | `32768` (32 KiB)    |
-| `target-block-size`       | `8388608` (8 MiB)   |
-| `max-chunks-per-block`    | `1024`              |
-| `min-block-usage-percent` | `80`                |
-| `hashing-algo`            | `blake3` (`blake2`, `blake3`, or `meow`) |
+| Key                       | Default                                                                                                                                                                 |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target-chunk-size`       | `32768` (32 KiB)                                                                                                                                                        |
+| `target-block-size`       | `8388608` (8 MiB)                                                                                                                                                       |
+| `max-chunks-per-block`    | `1024`                                                                                                                                                                  |
+| `min-block-usage-percent` | `80`                                                                                                                                                                    |
+| `hashing-algo`            | `blake3` (`blake2`, `blake3`, or `meow`)                                                                                                                                |
 | `compression-algo`        | `zstd` (also `none`, `lz4`, `zstd_min`, `zstd_low`, `zstd_high`, `zstd_max`, `brotli`, `brotli_min`, `brotli_max`, `brotli_text`, `brotli_text_min`, `brotli_text_max`) |
 
 To change them, create `config/app/longtail.yaml` with only the keys you want to override.
