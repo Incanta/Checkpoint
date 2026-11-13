@@ -27,7 +27,8 @@ declare module "@tanstack/react-table" {
   interface ColumnMeta<TData extends RowData, TValue> {
     /**
      * Takes the space the other columns leave. At most one column should
-     * set this; it is not resizable itself.
+     * set this. Dragging either of its edges resizes the neighbor across
+     * that edge, so the boundary still follows the pointer.
      */
     fill?: boolean;
     /**
@@ -175,22 +176,10 @@ export function DataTable<T>({
     data,
     columns,
     getRowId: (row) => getRowId(row),
+    // Sizes only change through the boundary drag below, which writes
+    // userSizes directly.
     state: { sorting, columnSizing },
     onSortingChange: setSorting,
-    onColumnSizingChange: (updater) => {
-      const next =
-        typeof updater === "function" ? updater(columnSizing) : updater;
-      // Only keep what differs from the content-based width, so a later
-      // re-measure still applies to columns the user never touched.
-      const changed: ColumnSizingState = {};
-      for (const [id, size] of Object.entries(next)) {
-        if (userSizes[id] !== undefined || autoSizes[id] !== size) {
-          changed[id] = size;
-        }
-      }
-      setUserSizes(changed);
-    },
-    columnResizeMode: "onChange",
     // TanStack sorts numbers descending first, which for already
     // newest-first data looks like the click did nothing.
     sortDescFirst: false,
@@ -200,6 +189,36 @@ export function DataTable<T>({
 
   const rows = table.getRowModel().rows;
   const leafColumns = table.getVisibleLeafColumns();
+  const fillIndex = leafColumns.findIndex((c) => c.columnDef.meta?.fill);
+
+  /**
+   * Each handle sits on the boundary to the right of column `index`, and
+   * dragging it moves that boundary with the pointer. Left of the fill
+   * column that means resizing the column itself (the fill column absorbs
+   * the change); from the fill column rightward it means resizing the
+   * column on the far side of the boundary, since the fill column's width
+   * isn't fixed. With a fill column, the last column's right edge is the
+   * table's edge and has no handle.
+   */
+  const boundaryTarget = (index: number) => {
+    if (fillIndex < 0 || index < fillIndex) {
+      return { column: leafColumns[index], sign: 1 };
+    }
+    if (index + 1 < leafColumns.length) {
+      return { column: leafColumns[index + 1], sign: -1 };
+    }
+    return null;
+  };
+
+  const [resizingHandle, setResizingHandle] = useState<string | null>(null);
+  const dragRef = useRef<{
+    targetId: string;
+    sign: number;
+    startX: number;
+    startSize: number;
+    min: number;
+    max: number;
+  } | null>(null);
 
   const gridTemplateColumns = leafColumns
     .map((column) =>
@@ -345,11 +364,11 @@ export function DataTable<T>({
           className="sticky top-0 z-10 grid border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] text-sm font-semibold text-[var(--color-text-primary)]"
           style={{ gridTemplateColumns, height: HEADER_HEIGHT }}
         >
-          {table.getFlatHeaders().map((header) => {
+          {table.getFlatHeaders().map((header, index) => {
             const column = header.column;
             const sorted = column.getIsSorted();
-            const canResize =
-              column.getCanResize() && !column.columnDef.meta?.fill;
+            const target = boundaryTarget(index);
+            const canResize = target !== null && target.column.getCanResize();
             return (
               <div
                 key={header.id}
@@ -379,14 +398,55 @@ export function DataTable<T>({
                     />
                   )}
                 </button>
-                {canResize && (
+                {canResize && target && (
                   <div
-                    onMouseDown={header.getResizeHandler()}
-                    onTouchStart={header.getResizeHandler()}
-                    onDoubleClick={() => resetColumnSize(column.id)}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      e.preventDefault();
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      const def = target.column.columnDef;
+                      dragRef.current = {
+                        targetId: target.column.id,
+                        sign: target.sign,
+                        startX: e.clientX,
+                        startSize: target.column.getSize(),
+                        min: def.minSize ?? 40,
+                        max: def.maxSize ?? Number.MAX_SAFE_INTEGER,
+                      };
+                      setResizingHandle(header.id);
+                    }}
+                    onPointerMove={(e) => {
+                      const drag = dragRef.current;
+                      if (!drag) return;
+                      const size = Math.round(
+                        Math.min(
+                          drag.max,
+                          Math.max(
+                            drag.min,
+                            drag.startSize +
+                              drag.sign * (e.clientX - drag.startX),
+                          ),
+                        ),
+                      );
+                      setUserSizes((sizes) =>
+                        sizes[drag.targetId] === size
+                          ? sizes
+                          : { ...sizes, [drag.targetId]: size },
+                      );
+                    }}
+                    onPointerUp={(e) => {
+                      e.currentTarget.releasePointerCapture(e.pointerId);
+                      dragRef.current = null;
+                      setResizingHandle(null);
+                    }}
+                    onLostPointerCapture={() => {
+                      dragRef.current = null;
+                      setResizingHandle(null);
+                    }}
+                    onDoubleClick={() => resetColumnSize(target.column.id)}
                     title="Drag to resize, double-click to fit"
-                    className={`absolute -right-1 top-0 z-10 h-full w-2 cursor-col-resize ${
-                      column.getIsResizing()
+                    className={`absolute -right-1 top-0 z-10 h-full w-2 cursor-col-resize touch-none ${
+                      resizingHandle === header.id
                         ? "bg-[var(--color-accent)]"
                         : "hover:bg-[var(--color-border-default)]"
                     }`}
