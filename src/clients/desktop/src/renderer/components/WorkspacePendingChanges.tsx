@@ -6,9 +6,6 @@ import React, {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
-import { Dialog } from "primereact/dialog";
-import type { MenuItem } from "primereact/menuitem";
-import { Splitter, SplitterPanel } from "primereact/splitter";
 import { useAtomValue } from "jotai";
 import {
   currentWorkspaceAtom,
@@ -34,7 +31,14 @@ import type {
   PendingChangelistState,
 } from "@checkpointvcs/daemon/types";
 import FileContextMenu, { useFileContextMenu } from "./FileContextMenu";
-import { Button, EmptyState } from "./ui";
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  Splitter,
+  SplitterPanel,
+  type MenuItem,
+} from "./ui";
 import StagedChangesTree, {
   UNSTAGED,
   type Bucket,
@@ -626,11 +630,6 @@ export default function WorkspacePendingChanges() {
           key={layout}
           layout={horizontal ? "horizontal" : "vertical"}
           className="h-full w-full"
-          pt={{
-            gutter: {
-              className: "pending-changes-splitter-gutter",
-            },
-          }}
         >
           <SplitterPanel
             className="flex overflow-hidden"
@@ -717,42 +716,12 @@ export default function WorkspacePendingChanges() {
         style={{ width: "30rem" }}
         onHide={() => setErrorMessage(null)}
         footer={
-          <Button size="sm" onClick={() => setErrorMessage(null)}>
-            OK
-          </Button>
+          <div className="flex justify-end gap-2">
+            <Button size="sm" onClick={() => setErrorMessage(null)}>
+              OK
+            </Button>
+          </div>
         }
-        pt={{
-          root: {
-            style: {
-              backgroundColor: "var(--color-bg-secondary)",
-              border: "1px solid var(--color-border-default)",
-              borderRadius: "0.5rem",
-              overflow: "hidden",
-            },
-          },
-          header: {
-            style: {
-              backgroundColor: "var(--color-bg-secondary)",
-              color: "var(--color-text-primary)",
-              fontWeight: 600,
-              borderBottom: "1px solid var(--color-border-default)",
-            },
-          },
-          content: {
-            style: {
-              backgroundColor: "var(--color-bg-secondary)",
-              color: "var(--color-text-secondary)",
-              padding: "1.5rem",
-            },
-          },
-          footer: {
-            style: {
-              backgroundColor: "var(--color-bg-secondary)",
-              borderTop: "1px solid var(--color-border-default)",
-              padding: "0.75rem",
-            },
-          },
-        }}
       >
         <p className="m-0">{errorMessage}</p>
       </Dialog>

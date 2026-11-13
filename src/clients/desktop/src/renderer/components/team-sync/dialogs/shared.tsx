@@ -1,34 +1,8 @@
 import { type ReactNode } from "react";
 
-// Shared PrimeReact Dialog passthrough styling for the Team Sync dialogs, kept
-// consistent with SettingsDialog. Content padding is left to each dialog so
-// tabbed layouts can manage their own gutters.
-export const teamSyncDialogPt = {
-  root: {
-    className:
-      "rounded-lg border border-[var(--color-border-default)] shadow-xl overflow-hidden",
-  },
-  header: {
-    className:
-      "flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-5 py-3.5 text-base font-semibold text-[var(--color-text-primary)]",
-  },
-  content: {
-    className:
-      "bg-[var(--color-bg-secondary)] p-0 text-[var(--color-text-secondary)]",
-  },
-  footer: {
-    className:
-      "border-t border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-5 py-3.5",
-  },
-  closeButton: {
-    className:
-      "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-bg-overlay)] hover:text-[var(--color-text-primary)]",
-  },
-};
-
 /** Shared textarea styling for the newline-separated rule editors. */
 export const textareaClass =
-  "w-full resize-y rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 font-mono text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]";
+  "box-border w-full resize-y rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 font-mono text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]";
 
 /** Shared select styling to match the surrounding controls. */
 export const selectClass =

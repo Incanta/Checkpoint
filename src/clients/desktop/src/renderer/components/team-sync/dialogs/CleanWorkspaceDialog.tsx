@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Dialog } from "primereact/dialog";
 import { useAtomValue } from "jotai";
 import { currentWorkspaceAtom } from "../../../../common/state/workspace";
 import {
@@ -8,8 +7,8 @@ import {
   type TeamSyncCleanFile,
 } from "../../../../common/state/team-sync";
 import { ipc } from "../../../pages/ipc";
-import { Button } from "../../ui";
-import { CheckRow, formatBytes, teamSyncDialogPt } from "./shared";
+import { Button, Dialog } from "../../ui";
+import { CheckRow, formatBytes } from "./shared";
 
 export interface CleanWorkspaceDialogProps {
   visible: boolean;
@@ -104,10 +103,9 @@ export default function CleanWorkspaceDialog({
       header="Clean Workspace"
       visible={visible}
       onHide={onHide}
-      modal
       dismissableMask
       style={{ width: "40rem" }}
-      pt={teamSyncDialogPt}
+      contentClassName="max-h-[26rem]"
       footer={
         <div className="flex items-center justify-between gap-4">
           <span className="text-xs text-[var(--color-text-muted)]">
@@ -130,8 +128,8 @@ export default function CleanWorkspaceDialog({
         </div>
       }
     >
-      <div className="max-h-[26rem] overflow-auto p-5">
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+      <div>
+        <p className="mb-3 mt-0 text-xs text-[var(--color-text-muted)]">
           Intermediate files are deleted. Untracked files are moved to
           .checkpoint/clean-backups in the workspace, so they can be recovered.
         </p>

@@ -1,12 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Dialog } from "primereact/dialog";
 import { useAtomValue } from "jotai";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faMinus } from "@fortawesome/free-solid-svg-icons/faMinus";
 import { faPlus } from "@fortawesome/free-solid-svg-icons/faPlus";
 import { ipc } from "../pages/ipc";
 import { useTheme, type Theme } from "../theme";
-import { Button } from "./ui";
+import { Button, Dialog } from "./ui";
 import { updateAtom, type UpdateChannel } from "../../common/state/update";
 
 const DOCS_URL = "https://checkpointvcs.com/docs";
@@ -14,31 +13,6 @@ const ISSUES_URL = "https://github.com/Incanta/Checkpoint/issues";
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
-
-// PrimeReact ships no base theme here, so the Dialog gets its padding, borders,
-// and close button from these passthrough classes.
-const dialogPt = {
-  root: {
-    className:
-      "rounded-lg border border-[var(--color-border-default)] shadow-xl overflow-hidden",
-  },
-  header: {
-    className:
-      "flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-5 py-3.5 text-base font-semibold text-[var(--color-text-primary)]",
-  },
-  content: {
-    className:
-      "bg-[var(--color-bg-secondary)] p-0 text-[var(--color-text-secondary)]",
-  },
-  footer: {
-    className:
-      "border-t border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-5 py-3.5",
-  },
-  closeButton: {
-    className:
-      "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-bg-overlay)] hover:text-[var(--color-text-primary)]",
-  },
-};
 
 function Section({
   title,
@@ -305,10 +279,9 @@ export default function SettingsDialog({
       header="Settings"
       visible={visible}
       onHide={onHide}
-      modal
       dismissableMask
       style={{ width: "32rem" }}
-      pt={dialogPt}
+      contentClassName="!px-0 !py-0"
       footer={
         <div className="flex justify-end">
           <Button variant="secondary" onClick={onHide}>

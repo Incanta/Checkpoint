@@ -1,10 +1,16 @@
-import { Avatar } from "primereact/avatar";
-import { Splitter, SplitterPanel } from "primereact/splitter";
 import Button from "../../components/Button";
 import TitleBar from "../../components/TitleBar";
-import { Button as UIButton, Card, EmptyState } from "../../components/ui";
-import { Dialog } from "primereact/dialog";
-import { InputText } from "primereact/inputtext";
+import {
+  Avatar,
+  Button as UIButton,
+  Card,
+  Dialog,
+  EmptyState,
+  Select,
+  Splitter,
+  SplitterPanel,
+  dialogInputClass,
+} from "../../components/ui";
 import { useEffect, useState, Fragment } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import {
@@ -19,7 +25,6 @@ import { faNetworkWired } from "@fortawesome/free-solid-svg-icons/faNetworkWired
 import { faLinkSlash } from "@fortawesome/free-solid-svg-icons/faLinkSlash";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ipc } from "../ipc";
-import { Dropdown } from "primereact/dropdown";
 import { currentUserAtom, usersAtom } from "../../../common/state/auth";
 import { useNavigate } from "react-router";
 import {
@@ -27,51 +32,6 @@ import {
   dashboardOrgsAtom,
   dashboardReposAtom,
 } from "../../../common/state/dashboard";
-
-// Shared PrimeReact Dropdown passthrough so the Accounts/Orgs selectors read as
-// tokenized inputs, matching the workspace header treatment.
-const dropdownPt = {
-  root: {
-    className:
-      "inline-flex items-center rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] pl-3 pr-2 py-1 transition-colors hover:border-[var(--color-text-muted)]",
-  },
-  input: {
-    className:
-      "text-sm text-[var(--color-text-primary)] outline-none bg-transparent",
-  },
-  trigger: { className: "ml-2 text-[var(--color-text-muted)]" },
-};
-
-// Shared PrimeReact Dialog passthrough. No PrimeReact base theme is imported,
-// so header/content/footer have no padding of their own: we supply token
-// surfaces, borders, rounding, spacing, and a styled close button here.
-const dialogPt = {
-  root: {
-    className:
-      "rounded-lg border border-[var(--color-border-default)] shadow-xl overflow-hidden",
-  },
-  header: {
-    className:
-      "flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-5 py-3.5 text-base font-semibold text-[var(--color-text-primary)]",
-  },
-  content: {
-    className:
-      "bg-[var(--color-bg-secondary)] px-5 py-5 text-[var(--color-text-secondary)]",
-  },
-  footer: {
-    className:
-      "border-t border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-5 py-3.5",
-  },
-  closeButton: {
-    className:
-      "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-bg-overlay)] hover:text-[var(--color-text-primary)]",
-  },
-};
-
-// Token class for the create-dialog text inputs (also needs its own padding
-// since PrimeReact's InputText theme is absent).
-const inputClassName =
-  "w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-accent)]";
 
 export default function Dashboard(): React.ReactElement {
   const users = useAtomValue(usersAtom);
@@ -193,37 +153,23 @@ export default function Dashboard(): React.ReactElement {
         <div className="flex items-center gap-2">
           {currentUser?.details && (
             <Avatar
-              image={currentUser.details.image ?? undefined}
-              label={
-                currentUser.details.image
-                  ? undefined
-                  : (
-                      currentUser.details.name ??
-                      currentUser.details.email ??
-                      "?"
-                    )
-                      .charAt(0)
-                      .toUpperCase()
-              }
-              shape="circle"
-              size="normal"
-              className="mr-[0.5rem]"
-              style={{
-                backgroundColor: currentUser.details.image
-                  ? "transparent"
-                  : "var(--color-bg-surface)",
-                color: "var(--color-text-primary)",
-              }}
+              src={currentUser.details.image}
+              name={currentUser.details.name}
+              email={currentUser.details.email}
+              size="md"
+              className="mr-[0.5rem] shrink-0"
             />
           )}
           <div className="flex flex-col gap-1">
             <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
               Accounts
             </span>
-            <Dropdown
-              value={currentUser?.details?.id || null}
-              options={users
-                ?.filter((user) => user.details !== null)
+            <Select<string>
+              aria-label="Account"
+              className="max-w-[20rem]"
+              value={currentUser?.details?.id ?? null}
+              options={(users ?? [])
+                .filter((user) => user.details !== null)
                 .map((user) => ({
                   label: user.details!.username || user.details!.email,
                   value: user.details!.id,
@@ -233,16 +179,15 @@ export default function Dashboard(): React.ReactElement {
                   { label: "Logout", value: "logout" },
                 )}
               placeholder="Select a User"
-              pt={dropdownPt}
-              onChange={(e) => {
-                if (e.value === "add") {
+              onChange={(value) => {
+                if (value === "add") {
                   setCurrentUser(null);
                   navigate("/login", { state: { from: "dashboard" } });
-                } else if (e.value === "logout") {
+                } else if (value === "logout") {
                   handleLogout();
                 } else {
                   const selectedUser = users?.find(
-                    (user) => user.details?.id === e.value,
+                    (user) => user.details?.id === value,
                   );
                   if (selectedUser) {
                     setCurrentUser(selectedUser);
@@ -258,31 +203,24 @@ export default function Dashboard(): React.ReactElement {
             <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
               Orgs
             </span>
-            <Dropdown
+            <Select<string>
+              aria-label="Organization"
+              className="max-w-[20rem]"
               value={currentOrgId}
               options={orgs.map((org) => ({ label: org.name, value: org.id }))}
-              onChange={(e) => {
-                setCurrentOrgId(e.value);
+              onChange={(value) => {
+                setCurrentOrgId(value);
               }}
               placeholder="Select an Organization"
-              pt={dropdownPt}
             />
           </div>
         </div>
-        <div className="row-span-1">
-          <Splitter
-            layout="horizontal"
-            className="w-full h-full"
-            pt={{
-              gutter: {
-                className: "config-splitter-gutter h-full",
-              },
-            }}
-          >
+        <div className="row-span-1 min-h-0">
+          <Splitter layout="horizontal" className="w-full h-full">
             <SplitterPanel
               size={40}
               minSize={20}
-              className="rounded-lg pr-5 mr-1"
+              className="flex min-h-0 flex-col rounded-lg pr-5 mr-1"
             >
               <div className="w-full h-full grid grid-rows-[2.5rem_calc(100%-2.5rem)]">
                 <div className="flex items-center p-2">
@@ -393,7 +331,7 @@ export default function Dashboard(): React.ReactElement {
             <SplitterPanel
               size={60}
               minSize={30}
-              className="rounded-lg pl-5 ml-1"
+              className="flex min-h-0 flex-col rounded-lg pl-5 ml-1"
               style={{ zIndex: 1 }}
             >
               <div className="w-full h-full grid grid-rows-[2.5rem_calc(100%-2.5rem)]">
@@ -423,8 +361,6 @@ export default function Dashboard(): React.ReactElement {
         header="Create Workspace"
         visible={isCreateWorkspaceDialogVisible}
         style={{ width: "32rem" }}
-        pt={dialogPt}
-        modal
         onHide={hideCreateWorkspaceDialog}
         footer={
           <div className="flex w-full justify-end gap-2">
@@ -467,8 +403,9 @@ export default function Dashboard(): React.ReactElement {
             <span className="text-sm font-medium text-[var(--color-text-primary)]">
               Workspace Name
             </span>
-            <InputText
-              className={inputClassName}
+            <input
+              type="text"
+              className={dialogInputClass}
               value={workspaceNameInput}
               onChange={(e) => setWorkspaceNameInput(e.target.value)}
               placeholder="My Workspace"
@@ -479,8 +416,9 @@ export default function Dashboard(): React.ReactElement {
               Workspace Path
             </span>
             <div className="flex gap-2">
-              <InputText
-                className={`flex-1 ${inputClassName}`}
+              <input
+                type="text"
+                className={`min-w-0 flex-1 ${dialogInputClass}`}
                 value={workspacePathInput}
                 onChange={(e) => setWorkspacePathInput(e.target.value)}
                 placeholder="C:\\Projects\\MyWorkspace"
@@ -500,8 +438,6 @@ export default function Dashboard(): React.ReactElement {
         header="Unlink Workspace"
         visible={unlinkTarget !== null}
         style={{ width: "28rem" }}
-        pt={dialogPt}
-        modal
         onHide={() => setUnlinkTarget(null)}
         footer={
           <div className="flex w-full justify-end gap-2">
@@ -522,7 +458,7 @@ export default function Dashboard(): React.ReactElement {
           </div>
         }
       >
-        <p className="text-[0.9em] text-[var(--color-text-secondary)]">
+        <p className="m-0 text-[0.9em] text-[var(--color-text-secondary)]">
           Are you sure you want to unlink{" "}
           <strong className="text-[var(--color-text-primary)]">
             {unlinkTarget?.name}

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dialog } from "primereact/dialog";
 import { useAtomValue } from "jotai";
 import { currentWorkspaceAtom } from "../../../../common/state/workspace";
 import {
@@ -12,12 +11,11 @@ import {
   type TeamSyncSettings,
 } from "../../../../common/state/team-sync";
 import { ipc } from "../../../pages/ipc";
-import { Button } from "../../ui";
+import { Button, Dialog } from "../../ui";
 import {
   CheckRow,
   FieldRow,
   Switch,
-  teamSyncDialogPt,
   selectClass,
   textareaClass,
 } from "./shared";
@@ -231,10 +229,9 @@ export default function TeamSyncSettingsDialog({
       header="Team Sync Settings"
       visible={visible}
       onHide={onHide}
-      modal
       dismissableMask
       style={{ width: "48rem" }}
-      pt={teamSyncDialogPt}
+      contentClassName="!px-0 !py-0"
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onHide}>

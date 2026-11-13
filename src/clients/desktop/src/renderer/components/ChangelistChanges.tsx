@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
-import { Splitter, SplitterPanel } from "primereact/splitter";
 // @ts-ignore
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
 import {
@@ -19,7 +18,7 @@ import { ipc } from "../pages/ipc";
 import FileTreeItem, { changeTypeColors } from "./FileTreeItem";
 import type { FileTreeNode } from "./FileTreeItem";
 import { buildFileTree, collectDirPaths } from "./build-file-tree";
-import { Button, EmptyState } from "./ui";
+import { Button, EmptyState, Splitter, SplitterPanel } from "./ui";
 
 const DESCRIPTION_MIN_HEIGHT = 32;
 const DESCRIPTION_AUTO_MAX_HEIGHT = 96;
@@ -309,16 +308,8 @@ export default function ChangelistChanges({
         className="min-h-0 flex-1"
         style={{ textAlign: "left", overflow: "hidden" }}
       >
-        <Splitter
-          layout="horizontal"
-          className="w-full h-full"
-          pt={{
-            gutter: {
-              className: "file-history-splitter-gutter",
-            },
-          }}
-        >
-          <SplitterPanel className="flex flex-col" size={30}>
+        <Splitter layout="horizontal" className="w-full h-full">
+          <SplitterPanel className="flex min-h-0 flex-col" size={30}>
             <div className="scroll-on-secondary h-full overflow-y-auto bg-[var(--color-bg-secondary)]">
               {changelistChanges.files.length === 0 ? (
                 <EmptyState title="No files changed in this changelist" />
@@ -343,7 +334,7 @@ export default function ChangelistChanges({
               )}
             </div>
           </SplitterPanel>
-          <SplitterPanel className="flex flex-col" size={70}>
+          <SplitterPanel className="flex min-h-0 flex-col" size={70}>
             {selectedFile && changelistChanges.diffContent ? (
               <div className="flex h-full flex-col">
                 <div className="flex items-center justify-between border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3 py-2">

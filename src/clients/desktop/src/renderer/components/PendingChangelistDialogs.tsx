@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Dialog } from "primereact/dialog";
-import { Button, dialogPt } from "./ui";
+import {
+  Button,
+  Dialog,
+  dialogFieldClass,
+  dialogInputClass,
+  dialogSelectClass,
+} from "./ui";
 import { PendingFileTree, type Bucket } from "./StagedChangesTree";
 
 const textareaClass =
@@ -58,7 +63,6 @@ export function ChangelistDescriptionDialog({
       visible={visible}
       style={{ width: "32rem" }}
       onHide={onHide}
-      pt={dialogPt}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onHide}>
@@ -70,12 +74,12 @@ export function ChangelistDescriptionDialog({
     >
       <div className="flex flex-col gap-3">
         {branches && branches.length > 1 && (
-          <label className="flex flex-col gap-1.5 text-[0.85em]">
+          <label className={dialogFieldClass}>
             <span>Submits to</span>
             <select
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
-              className="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
+              className={dialogSelectClass}
             >
               {branches.map((b) => (
                 <option key={b} value={b}>
@@ -85,7 +89,7 @@ export function ChangelistDescriptionDialog({
             </select>
           </label>
         )}
-        <label className="flex flex-col gap-1.5 text-[0.85em]">
+        <label className={dialogFieldClass}>
           <span>Description</span>
           <textarea
             ref={textareaRef}
@@ -151,7 +155,6 @@ export function ChangelistBranchDialog({
       visible={bucket !== null}
       style={{ width: "30rem" }}
       onHide={onHide}
-      pt={dialogPt}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onHide}>
@@ -177,7 +180,7 @@ export function ChangelistBranchDialog({
             <select
               value={choice}
               onChange={(e) => setChoice(e.target.value)}
-              className="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
+              className={dialogSelectClass}
             >
               <option value={NEW_BRANCH}>New branch...</option>
               {targets.length > 0 && (
@@ -216,7 +219,7 @@ export function ChangelistBranchDialog({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") confirm();
                 }}
-                className="box-border w-full rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+                className={dialogInputClass}
               />
               {taken && (
                 <span className="text-[var(--color-danger)]">
@@ -276,7 +279,6 @@ export function SubmitChangelistDialog({
         if (!submitting) onHide();
       }}
       closable={!submitting}
-      pt={dialogPt}
       footer={
         <div className="flex items-center justify-end gap-2">
           <Button variant="secondary" onClick={onHide} disabled={submitting}>

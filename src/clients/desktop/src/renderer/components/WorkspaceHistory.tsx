@@ -5,12 +5,17 @@ import {
   changelistChangesAtom,
   workspaceBranchesAtom,
 } from "../../common/state/workspace";
-import { Button, DataTable, EmptyState } from "./ui";
+import {
+  Button,
+  ContextMenu,
+  DataTable,
+  EmptyState,
+  type ContextMenuHandle,
+  type MenuItem,
+} from "./ui";
 import { ipc } from "../pages/ipc";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createColumnHelper } from "@tanstack/react-table";
-import { ContextMenu } from "primereact/contextmenu";
-import { MenuItem } from "primereact/menuitem";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faClockRotateLeft } from "@fortawesome/free-solid-svg-icons";
 import ChangelistChanges from "./ChangelistChanges";
@@ -70,36 +75,13 @@ const columns = [
   }),
 ];
 
-const contextMenuPt = {
-  root: {
-    style: {
-      marginTop: "2rem",
-      backgroundColor: "var(--color-bg-overlay)",
-      border: "1px solid var(--color-border-default)",
-      borderRadius: "0.5rem",
-      minWidth: "200px",
-    },
-  },
-  menu: { style: { backgroundColor: "var(--color-bg-overlay)" } },
-  menuitem: { style: { margin: 0 } },
-  action: {
-    style: {
-      color: "var(--color-text-secondary)",
-      padding: "0.5rem 1rem",
-      fontSize: "0.875rem",
-    },
-  },
-  separator: { style: { borderColor: "var(--color-border-muted)" } },
-  submenuIcon: { style: { color: "var(--color-text-secondary)" } },
-};
-
 export default function WorkspaceHistory() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const workspaceHistory = useAtomValue(workspaceHistoryAtom);
   const branchesState = useAtomValue(workspaceBranchesAtom);
   const changelistChanges = useAtomValue(changelistChangesAtom);
 
-  const contextMenuRef = useRef<ContextMenu>(null);
+  const contextMenuRef = useRef<ContextMenuHandle>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [createLabelVisible, setCreateLabelVisible] = useState(false);
   const [createLabelCl, setCreateLabelCl] = useState<number>(0);
@@ -175,12 +157,7 @@ export default function WorkspaceHistory() {
   return (
     <>
       {changelistChanges && <ChangelistChanges />}
-      <ContextMenu
-        ref={contextMenuRef}
-        model={menuItems}
-        breakpoint="767px"
-        pt={contextMenuPt}
-      />
+      <ContextMenu ref={contextMenuRef} model={menuItems} />
       <div
         className={`grid h-full grid-rows-[2.5rem_minmax(0,1fr)] ${
           changelistChanges ? "hidden" : ""

@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { Dialog } from "primereact/dialog";
 import {
   Button,
+  Dialog,
   dialogFieldClass,
   dialogInputClass,
-  dialogPt,
   dialogSelectClass,
 } from "./ui";
 import { ipc } from "../pages/ipc";
@@ -93,6 +92,7 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
       onHide={() => {
         if (!pending) props.onHide();
       }}
+      closable={!pending}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={props.onHide} disabled={pending}>
@@ -103,7 +103,6 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
           </Button>
         </div>
       }
-      pt={dialogPt}
     >
       <div className="flex flex-col gap-3">
         <label className={dialogFieldClass}>

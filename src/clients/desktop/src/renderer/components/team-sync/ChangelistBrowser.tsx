@@ -1,7 +1,5 @@
 import { useAtomValue } from "jotai";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { ContextMenu } from "primereact/contextmenu";
-import { MenuItem } from "primereact/menuitem";
 import { currentWorkspaceAtom } from "../../../common/state/workspace";
 import {
   teamSyncChangelistsAtom,
@@ -12,7 +10,12 @@ import {
   type TeamSyncChangelistMeta,
 } from "../../../common/state/team-sync";
 import { ipc } from "../../pages/ipc";
-import { EmptyState } from "../ui";
+import {
+  ContextMenu,
+  EmptyState,
+  type ContextMenuHandle,
+  type MenuItem,
+} from "../ui";
 import CommentDialog from "./dialogs/CommentDialog";
 import { describePinChange } from "./links";
 
@@ -120,7 +123,7 @@ export default function ChangelistBrowser(): React.ReactElement | null {
   const changelistsRecord = useAtomValue(teamSyncChangelistsAtom);
   const metadataRecord = useAtomValue(teamSyncMetadataAtom);
   const statusRecord = useAtomValue(teamSyncStatusAtom);
-  const contextMenuRef = useRef<ContextMenu>(null);
+  const contextMenuRef = useRef<ContextMenuHandle>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [commentCl, setCommentCl] = useState<number | null>(null);
 
@@ -230,31 +233,7 @@ export default function ChangelistBrowser(): React.ReactElement | null {
         />
       )}
 
-      <ContextMenu
-        ref={contextMenuRef}
-        model={menuItems}
-        breakpoint="767px"
-        pt={{
-          root: {
-            style: {
-              backgroundColor: "var(--color-bg-overlay)",
-              border: "1px solid var(--color-border-default)",
-              borderRadius: "0.5rem",
-              minWidth: "200px",
-            },
-          },
-          menu: { style: { backgroundColor: "var(--color-bg-overlay)" } },
-          menuitem: { style: { margin: 0 } },
-          action: {
-            style: {
-              color: "var(--color-text-secondary)",
-              padding: "0.5rem 1rem",
-              fontSize: "0.875rem",
-            },
-          },
-          separator: { style: { borderColor: "var(--color-border-muted)" } },
-        }}
-      />
+      <ContextMenu ref={contextMenuRef} model={menuItems} />
 
       {/* Column header */}
       <div className="grid grid-cols-[1.5rem_6rem_4rem_5rem_9rem_1fr_12rem] items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-4 py-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">

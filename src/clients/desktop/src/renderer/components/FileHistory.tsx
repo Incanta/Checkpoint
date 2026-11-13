@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
-import { Splitter, SplitterPanel } from "primereact/splitter";
+import { Splitter, SplitterPanel } from "./ui";
 // @ts-ignore
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
 import {
@@ -336,16 +336,8 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
         className="row-span-1"
         style={{ textAlign: "left", overflow: "hidden" }}
       >
-        <Splitter
-          layout="horizontal"
-          className="w-full h-full"
-          pt={{
-            gutter: {
-              className: "file-history-splitter-gutter",
-            },
-          }}
-        >
-          <SplitterPanel className="flex flex-col" size={35}>
+        <Splitter layout="horizontal" className="w-full h-full">
+          <SplitterPanel className="flex min-h-0 flex-col" size={35}>
             <div
               className="h-full overflow-y-auto"
               style={{ backgroundColor: "var(--color-bg-secondary)" }}
@@ -371,7 +363,7 @@ export default function FileHistory({ isPopout = false }: FileHistoryProps) {
               )}
             </div>
           </SplitterPanel>
-          <SplitterPanel className="flex flex-col" size={65}>
+          <SplitterPanel className="flex min-h-0 flex-col" size={65}>
             {selectedEntry && fileHistory.diffContent ? (
               <div
                 style={{

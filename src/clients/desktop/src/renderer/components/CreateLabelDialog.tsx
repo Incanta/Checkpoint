@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Dialog } from "primereact/dialog";
-import { Button, dialogFieldClass, dialogInputClass, dialogPt } from "./ui";
+import { Button, Dialog, dialogFieldClass, dialogInputClass } from "./ui";
 import { ipc } from "../pages/ipc";
 
 interface CreateLabelDialogProps {
@@ -90,7 +89,6 @@ export default function CreateLabelDialog({
           </Button>
         </div>
       }
-      pt={dialogPt}
     >
       <div className="flex flex-col gap-3">
         {error && (

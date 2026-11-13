@@ -4,7 +4,6 @@ import WorkspaceMenu from "../../components/WorkspaceMenu";
 import WorkspaceExplorer from "../../components/WorkspaceExplorer";
 import WorkspacePendingChanges from "../../components/WorkspacePendingChanges";
 import { useEffect, useState } from "react";
-import { Dropdown } from "primereact/dropdown";
 import {
   currentWorkspaceAtom,
   workspacesAtom,
@@ -17,7 +16,7 @@ import WorkspaceBranches from "../../components/WorkspaceBranches";
 import SyncPreview from "../../components/SyncPreview";
 import SyncStatusBadge from "../../components/SyncStatusBadge";
 import TitleBar from "../../components/TitleBar";
-import { Badge, Button } from "../../components/ui";
+import { Badge, Button, Select } from "../../components/ui";
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCodeBranch } from "@fortawesome/free-solid-svg-icons/faCodeBranch";
@@ -37,18 +36,6 @@ function getInitialSidebarExpanded(): boolean {
     return true;
   }
 }
-
-const dropdownPt = {
-  root: {
-    className:
-      "inline-flex items-center rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] pl-3 pr-2 py-1 transition-colors hover:border-[var(--color-text-muted)]",
-  },
-  input: {
-    className:
-      "text-sm text-[var(--color-text-primary)] outline-none bg-transparent",
-  },
-  trigger: { className: "ml-2 text-[var(--color-text-muted)]" },
-};
 
 export default function Workspace(): React.ReactElement {
   const workspaces = useAtomValue(workspacesAtom);
@@ -84,14 +71,17 @@ export default function Workspace(): React.ReactElement {
               Workspace
             </span>
             <span className="app-no-drag">
-              <Dropdown
+              {/* Header-sized: the old dropdown used py-1 and sized to its label. */}
+              <Select<string>
+                aria-label="Workspace"
+                className="max-w-[16rem] [&_select]:py-1"
                 value={currentWorkspace?.id}
-                onChange={(e) => {
-                  if (e.value === "configure") {
+                onChange={(value) => {
+                  if (value === "configure") {
                     navigate("/dashboard");
                   } else {
                     ipc.sendMessage("workspace:select", {
-                      id: e.value,
+                      id: value,
                     });
                   }
                 }}
@@ -102,7 +92,6 @@ export default function Workspace(): React.ReactElement {
                   })) || []
                 ).concat({ label: "Configure...", value: "configure" })}
                 placeholder="Select a Workspace"
-                pt={dropdownPt}
               />
             </span>
             {currentWorkspace && (

@@ -5,23 +5,87 @@ import {
   type BranchEntry,
 } from "../../common/state/workspace";
 import { currentUserAtom } from "../../common/state/auth";
-import Button from "./Button";
-import { Button as UiButton, Badge, dialogPt } from "./ui";
+import {
+  Badge,
+  Button,
+  ContextMenu,
+  DataTable,
+  Dialog,
+  type ContextMenuHandle,
+  type MenuItem,
+} from "./ui";
 import { ipc } from "../pages/ipc";
-import { TreeTable } from "primereact/treetable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { TreeNode } from "primereact/treenode";
-import { Column, ColumnPassThroughOptions } from "primereact/column";
-import { ContextMenu } from "primereact/contextmenu";
-import { MenuItem } from "primereact/menuitem";
-import { Checkbox } from "primereact/checkbox";
-import { Dialog } from "primereact/dialog";
+import { createColumnHelper, type ExpandedState } from "@tanstack/react-table";
 import CreateBranchDialog from "./CreateBranchDialog";
+
+interface BranchRow {
+  id: string;
+  name: string;
+  type: string;
+  headNumber: number;
+  archived: string;
+  creator: string;
+  isCurrent: boolean;
+  branch: BranchEntry;
+  children: BranchRow[];
+}
+
+const typeVariants: Record<string, "info" | "success" | "warning"> = {
+  Mainline: "info",
+  Release: "success",
+  Feature: "warning",
+};
+
+const column = createColumnHelper<BranchRow>();
+
+const columns = [
+  column.accessor("name", {
+    id: "name",
+    header: "Branch",
+    minSize: 160,
+    cell: (info) => (
+      <span
+        title={info.getValue()}
+        className={info.row.original.isCurrent ? "font-bold" : undefined}
+      >
+        {info.getValue()}
+      </span>
+    ),
+    meta: { fill: true, expander: true },
+  }),
+  column.accessor("type", {
+    id: "type",
+    header: "Type",
+    cell: (info) => (
+      <Badge variant={typeVariants[info.getValue()] ?? "default"}>
+        {info.getValue()}
+      </Badge>
+    ),
+    // The badge's padding needs a little more than the bare text.
+    meta: { measure: (row) => `${row.type}xxx` },
+  }),
+  column.accessor("headNumber", {
+    id: "headNumber",
+    header: "Head CL",
+    meta: { measure: (row) => String(row.headNumber) },
+  }),
+  column.accessor("archived", {
+    id: "archived",
+    header: "Archived",
+    meta: { measure: (row) => row.archived },
+  }),
+  column.accessor("creator", {
+    id: "creator",
+    header: "Creator",
+    meta: { measure: (row) => row.creator },
+  }),
+];
 
 function buildBranchTree(
   branches: BranchEntry[],
   currentBranchName: string,
-): TreeNode[] {
+): BranchRow[] {
   // Group branches by parent
   const byParent = new Map<string | null, BranchEntry[]>();
   for (const b of branches) {
@@ -32,26 +96,19 @@ function buildBranchTree(
     byParent.get(parent)!.push(b);
   }
 
-  function buildChildren(parentName: string | null): TreeNode[] {
+  function buildChildren(parentName: string | null): BranchRow[] {
     const children = byParent.get(parentName) || [];
-    return children.map((b) => {
-      const isCurrent = b.name === currentBranchName;
-      const node: TreeNode = {
-        id: b.id,
-        key: b.id,
-        data: {
-          name: b.name,
-          type: b.type.charAt(0) + b.type.slice(1).toLowerCase(),
-          headNumber: b.headNumber,
-          archived: b.archivedAt ? "Yes" : "",
-          creator: b.createdBy?.email || b.createdBy?.name || "",
-          isCurrent,
-          branch: b,
-        },
-        children: buildChildren(b.name),
-      };
-      return node;
-    });
+    return children.map((b) => ({
+      id: b.id,
+      name: b.name,
+      type: b.type.charAt(0) + b.type.slice(1).toLowerCase(),
+      headNumber: b.headNumber,
+      archived: b.archivedAt ? "Yes" : "",
+      creator: b.createdBy?.email || b.createdBy?.name || "",
+      isCurrent: b.name === currentBranchName,
+      branch: b,
+      children: buildChildren(b.name),
+    }));
   }
 
   // Root branches have no parent
@@ -63,11 +120,10 @@ export default function WorkspaceBranches() {
   const branchesState = useAtomValue(workspaceBranchesAtom);
   const currentUser = useAtomValue(currentUserAtom);
 
-  const treeTableRef = useRef<TreeTable>(null);
-  const contextMenuRef = useRef<ContextMenu>(null);
-  const tableWrapperRef = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes] = useState<TreeNode[]>([]);
-  const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
+  const contextMenuRef = useRef<ContextMenuHandle>(null);
+  // Everything starts expanded, and again whenever the branches change;
+  // the user can still collapse rows in between.
+  const [expanded, setExpanded] = useState<ExpandedState>(true);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const contextBranchRef = useRef<BranchEntry | null>(null);
   // The branch a delete was last asked for, to ask again with a discard.
@@ -99,37 +155,20 @@ export default function WorkspaceBranches() {
   }, []);
 
   useEffect(() => {
-    if (!currentWorkspace) {
-      setNodes([]);
-      return;
-    }
+    if (currentWorkspace && !branchesState) refreshBranches();
+  }, [currentWorkspace, branchesState, refreshBranches]);
 
-    if (!branchesState) {
-      setNodes([]);
-      refreshBranches();
-      return;
-    }
-
+  const rows = useMemo<BranchRow[]>(() => {
+    if (!currentWorkspace || !branchesState) return [];
     const filtered = showArchived
       ? branchesState.branches
       : branchesState.branches.filter((b) => !b.archivedAt);
+    return buildBranchTree(filtered, branchesState.currentBranchName);
+  }, [currentWorkspace, branchesState, showArchived]);
 
-    const tree = buildBranchTree(filtered, branchesState.currentBranchName);
-    setNodes(tree);
-
-    // Auto-expand all nodes
-    const keys: Record<string, boolean> = {};
-    const collectKeys = (nodes: TreeNode[]) => {
-      for (const n of nodes) {
-        if (n.children && n.children.length > 0) {
-          keys[n.key as string] = true;
-          collectKeys(n.children);
-        }
-      }
-    };
-    collectKeys(tree);
-    setExpandedKeys(keys);
-  }, [currentWorkspace, branchesState, showArchived, refreshBranches]);
+  useEffect(() => {
+    setExpanded(true);
+  }, [rows]);
 
   // IPC listeners
   useEffect(() => {
@@ -248,9 +287,9 @@ export default function WorkspaceBranches() {
   }, [refreshBranches]);
 
   const handleRowContextMenu = useCallback(
-    (event: React.MouseEvent, node: TreeNode) => {
+    (event: React.MouseEvent, row: BranchRow) => {
       event.preventDefault();
-      const branch = node.data?.branch as BranchEntry;
+      const branch = row.branch;
       contextBranchRef.current = branch;
 
       const items: MenuItem[] = [];
@@ -370,7 +409,7 @@ export default function WorkspaceBranches() {
       if (branch.type === "FEATURE" && (isAdmin || isCreator)) {
         items.push({
           label: "Delete",
-          style: { color: "var(--color-danger)" },
+          danger: true,
           command: () => {
             setDeleteDialogVisible(true);
           },
@@ -423,235 +462,47 @@ export default function WorkspaceBranches() {
     });
   }, []);
 
-  const nameTemplate = useCallback((node: TreeNode) => {
-    const isCurrent = node.data?.isCurrent;
-    return (
-      <span style={{ fontWeight: isCurrent ? "bold" : "normal" }}>
-        {node.data?.name}
-      </span>
-    );
-  }, []);
-
-  const typeTemplate = useCallback((node: TreeNode) => {
-    const type = node.data?.type as string;
-    const variants: Record<string, "info" | "success" | "warning"> = {
-      Mainline: "info",
-      Release: "success",
-      Feature: "warning",
-    };
-    return <Badge variant={variants[type] ?? "default"}>{type}</Badge>;
-  }, []);
-
-  const columnPt = useMemo<ColumnPassThroughOptions>(
-    () => ({
-      headerCell: {
-        style: {
-          borderColor: "var(--color-border-default)",
-          borderWidth: "0 1px 0 0",
-          borderStyle: "solid",
-          paddingLeft: "0.5rem",
-        },
-      },
-      bodyCell: {
-        style: {
-          paddingLeft: "0.5rem",
-        },
-      },
-      rowToggler: {
-        className: "treetable-toggler",
-        style: {
-          backgroundColor: "transparent",
-          padding: "0.4rem",
-        },
-      },
-    }),
-    [],
-  );
-
-  const contextMenuPt = useMemo(
-    () => ({
-      root: {
-        style: {
-          marginTop: "2rem",
-          backgroundColor: "var(--color-bg-overlay)",
-          border: "1px solid var(--color-border-default)",
-          borderRadius: "0.5rem",
-          minWidth: "200px",
-        },
-      },
-      menu: {
-        style: {
-          backgroundColor: "var(--color-bg-overlay)",
-        },
-      },
-      menuitem: {
-        style: {
-          margin: 0,
-        },
-      },
-      action: {
-        style: {
-          color: "var(--color-text-secondary)",
-          padding: "0.5rem 1rem",
-          fontSize: "0.875rem",
-        },
-      },
-      separator: {
-        style: {
-          borderColor: "var(--color-border-muted)",
-        },
-      },
-      submenuIcon: {
-        style: {
-          color: "var(--color-text-secondary)",
-        },
-      },
-    }),
-    [],
-  );
-
-  const treeTablePt = useMemo(
-    () => ({
-      thead: {
-        style: {
-          borderColor: "var(--color-border-default)",
-          borderWidth: "0 0 1px 0",
-          borderStyle: "solid",
-          paddingLeft: "0.5rem",
-        },
-      },
-      scrollableWrapper: {
-        style: {
-          height: "100%",
-        },
-      },
-      scrollable: {
-        style: {
-          height: "100%",
-        },
-      },
-      scrollableBody: {
-        style: {
-          maxHeight: "initial",
-        },
-      },
-      resizeHelper: {
-        style: {
-          width: "0.1rem",
-          backgroundColor: "var(--color-text-muted)",
-        },
-      },
-      tbody: {
-        style: {
-          cursor: "pointer",
-        },
-      },
-    }),
-    [],
-  );
-
   return (
     <>
-      <ContextMenu
-        ref={contextMenuRef}
-        model={menuItems}
-        breakpoint="767px"
-        pt={contextMenuPt}
-      />
-      <div className="grid h-full grid-rows-[2.5rem_1fr]">
-        <div className="row-span-1 flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
-          <UiButton variant="secondary" size="sm" onClick={refreshBranches}>
+      <ContextMenu ref={contextMenuRef} model={menuItems} />
+      <div className="grid h-full grid-rows-[2.5rem_minmax(0,1fr)]">
+        <div className="flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
+          <Button variant="secondary" size="sm" onClick={refreshBranches}>
             Refresh
-          </UiButton>
-          <UiButton variant="primary" size="sm" onClick={handleNewBranch}>
+          </Button>
+          <Button variant="primary" size="sm" onClick={handleNewBranch}>
             New Branch
-          </UiButton>
+          </Button>
           <div className="ml-4 flex items-center gap-2">
-            <Checkbox
-              inputId="show-archived"
+            <input
+              id="show-archived"
+              type="checkbox"
               checked={showArchived}
-              onChange={(e) => setShowArchived(!!e.checked)}
-              pt={{
-                box: {
-                  style: {
-                    backgroundColor: "var(--color-bg-surface)",
-                    borderColor: "var(--color-border-default)",
-                  },
-                },
-              }}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="m-0 cursor-pointer accent-[var(--color-accent)]"
             />
             <label
               htmlFor="show-archived"
-              style={{
-                color: "var(--color-text-secondary)",
-                fontSize: "0.8em",
-                cursor: "pointer",
-              }}
+              className="cursor-pointer text-[0.8em] text-[var(--color-text-secondary)]"
             >
               Show archived
             </label>
           </div>
         </div>
-        <div
-          className="row-span-1"
-          style={{ textAlign: "left", overflow: "hidden" }}
-          ref={tableWrapperRef}
-        >
-          <TreeTable
-            ref={treeTableRef}
-            value={nodes}
-            expandedKeys={expandedKeys}
-            onToggle={(e) => setExpandedKeys(e.value)}
-            tableStyle={{ minWidth: "50rem" }}
-            columnResizeMode="expand"
-            resizableColumns
-            showGridlines
-            scrollable
-            onContextMenu={(e) => {
-              handleRowContextMenu(e.originalEvent as React.MouseEvent, e.node);
-            }}
-            pt={treeTablePt}
-            style={{ height: "100%" }}
-          >
-            <Column
-              field="name"
-              header="Branch"
-              expander
-              resizeable
-              sortable
-              body={nameTemplate}
-              pt={columnPt}
-            />
-            <Column
-              field="type"
-              header="Type"
-              resizeable
-              sortable
-              body={typeTemplate}
-              pt={columnPt}
-            />
-            <Column
-              field="headNumber"
-              header="Head CL"
-              resizeable
-              sortable
-              pt={columnPt}
-            />
-            <Column
-              field="archived"
-              header="Archived"
-              resizeable
-              sortable
-              pt={columnPt}
-            />
-            <Column
-              field="creator"
-              header="Creator"
-              resizeable
-              sortable
-              pt={columnPt}
-            />
-          </TreeTable>
+        <div className="min-h-0 min-w-0 overflow-hidden">
+          <DataTable
+            data={rows}
+            columns={columns}
+            getRowId={(row) => row.id}
+            storageKey="workspace-branches"
+            getSubRows={(row) => row.children}
+            expanded={expanded}
+            onExpandedChange={setExpanded}
+            onRowContextMenu={handleRowContextMenu}
+            getRowClassName={(row) =>
+              row.isCurrent ? "text-[var(--color-text-primary)]" : ""
+            }
+          />
         </div>
       </div>
 
@@ -669,26 +520,28 @@ export default function WorkspaceBranches() {
         header="Delete Branch"
         visible={deleteDialogVisible}
         style={{ width: "26rem" }}
+        closable={!deletePending}
         onHide={() => {
           if (!deletePending) setDeleteDialogVisible(false);
         }}
         footer={
           <div className="flex justify-end gap-2">
             <Button
-              label="Cancel"
+              variant="secondary"
               onClick={() => setDeleteDialogVisible(false)}
               disabled={deletePending}
-              className="p-[0.5rem] text-[0.9em]"
-            />
+            >
+              Cancel
+            </Button>
             <Button
-              label={deletePending ? "Deleting..." : "Delete"}
+              variant="danger"
               onClick={handleDelete}
               disabled={deletePending}
-              className="p-[0.5rem] text-[0.9em]"
-            />
+            >
+              {deletePending ? "Deleting..." : "Delete"}
+            </Button>
           </div>
         }
-        pt={dialogPt}
       >
         <p className="m-0">
           Are you sure you want to delete the branch{" "}
@@ -702,38 +555,34 @@ export default function WorkspaceBranches() {
         header="Merge Branch"
         visible={mergeDialogVisible}
         style={{ width: "28rem" }}
+        closable={!mergePending}
         onHide={() => {
           if (!mergePending) setMergeDialogVisible(false);
         }}
         footer={
           <div className="flex justify-end gap-2">
             <Button
-              label="Cancel"
+              variant="secondary"
               onClick={() => setMergeDialogVisible(false)}
               disabled={mergePending}
-              className="p-[0.5rem] text-[0.9em]"
-            />
+            >
+              Cancel
+            </Button>
             <Button
-              label={mergePending ? "Merging..." : "Merge"}
+              variant="primary"
               onClick={handleMerge}
               disabled={mergePending}
-              className="p-[0.5rem] text-[0.9em]"
-            />
+            >
+              {mergePending ? "Merging..." : "Merge"}
+            </Button>
           </div>
         }
-        pt={dialogPt}
       >
         <p className="m-0">
           Merge <strong>&quot;{contextBranchRef.current?.name}&quot;</strong>{" "}
           into <strong>&quot;{branchesState?.currentBranchName}&quot;</strong>?
         </p>
-        <p
-          style={{
-            color: "var(--color-text-muted)",
-            fontSize: "0.85em",
-            marginTop: "0.5rem",
-          }}
-        >
+        <p className="mb-0 mt-2 text-[0.85em] text-[var(--color-text-muted)]">
           This will create a squash merge changelist and delete the incoming
           branch.
         </p>

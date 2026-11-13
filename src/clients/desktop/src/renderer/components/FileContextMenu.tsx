@@ -1,7 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ContextMenu } from "primereact/contextmenu";
-import { MenuItem } from "primereact/menuitem";
-import { Dialog } from "primereact/dialog";
+import {
+  Button,
+  ContextMenu,
+  Dialog,
+  type ContextMenuHandle,
+  type MenuItem,
+} from "./ui";
 import { useAtom, useAtomValue } from "jotai";
 import { ipc } from "../pages/ipc";
 import { userSettingsAtom } from "../../common/state/settings";
@@ -11,7 +15,7 @@ import {
 } from "../../common/state/workspace";
 
 export interface FileContextMenuProps {
-  contextMenuRef: React.RefObject<ContextMenu | null>;
+  contextMenuRef: React.RefObject<ContextMenuHandle | null>;
 }
 
 export interface FileContextInfo {
@@ -105,7 +109,7 @@ function isHidden(status: FileStatusType): boolean {
 }
 
 export function useFileContextMenu() {
-  const contextMenuRef = useRef<ContextMenu>(null);
+  const contextMenuRef = useRef<ContextMenuHandle>(null);
   const currentFileRef = useRef<FileContextInfo | null>(null);
   const [userSettings, setUserSettings] = useAtom(userSettingsAtom);
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
@@ -488,7 +492,7 @@ export function useFileContextMenu() {
     if (isWindows) {
       items.push({
         label: "Copy paths with backslashes",
-        icon: userSettings.useBackslashes ? "pi pi-check" : undefined,
+        checked: userSettings.useBackslashes,
         command: () => {
           setUserSettings({
             ...userSettings,
@@ -602,7 +606,7 @@ export default function FileContextMenu({
   setResolveDontAskDuration,
   confirmResolve,
 }: {
-  contextMenuRef: React.RefObject<ContextMenu | null>;
+  contextMenuRef: React.RefObject<ContextMenuHandle | null>;
   menuItems: MenuItem[];
   lockedWarningVisible?: boolean;
   setLockedWarningVisible?: (visible: boolean) => void;
@@ -620,48 +624,7 @@ export default function FileContextMenu({
 }) {
   return (
     <>
-      <ContextMenu
-        ref={contextMenuRef as React.RefObject<ContextMenu | null>}
-        model={menuItems}
-        breakpoint="767px"
-        pt={{
-          root: {
-            style: {
-              backgroundColor: "var(--color-bg-overlay)",
-              border: "1px solid var(--color-border-default)",
-              borderRadius: "0.5rem",
-              minWidth: "200px",
-            },
-          },
-          menu: {
-            style: {
-              backgroundColor: "var(--color-bg-overlay)",
-            },
-          },
-          menuitem: {
-            style: {
-              margin: 0,
-            },
-          },
-          action: {
-            style: {
-              color: "var(--color-text-primary)",
-              padding: "0.5rem 1rem",
-              fontSize: "0.875rem",
-            },
-          },
-          separator: {
-            style: {
-              borderColor: "var(--color-border-muted)",
-            },
-          },
-          submenuIcon: {
-            style: {
-              color: "var(--color-text-primary)",
-            },
-          },
-        }}
-      />
+      <ContextMenu ref={contextMenuRef} model={menuItems} />
 
       {lockedWarningVisible && setLockedWarningVisible && (
         <Dialog
@@ -671,71 +634,29 @@ export default function FileContextMenu({
           onHide={() => setLockedWarningVisible(false)}
           footer={
             <div className="flex justify-end gap-2">
-              <button
-                className="p-[0.5rem] px-[1rem] text-[0.9em] rounded"
-                style={{
-                  backgroundColor: "var(--color-bg-primary)",
-                  border: "1px solid var(--color-border-default)",
-                  color: "var(--color-text-secondary)",
-                }}
+              <Button
+                variant="secondary"
                 onClick={() => setLockedWarningVisible(false)}
               >
                 Cancel
-              </button>
-              <button
-                className="p-[0.5rem] px-[1rem] text-[0.9em] rounded"
-                style={{
-                  backgroundColor: "var(--color-accent)",
-                  border: "1px solid var(--color-accent)",
-                  color: "#fff",
-                }}
-                onClick={confirmLockedCheckout}
-              >
+              </Button>
+              <Button variant="primary" onClick={confirmLockedCheckout}>
                 Checkout Anyway
-              </button>
+              </Button>
             </div>
           }
-          pt={{
-            root: {
-              style: {
-                backgroundColor: "var(--color-bg-secondary)",
-                border: "1px solid var(--color-border-default)",
-              },
-            },
-            header: {
-              style: {
-                backgroundColor: "var(--color-bg-secondary)",
-                color: "var(--color-text-secondary)",
-                borderBottom: "1px solid var(--color-border-default)",
-              },
-            },
-            content: {
-              style: {
-                backgroundColor: "var(--color-bg-secondary)",
-                color: "var(--color-text-secondary)",
-                padding: "1.5rem",
-              },
-            },
-            footer: {
-              style: {
-                backgroundColor: "var(--color-bg-secondary)",
-                borderTop: "1px solid var(--color-border-default)",
-                padding: "0.75rem",
-              },
-            },
-          }}
         >
-          <p>
+          <p className="m-0">
             This file is currently locked by{" "}
             <strong>{lockedWarningUser}</strong>.
           </p>
           <p
-            className="mt-2 text-sm"
+            className="mb-0 mt-2 text-sm"
             style={{ color: "var(--color-text-muted)" }}
           >
             {lockedWarningPath}
           </p>
-          <p className="mt-2">
+          <p className="mb-0 mt-2">
             You can still check out the file, but you will not be able to submit
             changes while it remains locked by another user.
           </p>
@@ -750,67 +671,25 @@ export default function FileContextMenu({
           onHide={() => setResolveDialogVisible(false)}
           footer={
             <div className="flex justify-end gap-2">
-              <button
-                className="p-[0.5rem] px-[1rem] text-[0.9em] rounded"
-                style={{
-                  backgroundColor: "var(--color-bg-primary)",
-                  border: "1px solid var(--color-border-default)",
-                  color: "var(--color-text-secondary)",
-                }}
+              <Button
+                variant="secondary"
                 onClick={() => setResolveDialogVisible(false)}
               >
                 Cancel
-              </button>
-              <button
-                className="p-[0.5rem] px-[1rem] text-[0.9em] rounded"
-                style={{
-                  backgroundColor: "var(--color-accent)",
-                  border: "1px solid var(--color-accent)",
-                  color: "#fff",
-                }}
-                onClick={confirmResolve}
-              >
+              </Button>
+              <Button variant="primary" onClick={confirmResolve}>
                 Mark as Resolved
-              </button>
+              </Button>
             </div>
           }
-          pt={{
-            root: {
-              style: {
-                backgroundColor: "var(--color-bg-secondary)",
-                border: "1px solid var(--color-border-default)",
-              },
-            },
-            header: {
-              style: {
-                backgroundColor: "var(--color-bg-secondary)",
-                color: "var(--color-text-secondary)",
-                borderBottom: "1px solid var(--color-border-default)",
-              },
-            },
-            content: {
-              style: {
-                backgroundColor: "var(--color-bg-secondary)",
-                color: "var(--color-text-secondary)",
-                padding: "1.5rem",
-              },
-            },
-            footer: {
-              style: {
-                backgroundColor: "var(--color-bg-secondary)",
-                borderTop: "1px solid var(--color-border-default)",
-                padding: "0.75rem",
-              },
-            },
-          }}
         >
-          <p>
+          <p className="m-0">
             Are you sure you want to mark this file as resolved? This tells
             Checkpoint that your local version is correct despite newer changes
             on the remote.
           </p>
           <p
-            className="mt-2 text-sm"
+            className="mb-0 mt-2 text-sm"
             style={{ color: "var(--color-text-muted)" }}
           >
             {resolveDialogPath}
@@ -821,7 +700,7 @@ export default function FileContextMenu({
               id="resolve-dont-ask"
               checked={resolveDontAsk}
               onChange={(e) => setResolveDontAsk?.(e.target.checked)}
-              style={{ accentColor: "var(--color-accent)" }}
+              className="accent-[var(--color-accent)]"
             />
             <label
               htmlFor="resolve-dont-ask"

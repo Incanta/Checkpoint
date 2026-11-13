@@ -1,4 +1,3 @@
-import { Dialog } from "primereact/dialog";
 import { useAtomValue } from "jotai";
 import { currentWorkspaceAtom } from "../../../../common/state/workspace";
 import {
@@ -6,9 +5,8 @@ import {
   getWsRecord,
 } from "../../../../common/state/team-sync";
 import { ipc } from "../../../pages/ipc";
-import { Button } from "../../ui";
+import { Button, Dialog } from "../../ui";
 import { confirmReasons } from "../links";
-import { teamSyncDialogPt } from "./shared";
 
 /**
  * Shown when a sync stopped before moving linked repos that need the user's
@@ -49,9 +47,7 @@ export default function LinkConfirmDialog(): React.ReactElement | null {
       header="Move linked repos?"
       visible
       onHide={dismiss}
-      modal
       style={{ width: "36rem" }}
-      pt={teamSyncDialogPt}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={dismiss}>
@@ -68,7 +64,7 @@ export default function LinkConfirmDialog(): React.ReactElement | null {
         </div>
       }
     >
-      <div className="flex flex-col gap-4 p-5">
+      <div className="flex flex-col gap-4">
         <div className="text-sm text-[var(--color-text-secondary)]">
           Syncing {currentWorkspace?.name ?? "this workspace"} to {target} moves
           these linked repos first. Nothing has synced yet.

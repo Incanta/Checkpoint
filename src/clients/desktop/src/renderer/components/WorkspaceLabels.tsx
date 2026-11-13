@@ -3,34 +3,73 @@ import {
   currentWorkspaceAtom,
   workspaceLabelsAtom,
 } from "../../common/state/workspace";
-import Button from "./Button";
 import {
-  Button as UiButton,
+  Button,
+  ContextMenu,
+  DataTable,
+  Dialog,
   EmptyState,
   dialogFieldClass,
   dialogInputClass,
-  dialogPt,
+  type ContextMenuHandle,
+  type MenuItem,
 } from "./ui";
 import { ipc } from "../pages/ipc";
-import { TreeTable } from "primereact/treetable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { TreeNode } from "primereact/treenode";
-import { Column, ColumnPassThroughOptions } from "primereact/column";
-import { ContextMenu } from "primereact/contextmenu";
-import { MenuItem } from "primereact/menuitem";
-import { Dialog } from "primereact/dialog";
+import { createColumnHelper } from "@tanstack/react-table";
 import CreateLabelDialog from "./CreateLabelDialog";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faTag } from "@fortawesome/free-solid-svg-icons";
+
+interface LabelRow {
+  id: string;
+  label: string;
+  changelist: number;
+  message: string;
+  /** Epoch ms, so sorting is chronological. */
+  date: number;
+  dateLabel: string;
+  user: string;
+}
+
+const column = createColumnHelper<LabelRow>();
+
+const columns = [
+  column.accessor("label", {
+    id: "label",
+    header: "Label",
+    meta: { measure: (row) => row.label },
+  }),
+  column.accessor("changelist", {
+    id: "changelist",
+    header: "Changelist",
+    meta: { measure: (row) => String(row.changelist) },
+  }),
+  column.accessor("message", {
+    id: "message",
+    header: "Message",
+    minSize: 200,
+    cell: (info) => <span title={info.getValue()}>{info.getValue()}</span>,
+    meta: { fill: true },
+  }),
+  column.accessor("date", {
+    id: "date",
+    header: "Date",
+    cell: (info) => info.row.original.dateLabel,
+    meta: { measure: (row) => row.dateLabel },
+  }),
+  column.accessor("user", {
+    id: "user",
+    header: "User",
+    meta: { measure: (row) => row.user },
+  }),
+];
 
 export default function WorkspaceLabels() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
   const workspaceLabels = useAtomValue(workspaceLabelsAtom);
 
-  const treeTableRef = useRef<TreeTable>(null);
-  const contextMenuRef = useRef<ContextMenu>(null);
-  const tableWrapperRef = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes] = useState<TreeNode[]>([]);
+  const contextMenuRef = useRef<ContextMenuHandle>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const contextLabelRef = useRef<{
     id: string;
@@ -57,36 +96,29 @@ export default function WorkspaceLabels() {
   const [changeClPending, setChangeClPending] = useState(false);
   const [changeClError, setChangeClError] = useState<string | null>(null);
 
-  // Build tree nodes from labels
   useEffect(() => {
-    if (!currentWorkspace) {
-      setNodes([]);
-      return;
-    }
-
-    if (!workspaceLabels) {
-      setNodes([]);
+    if (currentWorkspace && !workspaceLabels) {
       ipc.sendMessage("workspace:labels", null);
-      return;
     }
+  }, [currentWorkspace, workspaceLabels]);
 
-    const newNodes: TreeNode[] = workspaceLabels.map((label) => ({
-      id: label.id,
-      key: label.id,
-      data: {
-        labelId: label.id,
+  const rows = useMemo<LabelRow[]>(() => {
+    if (!currentWorkspace || !workspaceLabels) return [];
+    return workspaceLabels.map((label) => {
+      const date = new Date(label.changelist.createdAt).getTime();
+      return {
+        id: label.id,
         label: label.name,
         changelist: label.changelist.number,
         message: label.changelist.message || "",
-        date: new Date(label.changelist.createdAt).toLocaleDateString(),
+        date,
+        dateLabel: isNaN(date) ? "" : new Date(date).toLocaleDateString(),
         user:
           label.changelist.user?.email ||
           label.changelist.user?.name ||
           "Unknown",
-      },
-    }));
-
-    setNodes(newNodes);
+      };
+    });
   }, [currentWorkspace, workspaceLabels]);
 
   // IPC listeners for label operations
@@ -97,7 +129,7 @@ export default function WorkspaceLabels() {
       ipc.sendMessage("workspace:labels", null);
     });
 
-    const unsubDeleteError = ipc.on("workspace:delete-label:error", (data) => {
+    const unsubDeleteError = ipc.on("workspace:delete-label:error", () => {
       setDeletePending(false);
     });
 
@@ -145,18 +177,15 @@ export default function WorkspaceLabels() {
   }, []);
 
   const handleRowContextMenu = useCallback(
-    (event: React.MouseEvent, node: TreeNode) => {
+    (event: React.MouseEvent, row: LabelRow) => {
       event.preventDefault();
-      const labelId = node.data?.labelId as string;
-      const labelName = node.data?.label as string;
-      const changelist = node.data?.changelist as number;
       contextLabelRef.current = {
-        id: labelId,
-        name: labelName,
-        changelist,
+        id: row.id,
+        name: row.label,
+        changelist: row.changelist,
       };
 
-      const items: MenuItem[] = [
+      setMenuItems([
         {
           label: "Rename...",
           command: () => {
@@ -180,16 +209,14 @@ export default function WorkspaceLabels() {
         { separator: true },
         {
           label: "Delete",
-          style: { color: "var(--color-danger)" },
+          danger: true,
           command: () => {
             if (contextLabelRef.current) {
               setDeleteDialogVisible(true);
             }
           },
         },
-      ];
-
-      setMenuItems(items);
+      ]);
       contextMenuRef.current?.show(event);
     },
     [],
@@ -225,120 +252,15 @@ export default function WorkspaceLabels() {
     });
   }, [changeClNumber]);
 
-  const columnPt = useMemo<ColumnPassThroughOptions>(
-    () => ({
-      headerCell: {
-        style: {
-          borderColor: "var(--color-border-default)",
-          borderWidth: "0 1px 0 0",
-          borderStyle: "solid",
-          paddingLeft: "0.5rem",
-        },
-      },
-      bodyCell: {
-        style: {
-          paddingLeft: "0.5rem",
-        },
-      },
-      rowToggler: {
-        className: "treetable-toggler",
-        style: {
-          backgroundColor: "transparent",
-          padding: "0.4rem",
-        },
-      },
-    }),
-    [],
-  );
-
-  const treeTablePt = useMemo(
-    () => ({
-      thead: {
-        style: {
-          borderColor: "var(--color-border-default)",
-          borderWidth: "0 0 1px 0",
-          borderStyle: "solid",
-          paddingLeft: "0.5rem",
-        },
-      },
-      scrollableWrapper: {
-        style: {
-          height: "100%",
-        },
-      },
-      scrollable: {
-        style: {
-          height: "100%",
-        },
-      },
-      scrollableBody: {
-        style: {
-          maxHeight: "initial",
-        },
-      },
-      resizeHelper: {
-        style: {
-          width: "0.1rem",
-          backgroundColor: "var(--color-border-default)",
-        },
-      },
-      tbody: {
-        style: {
-          cursor: "pointer",
-        },
-      },
-    }),
-    [],
-  );
+  const changeClValid =
+    !!changeClNumber.trim() && !isNaN(parseInt(changeClNumber, 10));
 
   return (
     <>
-      <ContextMenu
-        ref={contextMenuRef}
-        model={menuItems}
-        breakpoint="767px"
-        pt={{
-          root: {
-            style: {
-              marginTop: "2rem",
-              backgroundColor: "var(--color-bg-overlay)",
-              border: "1px solid var(--color-border-default)",
-              borderRadius: "0.5rem",
-              minWidth: "200px",
-            },
-          },
-          menu: {
-            style: {
-              backgroundColor: "var(--color-bg-overlay)",
-            },
-          },
-          menuitem: {
-            style: {
-              margin: 0,
-            },
-          },
-          action: {
-            style: {
-              color: "var(--color-text-secondary)",
-              padding: "0.5rem 1rem",
-              fontSize: "0.875rem",
-            },
-          },
-          separator: {
-            style: {
-              borderColor: "var(--color-border-muted)",
-            },
-          },
-          submenuIcon: {
-            style: {
-              color: "var(--color-text-secondary)",
-            },
-          },
-        }}
-      />
-      <div className="grid h-full grid-rows-[2.5rem_1fr]">
-        <div className="row-span-1 flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
-          <UiButton
+      <ContextMenu ref={contextMenuRef} model={menuItems} />
+      <div className="grid h-full grid-rows-[2.5rem_minmax(0,1fr)]">
+        <div className="flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3">
+          <Button
             variant="secondary"
             size="sm"
             onClick={() => {
@@ -346,85 +268,34 @@ export default function WorkspaceLabels() {
             }}
           >
             Refresh
-          </UiButton>
-          <UiButton
+          </Button>
+          <Button
             variant="primary"
             size="sm"
             onClick={() => setCreateLabelVisible(true)}
           >
             Create Label
-          </UiButton>
+          </Button>
         </div>
-        <div
-          className="row-span-1"
-          style={{ textAlign: "left", overflow: "hidden" }}
-          ref={tableWrapperRef}
-        >
-          {workspaceLabels && workspaceLabels.length === 0 ? (
-            <div className="flex h-full w-full items-center justify-center">
-              <EmptyState
-                icon={<FontAwesomeIcon icon={faTag} size="2x" />}
-                title="No Labels"
-                description="Labels name a changelist so it is easy to find again. Create one here, or from a changelist in the History tab."
-              />
-            </div>
-          ) : (
-            <TreeTable
-              ref={treeTableRef}
-              value={nodes}
-              tableStyle={{ minWidth: "50rem" }}
-              columnResizeMode="expand"
-              resizableColumns
-              showGridlines
-              scrollable
-              scrollHeight="flex"
-              onContextMenu={(e) => {
-                handleRowContextMenu(
-                  e.originalEvent as React.MouseEvent,
-                  e.node,
-                );
-              }}
-              pt={treeTablePt}
-              style={{ height: "100%" }}
-            >
-              <Column
-                field="label"
-                header="Label"
-                expander
-                resizeable
-                sortable
-                pt={columnPt}
-              ></Column>
-              <Column
-                field="changelist"
-                header="Changelist"
-                resizeable
-                sortable
-                pt={columnPt}
-              ></Column>
-              <Column
-                field="message"
-                header="Message"
-                resizeable
-                sortable
-                pt={columnPt}
-              ></Column>
-              <Column
-                field="date"
-                header="Date"
-                resizeable
-                sortable
-                pt={columnPt}
-              ></Column>
-              <Column
-                field="user"
-                header="User"
-                resizeable
-                sortable
-                pt={columnPt}
-              ></Column>
-            </TreeTable>
-          )}
+        <div className="min-h-0 min-w-0 overflow-hidden">
+          <DataTable
+            data={rows}
+            columns={columns}
+            getRowId={(row) => row.id}
+            storageKey="workspace-labels"
+            onRowContextMenu={handleRowContextMenu}
+            emptyState={
+              workspaceLabels ? (
+                <div className="flex justify-center py-12">
+                  <EmptyState
+                    icon={<FontAwesomeIcon icon={faTag} size="2x" />}
+                    title="No Labels"
+                    description="Labels name a changelist so it is easy to find again. Create one here, or from a changelist in the History tab."
+                  />
+                </div>
+              ) : null
+            }
+          />
         </div>
       </div>
 
@@ -440,26 +311,28 @@ export default function WorkspaceLabels() {
         header="Delete Label"
         visible={deleteDialogVisible}
         style={{ width: "24rem" }}
+        closable={!deletePending}
         onHide={() => {
           if (!deletePending) setDeleteDialogVisible(false);
         }}
         footer={
           <div className="flex justify-end gap-2">
             <Button
-              label="Cancel"
+              variant="secondary"
               onClick={() => setDeleteDialogVisible(false)}
               disabled={deletePending}
-              className="p-[0.5rem] text-[0.9em]"
-            />
+            >
+              Cancel
+            </Button>
             <Button
-              label={deletePending ? "Deleting..." : "Delete"}
+              variant="danger"
               onClick={handleDelete}
               disabled={deletePending}
-              className="p-[0.5rem] text-[0.9em]"
-            />
+            >
+              {deletePending ? "Deleting..." : "Delete"}
+            </Button>
           </div>
         }
-        pt={dialogPt}
       >
         <p className="m-0">
           Are you sure you want to delete the label{" "}
@@ -472,26 +345,28 @@ export default function WorkspaceLabels() {
         header="Rename Label"
         visible={renameDialogVisible}
         style={{ width: "26rem" }}
+        closable={!renamePending}
         onHide={() => {
           if (!renamePending) setRenameDialogVisible(false);
         }}
         footer={
           <div className="flex justify-end gap-2">
             <Button
-              label="Cancel"
+              variant="secondary"
               onClick={() => setRenameDialogVisible(false)}
               disabled={renamePending}
-              className="p-[0.5rem] text-[0.9em]"
-            />
+            >
+              Cancel
+            </Button>
             <Button
-              label={renamePending ? "Renaming..." : "Rename"}
+              variant="primary"
               onClick={handleRename}
               disabled={renamePending || !renameName.trim()}
-              className="p-[0.5rem] text-[0.9em]"
-            />
+            >
+              {renamePending ? "Renaming..." : "Rename"}
+            </Button>
           </div>
         }
-        pt={dialogPt}
       >
         <label className={dialogFieldClass}>
           <span>New name</span>
@@ -516,30 +391,28 @@ export default function WorkspaceLabels() {
         header="Change Changelist"
         visible={changeClDialogVisible}
         style={{ width: "26rem" }}
+        closable={!changeClPending}
         onHide={() => {
           if (!changeClPending) setChangeClDialogVisible(false);
         }}
         footer={
           <div className="flex justify-end gap-2">
             <Button
-              label="Cancel"
+              variant="secondary"
               onClick={() => setChangeClDialogVisible(false)}
               disabled={changeClPending}
-              className="p-[0.5rem] text-[0.9em]"
-            />
+            >
+              Cancel
+            </Button>
             <Button
-              label={changeClPending ? "Saving..." : "Save"}
+              variant="primary"
               onClick={handleChangeCl}
-              disabled={
-                changeClPending ||
-                !changeClNumber.trim() ||
-                isNaN(parseInt(changeClNumber, 10))
-              }
-              className="p-[0.5rem] text-[0.9em]"
-            />
+              disabled={changeClPending || !changeClValid}
+            >
+              {changeClPending ? "Saving..." : "Save"}
+            </Button>
           </div>
         }
-        pt={dialogPt}
       >
         <label className={dialogFieldClass}>
           <span>Changelist number</span>
@@ -549,13 +422,7 @@ export default function WorkspaceLabels() {
               setChangeClNumber(e.target.value.replace(/\D/g, ""))
             }
             onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                changeClNumber.trim() &&
-                !isNaN(parseInt(changeClNumber, 10))
-              ) {
-                handleChangeCl();
-              }
+              if (e.key === "Enter" && changeClValid) handleChangeCl();
             }}
             inputMode="numeric"
             autoFocus

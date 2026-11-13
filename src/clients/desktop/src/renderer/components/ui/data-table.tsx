@@ -10,17 +10,25 @@ import {
 import {
   flexRender,
   getCoreRowModel,
+  getExpandedRowModel,
   getSortedRowModel,
   useReactTable,
   type ColumnDef,
   type ColumnSizingState,
+  type ExpandedState,
   type Row,
   type RowData,
   type SortingState,
+  type Updater,
+  type VisibilityState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faChevronDown, faChevronUp } from "@fortawesome/free-solid-svg-icons";
+import {
+  faChevronDown,
+  faChevronRight,
+  faChevronUp,
+} from "@fortawesome/free-solid-svg-icons";
 
 declare module "@tanstack/react-table" {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -40,6 +48,16 @@ declare module "@tanstack/react-table" {
     maxAutoSize?: number;
     /** Extra classes for this column's body cells. */
     cellClassName?: string;
+    /**
+     * In a tree (`getSubRows`), this column's cells are indented by depth
+     * and carry the expand/collapse chevron. Usually the first column.
+     */
+    expander?: boolean;
+    /**
+     * Never shown. For sort keys used only by `sortPrefix`/`sortSuffix`,
+     * such as a directories-first rank.
+     */
+    hidden?: boolean;
   }
 }
 
@@ -51,6 +69,9 @@ const CELL_CHROME = 17;
 const SORT_ICON_ROOM = 18;
 const DEFAULT_MAX_AUTO_SIZE = 320;
 const MAX_MEASURED_ROWS = 1000;
+// Per tree level, and the chevron's slot (also kept on leaves so names align).
+const INDENT = 16;
+const EXPANDER_ROOM = 20;
 
 export interface DataTableProps<T> {
   data: T[];
@@ -67,6 +88,58 @@ export interface DataTableProps<T> {
   /** Shown under the header when there are no rows. */
   emptyState?: ReactNode;
   className?: string;
+  /** Extra classes for a row, e.g. to mark the current branch. */
+  getRowClassName?: (row: T) => string;
+  /** Called whenever the selected row changes (null when it goes away). */
+  onSelectionChange?: (row: T | null) => void;
+
+  // Trees
+
+  /** Makes the table a tree: a row's children. */
+  getSubRows?: (row: T) => T[] | undefined;
+  /**
+   * Whether a row has a chevron. Defaults to having children; return true
+   * for rows whose children load on demand (see `onRowExpand`).
+   */
+  getRowCanExpand?: (row: T) => boolean;
+  /** Called as a row is expanded, e.g. to load its children. */
+  onRowExpand?: (row: T) => void;
+  /**
+   * Controlled expansion, keyed by row id (`true` for everything). Leave
+   * unset to let the table track it, starting from `defaultExpanded`.
+   */
+  expanded?: ExpandedState;
+  onExpandedChange?: (expanded: ExpandedState) => void;
+  defaultExpanded?: ExpandedState;
+
+  // Sorting
+
+  /**
+   * Sorts applied before the user's column sort, and kept whatever they
+   * click (e.g. directories first). They can name `meta.hidden` columns.
+   */
+  sortPrefix?: SortingState;
+  /** Tie-breakers applied after the user's sort (e.g. by name). */
+  sortSuffix?: SortingState;
+}
+
+/** Rows in display order with their depth, for measuring a tree. */
+function flattenForMeasure<T>(
+  data: T[],
+  getSubRows: ((row: T) => T[] | undefined) | undefined,
+  limit: number,
+): { row: T; depth: number }[] {
+  const out: { row: T; depth: number }[] = [];
+  const walk = (rows: T[], depth: number) => {
+    for (const row of rows) {
+      if (out.length >= limit) return;
+      out.push({ row, depth });
+      const children = getSubRows?.(row);
+      if (children?.length) walk(children, depth + 1);
+    }
+  };
+  walk(data, 0);
+  return out;
 }
 
 function loadSizes(storageKey: string | undefined): ColumnSizingState {
@@ -106,12 +179,13 @@ function measureColumns<T>(
   el: Element,
   columns: ColumnDef<T, any>[],
   data: T[],
+  getSubRows: ((row: T) => T[] | undefined) | undefined,
 ): ColumnSizingState {
   const ctx = document.createElement("canvas").getContext("2d");
   if (!ctx) return {};
   const bodyFont = fontOf(el);
   const headerFont = fontOf(el, "600");
-  const rows = data.slice(0, MAX_MEASURED_ROWS);
+  const rows = flattenForMeasure(data, getSubRows, MAX_MEASURED_ROWS);
   const sizes: ColumnSizingState = {};
 
   for (const column of columns) {
@@ -123,8 +197,10 @@ function measureColumns<T>(
     let width = ctx.measureText(header).width + SORT_ICON_ROOM;
 
     ctx.font = bodyFont;
-    for (const row of rows) {
-      width = Math.max(width, ctx.measureText(measure(row)).width);
+    const tree = column.meta?.expander && getSubRows;
+    for (const { row, depth } of rows) {
+      const indent = tree ? depth * INDENT + EXPANDER_ROOM : 0;
+      width = Math.max(width, indent + ctx.measureText(measure(row)).width);
     }
 
     const max = column.meta?.maxAutoSize ?? DEFAULT_MAX_AUTO_SIZE;
@@ -148,20 +224,67 @@ export function DataTable<T>({
   onRowContextMenu,
   emptyState,
   className = "",
+  getRowClassName,
+  onSelectionChange,
+  getSubRows,
+  getRowCanExpand,
+  onRowExpand,
+  expanded: controlledExpanded,
+  onExpandedChange,
+  defaultExpanded = {},
+  sortPrefix,
+  sortSuffix,
 }: DataTableProps<T>): React.ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [userSorting, setUserSorting] = useState<SortingState>([]);
   const [userSizes, setUserSizes] = useState<ColumnSizingState>(() =>
     loadSizes(storageKey),
   );
   const [autoSizes, setAutoSizes] = useState<ColumnSizingState>({});
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedIdState] = useState<string | null>(null);
+  const [ownExpanded, setOwnExpanded] =
+    useState<ExpandedState>(defaultExpanded);
+  const expanded = controlledExpanded ?? ownExpanded;
 
   useLayoutEffect(() => {
     if (scrollRef.current) {
-      setAutoSizes(measureColumns(scrollRef.current, columns, data));
+      setAutoSizes(
+        measureColumns(scrollRef.current, columns, data, getSubRows),
+      );
     }
+    // getSubRows is usually an inline arrow; the data changing is what
+    // matters.
   }, [columns, data]);
+
+  // The pinned sorts wrap whatever the user clicked; only the user's part
+  // is state, so a header click can't drop or reorder the pinned ones.
+  const pinnedIds = useMemo(
+    () =>
+      new Set([...(sortPrefix ?? []), ...(sortSuffix ?? [])].map((s) => s.id)),
+    [sortPrefix, sortSuffix],
+  );
+  const sorting = useMemo(
+    () => [...(sortPrefix ?? []), ...userSorting, ...(sortSuffix ?? [])],
+    [sortPrefix, userSorting, sortSuffix],
+  );
+  const onSortingChange = (updater: Updater<SortingState>) => {
+    const next = typeof updater === "function" ? updater(sorting) : updater;
+    setUserSorting(next.filter((s) => !pinnedIds.has(s.id)));
+  };
+
+  const columnVisibility = useMemo(() => {
+    const visibility: VisibilityState = {};
+    for (const column of columns) {
+      if (column.id && column.meta?.hidden) visibility[column.id] = false;
+    }
+    return visibility;
+  }, [columns]);
+
+  const onExpandedStateChange = (updater: Updater<ExpandedState>) => {
+    const next = typeof updater === "function" ? updater(expanded) : updater;
+    if (controlledExpanded === undefined) setOwnExpanded(next);
+    onExpandedChange?.(next);
+  };
 
   useEffect(() => {
     saveSizes(storageKey, userSizes);
@@ -178,16 +301,41 @@ export function DataTable<T>({
     getRowId: (row) => getRowId(row),
     // Sizes only change through the boundary drag below, which writes
     // userSizes directly.
-    state: { sorting, columnSizing },
-    onSortingChange: setSorting,
+    state: { sorting, columnSizing, columnVisibility, expanded },
+    onSortingChange,
+    onExpandedChange: onExpandedStateChange,
+    getSubRows,
+    getRowCanExpand: getRowCanExpand
+      ? (row) => getRowCanExpand(row.original)
+      : undefined,
+    // A click sorts by that column alone (plus the pinned sorts).
+    enableMultiSort: false,
     // TanStack sorts numbers descending first, which for already
     // newest-first data looks like the click did nothing.
     sortDescFirst: false,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
   });
 
   const rows = table.getRowModel().rows;
+
+  const isTree = getSubRows !== undefined || getRowCanExpand !== undefined;
+
+  const setSelectedId = (id: string | null) => {
+    setSelectedIdState(id);
+    if (onSelectionChange) {
+      onSelectionChange(id ? (table.getRow(id, true)?.original ?? null) : null);
+    }
+  };
+
+  const toggleRow = (row: Row<T>, open?: boolean) => {
+    if (!row.getCanExpand()) return;
+    const willOpen = open ?? !row.getIsExpanded();
+    if (willOpen === row.getIsExpanded()) return;
+    if (willOpen) onRowExpand?.(row.original);
+    row.toggleExpanded(willOpen);
+  };
   const leafColumns = table.getVisibleLeafColumns();
   const fillIndex = leafColumns.findIndex((c) => c.columnDef.meta?.fill);
 
@@ -250,15 +398,18 @@ export function DataTable<T>({
     [rows, selectedId],
   );
 
-  const selectIndex = useCallback(
-    (index: number) => {
-      const row = rows[index];
-      if (!row) return;
-      setSelectedId(row.id);
-      virtualizer.scrollToIndex(index, { align: "auto" });
-    },
-    [rows, virtualizer],
-  );
+  const selectIndex = (index: number) => {
+    const row = rows[index];
+    if (!row) return;
+    setSelectedId(row.id);
+    virtualizer.scrollToIndex(index, { align: "auto" });
+  };
+
+  // Without an activate handler, opening a tree row means expanding it.
+  const activateRow = (row: Row<T>) => {
+    if (onRowActivate) onRowActivate(row.original);
+    else toggleRow(row);
+  };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (rows.length === 0) return;
@@ -291,11 +442,33 @@ export function DataTable<T>({
         next = rows.length - 1;
         break;
       case "Enter":
-        if (at >= 0 && onRowActivate) {
+        if (at >= 0) {
           e.preventDefault();
-          onRowActivate(rows[at].original);
+          activateRow(rows[at]);
         }
         return;
+      case "ArrowRight": {
+        // Expand, or step into an already expanded row.
+        const row = rows[at];
+        if (!row?.getCanExpand()) return;
+        e.preventDefault();
+        if (!row.getIsExpanded()) toggleRow(row, true);
+        else if (rows[at + 1]?.parentId === row.id) selectIndex(at + 1);
+        return;
+      }
+      case "ArrowLeft": {
+        // Collapse, or step out to the parent.
+        const row = rows[at];
+        if (!row) return;
+        e.preventDefault();
+        if (row.getCanExpand() && row.getIsExpanded()) {
+          toggleRow(row, false);
+        } else if (row.parentId) {
+          const parentIndex = rows.findIndex((r) => r.id === row.parentId);
+          if (parentIndex >= 0) selectIndex(parentIndex);
+        }
+        return;
+      }
       default:
         return;
     }
@@ -323,29 +496,69 @@ export function DataTable<T>({
           selected
             ? "bg-[var(--color-accent-muted)] text-[var(--color-text-primary)] hover:bg-[color-mix(in_srgb,var(--color-accent-muted),var(--color-accent)_25%)]"
             : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)]"
-        }`}
+        } ${getRowClassName?.(row.original) ?? ""}`}
         style={{
           gridTemplateColumns,
           transform: `translateY(${start - HEADER_HEIGHT}px)`,
         }}
         onClick={() => setSelectedId(row.id)}
-        onDoubleClick={() => onRowActivate?.(row.original)}
+        onDoubleClick={() => activateRow(row)}
         onContextMenu={(e) => {
           setSelectedId(row.id);
           onRowContextMenu?.(e, row.original);
         }}
       >
-        {row.getVisibleCells().map((cell) => (
-          <div
-            key={cell.id}
-            role="cell"
-            className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap border-r border-[var(--color-border-muted)] px-2 py-1 last:border-r-0 ${
-              cell.column.columnDef.meta?.cellClassName ?? ""
-            }`}
-          >
-            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-          </div>
-        ))}
+        {row.getVisibleCells().map((cell) => {
+          const content = flexRender(
+            cell.column.columnDef.cell,
+            cell.getContext(),
+          );
+          const isExpanderCell = isTree && cell.column.columnDef.meta?.expander;
+          return (
+            <div
+              key={cell.id}
+              role="cell"
+              className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap border-r border-[var(--color-border-muted)] px-2 py-1 last:border-r-0 ${
+                isExpanderCell ? "flex items-center" : ""
+              } ${cell.column.columnDef.meta?.cellClassName ?? ""}`}
+            >
+              {isExpanderCell ? (
+                <>
+                  <span
+                    className="flex shrink-0 items-center"
+                    style={{
+                      paddingLeft: row.depth * INDENT,
+                      width: EXPANDER_ROOM,
+                    }}
+                  >
+                    {row.getCanExpand() && (
+                      <span
+                        role="button"
+                        aria-label={row.getIsExpanded() ? "Collapse" : "Expand"}
+                        aria-expanded={row.getIsExpanded()}
+                        className="flex h-4 w-4 cursor-pointer items-center justify-center rounded text-[0.65em] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleRow(row);
+                        }}
+                        onDoubleClick={(e) => e.stopPropagation()}
+                      >
+                        <FontAwesomeIcon
+                          icon={
+                            row.getIsExpanded() ? faChevronDown : faChevronRight
+                          }
+                        />
+                      </span>
+                    )}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{content}</span>
+                </>
+              ) : (
+                content
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };

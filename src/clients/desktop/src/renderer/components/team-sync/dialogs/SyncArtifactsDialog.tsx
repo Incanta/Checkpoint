@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { Dialog } from "primereact/dialog";
 import type { TeamSyncArtifactChannel } from "@checkpointvcs/common";
 import { ipc } from "../../../pages/ipc";
-import { Button } from "../../ui";
-import { CheckRow, teamSyncDialogPt } from "./shared";
+import { Button, Dialog } from "../../ui";
+import { CheckRow } from "./shared";
 
 export interface SyncArtifactsDialogProps {
   visible: boolean;
@@ -68,10 +67,8 @@ export default function SyncArtifactsDialog({
       header="Sync Artifacts"
       visible={visible}
       onHide={onHide}
-      modal
       dismissableMask
       style={{ width: "32rem" }}
-      pt={teamSyncDialogPt}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onHide}>
@@ -81,7 +78,7 @@ export default function SyncArtifactsDialog({
         </div>
       }
     >
-      <div className="flex flex-col gap-3 p-5">
+      <div className="flex flex-col gap-3">
         <p className="m-0 text-sm text-[var(--color-text-secondary)]">
           Each sync applies the newest upload of the types you choose, at or
           before the changelist you sync to. Clearing a type removes its files

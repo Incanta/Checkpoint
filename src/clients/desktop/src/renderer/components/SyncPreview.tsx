@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
-import { Splitter, SplitterPanel } from "primereact/splitter";
 // @ts-ignore
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
 import {
@@ -25,7 +24,7 @@ import {
   buildFileTree as buildFileTreeGeneric,
   collectDirPaths,
 } from "./build-file-tree";
-import { Button, EmptyState } from "./ui";
+import { Button, EmptyState, Splitter, SplitterPanel } from "./ui";
 
 /**
  * Aggregates file changes across all incoming changelists into a single
@@ -223,16 +222,8 @@ export default function SyncPreview() {
         className="row-span-1"
         style={{ textAlign: "left", overflow: "hidden" }}
       >
-        <Splitter
-          layout="horizontal"
-          className="w-full h-full"
-          pt={{
-            gutter: {
-              className: "file-history-splitter-gutter",
-            },
-          }}
-        >
-          <SplitterPanel className="flex flex-col" size={30}>
+        <Splitter layout="horizontal" className="w-full h-full">
+          <SplitterPanel className="flex min-h-0 flex-col" size={30}>
             <div className="h-full overflow-y-auto bg-[var(--color-bg-secondary)]">
               {/* View mode toggle */}
               <div className="flex border-b border-[var(--color-border-default)]">
@@ -383,7 +374,7 @@ export default function SyncPreview() {
               )}
             </div>
           </SplitterPanel>
-          <SplitterPanel className="flex flex-col" size={70}>
+          <SplitterPanel className="flex min-h-0 flex-col" size={70}>
             {selectedFile && syncPreview.diffContent ? (
               <div className="flex h-full flex-col">
                 <div className="flex items-center justify-between border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3 py-2">

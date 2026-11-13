@@ -1,8 +1,8 @@
 /*
  * Tailwind v4, CSS-first. We intentionally import the theme + utilities layers
  * but NOT preflight: the app predates Tailwind and relies on its own base
- * styling + PrimeReact overrides, so enabling preflight's global resets would
- * regress screens wholesale. This mirrors the old `preflight: false` config.
+ * styling, so enabling preflight's global resets would regress screens
+ * wholesale. This mirrors the old `preflight: false` config.
  */
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
@@ -16,8 +16,9 @@
  * (--color-*) so existing `var(--color-*)` references keep resolving.
  */
 @theme {
-  --font-sans: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji";
+  --font-sans:
+    Inter, system-ui, Avenir, Helvetica, Arial, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji";
 
   /* Surfaces / borders / text (values come from :root / [data-theme]) */
   --color-bg-primary: var(--bg-primary);
@@ -206,20 +207,6 @@
   }
 }
 
-button.p-treetable-toggler {
-  border: none;
-  background: transparent;
-  padding: 0;
-}
-button.p-treetable-toggler:hover {
-  background: transparent;
-  border-color: transparent;
-}
-button.p-treetable-toggler:focus,
-button.p-treetable-toggler:focus-visible {
-  outline: 0;
-}
-
 /*
  * Custom window titlebar drag regions. The app draws its own titlebar (see
  * TitleBar.tsx) over the native window-controls overlay; `.app-drag` makes a
@@ -254,260 +241,6 @@ button.p-treetable-toggler:focus-visible {
   background: var(--bg-secondary);
 }
 
-/* ──────────────── PrimeReact overrides (no base theme is imported) ──────────────── */
-
-.p-treetable-toggler + .p-checkbox {
-  display: inline-block;
-}
-
-.p-treetable-resizable .p-treetable-thead > tr > th,
-.p-treetable-resizable .p-treetable-tfoot > tr > td,
-.p-treetable-resizable .p-treetable-tbody > tr > td {
-  text-wrap: nowrap;
-}
-
-.p-checkbox {
-  position: relative;
-  margin-right: 0.3rem;
-}
-
-.p-checkbox-input {
-  appearance: none;
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  margin: 0;
-  opacity: 0;
-  z-index: 1;
-  outline: 0 none;
-  cursor: pointer;
-}
-
-.p-checkbox-box {
-  border: 1px solid var(--border-default);
-  background: var(--bg-surface);
-  width: 1.2rem;
-  height: 1.2rem;
-  color: #ffffff;
-  border-radius: 0.25rem;
-  transition:
-    background-color 0.15s,
-    color 0.15s,
-    border-color 0.15s,
-    box-shadow 0.15s;
-  outline-color: transparent;
-}
-
-.p-checkbox.p-highlight .p-checkbox-box,
-.p-checkbox-box.p-highlight {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.p-checkbox-box > .p-icon {
-  display: inline-block;
-  pointer-events: auto;
-  position: absolute;
-  top: 0.18rem;
-  left: 0.18rem;
-}
-
-.p-splitter {
-  background: transparent;
-  border: none;
-}
-
-.p-splitter-gutter {
-  transition: background-color 0.2s;
-  background-color: var(--bg-secondary);
-}
-
-.pending-changes-splitter-gutter:nth-last-child(4) {
-  border-bottom: 1px solid var(--border-default);
-  height: calc(4px + 0.4rem) !important;
-  padding: 0.15rem 0 !important;
-  background-color: var(--bg-secondary);
-}
-
-.pending-changes-splitter-gutter:nth-last-child(2) {
-  border-top: 1px solid var(--border-default);
-  border-bottom: 1px solid var(--border-default);
-  height: calc(4px + 0.4rem) !important;
-  padding: 0.15rem 0 !important;
-  background-color: var(--bg-secondary);
-}
-
-.file-history-splitter-gutter:nth-last-child(4) {
-  border-right: 1px solid var(--border-default);
-  width: calc(4px + 0.4rem) !important;
-  padding: 0 0.15rem !important;
-  background-color: var(--bg-secondary);
-}
-
-.file-history-splitter-gutter:nth-last-child(2) {
-  border-left: 1px solid var(--border-default);
-  border-right: 1px solid var(--border-default);
-  width: calc(4px + 0.4rem) !important;
-  padding: 0 0.15rem !important;
-  background-color: var(--bg-secondary);
-}
-
-.p-splitter-gutter-handle {
-  background-color: var(--border-lighter, var(--text-muted));
-  border-radius: 0.5rem;
-}
-
-.p-splitter-gutter:hover {
-  background-color: var(--accent);
-  transition: background-color 0.2s 0.5s;
-}
-
-.p-splitter-gutter-resizing {
-  background-color: var(--accent);
-}
-
-.workspace-menu-item:hover {
-  background-color: var(--bg-overlay) !important;
-}
-
-.p-dropdown-panel {
-  background-color: var(--bg-overlay);
-  border: 1px solid var(--border-default);
-  padding: 0.375rem;
-  border-radius: 0.5rem;
-  box-shadow:
-    0 10px 15px -3px rgb(0 0 0 / 0.3),
-    0 4px 6px -4px rgb(0 0 0 / 0.3);
-}
-
-.p-dropdown-items li {
-  padding: 0.5rem;
-  border-radius: 0.375rem;
-  color: var(--text-primary);
-}
-
-.p-dropdown-items li:hover {
-  background-color: var(--bg-surface) !important;
-}
-
-.p-dropdown-items li.p-highlight {
-  background-color: var(--accent-muted) !important;
-  color: var(--text-primary);
-}
-
-.p-dialog-mask {
-  background-color: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(1px);
-}
-
-/* TreeTable sort icon customization */
-.p-treetable .p-sortable-column .p-sortable-column-icon {
-  display: none;
-  margin-left: auto;
-  margin-right: 0;
-}
-
-.p-treetable .p-sortable-column.p-highlight .p-sortable-column-icon {
-  display: inline-flex;
-}
-
-.p-treetable .p-sortable-column .p-column-header-content {
-  display: flex;
-  align-items: center;
-  width: 100%;
-}
-
-/* Override default sort icons with chevrons */
-.p-treetable .p-sortable-column-icon.pi-sort-amount-up-alt::before {
-  content: "\e93e"; /* pi-chevron-up */
-}
-
-.p-treetable .p-sortable-column-icon.pi-sort-amount-down-alt::before {
-  content: "\e93f"; /* pi-chevron-down */
-}
-
-.p-treetable .p-sortable-column-icon.pi-sort-alt::before {
-  content: "\e93e"; /* pi-chevron-up as default when visible */
-}
-
-/* TreeTable row styling */
-.p-treetable .p-treetable-tbody > tr {
-  user-select: none;
-  cursor: initial;
-  transition: background-color 0.15s ease;
-}
-
-.category-row:hover {
-  background-color: transparent !important;
-}
-
-.p-treetable .p-treetable-tbody > tr:hover:not(.category-row:hover) {
-  background-color: var(--bg-surface) !important;
-}
-
-.p-treetable .p-treetable-tbody > tr.p-highlight,
-.p-treetable .p-treetable-tbody > tr.p-row-selected {
-  background-color: var(--accent-muted) !important;
-  color: var(--text-primary);
-}
-
-.p-treetable .p-treetable-tbody > tr.p-highlight:hover,
-.p-treetable .p-treetable-tbody > tr.p-row-selected:hover {
-  background-color: color-mix(in srgb, var(--accent-muted), var(--accent) 25%) !important;
-}
-
-/* Row highlighted for diff preview (separate from checkbox selection) */
-.p-treetable .p-treetable-tbody > tr.row-highlighted {
-  background-color: var(--bg-overlay) !important;
-}
-
-.p-treetable
-  .p-treetable-tbody
-  > tr.row-highlighted:hover:not(.category-row:hover) {
-  background-color: color-mix(in srgb, var(--bg-overlay), white 8%) !important;
-}
-
-/* Remove selection highlight for pending changes (checkboxes convey selection) */
-.pending-changes-tree.p-treetable .p-treetable-tbody > tr.p-highlight,
-.pending-changes-tree.p-treetable .p-treetable-tbody > tr.p-row-selected {
-  background-color: transparent !important;
-}
-
-.pending-changes-tree.p-treetable
-  .p-treetable-tbody
-  > tr.p-highlight:hover:not(.category-row:hover),
-.pending-changes-tree.p-treetable
-  .p-treetable-tbody
-  > tr.p-row-selected:hover:not(.category-row:hover) {
-  background-color: var(--bg-surface) !important;
-}
-
-/* Row highlighted for diff preview takes priority over selection */
-.pending-changes-tree.p-treetable
-  .p-treetable-tbody
-  > tr.row-highlighted.p-highlight,
-.pending-changes-tree.p-treetable
-  .p-treetable-tbody
-  > tr.row-highlighted.p-row-selected,
-.pending-changes-tree.p-treetable .p-treetable-tbody > tr.row-highlighted {
-  background-color: var(--accent-muted) !important;
-}
-
-.pending-changes-tree.p-treetable
-  .p-treetable-tbody
-  > tr.row-highlighted.p-highlight:hover,
-.pending-changes-tree.p-treetable
-  .p-treetable-tbody
-  > tr.row-highlighted.p-row-selected:hover,
-.pending-changes-tree.p-treetable
-  .p-treetable-tbody
-  > tr.row-highlighted:hover {
-  background-color: color-mix(in srgb, var(--accent-muted), var(--accent) 25%) !important;
-}
-
 /* Rows of the Pending page's changelist sections (StagedChangesTree). */
 .pending-row {
   border-left: 2px solid transparent;
@@ -524,49 +257,4 @@ button.p-treetable-toggler:focus-visible {
 
 .pending-row.is-selected:hover {
   background-color: color-mix(in srgb, var(--accent-muted), var(--accent) 25%);
-}
-
-.p-contextmenu {
-  z-index: 100000;
-  background-color: var(--bg-overlay);
-  border: 1px solid var(--border-default);
-  border-radius: 0.5rem;
-  padding: 0.375rem;
-  box-shadow:
-    0 10px 15px -3px rgb(0 0 0 / 0.3),
-    0 4px 6px -4px rgb(0 0 0 / 0.3);
-}
-
-.p-contextmenu .p-menuitem-content {
-  border-radius: 0.375rem;
-}
-
-.p-contextmenu .p-menuitem-link {
-  padding: 0.4rem 0.6rem;
-  color: var(--text-primary);
-}
-
-.p-contextmenu .p-menuitem:not(.p-disabled) > .p-menuitem-content:hover {
-  background-color: var(--bg-surface);
-}
-
-/* Context menu separator */
-.p-menuitem-separator {
-  border: none;
-  border-top: 1px solid var(--border-default);
-  margin: 0.25rem 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* Context menu disabled item */
-.p-menuitem.p-disabled > .p-menuitem-content {
-  opacity: 0.45;
-  pointer-events: none;
-  cursor: default;
-}
-
-.p-menuitem-link.p-disabled {
-  cursor: default;
-  color: var(--text-muted) !important;
 }

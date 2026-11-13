@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { Dialog } from "primereact/dialog";
 import { ipc } from "../../../pages/ipc";
-import { Button } from "../../ui";
-import { teamSyncDialogPt, textareaClass } from "./shared";
+import { Button, Dialog } from "../../ui";
+import { textareaClass } from "./shared";
 
 export interface CommentDialogProps {
   changelistNumber: number;
@@ -38,10 +37,8 @@ export default function CommentDialog({
       header={`Comment on CL ${changelistNumber}`}
       visible
       onHide={onClose}
-      modal
       dismissableMask
       style={{ width: "30rem" }}
-      pt={teamSyncDialogPt}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
@@ -53,16 +50,14 @@ export default function CommentDialog({
         </div>
       }
     >
-      <div className="p-5">
-        <textarea
-          autoFocus
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={5}
-          placeholder="Share what you found on this changelist..."
-          className={textareaClass}
-        />
-      </div>
+      <textarea
+        autoFocus
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        rows={5}
+        placeholder="Share what you found on this changelist..."
+        className={`${textareaClass} block`}
+      />
     </Dialog>
   );
 }
