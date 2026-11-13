@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { Dialog } from "primereact/dialog";
-import { InputText } from "primereact/inputtext";
-import { Dropdown } from "primereact/dropdown";
-import { InputNumber } from "primereact/inputnumber";
-import { Button } from "./ui";
+import {
+  Button,
+  dialogFieldClass,
+  dialogInputClass,
+  dialogPt,
+  dialogSelectClass,
+} from "./ui";
 import { ipc } from "../pages/ipc";
 
 export interface CreateBranchDialogProps {
@@ -82,51 +85,11 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
     });
   }, [name, headNumber, type, parentBranchName]);
 
-  const dialogPt = {
-    root: {
-      style: {
-        backgroundColor: "var(--color-bg-secondary)",
-        border: "1px solid var(--color-border-default)",
-        borderRadius: "0.5rem",
-        overflow: "hidden",
-      },
-    },
-    header: {
-      style: {
-        backgroundColor: "var(--color-bg-secondary)",
-        color: "var(--color-text-primary)",
-        fontWeight: 600,
-        borderBottom: "1px solid var(--color-border-default)",
-      },
-    },
-    content: {
-      style: {
-        backgroundColor: "var(--color-bg-secondary)",
-        color: "var(--color-text-secondary)",
-        padding: "1.5rem",
-      },
-    },
-    footer: {
-      style: {
-        backgroundColor: "var(--color-bg-secondary)",
-        borderTop: "1px solid var(--color-border-default)",
-        padding: "0.75rem",
-      },
-    },
-  };
-
-  const inputStyle = {
-    backgroundColor: "var(--color-bg-surface)",
-    color: "var(--color-text-primary)",
-    border: "1px solid var(--color-border-default)",
-    width: "100%",
-  };
-
   return (
     <Dialog
       header="Create Branch"
       visible={props.visible}
-      style={{ width: "28rem" }}
+      style={{ width: "30rem" }}
       onHide={() => {
         if (!pending) props.onHide();
       }}
@@ -135,10 +98,7 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
           <Button variant="secondary" onClick={props.onHide} disabled={pending}>
             Cancel
           </Button>
-          <Button
-            onClick={handleCreate}
-            disabled={pending || !name.trim()}
-          >
+          <Button onClick={handleCreate} disabled={pending || !name.trim()}>
             {pending ? "Creating..." : "Create"}
           </Button>
         </div>
@@ -146,78 +106,70 @@ export default function CreateBranchDialog(props: CreateBranchDialogProps) {
       pt={dialogPt}
     >
       <div className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="branch-name"
-            style={{ color: "var(--color-text-secondary)", fontSize: "0.85em" }}
-          >
-            Branch name
-          </label>
-          <InputText
-            id="branch-name"
+        <label className={dialogFieldClass}>
+          <span>Branch name</span>
+          <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && name.trim()) handleCreate();
             }}
             autoFocus
-            style={inputStyle}
+            disabled={pending}
+            className={dialogInputClass}
           />
-        </div>
+        </label>
 
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="branch-type"
-            style={{ color: "var(--color-text-secondary)", fontSize: "0.85em" }}
-          >
-            Branch type
-          </label>
-          <Dropdown
-            id="branch-type"
+        <label className={dialogFieldClass}>
+          <span>Branch type</span>
+          <select
             value={type}
-            onChange={(e) => setType(e.value)}
-            options={typeOptions}
-            style={inputStyle}
-          />
-        </div>
+            onChange={(e) =>
+              setType(e.target.value as "MAINLINE" | "RELEASE" | "FEATURE")
+            }
+            disabled={pending}
+            className={dialogSelectClass}
+          >
+            {typeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         {type !== "MAINLINE" && (
-          <div className="flex flex-col gap-1">
-            <label
-              htmlFor="branch-parent"
-              style={{ color: "var(--color-text-secondary)", fontSize: "0.85em" }}
-            >
-              Parent branch
-            </label>
-            <InputText
-              id="branch-parent"
+          <label className={dialogFieldClass}>
+            <span>Parent branch</span>
+            <input
               value={parentBranchName ?? ""}
               onChange={(e) => setParentBranchName(e.target.value || null)}
-              style={inputStyle}
+              disabled={pending}
+              className={dialogInputClass}
             />
-          </div>
+          </label>
         )}
 
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="branch-head"
-            style={{ color: "var(--color-text-secondary)", fontSize: "0.85em" }}
-          >
-            Starting changelist number
-          </label>
-          <InputNumber
-            id="branch-head"
-            value={headNumber}
-            onValueChange={(e) => setHeadNumber(e.value ?? 0)}
+        <label className={dialogFieldClass}>
+          <span>Starting changelist number</span>
+          <input
+            type="number"
             min={0}
-            useGrouping={false}
-            style={inputStyle}
-            inputStyle={inputStyle}
+            step={1}
+            value={headNumber}
+            onChange={(e) => {
+              const parsed = parseInt(e.target.value, 10);
+              setHeadNumber(isNaN(parsed) || parsed < 0 ? 0 : parsed);
+            }}
+            disabled={pending}
+            className={dialogInputClass}
           />
-        </div>
+        </label>
 
         {error && (
-          <small style={{ color: "var(--color-danger)" }}>{error}</small>
+          <p className="m-0 text-[0.85em] text-[var(--color-danger)]">
+            {error}
+          </p>
         )}
       </div>
     </Dialog>

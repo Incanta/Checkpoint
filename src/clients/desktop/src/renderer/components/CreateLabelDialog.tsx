@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Dialog } from "primereact/dialog";
-import { InputText } from "primereact/inputtext";
-import { Button } from "./ui";
+import { Button, dialogFieldClass, dialogInputClass, dialogPt } from "./ui";
 import { ipc } from "../pages/ipc";
 
 interface CreateLabelDialogProps {
@@ -72,45 +71,6 @@ export default function CreateLabelDialog({
     }
   };
 
-  const dialogPt = {
-    root: {
-      style: {
-        backgroundColor: "var(--color-bg-secondary)",
-        border: "1px solid var(--color-border-default)",
-        borderRadius: "0.5rem",
-        overflow: "hidden",
-      },
-    },
-    header: {
-      style: {
-        backgroundColor: "var(--color-bg-secondary)",
-        color: "var(--color-text-primary)",
-        fontWeight: 600,
-        borderBottom: "1px solid var(--color-border-default)",
-      },
-    },
-    content: {
-      style: {
-        backgroundColor: "var(--color-bg-secondary)",
-        color: "var(--color-text-secondary)",
-        padding: "1.5rem",
-      },
-    },
-    footer: {
-      style: {
-        backgroundColor: "var(--color-bg-secondary)",
-        borderTop: "1px solid var(--color-border-default)",
-        padding: "0.75rem",
-      },
-    },
-  };
-
-  const inputStyle = {
-    backgroundColor: "var(--color-bg-surface)",
-    color: "var(--color-text-primary)",
-    border: "1px solid var(--color-border-default)",
-  };
-
   return (
     <Dialog
       header="Create Label"
@@ -134,46 +94,40 @@ export default function CreateLabelDialog({
     >
       <div className="flex flex-col gap-3">
         {error && (
-          <p
-            className="text-[0.85em]"
-            style={{ color: "var(--color-danger)" }}
-          >
+          <p className="m-0 text-[0.85em] text-[var(--color-danger)]">
             {error}
           </p>
         )}
-        <label className="flex flex-col gap-2 text-[0.85em]">
-          <span>Changelist Number</span>
+        <label className={dialogFieldClass}>
+          <span>Changelist number</span>
           {changelistNumber !== null ? (
-            <InputText
-              className="w-full"
+            <input
+              className={dialogInputClass}
               value={String(changelistNumber)}
               disabled
-              style={inputStyle}
             />
           ) : (
-            <InputText
-              className="w-full"
+            <input
+              className={dialogInputClass}
               value={clNumber}
-              onChange={(e) => setClNumber(e.target.value)}
+              onChange={(e) => setClNumber(e.target.value.replace(/\D/g, ""))}
               onKeyDown={handleKeyDown}
               placeholder="e.g. 42"
-              keyfilter="int"
+              inputMode="numeric"
               disabled={isPending}
-              style={inputStyle}
             />
           )}
         </label>
-        <label className="flex flex-col gap-2 text-[0.85em]">
-          <span>Label Name</span>
-          <InputText
+        <label className={dialogFieldClass}>
+          <span>Label name</span>
+          <input
             ref={inputRef}
-            className="w-full"
+            className={dialogInputClass}
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="e.g. v1.0.0"
             disabled={isPending}
-            style={inputStyle}
           />
         </label>
       </div>

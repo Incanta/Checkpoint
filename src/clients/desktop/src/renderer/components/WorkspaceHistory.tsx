@@ -100,6 +100,50 @@ function autoSizeColumns(wrapper: HTMLElement) {
   }
 }
 
+/** Column widths as PrimeReact's resizer leaves them, to restore on remount. */
+interface ColumnLayout {
+  cols: string[];
+  headerTableWidth: string;
+  bodyTableWidth: string;
+}
+
+function findTables(wrapper: HTMLElement) {
+  const header = wrapper.querySelector<HTMLElement>(
+    'table[data-pc-section="scrollableheadertable"]',
+  );
+  const body = wrapper.querySelector<HTMLElement>(
+    'table[data-pc-section="scrollablebodytable"]',
+  );
+  return header && body ? { header, body } : null;
+}
+
+function captureLayout(wrapper: HTMLElement): ColumnLayout | null {
+  const tables = findTables(wrapper);
+  if (!tables) return null;
+  const cols = Array.from(
+    tables.header.querySelector("colgroup")?.children ?? [],
+  ).map((col) => (col as HTMLElement).style.width);
+  return {
+    cols,
+    headerTableWidth: tables.header.style.width,
+    bodyTableWidth: tables.body.style.width,
+  };
+}
+
+function restoreLayout(wrapper: HTMLElement, layout: ColumnLayout) {
+  const tables = findTables(wrapper);
+  if (!tables) return;
+  tables.header.style.width = layout.headerTableWidth;
+  tables.body.style.width = layout.bodyTableWidth;
+  for (const table of [tables.header, tables.body]) {
+    const cols = table.querySelector("colgroup")?.children ?? [];
+    layout.cols.forEach((width, index) => {
+      const col = cols[index] as HTMLElement | undefined;
+      if (col) col.style.width = width;
+    });
+  }
+}
+
 /** Local date plus a 12-hour time, e.g. "10/27/2026, 3:42 PM". */
 function formatChangelistTime(epochMs: number | undefined): string {
   if (epochMs === undefined || isNaN(epochMs)) return "";
@@ -123,8 +167,9 @@ export default function WorkspaceHistory() {
   const contextMenuRef = useRef<ContextMenu>(null);
   const tableWrapperRef = useRef<HTMLDivElement>(null);
   // Once the user drags a column, stop auto-sizing so a refresh doesn't
-  // undo their layout.
-  const userResizedRef = useRef(false);
+  // undo their layout, and keep that layout to restore when the table
+  // remounts after the changelist details view.
+  const userLayoutRef = useRef<ColumnLayout | null>(null);
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const contextChangelistRef = useRef<number | null>(null);
@@ -168,13 +213,38 @@ export default function WorkspaceHistory() {
   }, [currentWorkspace, workspaceHistory]);
 
   // Runs after the rows are in the DOM, before paint, so there's no flash of
-  // uniform columns. Also re-runs when the table remounts after returning
-  // from the changelist details view.
-  useLayoutEffect(() => {
-    if (userResizedRef.current) return;
+  // uniform columns. The table unmounts while the changelist details view is
+  // shown (nodes don't change), so closing that view must re-run this too.
+  const showingDetails = !!changelistChanges;
+  const applyColumnLayout = useCallback(() => {
     const wrapper = tableWrapperRef.current;
-    if (wrapper) autoSizeColumns(wrapper);
-  }, [nodes]);
+    if (!wrapper) return;
+    if (userLayoutRef.current) {
+      restoreLayout(wrapper, userLayoutRef.current);
+    } else {
+      autoSizeColumns(wrapper);
+    }
+  }, []);
+  useLayoutEffect(() => {
+    if (!showingDetails) applyColumnLayout();
+  }, [nodes, showingDetails, applyColumnLayout]);
+
+  // Tabs other than the active one are display:none, so history that loads
+  // while another tab is open measures as zero width. Size again once the
+  // table actually has a width.
+  useEffect(() => {
+    if (showingDetails) return;
+    const wrapper = tableWrapperRef.current;
+    if (!wrapper) return;
+    let wasVisible = wrapper.offsetWidth > 0;
+    const observer = new ResizeObserver(() => {
+      const visible = wrapper.offsetWidth > 0;
+      if (visible && !wasVisible) applyColumnLayout();
+      wasVisible = visible;
+    });
+    observer.observe(wrapper);
+    return () => observer.disconnect();
+  }, [showingDetails, applyColumnLayout]);
 
   const handleViewChanges = useCallback((changelistNumber: number) => {
     ipc.sendMessage("workspace:history:view-changes", { changelistNumber });
@@ -323,6 +393,19 @@ export default function WorkspaceHistory() {
           maxHeight: "initial",
         },
       },
+      // Pin the fixed layout inline: under an auto layout a long,
+      // unwrapped message widens its column until the others are squeezed
+      // to nothing, and the content-sized widths stop mattering.
+      scrollableHeaderTable: {
+        style: {
+          tableLayout: "fixed",
+        },
+      },
+      scrollableBodyTable: {
+        style: {
+          tableLayout: "fixed",
+        },
+      },
       resizeHelper: {
         style: {
           width: "0.1rem",
@@ -419,7 +502,8 @@ export default function WorkspaceHistory() {
               handleRowContextMenu(e.originalEvent as React.MouseEvent, e.node);
             }}
             onColumnResizeEnd={() => {
-              userResizedRef.current = true;
+              const wrapper = tableWrapperRef.current;
+              if (wrapper) userLayoutRef.current = captureLayout(wrapper);
             }}
             pt={treeTablePt}
             style={{ height: "100%" }}

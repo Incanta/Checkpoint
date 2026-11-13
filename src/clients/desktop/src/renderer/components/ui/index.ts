@@ -3,6 +3,12 @@ export { Badge } from "./badge";
 export { Button } from "./button";
 export { Card } from "./card";
 export { Dropdown, DropdownItem, DropdownDivider } from "./dropdown";
+export {
+  dialogPt,
+  dialogInputClass,
+  dialogSelectClass,
+  dialogFieldClass,
+} from "./dialog-styles";
 export { EmptyState } from "./empty-state";
 export { PageHeader } from "./page-header";
 export { Tabs, Tab } from "./tabs";

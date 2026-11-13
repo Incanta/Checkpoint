@@ -1,32 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Dialog } from "primereact/dialog";
-import { Button } from "./ui";
+import { Button, dialogPt } from "./ui";
 import { PendingFileTree, type Bucket } from "./StagedChangesTree";
-
-// PrimeReact ships no base theme here, so the Dialog gets its padding, borders,
-// and close button from these passthrough classes (matching SettingsDialog).
-const dialogPt = {
-  root: {
-    className:
-      "rounded-lg border border-[var(--color-border-default)] shadow-xl overflow-hidden",
-  },
-  header: {
-    className:
-      "flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-5 py-3.5 text-base font-semibold text-[var(--color-text-primary)]",
-  },
-  content: {
-    className:
-      "bg-[var(--color-bg-secondary)] px-5 py-4 text-[var(--color-text-secondary)]",
-  },
-  footer: {
-    className:
-      "border-t border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-5 py-3.5",
-  },
-  closeButton: {
-    className:
-      "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-bg-overlay)] hover:text-[var(--color-text-primary)]",
-  },
-};
 
 const textareaClass =
   "box-border w-full resize-y rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none";
@@ -164,8 +139,7 @@ export function ChangelistBranchDialog({
   const creating = choice === NEW_BRANCH;
   const branchName = creating ? newName.trim() : choice;
   const taken =
-    creating &&
-    [...activeBranches, ...inactiveBranches].includes(branchName);
+    creating && [...activeBranches, ...inactiveBranches].includes(branchName);
   const canConfirm = branchName !== "" && !taken;
   const confirm = () => {
     if (canConfirm) onConfirm(branchName, creating);

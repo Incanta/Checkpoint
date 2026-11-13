@@ -4,7 +4,13 @@ import {
   workspaceLabelsAtom,
 } from "../../common/state/workspace";
 import Button from "./Button";
-import { Button as UiButton } from "./ui";
+import {
+  Button as UiButton,
+  EmptyState,
+  dialogFieldClass,
+  dialogInputClass,
+  dialogPt,
+} from "./ui";
 import { ipc } from "../pages/ipc";
 import { TreeTable } from "primereact/treetable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,8 +19,9 @@ import { Column, ColumnPassThroughOptions } from "primereact/column";
 import { ContextMenu } from "primereact/contextmenu";
 import { MenuItem } from "primereact/menuitem";
 import { Dialog } from "primereact/dialog";
-import { InputText } from "primereact/inputtext";
 import CreateLabelDialog from "./CreateLabelDialog";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faTag } from "@fortawesome/free-solid-svg-icons";
 
 export default function WorkspaceLabels() {
   const currentWorkspace = useAtomValue(currentWorkspaceAtom);
@@ -244,40 +251,6 @@ export default function WorkspaceLabels() {
     [],
   );
 
-  const dialogPt = useMemo(
-    () => ({
-      root: {
-        style: {
-          backgroundColor: "var(--color-bg-secondary)",
-          border: "1px solid var(--color-border-default)",
-        },
-      },
-      header: {
-        style: {
-          backgroundColor: "var(--color-bg-secondary)",
-          color: "var(--color-text-primary)",
-          fontWeight: 600,
-          borderBottom: "1px solid var(--color-border-default)",
-        },
-      },
-      content: {
-        style: {
-          backgroundColor: "var(--color-bg-secondary)",
-          color: "var(--color-text-secondary)",
-          padding: "1.5rem",
-        },
-      },
-      footer: {
-        style: {
-          backgroundColor: "var(--color-bg-secondary)",
-          borderTop: "1px solid var(--color-border-default)",
-          padding: "0.75rem",
-        },
-      },
-    }),
-    [],
-  );
-
   const treeTablePt = useMemo(
     () => ({
       thead: {
@@ -387,58 +360,71 @@ export default function WorkspaceLabels() {
           style={{ textAlign: "left", overflow: "hidden" }}
           ref={tableWrapperRef}
         >
-          <TreeTable
-            ref={treeTableRef}
-            value={nodes}
-            tableStyle={{ minWidth: "50rem" }}
-            columnResizeMode="expand"
-            resizableColumns
-            showGridlines
-            scrollable
-            scrollHeight="flex"
-            onContextMenu={(e) => {
-              handleRowContextMenu(e.originalEvent as React.MouseEvent, e.node);
-            }}
-            pt={treeTablePt}
-            style={{ height: "100%" }}
-          >
-            <Column
-              field="label"
-              header="Label"
-              expander
-              resizeable
-              sortable
-              pt={columnPt}
-            ></Column>
-            <Column
-              field="changelist"
-              header="Changelist"
-              resizeable
-              sortable
-              pt={columnPt}
-            ></Column>
-            <Column
-              field="message"
-              header="Message"
-              resizeable
-              sortable
-              pt={columnPt}
-            ></Column>
-            <Column
-              field="date"
-              header="Date"
-              resizeable
-              sortable
-              pt={columnPt}
-            ></Column>
-            <Column
-              field="user"
-              header="User"
-              resizeable
-              sortable
-              pt={columnPt}
-            ></Column>
-          </TreeTable>
+          {workspaceLabels && workspaceLabels.length === 0 ? (
+            <div className="flex h-full w-full items-center justify-center">
+              <EmptyState
+                icon={<FontAwesomeIcon icon={faTag} size="2x" />}
+                title="No Labels"
+                description="Labels name a changelist so it is easy to find again. Create one here, or from a changelist in the History tab."
+              />
+            </div>
+          ) : (
+            <TreeTable
+              ref={treeTableRef}
+              value={nodes}
+              tableStyle={{ minWidth: "50rem" }}
+              columnResizeMode="expand"
+              resizableColumns
+              showGridlines
+              scrollable
+              scrollHeight="flex"
+              onContextMenu={(e) => {
+                handleRowContextMenu(
+                  e.originalEvent as React.MouseEvent,
+                  e.node,
+                );
+              }}
+              pt={treeTablePt}
+              style={{ height: "100%" }}
+            >
+              <Column
+                field="label"
+                header="Label"
+                expander
+                resizeable
+                sortable
+                pt={columnPt}
+              ></Column>
+              <Column
+                field="changelist"
+                header="Changelist"
+                resizeable
+                sortable
+                pt={columnPt}
+              ></Column>
+              <Column
+                field="message"
+                header="Message"
+                resizeable
+                sortable
+                pt={columnPt}
+              ></Column>
+              <Column
+                field="date"
+                header="Date"
+                resizeable
+                sortable
+                pt={columnPt}
+              ></Column>
+              <Column
+                field="user"
+                header="User"
+                resizeable
+                sortable
+                pt={columnPt}
+              ></Column>
+            </TreeTable>
+          )}
         </div>
       </div>
 
@@ -475,7 +461,7 @@ export default function WorkspaceLabels() {
         }
         pt={dialogPt}
       >
-        <p>
+        <p className="m-0">
           Are you sure you want to delete the label{" "}
           <strong>&quot;{contextLabelRef.current?.name}&quot;</strong>?
         </p>
@@ -507,31 +493,22 @@ export default function WorkspaceLabels() {
         }
         pt={dialogPt}
       >
-        <div className="flex flex-col gap-2">
-          <label
-            htmlFor="rename-input"
-            style={{ color: "var(--color-text-secondary)" }}
-          >
-            New name
-          </label>
-          <InputText
-            id="rename-input"
+        <label className={dialogFieldClass}>
+          <span>New name</span>
+          <input
             value={renameName}
             onChange={(e) => setRenameName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && renameName.trim()) handleRename();
             }}
             autoFocus
-            style={{
-              backgroundColor: "var(--color-bg-surface)",
-              color: "var(--color-text-primary)",
-              border: "1px solid var(--color-border-default)",
-            }}
+            disabled={renamePending}
+            className={dialogInputClass}
           />
           {renameError && (
-            <small style={{ color: "var(--color-danger)" }}>{renameError}</small>
+            <span className="text-[var(--color-danger)]">{renameError}</span>
           )}
-        </div>
+        </label>
       </Dialog>
 
       {/* Change Changelist Dialog */}
@@ -564,17 +541,13 @@ export default function WorkspaceLabels() {
         }
         pt={dialogPt}
       >
-        <div className="flex flex-col gap-2">
-          <label
-            htmlFor="changecl-input"
-            style={{ color: "var(--color-text-secondary)" }}
-          >
-            Changelist number
-          </label>
-          <InputText
-            id="changecl-input"
+        <label className={dialogFieldClass}>
+          <span>Changelist number</span>
+          <input
             value={changeClNumber}
-            onChange={(e) => setChangeClNumber(e.target.value)}
+            onChange={(e) =>
+              setChangeClNumber(e.target.value.replace(/\D/g, ""))
+            }
             onKeyDown={(e) => {
               if (
                 e.key === "Enter" &&
@@ -584,18 +557,15 @@ export default function WorkspaceLabels() {
                 handleChangeCl();
               }
             }}
-            keyfilter="int"
+            inputMode="numeric"
             autoFocus
-            style={{
-              backgroundColor: "var(--color-bg-surface)",
-              color: "var(--color-text-primary)",
-              border: "1px solid var(--color-border-default)",
-            }}
+            disabled={changeClPending}
+            className={dialogInputClass}
           />
           {changeClError && (
-            <small style={{ color: "var(--color-danger)" }}>{changeClError}</small>
+            <span className="text-[var(--color-danger)]">{changeClError}</span>
           )}
-        </div>
+        </label>
       </Dialog>
     </>
   );

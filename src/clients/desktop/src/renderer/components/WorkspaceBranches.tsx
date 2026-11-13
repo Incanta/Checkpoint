@@ -6,7 +6,7 @@ import {
 } from "../../common/state/workspace";
 import { currentUserAtom } from "../../common/state/auth";
 import Button from "./Button";
-import { Button as UiButton, Badge } from "./ui";
+import { Button as UiButton, Badge, dialogPt } from "./ui";
 import { ipc } from "../pages/ipc";
 import { TreeTable } from "primereact/treetable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -510,40 +510,6 @@ export default function WorkspaceBranches() {
     [],
   );
 
-  const dialogPt = useMemo(
-    () => ({
-      root: {
-        style: {
-          backgroundColor: "var(--color-bg-secondary)",
-          border: "1px solid var(--color-border-default)",
-        },
-      },
-      header: {
-        style: {
-          backgroundColor: "var(--color-bg-secondary)",
-          color: "var(--color-text-primary)",
-          fontWeight: 600,
-          borderBottom: "1px solid var(--color-border-default)",
-        },
-      },
-      content: {
-        style: {
-          backgroundColor: "var(--color-bg-secondary)",
-          color: "var(--color-text-secondary)",
-          padding: "1.5rem",
-        },
-      },
-      footer: {
-        style: {
-          backgroundColor: "var(--color-bg-secondary)",
-          borderTop: "1px solid var(--color-border-default)",
-          padding: "0.75rem",
-        },
-      },
-    }),
-    [],
-  );
-
   const treeTablePt = useMemo(
     () => ({
       thead: {
@@ -724,7 +690,7 @@ export default function WorkspaceBranches() {
         }
         pt={dialogPt}
       >
-        <p>
+        <p className="m-0">
           Are you sure you want to delete the branch{" "}
           <strong>&quot;{contextBranchRef.current?.name}&quot;</strong>? This
           cannot be undone.
@@ -757,7 +723,7 @@ export default function WorkspaceBranches() {
         }
         pt={dialogPt}
       >
-        <p>
+        <p className="m-0">
           Merge <strong>&quot;{contextBranchRef.current?.name}&quot;</strong>{" "}
           into <strong>&quot;{branchesState?.currentBranchName}&quot;</strong>?
         </p>
