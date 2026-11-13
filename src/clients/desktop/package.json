@@ -36,6 +36,8 @@
     "@fortawesome/react-fontawesome": "^3.1.0",
     "@shikijs/monaco": "^3.23.0",
     "@tailwindcss/vite": "^4.1.18",
+    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-virtual": "^3.13.12",
     "file-icon-vectors": "^1.0.0",
     "jotai": "^2.13.1",
     "monaco-editor": "^0.55.1",

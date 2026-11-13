@@ -9,6 +9,7 @@ export {
   dialogSelectClass,
   dialogFieldClass,
 } from "./dialog-styles";
+export { DataTable, type DataTableProps } from "./data-table";
 export { EmptyState } from "./empty-state";
 export { PageHeader } from "./page-header";
 export { Tabs, Tab } from "./tabs";
