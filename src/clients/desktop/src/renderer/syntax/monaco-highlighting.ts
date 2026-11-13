@@ -1,4 +1,8 @@
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
+// editor.api is a bare editor with no contributions. Register the find
+// widget (Ctrl+F, F3, Ctrl+H) for every diff editor; they all import this
+// module.
+import "monaco-editor/esm/vs/editor/contrib/find/browser/findController.js";
 import {
   createHighlighter,
   type BundledLanguage,
