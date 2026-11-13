@@ -596,6 +596,24 @@ function HeaderIcon({
   );
 }
 
+const COLLAPSED_STORAGE_KEY = "pendingChanges.collapsedSections";
+
+/** Section ids the user collapsed, remembered across visits to the page. */
+function readCollapsed(): Set<string> {
+  try {
+    const stored = JSON.parse(
+      localStorage.getItem(COLLAPSED_STORAGE_KEY) ?? "[]",
+    );
+    return new Set(
+      Array.isArray(stored)
+        ? stored.filter((s): s is string => typeof s === "string")
+        : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
 interface StagedChangesTreeProps {
   buckets: Bucket[];
   selection: PendingSelection | null;
@@ -633,6 +651,22 @@ export default function StagedChangesTree({
 }: StagedChangesTreeProps) {
   const [toggled, setToggled] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed);
+
+  const toggleSection = useCallback((id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify([...next]));
+      } catch {
+        /* localStorage unavailable */
+      }
+      return next;
+    });
+  }, []);
+
   // Each section's tree as shown, kept for selection ranges and paths.
   const [nodesByBucket, setNodesByBucket] = useState<
     Record<string, PendingTreeNode[]>
@@ -792,120 +826,143 @@ export default function StagedChangesTree({
 
   return (
     <div className="flex flex-col gap-3">
-      {buckets.map((bucket) => (
-        <div
-          key={bucket.id}
-          className={
-            "rounded border " +
-            (dragOver === bucket.id
-              ? "border-[var(--color-accent)]"
-              : "border-[var(--color-border-default)]")
-          }
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-            setDragOver(bucket.id);
-          }}
-          onDragLeave={() => setDragOver((d) => (d === bucket.id ? null : d))}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(null);
-            try {
-              const { paths, from } = JSON.parse(
-                e.dataTransfer.getData(DRAG_TYPE),
-              ) as { paths: string[]; from: string };
-              const source = buckets.find((b) => b.id === from);
-              if (source && from !== bucket.id && paths.length > 0) {
-                onMove(paths, source, bucket);
-              }
-            } catch {
-              // A drag from outside the app; nothing to do.
+      {buckets.map((bucket) => {
+        const isCollapsed = collapsed.has(bucket.id);
+        return (
+          <div
+            key={bucket.id}
+            className={
+              "rounded border " +
+              (dragOver === bucket.id
+                ? "border-[var(--color-accent)]"
+                : "border-[var(--color-border-default)]")
             }
-          }}
-        >
-          <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-2 py-1">
-            <span className="flex min-w-0 items-baseline gap-2">
-              <span className="shrink-0 text-[0.8rem] font-medium text-[var(--color-text-primary)]">
-                {bucket.label}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setDragOver(bucket.id);
+            }}
+            onDragLeave={() => setDragOver((d) => (d === bucket.id ? null : d))}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(null);
+              try {
+                const { paths, from } = JSON.parse(
+                  e.dataTransfer.getData(DRAG_TYPE),
+                ) as { paths: string[]; from: string };
+                const source = buckets.find((b) => b.id === from);
+                if (source && from !== bucket.id && paths.length > 0) {
+                  onMove(paths, source, bucket);
+                }
+              } catch {
+                // A drag from outside the app; nothing to do.
+              }
+            }}
+          >
+            <div
+              role="button"
+              aria-expanded={!isCollapsed}
+              title={isCollapsed ? "Expand section" : "Collapse section"}
+              className={
+                "flex cursor-pointer select-none items-center justify-between gap-2 px-2 py-1 hover:bg-[var(--color-bg-overlay)]" +
+                (isCollapsed
+                  ? ""
+                  : " border-b border-[var(--color-border-default)]")
+              }
+              onClick={() => toggleSection(bucket.id)}
+            >
+              <span className="flex min-w-0 items-baseline gap-2">
+                <span className="w-3 shrink-0 text-center text-[0.7rem] text-[var(--color-text-muted)]">
+                  {isCollapsed ? "▸" : "▾"}
+                </span>
+                <span className="shrink-0 text-[0.8rem] font-medium text-[var(--color-text-primary)]">
+                  {bucket.label}
+                </span>
+                <span className="shrink-0 text-[0.7rem] text-[var(--color-text-muted)]">
+                  {bucket.files.length}
+                </span>
+                {bucket.description && (
+                  <span
+                    className="truncate text-[0.75rem] text-[var(--color-text-secondary)]"
+                    title={bucket.description}
+                  >
+                    {bucket.description.split("\n")[0]}
+                  </span>
+                )}
               </span>
-              <span className="shrink-0 text-[0.7rem] text-[var(--color-text-muted)]">
-                {bucket.files.length}
-              </span>
-              {bucket.description && (
-                <span
-                  className="truncate text-[0.75rem] text-[var(--color-text-secondary)]"
-                  title={bucket.description}
-                >
-                  {bucket.description.split("\n")[0]}
+              {bucket.kind !== "unstaged" && (
+                <span className="flex shrink-0 items-center gap-0.5">
+                  <HeaderIcon
+                    icon={faPen}
+                    title="Edit description"
+                    disabled={disabled}
+                    onClick={() => onEditDescription(bucket)}
+                  />
+                  {bucket.kind === "numbered" && (
+                    <HeaderIcon
+                      icon={faCodeBranch}
+                      title={`Change branch (submits to ${bucket.branchName})`}
+                      disabled={disabled}
+                      onClick={() => onChangeBranch(bucket)}
+                    />
+                  )}
+                  {bucket.kind === "numbered" && (
+                    <HeaderIcon
+                      icon={faTrashCan}
+                      title="Delete changelist (its files stay staged)"
+                      disabled={disabled}
+                      onClick={() => onDelete(bucket)}
+                    />
+                  )}
+                  <HeaderIcon
+                    icon={faCheck}
+                    title={
+                      bucket.files.length === 0
+                        ? "Nothing to submit"
+                        : "Submit this changelist"
+                    }
+                    disabled={disabled || bucket.files.length === 0}
+                    onClick={() => onSubmit(bucket)}
+                  />
                 </span>
               )}
-            </span>
-            {bucket.kind !== "unstaged" && (
-              <span className="flex shrink-0 items-center gap-0.5">
-                <HeaderIcon
-                  icon={faPen}
-                  title="Edit description"
-                  disabled={disabled}
-                  onClick={() => onEditDescription(bucket)}
-                />
-                {bucket.kind === "numbered" && (
-                  <HeaderIcon
-                    icon={faCodeBranch}
-                    title={`Change branch (submits to ${bucket.branchName})`}
-                    disabled={disabled}
-                    onClick={() => onChangeBranch(bucket)}
-                  />
-                )}
-                {bucket.kind === "numbered" && (
-                  <HeaderIcon
-                    icon={faTrashCan}
-                    title="Delete changelist (its files stay staged)"
-                    disabled={disabled}
-                    onClick={() => onDelete(bucket)}
-                  />
-                )}
-                <HeaderIcon
-                  icon={faCheck}
-                  title={
-                    bucket.files.length === 0
-                      ? "Nothing to submit"
-                      : "Submit this changelist"
-                  }
-                  disabled={disabled || bucket.files.length === 0}
-                  onClick={() => onSubmit(bucket)}
-                />
-              </span>
-            )}
-          </div>
-
-          {bucket.files.length === 0 ? (
-            <div className="px-3 py-2 text-[0.75rem] text-[var(--color-text-muted)]">
-              {bucket.kind === "unstaged"
-                ? "Nothing unstaged."
-                : "Drag changes here to stage them."}
             </div>
-          ) : (
-            <PendingFileTree
-              files={bucket.files}
-              ownRows={ownRows}
-              expandKeyPrefix={bucket.id + ":"}
-              toggled={toggled}
-              onToggle={onToggle}
-              onNodes={nodeSetters[bucket.id]}
-              isSelected={(p) =>
-                selection?.bucketId === bucket.id && selectedRows.has(p)
-              }
-              onRowClick={(e, node) => handleRowClick(e, bucket, node)}
-              onRowContextMenu={(e, node) => handleContextMenu(e, bucket, node)}
-              onRowDragStart={
-                disabled
-                  ? undefined
-                  : (e, node) => handleDragStart(e, bucket, node)
-              }
-            />
-          )}
-        </div>
-      ))}
+
+            {/* Kept mounted while collapsed, so the section's tree still
+              reports its rows and the selection stays in step with it. */}
+            <div className={isCollapsed ? "hidden" : undefined}>
+              {bucket.files.length === 0 ? (
+                <div className="px-3 py-2 text-[0.75rem] text-[var(--color-text-muted)]">
+                  {bucket.kind === "unstaged"
+                    ? "Nothing unstaged."
+                    : "Drag changes here to stage them."}
+                </div>
+              ) : (
+                <PendingFileTree
+                  files={bucket.files}
+                  ownRows={ownRows}
+                  expandKeyPrefix={bucket.id + ":"}
+                  toggled={toggled}
+                  onToggle={onToggle}
+                  onNodes={nodeSetters[bucket.id]}
+                  isSelected={(p) =>
+                    selection?.bucketId === bucket.id && selectedRows.has(p)
+                  }
+                  onRowClick={(e, node) => handleRowClick(e, bucket, node)}
+                  onRowContextMenu={(e, node) =>
+                    handleContextMenu(e, bucket, node)
+                  }
+                  onRowDragStart={
+                    disabled
+                      ? undefined
+                      : (e, node) => handleDragStart(e, bucket, node)
+                  }
+                />
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
