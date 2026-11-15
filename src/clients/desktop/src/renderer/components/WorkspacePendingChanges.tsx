@@ -521,7 +521,7 @@ export default function WorkspacePendingChanges() {
   const horizontal = layout === "horizontal";
 
   const filesPanel = (
-    <div className="h-full w-full overflow-auto p-2">
+    <div className="box-border h-full w-full overflow-auto p-2">
       {hasChanges || pendingChangelists.changelists.length > 0 ? (
         <StagedChangesTree
           buckets={buckets}

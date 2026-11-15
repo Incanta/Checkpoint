@@ -73,7 +73,10 @@ export function Splitter({
               defaultSize={size !== undefined ? `${size}%` : undefined}
               minSize={minSize !== undefined ? `${minSize}%` : undefined}
               className={panelClass}
-              style={style}
+              // The library sets an inline `overflow: auto` here, which beats
+              // any overflow class. Clip by default like PrimeReact did; each
+              // panel's content brings its own scroll container.
+              style={{ overflow: "hidden", ...style }}
             >
               {panel.props.children}
             </Panel>
