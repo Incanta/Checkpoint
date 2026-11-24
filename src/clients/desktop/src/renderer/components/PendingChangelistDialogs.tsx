@@ -7,6 +7,7 @@ import {
   dialogSelectClass,
 } from "./ui";
 import { PendingFileTree, type Bucket } from "./StagedChangesTree";
+import { OperationProgressBar } from "./SyncStatusBadge";
 
 const textareaClass =
   "box-border w-full resize-y rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none";
@@ -281,6 +282,11 @@ export function SubmitChangelistDialog({
       closable={!submitting}
       footer={
         <div className="flex items-center justify-end gap-2">
+          {submitting && (
+            <div className="flex min-w-0 flex-1 -ml-2">
+              <OperationProgressBar />
+            </div>
+          )}
           <Button variant="secondary" onClick={onHide} disabled={submitting}>
             Cancel
           </Button>

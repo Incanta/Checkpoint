@@ -19,7 +19,11 @@ function formatEta(
   return `${m}m ${s}s`;
 }
 
-function ProgressBar() {
+/**
+ * The running pull or submit's step and progress. Also shown inside the
+ * submit dialog, since the dialog's backdrop covers the footer's copy.
+ */
+export function OperationProgressBar() {
   const progress = useAtomValue(operationProgressAtom);
   if (!progress) return null;
 
@@ -119,7 +123,7 @@ export default function SyncStatusBadge() {
 
   // Show progress bar when an operation is active
   if (progress) {
-    return <ProgressBar />;
+    return <OperationProgressBar />;
   }
 
   const handleRefresh = () => {
