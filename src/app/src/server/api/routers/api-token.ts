@@ -59,7 +59,7 @@ export const apiTokenRouter = createTRPCRouter({
         createdAt: {
           gte: new Date(Date.now() - DEVICE_CODE_LIFETIME_MS),
         },
-        OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       };
 
       const apiToken = await ctx.db.apiToken.findFirst({ where });
@@ -126,7 +126,7 @@ export const apiTokenRouter = createTRPCRouter({
           },
           {
             expiresAt: {
-              gte: new Date(),
+              gt: new Date(),
             },
           },
         ],

@@ -827,6 +827,65 @@ describe("access control", () => {
       expect(await sessionFor(token)).toBeNull();
     });
 
+    // revokeDevice sets expiresAt = now, so a check that lands in the same
+    // millisecond must already reject the token. Freezing Date makes that
+    // race deterministic instead of depending on a fast CI runner.
+    describe("expiry boundary (frozen clock)", () => {
+      const frozen = new Date("2026-06-01T12:00:00.000Z");
+
+      async function withFrozenClock<T>(fn: () => Promise<T>): Promise<T> {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(frozen);
+        try {
+          return await fn();
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+
+      it("control: a token revoked in the same millisecond as the auth check is rejected", async () => {
+        const { id, token } = await makeApiToken(db, writer.id);
+        await withFrozenClock(async () => {
+          expect((await sessionFor(token))?.user.id).toBe(writer.id);
+          await asWriter.apiToken.revokeDevice({ deviceId: id });
+          expect(await sessionFor(token)).toBeNull();
+        });
+      });
+
+      it("control: a revoked device drops out of getActiveDevices in the same millisecond", async () => {
+        const { id } = await makeApiToken(db, writer.id);
+        await withFrozenClock(async () => {
+          await asWriter.apiToken.revokeDevice({ deviceId: id });
+          const { activeDevices } = await asWriter.apiToken.getActiveDevices();
+          expect(activeDevices.map((d) => d.id)).not.toContain(id);
+        });
+      });
+
+      it("control: a token whose expiresAt equals now is rejected by both auth paths", async () => {
+        const { resolveBearerUser } = await import("~/server/api/token-auth");
+        const { token } = await makeApiToken(db, writer.id, {
+          expiresAt: frozen,
+        });
+        await withFrozenClock(async () => {
+          expect(await sessionFor(token)).toBeNull();
+          expect(await resolveBearerUser(db, `Bearer ${token}`)).toBeNull();
+        });
+      });
+
+      it("control: a token expiring 1ms after now still authenticates on both auth paths", async () => {
+        const { resolveBearerUser } = await import("~/server/api/token-auth");
+        const { token } = await makeApiToken(db, writer.id, {
+          expiresAt: new Date(frozen.getTime() + 1),
+        });
+        await withFrozenClock(async () => {
+          expect((await sessionFor(token))?.user.id).toBe(writer.id);
+          expect((await resolveBearerUser(db, `Bearer ${token}`))?.id).toBe(
+            writer.id,
+          );
+        });
+      });
+    });
+
     it("control: listing devices does not reveal token secrets or other users' devices", async () => {
       await makeApiToken(db, writer.id, { deviceCode: "ABC123" });
       await makeApiToken(db, outsider.id);

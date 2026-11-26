@@ -20,7 +20,8 @@ export async function resolveBearerUser(
   const apiTokenData = await db.apiToken.findUnique({
     where: {
       token,
-      OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+      // Strictly after now: a token revoked this millisecond is expired.
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
     include: { user: true },
   });
