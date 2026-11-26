@@ -247,21 +247,16 @@ jobs:
           data="$RUNNER_TEMP/horde-data"
           cp -r src/clients/horde/tests/ci/horde-data "$data"
           plugin="$GITHUB_WORKSPACE/src/clients/horde/artifacts/server"
-          # Diagnostics tools land here only if Horde fails to come up (see the next step).
-          mkdir -p "$RUNNER_TEMP/dtools"
           # The image may not run as the runner's user, and Horde writes its logs and state here.
           chmod -R a+rwX "$data"
 
-          # SYS_PTRACE lets createdump read the process if startup hangs (see the next step).
-          docker run -d --name horde --network host --cap-add SYS_PTRACE \
-            -e Serilog__MinimumLevel__Default=Debug \
+          docker run -d --name horde --network host \
             -e Horde__HttpPort="$HORDE_PORT" \
             -e Horde__Http2Port=13342 \
             -e Horde__DatabaseConnectionString="mongodb://localhost:27017/Horde" \
             -e Horde__RedisConnectionConfig="localhost:6379" \
             -e CHECKPOINT_API_TOKEN \
             -v "$data:/app/Data" \
-            -v "$RUNNER_TEMP/dtools:/dtools" \
             -v "$plugin/HordeServer.Checkpoint.dll:/app/HordeServer.Checkpoint.dll:ro" \
             -v "$plugin/Checkpoint.Api.dll:/app/Checkpoint.Api.dll:ro" \
             "$HORDE_IMAGE"
@@ -269,82 +264,6 @@ jobs:
       # The stream only resolves once Horde has started, loaded the plugin, and read the config.
       - name: Wait for Horde to load the Checkpoint stream
         run: |
-          mkdir -p "$RUNNER_TEMP/logs"
-
-          # When Horde is up but never listens, its log goes quiet. A memory dump analyzed inside
-          # the container (same runtime, so the debugger finds a matching DAC) shows every managed
-          # thread's stack. Horde is pid 1 in the container; tools come from the mounted /dtools.
-          diagnose() {
-            # Report every probe's outcome; the step fails afterwards regardless.
-            set +e
-            echo "::group::Listening TCP sockets"
-            sudo ss -ltnp
-            echo "::endgroup::"
-
-            echo "::group::Horde managed stacks (memory dump)"
-            dotnet tool install --tool-path "$RUNNER_TEMP/dtools" dotnet-dump
-            dll=$(find "$RUNNER_TEMP/dtools/.store" -name dotnet-dump.dll | head -n 1)
-            echo "dotnet-dump: ${dll:-not found}"
-            if [ -n "$dll" ]; then
-              docker exec horde sh -c \
-                'cd "$(dirname "$(ls -d /usr/share/dotnet/shared/Microsoft.NETCore.App/*/createdump | head -n 1)")" && ./createdump -f /dtools/horde.dmp 1'
-              echo "createdump exit code: $?"
-              docker exec -e DOTNET_ROLL_FORWARD=Major horde \
-                dotnet "/dtools${dll#"$RUNNER_TEMP/dtools"}" analyze /dtools/horde.dmp \
-                -c "clrthreads" -c "clrstack -all" -c "syncblk" -c "exit" \
-                > "$RUNNER_TEMP/logs/horde-stacks.log" 2>&1
-              echo "dotnet-dump exit code: $?"
-              cat "$RUNNER_TEMP/logs/horde-stacks.log"
-              sudo rm -f "$RUNNER_TEMP/dtools/horde.dmp"
-            fi
-            echo "::endgroup::"
-
-            # Bisect with two controls from the same image, each on its own port, Mongo
-            # database, and Redis database:
-            #   bare:      no plugin and no mounted config (Horde's defaults)
-            #   no-plugin: this job's config with the Checkpoint sections removed, and no plugin
-            #              DLLs (Horde refuses to start if server.json enables a missing plugin)
-            # If bare listens and no-plugin hangs, the rest of the CI config is the cause; if both
-            # listen, the plugin or its config is.
-            control() {
-              local name=$1 port=$2 db=$3; shift 3
-              echo "::group::Control: $name"
-              docker run -d --name "horde-$name" --network host \
-                -e Serilog__MinimumLevel__Default=Debug \
-                -e Horde__HttpPort="$port" \
-                -e Horde__Http2Port="$((port + 2))" \
-                -e Horde__DatabaseConnectionString="mongodb://localhost:27017/Horde-$name" \
-                -e Horde__RedisConnectionConfig="localhost:6379,defaultDatabase=$db" \
-                "$@" "$HORDE_IMAGE" > /dev/null
-              local code=000
-              for i in $(seq 1 45); do
-                code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/api/v1/server/info" || true)
-                [ "$code" = "000" ] || break
-                sleep 2
-              done
-              echo "Control $name answered HTTP $code (000 means it never listened)"
-              docker logs "horde-$name" > "$RUNNER_TEMP/logs/horde-$name.log" 2>&1
-              tail -n 40 "$RUNNER_TEMP/logs/horde-$name.log"
-              echo "::endgroup::"
-            }
-            cp -r src/clients/horde/tests/ci/horde-data "$RUNNER_TEMP/horde-data-noplugin"
-            # The config files only have whole-line // comments, so dropping those lines leaves JSON.
-            node -e '
-              const fs = require("fs"), path = require("path"), dir = process.argv[1];
-              const edit = (file, change) => {
-                const full = path.join(dir, file);
-                const json = JSON.parse(fs.readFileSync(full, "utf8").split("\n").filter((l) => !l.trim().startsWith("//")).join("\n"));
-                change(json);
-                fs.writeFileSync(full, JSON.stringify(json, null, 2));
-              };
-              edit("server.json", (j) => delete j.Horde.Plugins);
-              edit("globals.json", (j) => delete j.plugins.checkpoint);
-            ' "$RUNNER_TEMP/horde-data-noplugin"
-            chmod -R a+rwX "$RUNNER_TEMP/horde-data-noplugin"
-            control bare 13350 1
-            control no-plugin 13360 2 -v "$RUNNER_TEMP/horde-data-noplugin:/app/Data"
-          }
-
           url="http://localhost:$HORDE_PORT/api/v1/streams/$HORDE_STREAM_ID"
           for i in $(seq 1 90); do
             if [ "$(docker inspect -f '{{.State.Running}}' horde)" != "true" ]; then
@@ -363,7 +282,6 @@ jobs:
           done
           echo "::error::Horde never served stream $HORDE_STREAM_ID"
           docker logs horde 2>&1 | tail -n 200
-          diagnose
           exit 1
 
       - name: Check the plugin loaded
@@ -422,5 +340,5 @@ jobs:
       - name: Stop services
         if: always()
         run: |
-          docker rm -f horde horde-bare horde-no-plugin > /dev/null 2>&1 || true
+          docker rm -f horde > /dev/null 2>&1 || true
           yarn dev stop || true
