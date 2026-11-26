@@ -139,17 +139,16 @@ export default function Dashboard(): React.ReactElement {
   }, [currentUser, currentOrgId]);
 
   return (
-    <div className="bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
+    <div className="flex h-screen flex-col bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
       <TitleBar
         left={<span className="text-sm font-semibold">Checkpoint</span>}
       />
       {/*
-        Top-level route (not inside the bounded Workspace shell), so size from
-        the viewport rather than a percentage chain. Subtract the titlebar
-        (40px), the header row (3rem), the p-6 vertical padding (3rem), and the
-        grid gap (1rem) so the content fits with the bottom padding visible.
+        Fill whatever the titlebar leaves rather than subtracting its height
+        from 100vh: its border makes it 41px, not 40px, and the desktop app has
+        no preflight, so this needs box-border to keep p-6 inside the flex item.
       */}
-      <div className="p-6 grid grid-rows-[3rem_calc(100vh-3rem-3rem-1rem-40px)] gap-4">
+      <div className="box-border grid min-h-0 flex-1 grid-rows-[3rem_minmax(0,1fr)] gap-4 p-6">
         <div className="flex items-center gap-2">
           {currentUser?.details && (
             <Avatar
@@ -220,9 +219,9 @@ export default function Dashboard(): React.ReactElement {
             <SplitterPanel
               size={40}
               minSize={20}
-              className="flex min-h-0 flex-col rounded-lg pr-5 mr-1"
+              className="box-border flex min-h-0 flex-col rounded-lg pr-5 mr-1"
             >
-              <div className="w-full h-full grid grid-rows-[2.5rem_calc(100%-2.5rem)]">
+              <div className="grid h-full w-full grid-rows-[2.5rem_minmax(0,1fr)]">
                 <div className="flex items-center p-2">
                   <span className="text-sm font-semibold text-[var(--color-text-primary)]">
                     Repositories
@@ -233,7 +232,7 @@ export default function Dashboard(): React.ReactElement {
                     className="ml-[1rem] text-[0.8em] p-[0.25rem]"
                   />
                 </div>
-                <div className="p-2 overflow-y-auto h-full space-y-2">
+                <div className="box-border h-full space-y-2 overflow-y-auto p-2">
                   {repos.map((repo) => (
                     <Fragment key={repo.id}>
                       <Card
@@ -331,10 +330,10 @@ export default function Dashboard(): React.ReactElement {
             <SplitterPanel
               size={60}
               minSize={30}
-              className="flex min-h-0 flex-col rounded-lg pl-5 ml-1"
+              className="box-border flex min-h-0 flex-col rounded-lg pl-5 ml-1"
               style={{ zIndex: 1 }}
             >
-              <div className="w-full h-full grid grid-rows-[2.5rem_calc(100%-2.5rem)]">
+              <div className="grid h-full w-full grid-rows-[2.5rem_minmax(0,1fr)]">
                 <div className="flex items-center p-2">
                   <span className="text-sm font-semibold text-[var(--color-text-primary)]">
                     Repository / Workspace Details
