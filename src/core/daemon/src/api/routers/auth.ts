@@ -4,12 +4,27 @@ import {
   CreateApiClientAuthManual,
   DeleteAuthToken,
   GetAllAuthConfigUsers,
+  GetAuthConfigUser,
   SaveAuthProfile,
   SaveAuthToken,
+  UpdateAuthConfigUser,
 } from "@checkpointvcs/common";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { User } from "../../types/index.js";
 import { AuthenticateDevice } from "../../util/index.js";
+
+/** Trims whitespace and trailing slashes, since the API path is appended. */
+function normalizeEndpoint(endpoint: string): string {
+  return endpoint.trim().replace(/\/+$/, "");
+}
+
+/** An empty or whitespace-only label means "no label". */
+function normalizeLabel(label: string | null | undefined) {
+  if (label === undefined) return undefined;
+  const trimmed = label?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
+}
 
 export const authRouter = router({
   login: publicProcedure
@@ -44,13 +59,13 @@ export const authRouter = router({
         endpoint: z.string(),
         daemonId: z.string(),
         token: z.string(),
+        label: z.string().nullable().optional(),
       }),
     )
     .mutation(async ({ input }) => {
-      const client = await CreateApiClientAuthManual(
-        input.endpoint,
-        input.token,
-      );
+      const endpoint = normalizeEndpoint(input.endpoint);
+      const token = input.token.trim();
+      const client = await CreateApiClientAuthManual(endpoint, token);
 
       let meResponse: User;
       try {
@@ -59,9 +74,101 @@ export const authRouter = router({
         throw new Error("Invalid API token or endpoint");
       }
 
-      await SaveAuthToken(input.daemonId, input.endpoint, input.token);
+      await SaveAuthToken(input.daemonId, endpoint, token);
+
+      const label = normalizeLabel(input.label);
+      if (label !== undefined) {
+        await UpdateAuthConfigUser(input.daemonId, { label });
+      }
 
       return { user: meResponse };
+    }),
+
+  /**
+   * Changes an existing account's settings: its server URL, API token, or
+   * display label. A new URL or token is checked against the server first
+   * (so a typo doesn't silently break the account) unless `skipValidation`
+   * is set, which is for pointing an account at a server that's down right
+   * now. Fields left out are kept.
+   */
+  updateUser: publicProcedure
+    .input(
+      z.object({
+        daemonId: z.string(),
+        endpoint: z.string().min(1).optional(),
+        token: z.string().min(1).optional(),
+        label: z.string().nullable().optional(),
+        skipValidation: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const existing = await GetAuthConfigUser(input.daemonId);
+      if (!existing) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `No account under daemon ID ${input.daemonId}`,
+        });
+      }
+
+      const endpoint =
+        input.endpoint !== undefined
+          ? normalizeEndpoint(input.endpoint)
+          : undefined;
+      const token = input.token !== undefined ? input.token.trim() : undefined;
+      const label = normalizeLabel(input.label);
+
+      const connectionChanged =
+        (endpoint !== undefined && endpoint !== existing.endpoint) ||
+        (token !== undefined && token !== existing.apiToken);
+
+      let profile: User | undefined;
+      if (connectionChanged && !input.skipValidation) {
+        const nextEndpoint = endpoint ?? existing.endpoint;
+        const nextToken = token ?? existing.apiToken;
+        if (!nextToken) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "This account has no API token to check the server with.",
+          });
+        }
+
+        try {
+          const client = await CreateApiClientAuthManual(
+            nextEndpoint,
+            nextToken,
+          );
+          profile = await client.user.me.query();
+        } catch (e: any) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Could not sign in to ${nextEndpoint} with ${
+              token !== undefined ? "the new" : "this account's"
+            } token: ${e?.message ?? "unknown error"}`,
+          });
+        }
+      }
+
+      const updated = await UpdateAuthConfigUser(input.daemonId, {
+        endpoint,
+        apiToken: token,
+        label,
+        profile: profile
+          ? {
+              id: profile.id,
+              email: profile.email,
+              name: profile.name ?? null,
+              username: profile.username ?? null,
+              image: profile.image ?? null,
+            }
+          : undefined,
+      });
+
+      return {
+        daemonId: input.daemonId,
+        endpoint: updated.endpoint,
+        label: updated.label ?? null,
+        validated: profile !== undefined,
+      };
     }),
 
   logout: publicProcedure
@@ -107,6 +214,7 @@ export const authRouter = router({
           | (User & {
               daemonId: string;
               endpoint: string;
+              label: string | null;
               reachable: boolean;
             })
           | null
@@ -134,6 +242,7 @@ export const authRouter = router({
             ...meResponse,
             daemonId,
             endpoint: user.endpoint,
+            label: user.label ?? null,
             reachable: true,
           };
         } catch (e: any) {
@@ -153,10 +262,12 @@ export const authRouter = router({
             image: cached?.image ?? null,
             daemonId,
             endpoint: user.endpoint,
+            label: user.label ?? null,
             reachable: false,
           } as User & {
             daemonId: string;
             endpoint: string;
+            label: string | null;
             reachable: boolean;
           };
         }

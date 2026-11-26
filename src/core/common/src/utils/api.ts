@@ -160,6 +160,49 @@ export async function SaveAuthProfile(
   await fs.writeFile(authFilePath, JSON.stringify(authConfig, null, 2));
 }
 
+/**
+ * Changes stored settings of an existing account (its endpoint, token, label,
+ * or cached profile). Fields left undefined are kept. Throws if the account
+ * isn't in the auth config.
+ */
+export async function UpdateAuthConfigUser(
+  daemonId: string,
+  patch: Partial<
+    Pick<AuthConfigUser, "endpoint" | "apiToken" | "label" | "profile">
+  >,
+): Promise<AuthConfigUser> {
+  const authFilePath = path.join(os.homedir(), ".checkpoint", "auth.json");
+
+  let authConfig: AuthConfig | null = null;
+
+  if (existsSync(authFilePath)) {
+    const authConfigStr = await fs.readFile(authFilePath, "utf-8");
+    try {
+      authConfig = JSON.parse(authConfigStr);
+    } catch (e) {
+      //
+    }
+  }
+
+  const existing = authConfig?.users?.[daemonId];
+  if (!authConfig || !existing) {
+    throw new Error(`Could not find a user under daemon ID ${daemonId}`);
+  }
+
+  const next: AuthConfigUser = { ...existing };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined) {
+      (next as any)[key] = value;
+    }
+  }
+
+  authConfig.users[daemonId] = next;
+
+  await fs.writeFile(authFilePath, JSON.stringify(authConfig, null, 2));
+
+  return next;
+}
+
 export async function DeleteAuthToken(daemonId: string): Promise<void> {
   const authFilePath = path.join(os.homedir(), ".checkpoint", "auth.json");
 

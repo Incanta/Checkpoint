@@ -9,13 +9,25 @@ import {
   DAEMON_API,
 } from "@checkpointvcs/common";
 import { MockedData } from "../common/mock-data";
-import { User, usersAtom, currentUserAtom } from "../common/state/auth";
+import {
+  User,
+  PendingLogin,
+  usersAtom,
+  currentUserAtom,
+  pendingLoginAtom,
+} from "../common/state/auth";
 import {
   daemonConnectionAtom,
   serverReachableAtom,
 } from "../common/state/daemon";
 import { store } from "../common/state/store";
-import { Channels, ipcOn, ipcSend, ipcHandle } from "./channels";
+import {
+  Channels,
+  InvokeChannels,
+  ipcOn,
+  ipcSend,
+  ipcHandle,
+} from "./channels";
 import { getLastOpenedWorkspace, setLastOpenedWorkspace } from "./app-config";
 import {
   currentWorkspaceAtom,
@@ -171,8 +183,20 @@ export default class DaemonHandler {
       this.handleLogin(data);
     });
 
+    ipcOn(this.ipcMain, "auth:login:cancel", async (_event, data) => {
+      this.handleLoginCancel(data);
+    });
+
     ipcOn(this.ipcMain, "auth:logout", async (_event, data) => {
       this.handleLogout(data);
+    });
+
+    ipcHandle(this.ipcMain, "accounts:update", async (_event, data) => {
+      return this.handleAccountUpdate(data);
+    });
+
+    ipcHandle(this.ipcMain, "accounts:add-with-token", async (_event, data) => {
+      return this.handleAccountAddWithToken(data);
     });
 
     ipcOn(this.ipcMain, "auth:recheck", async () => {
@@ -567,6 +591,8 @@ export default class DaemonHandler {
     const usersValue: User[] = users.users.map((user) => ({
       daemonId: user.daemonId,
       endpoint: user.endpoint,
+      label: user.label,
+      reachable: user.reachable,
       details: {
         id: user.id,
         email: user.email,
@@ -637,110 +663,206 @@ export default class DaemonHandler {
     }
   }
 
+  /**
+   * Runs a browser (device-code) sign-in. Progress goes to pendingLoginAtom
+   * rather than currentUserAtom, so adding an account from the Manage
+   * Accounts dialog doesn't switch away from the active account until the
+   * new one is authorized. On success the new account becomes active.
+   */
   private async handleLogin(data: Channels["auth:login"]): Promise<void> {
+    const { daemonId } = data;
+    const endpoint = data.endpoint.trim().replace(/\/+$/, "");
+    const label = data.label?.trim() || null;
+
+    // Cancelling (or starting another sign-in) replaces pendingLoginAtom, which
+    // is how the polling below knows to stop.
+    const isStillPending = () =>
+      store.get(pendingLoginAtom)?.daemonId === daemonId;
+
+    const setPending = (patch: Partial<PendingLogin>) => {
+      if (!isStillPending()) return;
+      store.set(pendingLoginAtom, {
+        ...store.get(pendingLoginAtom)!,
+        ...patch,
+      });
+    };
+
+    const finish = (user: User) => {
+      if (!isStillPending()) return;
+      const nextUsers = (store.get(usersAtom) || [])
+        .filter((u) => u.daemonId !== daemonId)
+        .concat(user);
+      store.set(usersAtom, nextUsers);
+      store.set(currentUserAtom, user);
+      store.set(serverReachableAtom, true);
+      store.set(pendingLoginAtom, null);
+    };
+
+    store.set(pendingLoginAtom, {
+      daemonId,
+      endpoint,
+      code: null,
+      url: null,
+      error: null,
+    });
+
     if (this.isMocked) {
-      for (const availableUser of MockedData.availableUsers) {
-        if (MockedData.users[availableUser].endpoint === data.endpoint) {
-          const user = MockedData.users[availableUser];
-          MockedData.availableUsers.splice(
-            MockedData.availableUsers.indexOf(availableUser),
-            1,
-          );
-
-          const nextAuthUser: User = {
-            ...user,
-            daemonId: data.daemonId,
-            details: null,
-            auth: {
-              code: "1234",
-              url: "http://localhost:13000/settings/devices?code=1234",
-            },
-          };
-
-          store.set(currentUserAtom, nextAuthUser);
-
-          setTimeout(() => {
-            const currentAuthUser = store.get(currentUserAtom);
-
-            if (!currentAuthUser) return;
-
-            const nextUser: User = {
-              ...currentAuthUser,
-              details: user.details,
-              auth: undefined,
-            };
-
-            store.set(currentUserAtom, nextUser);
-
-            const currentUsers = store.get(usersAtom) || [];
-            const nextUsers = currentUsers
-              .filter((a) => a.daemonId !== data.daemonId)
-              .concat(nextUser);
-
-            store.set(usersAtom, nextUsers);
-
-            store.set(workspacesAtom, MockedData.workspaces);
-            this.selectWorkspace(MockedData.workspaces[0]);
-          }, 2000);
-
-          break;
-        }
+      const index = MockedData.availableUsers.findIndex(
+        (i) => MockedData.users[i].endpoint === endpoint,
+      );
+      if (index < 0) {
+        setPending({ error: `No mocked account for ${endpoint}` });
+        return;
       }
-    } else {
-      const client = await CreateDaemonClient();
-      const loginResponse = await client.auth.login.mutate({
-        endpoint: data.endpoint,
-        daemonId: data.daemonId,
+      const user = MockedData.users[MockedData.availableUsers[index]];
+      MockedData.availableUsers.splice(index, 1);
+
+      setPending({
+        code: "1234",
+        url: "http://localhost:13000/settings/devices?code=1234",
       });
 
-      const nextAuthUser: User = {
-        daemonId: data.daemonId,
-        endpoint: data.endpoint,
-        details: null,
-        auth: { code: loginResponse.code, url: loginResponse.url },
-      };
+      setTimeout(() => {
+        if (!isStillPending()) return;
+        finish({ ...user, daemonId, label, reachable: true, auth: undefined });
+        store.set(workspacesAtom, MockedData.workspaces);
+        this.selectWorkspace(MockedData.workspaces[0]);
+      }, 2000);
+      return;
+    }
 
-      store.set(currentUserAtom, nextAuthUser);
+    let client: Awaited<ReturnType<typeof CreateDaemonClient>>;
+    try {
+      client = await CreateDaemonClient();
+      const loginResponse = await client.auth.login.mutate({
+        endpoint,
+        daemonId,
+      });
+      setPending({ code: loginResponse.code, url: loginResponse.url });
+    } catch (error: any) {
+      setPending({
+        error: `Could not start sign-in with ${endpoint}: ${
+          error?.message || "unknown error"
+        }`,
+      });
+      return;
+    }
 
-      // wait for daemon to give us the user details
-      for (let i = 0; i < 5 * 60; i++) {
-        try {
-          const { user } = await client.auth.getUser.query({
-            daemonId: data.daemonId,
-          });
+    // Wait for the daemon to report the authorized user.
+    for (let i = 0; i < 5 * 60; i++) {
+      if (!isStillPending()) return;
 
-          const currentAuthUser = store.get(currentUserAtom);
+      try {
+        const { user } = await client.auth.getUser.query({ daemonId });
 
-          if (!currentAuthUser) return;
-
-          const nextUser: User = {
-            ...currentAuthUser,
-            details: {
-              id: user.id,
-              email: user.email,
-              name: user.name,
-              username: user.username,
-              image: user.image ?? null,
-            },
-            auth: undefined,
-          };
-
-          store.set(currentUserAtom, nextUser);
-
-          const currentUsers = store.get(usersAtom) || [];
-          const nextUsers = currentUsers
-            .filter((a) => a.daemonId !== data.daemonId)
-            .concat(nextUser);
-
-          store.set(usersAtom, nextUsers);
-        } catch (e) {
-          //
+        if (label) {
+          try {
+            await client.auth.updateUser.mutate({
+              daemonId,
+              label,
+              skipValidation: true,
+            });
+          } catch (error) {
+            console.error("Failed to save account label:", error);
+          }
         }
 
-        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+        finish({
+          daemonId,
+          endpoint,
+          label,
+          reachable: true,
+          details: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            username: user.username,
+            image: user.image ?? null,
+          },
+          auth: undefined,
+        });
+        return;
+      } catch {
+        // Not authorized yet.
       }
 
-      throw new Error("Timed out waiting for device authorization");
+      await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+    }
+
+    setPending({ error: "Timed out waiting for device authorization." });
+  }
+
+  private async handleLoginCancel(
+    data: Channels["auth:login:cancel"],
+  ): Promise<void> {
+    if (store.get(pendingLoginAtom)?.daemonId !== data.daemonId) return;
+    store.set(pendingLoginAtom, null);
+
+    // If the user confirmed in the browser just as they cancelled, the daemon
+    // may already have saved a token; drop it so a half-added account doesn't
+    // show up on the next launch.
+    if (!this.isMocked) {
+      try {
+        const client = await CreateDaemonClient();
+        await client.auth.logout.mutate({ daemonId: data.daemonId });
+      } catch (error) {
+        console.error("Failed to clean up cancelled sign-in:", error);
+      }
+    }
+  }
+
+  private async handleAccountUpdate(
+    data: InvokeChannels["accounts:update"]["request"],
+  ): Promise<InvokeChannels["accounts:update"]["response"]> {
+    try {
+      if (!this.isMocked) {
+        const client = await CreateDaemonClient();
+        await client.auth.updateUser.mutate(data);
+        await this.loadUsers(client);
+      } else {
+        const patch = (u: User): User =>
+          u.daemonId === data.daemonId
+            ? {
+                ...u,
+                endpoint: data.endpoint?.trim() ?? u.endpoint,
+                label:
+                  data.label === undefined
+                    ? u.label
+                    : data.label?.trim() || null,
+              }
+            : u;
+        store.set(usersAtom, (store.get(usersAtom) || []).map(patch));
+        const current = store.get(currentUserAtom);
+        if (current) store.set(currentUserAtom, patch(current));
+      }
+      return { ok: true };
+    } catch (error: any) {
+      return { ok: false, error: error?.message || "Failed to save account" };
+    }
+  }
+
+  private async handleAccountAddWithToken(
+    data: InvokeChannels["accounts:add-with-token"]["request"],
+  ): Promise<InvokeChannels["accounts:add-with-token"]["response"]> {
+    if (this.isMocked) {
+      return { ok: false, error: "Not supported with mocked data" };
+    }
+    try {
+      const client = await CreateDaemonClient();
+      await client.auth.loginWithToken.mutate(data);
+      await this.loadUsers(client);
+
+      // Make the new account active, as a browser sign-in does.
+      const added = (store.get(usersAtom) || []).find(
+        (u) => u.daemonId === data.daemonId,
+      );
+      if (added) {
+        store.set(currentUserAtom, added);
+        store.set(serverReachableAtom, added.reachable ?? true);
+      }
+      return { ok: true };
+    } catch (error: any) {
+      return { ok: false, error: error?.message || "Failed to add account" };
     }
   }
 
@@ -778,6 +900,10 @@ export default class DaemonHandler {
 
       if (this.webContents) {
         ipcSend(this.webContents, "auth:logout:success", null);
+        // With no accounts left there's nothing for the dashboard to show.
+        if (nextUsers.length === 0) {
+          ipcSend(this.webContents, "set-renderer-url", { url: "/login" });
+        }
       }
     } catch (error: any) {
       if (this.webContents) {

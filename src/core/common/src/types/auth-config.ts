@@ -15,6 +15,11 @@ export interface AuthConfigUser {
   endpoint: string;
   apiToken: string | null;
   /**
+   * Optional display name the user gave this account, so two accounts for the
+   * same person (or the same email on two servers) can be told apart.
+   */
+  label?: string | null;
+  /**
    * Last-known profile for this account. Optional because it's only populated
    * once we've successfully reached the server at least once.
    */

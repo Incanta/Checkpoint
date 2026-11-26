@@ -28,7 +28,10 @@ export type Channels = {
   // Open a URL in the user's default browser.
   "app:open-external": { url: string };
 
-  "auth:login": { daemonId: string; endpoint: string };
+  // Start a browser (device-code) sign-in; progress lands in pendingLoginAtom.
+  "auth:login": { daemonId: string; endpoint: string; label?: string | null };
+  // Abandon the browser sign-in under this daemonId.
+  "auth:login:cancel": { daemonId: string };
   // Re-query the daemon for the known users and their reachability. Used by the
   // "server unreachable" banner's retry button.
   "auth:recheck": null;
@@ -397,6 +400,30 @@ export type InvokeChannels = {
   "settings:collect-bug-report": {
     request: null;
     response: { path: string } | { error: string };
+  };
+
+  // Manage Accounts dialog
+  // Change an account's label, server URL, or API token. A new URL or token
+  // is checked against the server unless skipValidation is set.
+  "accounts:update": {
+    request: {
+      daemonId: string;
+      label?: string | null;
+      endpoint?: string;
+      token?: string;
+      skipValidation?: boolean;
+    };
+    response: { ok: true } | { ok: false; error: string };
+  };
+  // Add an account from an API token minted in the web UI.
+  "accounts:add-with-token": {
+    request: {
+      daemonId: string;
+      endpoint: string;
+      token: string;
+      label?: string | null;
+    };
+    response: { ok: true } | { ok: false; error: string };
   };
 };
 

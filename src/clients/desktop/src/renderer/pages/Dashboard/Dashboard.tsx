@@ -25,18 +25,26 @@ import { faNetworkWired } from "@fortawesome/free-solid-svg-icons/faNetworkWired
 import { faLinkSlash } from "@fortawesome/free-solid-svg-icons/faLinkSlash";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ipc } from "../ipc";
-import { currentUserAtom, usersAtom } from "../../../common/state/auth";
-import { useNavigate } from "react-router";
+import {
+  accountDisplayName,
+  currentUserAtom,
+  usersAtom,
+} from "../../../common/state/auth";
 import {
   dashboardNewWorkspaceFolderAtom,
   dashboardOrgsAtom,
   dashboardReposAtom,
 } from "../../../common/state/dashboard";
+import ManageAccountsDialog from "../../components/ManageAccountsDialog";
+
+// Sentinel option values in the account select; daemon IDs are nanoids, so
+// these can't collide with one.
+const MANAGE_VALUE = "__manage__";
+const SEPARATOR_VALUE = "__separator__";
 
 export default function Dashboard(): React.ReactElement {
   const users = useAtomValue(usersAtom);
   const [currentUser, setCurrentUser] = useAtom(currentUserAtom);
-  const navigate = useNavigate();
   const orgs = useAtomValue(dashboardOrgsAtom);
   const repos = useAtomValue(dashboardReposAtom);
   const workspaces = useAtomValue(workspacesAtom);
@@ -74,10 +82,7 @@ export default function Dashboard(): React.ReactElement {
     name: string;
   } | null>(null);
 
-  const handleLogout = () => {
-    if (!currentUser) return;
-    ipc.sendMessage("auth:logout", { daemonId: currentUser.daemonId });
-  };
+  const [isManageAccountsVisible, setIsManageAccountsVisible] = useState(false);
 
   const handleUnlinkWorkspace = () => {
     if (!unlinkTarget) return;
@@ -166,31 +171,29 @@ export default function Dashboard(): React.ReactElement {
             <Select<string>
               aria-label="Account"
               className="max-w-[20rem]"
-              value={currentUser?.details?.id ?? null}
-              options={(users ?? [])
-                .filter((user) => user.details !== null)
-                .map((user) => ({
-                  label: user.details!.username || user.details!.email,
-                  value: user.details!.id,
-                }))
-                .concat(
-                  { label: "Add login credentials...", value: "add" },
-                  { label: "Logout", value: "logout" },
-                )}
-              placeholder="Select a User"
+              value={currentUser?.daemonId ?? null}
+              options={[
+                ...(users ?? []).map((user) => ({
+                  label: accountDisplayName(user),
+                  value: user.daemonId,
+                })),
+                // Native selects have no divider; a disabled rule stands in.
+                { label: "────────", value: SEPARATOR_VALUE, disabled: true },
+                { label: "Manage...", value: MANAGE_VALUE },
+              ]}
+              placeholder="Select an account"
               onChange={(value) => {
-                if (value === "add") {
-                  setCurrentUser(null);
-                  navigate("/login", { state: { from: "dashboard" } });
-                } else if (value === "logout") {
-                  handleLogout();
-                } else {
-                  const selectedUser = users?.find(
-                    (user) => user.details?.id === value,
-                  );
-                  if (selectedUser) {
-                    setCurrentUser(selectedUser);
-                  }
+                if (value === MANAGE_VALUE) {
+                  // The select stays on the active account: its value is
+                  // driven by currentUser, which this doesn't change.
+                  setIsManageAccountsVisible(true);
+                  return;
+                }
+                const selectedUser = users?.find(
+                  (user) => user.daemonId === value,
+                );
+                if (selectedUser) {
+                  setCurrentUser(selectedUser);
                 }
               }}
             />
@@ -466,6 +469,10 @@ export default function Dashboard(): React.ReactElement {
           stop tracking changes.
         </p>
       </Dialog>
+      <ManageAccountsDialog
+        visible={isManageAccountsVisible}
+        onHide={() => setIsManageAccountsVisible(false)}
+      />
     </div>
   );
 }
