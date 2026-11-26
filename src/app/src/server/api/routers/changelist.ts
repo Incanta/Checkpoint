@@ -571,18 +571,11 @@ export const changelistRouter = createTRPCRouter({
         stateRootHash: string;
       } | null = null;
 
-      for (
-        let attempt = 0;
-        attempt < MAX_SUBMIT_ATTEMPTS && !committed;
-        attempt++
-      ) {
-        if (attempt > 0) {
-          // Spread retries out so the same submits do not collide again.
-          await new Promise((resolve) =>
-            setTimeout(resolve, 15 * attempt + Math.random() * 60),
-          );
-        }
-
+      // One attempt's view of the head: what it holds at the submitted paths,
+      // and the changelist number to take. These reads wait on the database's
+      // writer like the commit below does, so on SQLite a busy writer fails
+      // them the same way, and that is contention to retry, not a failure.
+      const readHead = async () => {
         const branch = await ctx.db.branch.findUnique({
           where: { id: submitBranch.id },
         });
@@ -656,6 +649,33 @@ export const changelistRouter = createTRPCRouter({
         });
 
         const nextNumber = (lastChangelist?.number ?? -1) + 1;
+
+        return { branch, parentChangelist, headRoot, headPaths, nextNumber };
+      };
+
+      for (
+        let attempt = 0;
+        attempt < MAX_SUBMIT_ATTEMPTS && !committed;
+        attempt++
+      ) {
+        if (attempt > 0) {
+          // Spread retries out so the same submits do not collide again.
+          await new Promise((resolve) =>
+            setTimeout(resolve, 15 * attempt + Math.random() * 60),
+          );
+        }
+
+        let head: Awaited<ReturnType<typeof readHead>>;
+        try {
+          head = await readHead();
+        } catch (error) {
+          if (!isSubmitContention(error)) {
+            throw error;
+          }
+          continue;
+        }
+        const { branch, parentChangelist, headRoot, headPaths, nextNumber } =
+          head;
 
         const edits: TreeEdit[] = input.modifications.map((mod) => {
           const path = mod.path.replaceAll("\\", "/");
