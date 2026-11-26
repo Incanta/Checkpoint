@@ -2,6 +2,7 @@
 
 using System.Collections.Concurrent;
 using Checkpoint.Api;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace HordeServer.VersionControl.Checkpoint
@@ -13,14 +14,23 @@ namespace HordeServer.VersionControl.Checkpoint
 	public sealed class CheckpointConnectionService : IDisposable
 	{
 		readonly IOptions<CheckpointServerConfig> _serverConfig;
-		readonly IOptionsMonitor<CheckpointConfig> _globalConfig;
+		readonly Lazy<IOptionsMonitor<CheckpointConfig>> _globalConfig;
 		readonly HttpClient _httpClient;
 		readonly ConcurrentDictionary<string, string> _repoIdCache = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-		public CheckpointConnectionService(IOptions<CheckpointServerConfig> serverConfig, IOptionsMonitor<CheckpointConfig> globalConfig)
+		/// <remarks>
+		/// The global (globals.json) config is resolved on first use, never in the constructor.
+		/// CheckpointConfigSource depends on this service, and Horde's ConfigService takes every
+		/// IConfigSource in its constructor, while IOptionsMonitor&lt;CheckpointConfig&gt; is built from
+		/// GlobalConfig, which ConfigService provides. Taking the monitor here closed that loop through
+		/// factory registrations the container cannot see as a cycle: resolution recursed forever and
+		/// the server hung at startup before it ever listened. The config source only needs the
+		/// server config, so it never touches the global config at all.
+		/// </remarks>
+		public CheckpointConnectionService(IOptions<CheckpointServerConfig> serverConfig, IServiceProvider serviceProvider)
 		{
 			_serverConfig = serverConfig;
-			_globalConfig = globalConfig;
+			_globalConfig = new Lazy<IOptionsMonitor<CheckpointConfig>>(() => serviceProvider.GetRequiredService<IOptionsMonitor<CheckpointConfig>>());
 			_httpClient = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(15.0) }, disposeHandler: true);
 		}
 
@@ -32,7 +42,7 @@ namespace HordeServer.VersionControl.Checkpoint
 		/// Gets the cluster profile for a Horde cluster name.
 		/// </summary>
 		public CheckpointClusterConfig GetCluster(string? clusterName)
-			=> _globalConfig.CurrentValue.GetCluster(clusterName);
+			=> _globalConfig.Value.CurrentValue.GetCluster(clusterName);
 
 		/// <summary>
 		/// Resolves the endpoint and token for a cluster and creates a client for it.
