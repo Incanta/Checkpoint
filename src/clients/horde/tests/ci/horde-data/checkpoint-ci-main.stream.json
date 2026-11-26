@@ -1,0 +1,16 @@
+{
+	"name": "//CheckpointCI/Main",
+
+	// The org/repo that scripts/ci/seed-horde-repo.mjs creates. The CI database is fresh on every
+	// run, so fixed names are safe.
+	"vcs": "Checkpoint",
+	"repositoryName": "horde-ci-org/horde-ci-repo",
+	"defaultBranchName": "main",
+	"clusterName": "Checkpoint",
+
+	"workspaceTypes": {
+		"Default": {
+			"useAutoSdk": false
+		}
+	}
+}

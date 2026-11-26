@@ -9,9 +9,15 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <UseHordeAssemblies Condition="'$(HordeAssembliesDir)' != ''">true</UseHordeAssemblies>
+  </PropertyGroup>
+
   <Target Name="CheckHordeEngineDir" BeforeTargets="Restore;CollectPackageReferences;BeforeBuild">
-    <Error Condition="'$(HordeEngineDir)' == '' OR !Exists('$(HordeSourceDir)')"
-           Text="HordeEngineDir is not set or does not contain Horde source. Set the HORDE_ENGINE_DIR environment variable to an Unreal Engine checkout root (e.g. E:/epic/engine/UE_Incanta)." />
+    <Error Condition="'$(UseHordeAssemblies)' != 'true' AND ('$(HordeEngineDir)' == '' OR !Exists('$(HordeSourceDir)'))"
+           Text="HordeEngineDir is not set or does not contain Horde source. Set the HORDE_ENGINE_DIR environment variable to an Unreal Engine checkout root (e.g. E:/epic/engine/UE_Incanta), or HORDE_ASSEMBLIES_DIR to an installed Horde server's directory." />
+    <Error Condition="'$(UseHordeAssemblies)' == 'true' AND !Exists('$(HordeAssembliesDir)/HordeServer.Shared.dll')"
+           Text="HordeAssembliesDir ('$(HordeAssembliesDir)') does not contain HordeServer.Shared.dll. Point it at a Horde server installation directory (the image's /app)." />
   </Target>
 
   <ItemGroup>
@@ -22,8 +28,20 @@
     Horde/EpicGames assemblies are provided by the server at runtime; Private=false keeps them
     out of our output folder so the release artifact is only HordeServer.Checkpoint.dll and
     Checkpoint.Api.dll.
+
+    Prebuilt mode references every managed assembly the server ships (Horde, its plugins, and
+    their NuGet dependencies such as MongoDB), since a plain Reference brings no transitive
+    references with it. Our own two DLLs are excluded in case the directory is a live install, and
+    so is the native Perforce library, which has no metadata to reference.
   -->
-  <ItemGroup>
+  <ItemGroup Condition="'$(UseHordeAssemblies)' == 'true'">
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Reference Include="$(HordeAssembliesDir)/*.dll"
+               Exclude="$(HordeAssembliesDir)/HordeServer.Checkpoint.dll;$(HordeAssembliesDir)/Checkpoint.Api.dll;$(HordeAssembliesDir)/EpicGames.Perforce.Native.dll"
+               Private="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseHordeAssemblies)' != 'true'">
     <ProjectReference Include="$(HordeSharedDir)\EpicGames.Core\EpicGames.Core.csproj" Private="false" />
     <ProjectReference Include="$(HordeSharedDir)\EpicGames.Horde\EpicGames.Horde.csproj" Private="false" />
     <ProjectReference Include="$(HordeSourceDir)\HordeServer.Shared\HordeServer.Shared.csproj" Private="false" />

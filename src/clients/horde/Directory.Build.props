@@ -15,7 +15,15 @@
     the engine root, e.g. E:/epic/engine/UE_Incanta. Only projects that reference Horde/EpicGames
     assemblies need it; Checkpoint.Api builds standalone.
   -->
+  <!--
+    Alternatively, HORDE_ASSEMBLIES_DIR (or -p:HordeAssembliesDir=...) points at the assemblies of
+    an installed Horde server, such as /app copied out of the ghcr.io/epicgames/horde-server image.
+    The plugin then compiles against exactly the binaries it will load into, with no engine
+    checkout. CI uses this (.github/workflows/horde-integration.yaml). When both are set, the
+    prebuilt assemblies win.
+  -->
   <PropertyGroup>
+    <HordeAssembliesDir Condition="'$(HordeAssembliesDir)' == ''">$(HORDE_ASSEMBLIES_DIR)</HordeAssembliesDir>
     <HordeEngineDir Condition="'$(HordeEngineDir)' == ''">$(HORDE_ENGINE_DIR)</HordeEngineDir>
     <HordeSourceDir>$(HordeEngineDir)\Engine\Source\Programs\Horde</HordeSourceDir>
     <HordeSharedDir>$(HordeEngineDir)\Engine\Source\Programs\Shared</HordeSharedDir>

@@ -34,7 +34,7 @@ public class LiveServerTests
 	public async Task VersionAndAuth()
 	{
 		CheckpointClient? client = TryCreateClient();
-		Skip.If(client == null, "CHECKPOINT_TEST_ENDPOINT/CHECKPOINT_TEST_TOKEN not set");
+		LiveTest.SkipIf(client == null, "CHECKPOINT_TEST_ENDPOINT/CHECKPOINT_TEST_TOKEN not set");
 
 		ServerVersionInfo version = await client!.GetServerVersionAsync();
 		Assert.False(String.IsNullOrEmpty(version.ServerVersion));
@@ -47,9 +47,9 @@ public class LiveServerTests
 	public async Task ChangelistPagingAndFiles()
 	{
 		CheckpointClient? client = TryCreateClient();
-		Skip.If(client == null, "CHECKPOINT_TEST_ENDPOINT/CHECKPOINT_TEST_TOKEN not set");
+		LiveTest.SkipIf(client == null, "CHECKPOINT_TEST_ENDPOINT/CHECKPOINT_TEST_TOKEN not set");
 		string? repoId = Environment.GetEnvironmentVariable("CHECKPOINT_TEST_REPO_ID");
-		Skip.If(String.IsNullOrEmpty(repoId), "CHECKPOINT_TEST_REPO_ID not set");
+		LiveTest.SkipIf(String.IsNullOrEmpty(repoId), "CHECKPOINT_TEST_REPO_ID not set");
 		string branch = Environment.GetEnvironmentVariable("CHECKPOINT_TEST_BRANCH") ?? "main";
 
 		int? head = await client!.GetHeadNumberAsync(repoId!, branch);
