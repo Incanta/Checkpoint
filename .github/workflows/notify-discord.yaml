@@ -1,0 +1,99 @@
+# Posts a Discord message when one of the watched workflows fails.
+#
+# One listener on workflow_run instead of a notify job in each workflow: a job
+# would have to `needs:` every other job in its file to see their results, and
+# that list drifts every time a job is added. workflow_run reports the run's
+# overall conclusion, which for CD includes the reusable workflows it calls.
+#
+# workflow_run only fires from the copy of this file on the default branch, so
+# changes here take effect once they are merged to main.
+#
+# Pull request runs are skipped: their author already sees the red check on the
+# pull request, and posting every failing push to a draft would bury the
+# failures on main and in CD that nobody else would otherwise notice.
+
+name: Notify Discord on failure
+
+on:
+  workflow_run:
+    workflows:
+      - CLI Integration Test
+      - Data-loss red team
+      - CD
+    types: [completed]
+
+permissions:
+  actions: read
+
+jobs:
+  notify:
+    if: >-
+      github.event.workflow_run.event != 'pull_request'
+      && contains(fromJSON('["failure", "timed_out", "startup_failure"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Post to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Everything from the triggering run goes through the environment, not
+          # an expression in the script: branch names and commit messages are
+          # author-controlled and must never become shell.
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          RUN_TITLE: ${{ github.event.workflow_run.display_title }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          TRIGGER: ${{ github.event.workflow_run.event }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          ACTOR: ${{ github.event.workflow_run.triggering_actor.login }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::error::DISCORD_WEBHOOK_URL secret is not set"
+            exit 1
+          fi
+
+          # The failed jobs, each linked to its log. Best effort: a failed API
+          # call still sends the message, just without the list.
+          failed_jobs=$(gh api --paginate \
+            "repos/$REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs?per_page=100" \
+            --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | "- [\(.name)](\(.html_url))"' \
+            2> /dev/null | head -n 15 || true)
+          [ -n "$failed_jobs" ] || failed_jobs="(see the run for details)"
+
+          payload=$(jq -n \
+            --arg workflow "$WORKFLOW" \
+            --arg title "$RUN_TITLE" \
+            --arg url "$RUN_URL" \
+            --arg conclusion "$CONCLUSION" \
+            --arg trigger "$TRIGGER" \
+            --arg branch "$BRANCH" \
+            --arg sha "${SHA:0:8}" \
+            --arg commit_url "https://github.com/$REPO/commit/$SHA" \
+            --arg actor "$ACTOR" \
+            --arg jobs "$failed_jobs" \
+            '{
+              username: "GitHub Actions",
+              allowed_mentions: { parse: [] },
+              embeds: [{
+                title: ("\($workflow) \($conclusion | gsub("_"; " "))" | .[0:256]),
+                url: $url,
+                color: 15158332,
+                description: ($title | .[0:300]),
+                fields: [
+                  { name: "Branch", value: (if $branch == "" then "n/a" else $branch[0:1024] end), inline: true },
+                  { name: "Commit", value: "[\($sha)](\($commit_url))", inline: true },
+                  { name: "Trigger", value: "\($trigger) by \($actor)", inline: true },
+                  { name: "Failed jobs", value: ($jobs | .[0:1024]) }
+                ]
+              }]
+            }')
+
+          curl --fail-with-body -sS -X POST \
+            -H "Content-Type: application/json" \
+            --data "$payload" \
+            "$DISCORD_WEBHOOK_URL"
