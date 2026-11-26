@@ -43,8 +43,10 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
             expiresAt: null,
           },
           {
+            // Strictly after now: revokeDevice sets expiresAt = now, so an
+            // equal timestamp must already count as expired.
             expiresAt: {
-              gte: new Date(),
+              gt: new Date(),
             },
           },
         ],
