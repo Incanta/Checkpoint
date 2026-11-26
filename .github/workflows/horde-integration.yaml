@@ -274,17 +274,44 @@ jobs:
           # what startup is waiting on. dotnet-stack runs inside the container (Horde is pid 1
           # there) from the mounted /dtools.
           diagnose() {
+            # Report every probe's outcome; the step fails afterwards regardless.
+            set +e
             echo "::group::Listening TCP sockets"
             sudo ss -ltnp || true
             echo "::endgroup::"
-            dotnet tool install --tool-path "$RUNNER_TEMP/dtools" dotnet-stack > /dev/null || return 0
-            dll=$(find "$RUNNER_TEMP/dtools/.store" -name dotnet-stack.dll | head -n 1)
-            [ -n "$dll" ] || return 0
-            docker exec -e DOTNET_ROLL_FORWARD=Major horde \
-              dotnet "/dtools${dll#"$RUNNER_TEMP/dtools"}" report -p 1 \
-              > "$RUNNER_TEMP/logs/horde-stacks.log" 2>&1 || true
             echo "::group::Horde managed stacks"
-            cat "$RUNNER_TEMP/logs/horde-stacks.log"
+            dotnet tool install --tool-path "$RUNNER_TEMP/dtools" dotnet-stack || true
+            dll=$(find "$RUNNER_TEMP/dtools/.store" -name dotnet-stack.dll | head -n 1)
+            echo "dotnet-stack: ${dll:-not found}"
+            if [ -n "$dll" ]; then
+              docker exec -e DOTNET_ROLL_FORWARD=Major horde \
+                dotnet "/dtools${dll#"$RUNNER_TEMP/dtools"}" report -p 1 \
+                > "$RUNNER_TEMP/logs/horde-stacks.log" 2>&1
+              echo "dotnet-stack exit code: $?"
+              cat "$RUNNER_TEMP/logs/horde-stacks.log"
+            fi
+            echo "::endgroup::"
+
+            # Bisect: the same image with no plugin and no mounted config, on its own port,
+            # Mongo database, and Redis database. If this one listens, the hang comes from the
+            # plugin or the CI config; if it hangs too, from the environment.
+            echo "::group::Control: Horde without the plugin"
+            docker run -d --name horde-bare --network host \
+              -e Serilog__MinimumLevel__Default=Debug \
+              -e Horde__HttpPort=13350 \
+              -e Horde__Http2Port=13352 \
+              -e Horde__DatabaseConnectionString="mongodb://localhost:27017/HordeBare" \
+              -e Horde__RedisConnectionConfig="localhost:6379,defaultDatabase=1" \
+              "$HORDE_IMAGE" > /dev/null
+            bare=000
+            for i in $(seq 1 45); do
+              bare=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:13350/api/v1/server/info" || true)
+              [ "$bare" = "000" ] || break
+              sleep 2
+            done
+            echo "Horde without the plugin answered HTTP $bare (000 means it never listened)"
+            docker logs horde-bare > "$RUNNER_TEMP/logs/horde-bare.log" 2>&1 || true
+            tail -n 60 "$RUNNER_TEMP/logs/horde-bare.log"
             echo "::endgroup::"
           }
 
@@ -365,5 +392,5 @@ jobs:
       - name: Stop services
         if: always()
         run: |
-          docker rm -f horde > /dev/null 2>&1 || true
+          docker rm -f horde horde-bare > /dev/null 2>&1 || true
           yarn dev stop || true
