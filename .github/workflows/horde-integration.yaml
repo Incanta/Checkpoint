@@ -252,7 +252,8 @@ jobs:
           # The image may not run as the runner's user, and Horde writes its logs and state here.
           chmod -R a+rwX "$data"
 
-          docker run -d --name horde --network host \
+          # SYS_PTRACE lets createdump read the process if startup hangs (see the next step).
+          docker run -d --name horde --network host --cap-add SYS_PTRACE \
             -e Serilog__MinimumLevel__Default=Debug \
             -e Horde__HttpPort="$HORDE_PORT" \
             -e Horde__Http2Port=13342 \
@@ -301,9 +302,10 @@ jobs:
             # Bisect with two controls from the same image, each on its own port, Mongo
             # database, and Redis database:
             #   bare:      no plugin and no mounted config (Horde's defaults)
-            #   no-plugin: this job's config, without the plugin DLLs
-            # If bare listens and no-plugin hangs, the CI config is the cause; if both listen, the
-            # plugin is.
+            #   no-plugin: this job's config with the Checkpoint sections removed, and no plugin
+            #              DLLs (Horde refuses to start if server.json enables a missing plugin)
+            # If bare listens and no-plugin hangs, the rest of the CI config is the cause; if both
+            # listen, the plugin or its config is.
             control() {
               local name=$1 port=$2 db=$3; shift 3
               echo "::group::Control: $name"
@@ -326,6 +328,18 @@ jobs:
               echo "::endgroup::"
             }
             cp -r src/clients/horde/tests/ci/horde-data "$RUNNER_TEMP/horde-data-noplugin"
+            # The config files only have whole-line // comments, so dropping those lines leaves JSON.
+            node -e '
+              const fs = require("fs"), path = require("path"), dir = process.argv[1];
+              const edit = (file, change) => {
+                const full = path.join(dir, file);
+                const json = JSON.parse(fs.readFileSync(full, "utf8").split("\n").filter((l) => !l.trim().startsWith("//")).join("\n"));
+                change(json);
+                fs.writeFileSync(full, JSON.stringify(json, null, 2));
+              };
+              edit("server.json", (j) => delete j.Horde.Plugins);
+              edit("globals.json", (j) => delete j.plugins.checkpoint);
+            ' "$RUNNER_TEMP/horde-data-noplugin"
             chmod -R a+rwX "$RUNNER_TEMP/horde-data-noplugin"
             control bare 13350 1
             control no-plugin 13360 2 -v "$RUNNER_TEMP/horde-data-noplugin:/app/Data"
