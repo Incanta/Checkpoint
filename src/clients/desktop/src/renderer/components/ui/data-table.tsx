@@ -92,6 +92,11 @@ export interface DataTableProps<T> {
   getRowClassName?: (row: T) => string;
   /** Called whenever the selected row changes (null when it goes away). */
   onSelectionChange?: (row: T | null) => void;
+  /**
+   * Draws lines between body rows and cells (the default). Turn it off for a
+   * file-explorer look; the header keeps its dividers either way.
+   */
+  gridLines?: boolean;
 
   // Trees
 
@@ -226,6 +231,7 @@ export function DataTable<T>({
   className = "",
   getRowClassName,
   onSelectionChange,
+  gridLines = true,
   getSubRows,
   getRowCanExpand,
   onRowExpand,
@@ -492,7 +498,9 @@ export function DataTable<T>({
         ref={virtualizer.measureElement}
         role="row"
         aria-selected={selected}
-        className={`absolute left-0 top-0 grid w-full cursor-default select-none border-b border-[var(--color-border-muted)] text-sm transition-colors ${
+        className={`absolute left-0 top-0 grid w-full cursor-default select-none text-sm transition-colors ${
+          gridLines ? "border-b border-[var(--color-border-muted)]" : ""
+        } ${
           selected
             ? "bg-[var(--color-accent-muted)] text-[var(--color-text-primary)] hover:bg-[color-mix(in_srgb,var(--color-accent-muted),var(--color-accent)_25%)]"
             : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)]"
@@ -518,7 +526,11 @@ export function DataTable<T>({
             <div
               key={cell.id}
               role="cell"
-              className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap border-r border-[var(--color-border-muted)] px-2 py-1 last:border-r-0 ${
+              className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap px-2 py-1 ${
+                gridLines
+                  ? "border-r border-[var(--color-border-muted)] last:border-r-0"
+                  : ""
+              } ${
                 isExpanderCell ? "flex items-center" : ""
               } ${cell.column.columnDef.meta?.cellClassName ?? ""}`}
             >

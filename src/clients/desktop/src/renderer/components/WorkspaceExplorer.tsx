@@ -427,6 +427,7 @@ export default function WorkspaceExplorer(): React.ReactElement {
             columns={columns}
             getRowId={(row) => row.id}
             storageKey="workspace-explorer"
+            gridLines={false}
             getSubRows={(row) => row.children}
             getRowCanExpand={(row) => row.isDirectory}
             onRowExpand={handleRowExpand}
