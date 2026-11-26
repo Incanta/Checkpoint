@@ -1,0 +1,9 @@
+{
+	"name": "Checkpoint CI",
+	"streams": [
+		{
+			"id": "checkpoint-ci-main",
+			"path": "checkpoint-ci-main.stream.json"
+		}
+	]
+}

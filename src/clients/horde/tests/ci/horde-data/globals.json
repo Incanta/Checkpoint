@@ -1,0 +1,44 @@
+{
+	"version": 2,
+
+	"include": [
+		{
+			"path": "$(HordeDir)/Defaults/default.global.json"
+		}
+	],
+
+	"plugins": {
+		"build": {
+			"projects": [
+				{
+					"id": "checkpoint-ci",
+					"path": "checkpoint-ci.project.json"
+				}
+			],
+
+			// Placeholder cluster that Checkpoint streams name; the plugin keeps it marked healthy.
+			"perforceClusters": [
+				{
+					"name": "Checkpoint",
+					"servers": [
+						{
+							"serverAndPort": "127.0.0.1:1",
+							"resolveDns": false,
+							"healthCheck": false
+						}
+					]
+				}
+			]
+		},
+
+		"checkpoint": {
+			"clusters": [
+				{
+					"name": "Checkpoint",
+					"connection": "default",
+					"pollIntervalSeconds": 2
+				}
+			]
+		}
+	}
+}

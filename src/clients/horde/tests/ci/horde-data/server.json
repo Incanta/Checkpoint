@@ -1,0 +1,26 @@
+// Horde server settings for the CI integration job (.github/workflows/horde-integration.yaml).
+// The job copies this directory to a scratch location and mounts it as /app/Data. Ports, MongoDB,
+// and Redis come from Horde__* environment variables on the container.
+{
+	"Horde": {
+		// Lets the tests call the REST API without logging in.
+		"AuthMethod": "Anonymous",
+
+		// Relative to this file.
+		"ConfigPath": "globals.json",
+
+		"Plugins": {
+			"Checkpoint": {
+				"Enabled": true,
+				"Connections": [
+					{
+						"Id": "default",
+						// The container runs on the host network, so this is the job's own dev server.
+						"ServerUrl": "http://localhost:13000",
+						"TokenEnvVar": "CHECKPOINT_API_TOKEN"
+					}
+				]
+			}
+		}
+	}
+}

@@ -24,6 +24,8 @@ $env:HORDE_ENGINE_DIR = "E:/epic/engine/UE_Incanta"
 
 To build everything in one step, drop the CD-built CLI zip at `artifacts/checkpoint-cli-win32-x64.zip` and run `./scripts/build-release.ps1 -EngineDir E:/epic/engine/UE_Incanta`. It cleans `artifacts/` (keeping `checkpoint-cli-*.zip`), runs both builds, and bundles the CLI into the JobDriver. Copy the two DLLs from `artifacts/server` to the Horde server, and run `repack-agent.ps1` (which reads `artifacts/jobdriver/JobDriver` directly) for agents. Add `-Package` to also produce the distributable release zip via `package-release.ps1`; its Horde version defaults to the engine's `Build.version` Major.Minor (override with `-HordeVersion`).
 
+The server plugin can also build without an engine checkout, against the assemblies of an installed Horde server. Set `HORDE_ASSEMBLIES_DIR` to the server's directory (for example `/app` copied out of the `ghcr.io/epicgames/horde-server` image) and run `./build.sh` or `dotnet build`. This compiles against exactly the binaries the plugin will load into, and it is how CI builds it. The JobDriver still needs the engine checkout.
+
 `Checkpoint.Api` builds standalone (no engine needed):
 
 ```powershell
@@ -59,6 +61,19 @@ Then enable the plugin in the server config and set `CHECKPOINT_API_TOKEN` in th
 
 ## Integration tests
 
+`Checkpoint.Integration.Tests` has two suites:
+
+- `LiveServerTests`: the API client against a live Checkpoint app.
+- `HordeServerTests`: the plugin inside a real Horde server. They read a Checkpoint stream through Horde's `/api/v1/streams/{id}/changes` endpoints, which go through the plugin's commit collection, and compare history, descriptions, authors, files, and code/content tags with what the Checkpoint API reports.
+
+Each test skips when its environment variables are unset. With `CHECKPOINT_TEST_REQUIRE_LIVE=1` a missing variable fails the test instead, which is what CI uses.
+
+### In CI
+
+`.github/workflows/horde-integration.yaml` runs both suites, plus `Checkpoint.Api.Tests`. It pulls `ghcr.io/epicgames/horde-server` (pinned in the workflow's `HORDE_IMAGE`), builds the plugin against the image's `/app`, starts the Checkpoint services, and seeds `horde-ci-org/horde-ci-repo` with `scripts/ci/seed-horde-repo.mjs`. Then it starts Horde with MongoDB, Redis, the plugin DLLs mounted, and the config in `tests/ci/horde-data`. Pulling Epic's image needs the `HORDE_IMAGE_TOKEN` secret (a `read:packages` PAT from a GitHub account linked to Epic) and the `HORDE_IMAGE_USER` variable (that account's username).
+
+### Locally
+
 Start a dev server at the repo root (`node dev.js`), create an org/repo with some submitted changelists, mint an API token, then:
 
 ```powershell
@@ -67,6 +82,8 @@ $env:CHECKPOINT_TEST_TOKEN = "<api token>"
 $env:CHECKPOINT_TEST_REPO_ID = "<repo id>"
 dotnet test tests/Checkpoint.Integration.Tests/Checkpoint.Integration.Tests.csproj
 ```
+
+For `HordeServerTests`, also run a Horde server with the plugin and a Checkpoint stream for that repo, and set `HORDE_TEST_ENDPOINT` (for example `http://localhost:13340`) and `HORDE_TEST_STREAM_ID`. `ChangeDetailsMatchCheckpoint` and `CommitTagsFollowChangedFiles` look for the changelists that `scripts/ci/seed-horde-repo.mjs` creates, so seed the repo with that script.
 
 ## Versioning
 

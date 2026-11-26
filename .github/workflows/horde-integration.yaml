@@ -1,0 +1,340 @@
+name: Horde Integration Test
+
+# End-to-end test of the Horde server plugin (src/clients/horde): a real Horde server from Epic's
+# image with HordeServer.Checkpoint loaded, a stream that uses "vcs": "Checkpoint", and this
+# commit's Checkpoint services behind it. Also runs the plugin's offline API client tests.
+#
+# Epic's image is private to accounts linked to the EpicGames GitHub org. Pulling it needs:
+#   - secret HORDE_IMAGE_TOKEN: a classic PAT with read:packages from a linked account
+#   - variable HORDE_IMAGE_USER: that account's GitHub username
+# (Settings > Secrets and variables > Actions.) Without them the job fails rather than skipping.
+
+on:
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - ".github/workflows/horde-integration.yaml"
+  #     - "src/clients/horde/**"
+  #     - "src/app/**"
+  #     - "scripts/ci/seed-horde-repo.mjs"
+  #     - "scripts/ci/dev-login.mjs"
+  # pull_request:
+  #   branches: [main]
+  #   paths:
+  #     - ".github/workflows/horde-integration.yaml"
+  #     - "src/clients/horde/**"
+  #     - "src/app/**"
+  #     - "scripts/ci/seed-horde-repo.mjs"
+  #     - "scripts/ci/dev-login.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: horde-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The plugin binds Horde's assemblies exactly, so it is compiled against this image's own /app.
+  # Bumping the tag is how to test a new Horde release (see the compatibility notes in
+  # src/clients/horde/README.md).
+  HORDE_IMAGE: ghcr.io/epicgames/horde-server:5.8.0
+  HORDE_PORT: "13340"
+  HORDE_STREAM_ID: checkpoint-ci-main
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  # ==================================================================
+  # Offline wire-format tests for Checkpoint.Api. No services, no secrets.
+  # ==================================================================
+  api-tests:
+    name: api client tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Run Checkpoint.Api tests
+        run: dotnet test src/clients/horde/tests/Checkpoint.Api.Tests/Checkpoint.Api.Tests.csproj --logger "console;verbosity=normal"
+
+  # ==================================================================
+  # Horde server + plugin against live Checkpoint services.
+  # ==================================================================
+  horde:
+    name: horde server
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # Horde's own dependencies. The Horde container runs on the host network, so it reaches these
+    # (and the Checkpoint app) on localhost.
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7.2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # ----------------------------------------------------------------
+      # Horde image: pull it, and copy out /app to compile the plugin against.
+      # ----------------------------------------------------------------
+      - name: Check Horde image credentials
+        env:
+          HORDE_IMAGE_TOKEN: ${{ secrets.HORDE_IMAGE_TOKEN }}
+          HORDE_IMAGE_USER: ${{ vars.HORDE_IMAGE_USER }}
+        run: |
+          missing=()
+          [ -n "$HORDE_IMAGE_TOKEN" ] || missing+=("secret HORDE_IMAGE_TOKEN")
+          [ -n "$HORDE_IMAGE_USER" ] || missing+=("variable HORDE_IMAGE_USER")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Cannot pull $HORDE_IMAGE without ${missing[*]}. See the header of .github/workflows/horde-integration.yaml."
+            exit 1
+          fi
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ vars.HORDE_IMAGE_USER }}
+          password: ${{ secrets.HORDE_IMAGE_TOKEN }}
+
+      - name: Pull Horde image
+        run: docker pull "$HORDE_IMAGE"
+
+      - name: Extract Horde server assemblies
+        run: |
+          mkdir -p .ci
+          id=$(docker create "$HORDE_IMAGE")
+          docker cp "$id:/app" .ci/horde-app
+          docker rm "$id" > /dev/null
+          ls .ci/horde-app | grep -E '^(HordeServer|EpicGames)\..*\.dll$'
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build the plugin against the image
+        env:
+          HORDE_ASSEMBLIES_DIR: ${{ github.workspace }}/.ci/horde-app
+        run: |
+          bash src/clients/horde/build.sh
+          ls -la src/clients/horde/artifacts/server
+
+      # ----------------------------------------------------------------
+      # Checkpoint services (same setup as the `test` job in test.yaml, minus the CLI and S3).
+      # ----------------------------------------------------------------
+      - name: Enable Corepack
+        run: |
+          yarn_path=$(command -v yarn || true)
+          if [ -n "$yarn_path" ]; then
+            corepack enable --install-directory "$(dirname "$yarn_path")"
+          else
+            corepack enable
+          fi
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Build services
+        run: yarn build
+
+      # The daemon submits through the longtail addon. Build it from this commit's sources, sharing
+      # test.yaml's cache entry (same key), so this is usually a cache hit.
+      - name: Fingerprint the addon sources
+        id: addon-fp
+        run: |
+          echo "::group::addon source digests"
+          fingerprint=$(node scripts/addon-source-fingerprint.js --verbose)
+          echo "::endgroup::"
+          echo "Addon source fingerprint: ${fingerprint}"
+
+      - name: Restore source-built longtail addon
+        id: addon-cache
+        uses: actions/cache@v6
+        with:
+          path: .ci/longtail-addon
+          key: longtail-addon-${{ runner.os }}-${{ runner.arch }}-node24-build1-${{ steps.addon-fp.outputs.fingerprint }}
+
+      - name: Install C++ dependencies
+        if: steps.addon-cache.outputs.cache-hit != 'true'
+        run: |
+          missing=()
+          command -v cmake > /dev/null || missing+=(cmake)
+          command -v g++ > /dev/null || missing+=(g++)
+          for pkg in libcurl4-openssl-dev nlohmann-json3-dev libssl-dev; do
+            dpkg-query -W -f='${Status}' "$pkg" 2> /dev/null | grep -q "install ok installed" || missing+=("$pkg")
+          done
+          if [ ${#missing[@]} -eq 0 ]; then
+            echo "All C++ dependencies are already installed"
+            exit 0
+          fi
+          echo "Installing: ${missing[*]}"
+          apt_opts=(-o Acquire::Retries=5 -o Acquire::http::Timeout=30)
+          sudo apt-get "${apt_opts[@]}" update
+          sudo apt-get "${apt_opts[@]}" install -y --no-install-recommends "${missing[@]}"
+
+      - name: Build longtail addon from source
+        if: steps.addon-cache.outputs.cache-hit != 'true'
+        run: node scripts/ci/build-longtail-addon.mjs
+
+      - name: Use the source-built longtail addon
+        run: node scripts/ci/install-local-addon.mjs
+
+      - name: Start services
+        run: yarn dev --background
+
+      - name: Wait for services to be reachable
+        run: |
+          wait_for() {
+            for i in $(seq 1 60); do
+              if curl -s -o /dev/null "$2"; then
+                echo "$1 is reachable"
+                return 0
+              fi
+              sleep 2
+            done
+            echo "::error::$1 did not come up at $2"
+            return 1
+          }
+          wait_for app http://localhost:13000
+          wait_for server http://localhost:13001
+          wait_for daemon http://localhost:13010
+
+      - name: Create dev user and authenticate
+        id: auth
+        run: node scripts/ci/dev-login.mjs
+
+      - name: Seed a repo with changelists
+        id: seed
+        run: |
+          node scripts/ci/seed-horde-repo.mjs \
+            --daemon-id "${{ steps.auth.outputs.DAEMON_ID }}" \
+            --token "${{ steps.auth.outputs.API_TOKEN }}" \
+            --workdir "$RUNNER_TEMP"
+
+      # ----------------------------------------------------------------
+      # Horde server with the plugin mounted (the documented Docker deployment).
+      # ----------------------------------------------------------------
+      - name: Start Horde
+        env:
+          CHECKPOINT_API_TOKEN: ${{ steps.auth.outputs.API_TOKEN }}
+        run: |
+          data="$RUNNER_TEMP/horde-data"
+          cp -r src/clients/horde/tests/ci/horde-data "$data"
+          plugin="$GITHUB_WORKSPACE/src/clients/horde/artifacts/server"
+
+          docker run -d --name horde --network host \
+            -e Horde__HttpPort="$HORDE_PORT" \
+            -e Horde__Http2Port=13342 \
+            -e Horde__DatabaseConnectionString="mongodb://localhost:27017/Horde" \
+            -e Horde__RedisConnectionConfig="localhost:6379" \
+            -e CHECKPOINT_API_TOKEN \
+            -v "$data:/app/Data" \
+            -v "$plugin/HordeServer.Checkpoint.dll:/app/HordeServer.Checkpoint.dll:ro" \
+            -v "$plugin/Checkpoint.Api.dll:/app/Checkpoint.Api.dll:ro" \
+            "$HORDE_IMAGE"
+
+      # The stream only resolves once Horde has started, loaded the plugin, and read the config.
+      - name: Wait for Horde to load the Checkpoint stream
+        run: |
+          url="http://localhost:$HORDE_PORT/api/v1/streams/$HORDE_STREAM_ID"
+          for i in $(seq 1 90); do
+            if [ "$(docker inspect -f '{{.State.Running}}' horde)" != "true" ]; then
+              echo "::error::Horde container exited"
+              docker logs horde 2>&1 | tail -n 200
+              exit 1
+            fi
+            code=$(curl -s -o /tmp/horde-stream.json -w '%{http_code}' "$url" || true)
+            if [ "$code" = "200" ]; then
+              echo "Horde is serving stream $HORDE_STREAM_ID"
+              cat /tmp/horde-stream.json | head -c 2000; echo
+              exit 0
+            fi
+            echo "  waiting for Horde ($i/90, HTTP $code)"
+            sleep 2
+          done
+          echo "::error::Horde never served stream $HORDE_STREAM_ID"
+          docker logs horde 2>&1 | tail -n 200
+          exit 1
+
+      - name: Check the plugin loaded
+        run: |
+          docker logs horde > "$RUNNER_TEMP/horde.log" 2>&1
+          if ! grep -qi 'checkpoint' "$RUNNER_TEMP/horde.log"; then
+            echo "::warning::Horde's log never mentions Checkpoint; the plugin may not have loaded"
+          fi
+          grep -i 'checkpoint' "$RUNNER_TEMP/horde.log" | head -n 50 || true
+
+      # ----------------------------------------------------------------
+      # Tests: LiveServerTests (the API client against the app) and HordeServerTests (the plugin
+      # inside Horde). REQUIRE_LIVE turns a missing variable into a failure instead of a skip.
+      # ----------------------------------------------------------------
+      - name: Run integration tests
+        env:
+          CHECKPOINT_TEST_REQUIRE_LIVE: "1"
+          CHECKPOINT_TEST_ENDPOINT: http://localhost:13000
+          CHECKPOINT_TEST_TOKEN: ${{ steps.auth.outputs.API_TOKEN }}
+          CHECKPOINT_TEST_REPO_ID: ${{ steps.seed.outputs.REPO_ID }}
+          CHECKPOINT_TEST_BRANCH: main
+          HORDE_TEST_ENDPOINT: http://localhost:${{ env.HORDE_PORT }}
+          HORDE_TEST_STREAM_ID: ${{ env.HORDE_STREAM_ID }}
+        run: dotnet test src/clients/horde/tests/Checkpoint.Integration.Tests/Checkpoint.Integration.Tests.csproj --logger "console;verbosity=normal"
+
+      # ----------------------------------------------------------------
+      # Cleanup and diagnostics
+      # ----------------------------------------------------------------
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          docker logs horde > "$RUNNER_TEMP/logs/horde.log" 2>&1 || true
+          cp logs/*.log "$RUNNER_TEMP/logs/" 2>/dev/null || true
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          for log in "$RUNNER_TEMP"/logs/*.log; do
+            [ -f "$log" ] || continue
+            echo "::group::$(basename "$log") ($(wc -l < "$log") lines)"
+            tail -n 400 "$log"
+            echo "::endgroup::"
+          done
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: horde-integration-logs
+          path: ${{ runner.temp }}/logs
+          retention-days: 7
+
+      - name: Stop services
+        if: always()
+        run: |
+          docker rm -f horde > /dev/null 2>&1 || true
+          yarn dev stop || true
